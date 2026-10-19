@@ -412,6 +412,11 @@ KapitalertragsteuerSolidaritätszuschlag
     expect(s.quantity).toBe(30);
   });
 
+  it("takes no amount of money after 'Stück' for the quantity", () => {
+    const s = parseSettlement(TEXT.replace("Nennwert Zum Kurs von", "Anschaffungskosten der Stück EUR 1.807,20\nNennwert Zum Kurs von"))!;
+    expect(s.quantity).toBe(30);
+  });
+
   it("reads the quantity after 'St.' when no other quantity label is printed", () => {
     const s = parseSettlement(TEXT.replace("Stk. 30", "30 Anteile"))!;
     expect(s.quantity).toBe(30);

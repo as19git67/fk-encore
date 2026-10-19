@@ -1574,3 +1574,80 @@ describe("finance/portfolio — the reset derives the bookings again with today'
     expect(rows[0]).toMatchObject({ kind: "buy", source: "giro-derived", linked_transaction_id: bookingId });
   });
 });
+
+describe("finance/depot-document-enrichment — a sale booked while the model was away", () => {
+  // Synthetic, laid out like a broker's sale: the price under its label, the
+  // Kurswert on the next line, and a number after "Stück" further up that
+  // is not the quantity — the rules alone take it for one.
+  const SALE = `Beispielbank AG
+Wertpapierverkauf
+Geschäftstag : 14.03.2026
+Alpha Industries AG ISIN ${ISIN_A}
+Mindeststückelung 1.800,00
+Nennwert Zum Kurs von
+St. 25 EUR 118,40
+Kurswert
+EUR 2.960,00
+Provision : EUR 6,40-
+Zu Ihren Gunsten nach Steuern EUR 2.953,60`;
+
+  const llmAnswer = {
+    is_settlement: true,
+    kind: "sell",
+    isin: ISIN_A,
+    wkn: null,
+    name: "Alpha Industries AG",
+    depot_number: null,
+    executed_at: "2026-03-14",
+    quantity: 25,
+    price: 118.4,
+    gross: 2960,
+    fees: 6.4,
+    tax: null,
+    net: 2953.6,
+    currency: "EUR",
+  };
+
+  it("corrects the row once the model reads the paper, and joins the booking that quotes the settlement", async () => {
+    const { bc, giro, depot } = await setup();
+    const docId = await insertDocument(SALE);
+
+    const first = await enrichDocument(docId);
+    expect(first.outcome).toBe("created");
+    expect(first.llm_status).toBe("unavailable");
+    let [row] = await depotRows(depot);
+    expect(Number(row!.amount)).toBe(1800);
+    expect(row!.price).toBeNull();
+
+    vi.mocked(extractSettlementValues).mockResolvedValue(llmAnswer);
+    const again = await enrichPendingDocuments([depot]);
+    expect(again.enriched).toBe(1);
+    [row] = await depotRows(depot);
+    expect(Number(row!.amount)).toBe(25);
+    expect(Number(row!.price)).toBe(118.4);
+    expect(row!.gross_amount).toBe("2960.00");
+    expect(Number(row!.net_amount)).toBe(2953.6);
+
+    // Read in full now: the next run leaves it alone.
+    expect((await enrichPendingDocuments([depot])).documents_examined).toBe(0);
+
+    // The bank's booking names no kind, only the settlement's amounts.
+    const [booking] = await db
+      .insert(financeTransaction)
+      .values({
+        account_id: giro,
+        booking_date: "2026-03-13",
+        value_date: "2026-03-16",
+        amount: "2953.60",
+        currency_code: "EUR",
+        purpose: `ALPHA INDUSTRIES DL-,01 WPKNR: AAA111 ISIN: ${ISIN_A} Abr.Betrag Brutto 2.953,60 EUR Steuerabzug 0,00- EUR`,
+        dedupe_hash: `sale|${Math.random()}`,
+      })
+      .returning({ id: financeTransaction.id });
+    const stats = await deriveDepotTransactionsForBankcontact(bc);
+    expect(stats.merged).toBe(1);
+    const rows = await depotRows(depot);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.linked_transaction_id).toBe(booking!.id);
+  });
+});

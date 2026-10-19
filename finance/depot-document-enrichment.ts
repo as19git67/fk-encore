@@ -640,6 +640,35 @@ async function missingFieldsPatch(
   return patch;
 }
 
+/**
+ * What a paper now reads differently on the row it created: the trade's
+ * figures always; the charges and the net only when the paper is the
+ * whole settlement (a credit note before taxes left those to its tax
+ * statement).
+ */
+function rereadPatch(
+  row: DepotRow,
+  parsed: SettlementExtraction,
+  withCharges: boolean,
+): Partial<typeof financeDepotTransaction.$inferInsert> {
+  const patch: Partial<typeof financeDepotTransaction.$inferInsert> = {};
+  const put = (key: "amount" | "price" | "gross_amount" | "fees" | "tax" | "net_amount", value: number | null, scale: number) => {
+    if (value === null) return;
+    const current = num(row[key]);
+    if (current !== null && Math.abs(current - value) < 10 ** -scale / 2) return;
+    patch[key] = fixed(value, scale);
+  };
+  put("amount", parsed.quantity, 8);
+  put("price", parsed.price, 6);
+  put("gross_amount", parsed.gross, 2);
+  if (withCharges) {
+    put("fees", parsed.fees, 2);
+    put("tax", parsed.tax, 2);
+    put("net_amount", parsed.net, 2);
+  }
+  return patch;
+}
+
 /** Link the document to the booking's row and change nothing on it. */
 async function linkToBookingRow(
   result: EnrichResult,
@@ -826,10 +855,17 @@ export async function enrichDocument(
     result.transaction_net = row.net_amount;
     const rowNet = num(row.net_amount);
     const netAgrees = rowNet === null || parsed.net === null || Math.abs(Math.abs(rowNet) - Math.abs(parsed.net)) <= NET_TOLERANCE;
+    if (reading.merge.verdict === "unverified" || row.kind !== parsed.kind) return result;
+    // The row this paper created, booked from a reading the model had no
+    // part in yet (it was away): what the paper says now, checked, replaces
+    // what the rules alone read — a quantity no price could confirm.
+    const ownRow = row.dedupe_hash === `doc:${documentId}` && reading.llm !== null;
     // A tax statement's amounts (before and after taxes) are not the trade's.
-    if (reading.rules?.taxStatement || reading.rules?.taxPending) return result;
-    if (reading.merge.verdict === "unverified" || row.kind !== parsed.kind || !netAgrees) return result;
-    const patch = await missingFieldsPatch(row, parsed);
+    const pairPaper = reading.rules?.taxStatement || reading.rules?.taxPending;
+    if (pairPaper && !ownRow) return result;
+    // The bank's booking has the last word on the net.
+    if (!netAgrees && !(ownRow && row.linked_transaction_id === null)) return result;
+    const patch = ownRow ? rereadPatch(row, parsed, !pairPaper) : await missingFieldsPatch(row, parsed);
     if (Object.keys(patch).length === 0) return result;
     if (!dryRun) {
       patch.source = withDocumentSource(row.source);
@@ -1062,7 +1098,9 @@ export async function enrichPendingDocuments(
 
   // Linked papers are done — unless their trade still has no quantity: a
   // paper linked before it could be read is examined again, so what it
-  // says reaches the row once it reads.
+  // says reaches the row once it reads. So is a trade the paper booked
+  // itself without price or Kurswert: read by the rules alone, its
+  // quantity was never checked.
   const linked = db
     .select({ id: financeDepotTransactionDocument.document_id })
     .from(financeDepotTransactionDocument)
@@ -1072,8 +1110,15 @@ export async function enrichPendingDocuments(
     )
     .where(
       or(
-        isNotNull(financeDepotTransaction.amount),
         notInArray(financeDepotTransaction.kind, ["buy", "sell", "dividend"]),
+        and(
+          isNotNull(financeDepotTransaction.amount),
+          or(
+            eq(financeDepotTransaction.kind, "dividend"),
+            sql`${financeDepotTransaction.dedupe_hash} IS DISTINCT FROM 'doc:' || ${financeDepotTransactionDocument.document_id}`,
+            and(isNotNull(financeDepotTransaction.price), isNotNull(financeDepotTransaction.gross_amount)),
+          ),
+        ),
       ),
     );
   const ignored = db
