@@ -67,7 +67,7 @@ export const taxWorksheet: ToolSpec = {
 
 export const taxWorksheetPdf: WriteToolDefinition = {
   name: "tax_worksheet_pdf",
-  summary: "Propose the worksheet for one year's tax return as a PDF ('Ausfüllhilfe Steuer <Jahr>'), stored as a document linked to the flagged documents: per Anlage the documents, the tax-relevant bookings by tag, the depot's figures and the hints.",
+  summary: "Propose the worksheet for one year's tax return as a PDF ('Ausfüllhilfe Steuer <Jahr>'), stored as a document linked to the flagged documents: the values read off the evidence by Anlage, person, Zeile and Kennzahl for typing into ELSTER, with an appendix per value summed from several documents; then per Anlage the documents, the tax-relevant bookings by tag, the depot's figures and the hints.",
   permissions: DOCUMENTS,
   parameters: {
     type: "object",
@@ -84,9 +84,9 @@ export const taxWorksheetPdf: WriteToolDefinition = {
     if (!w.documentCount && !w.bookingCount) {
       throw new Error(`nothing is flagged for the tax year ${year}; flag documents on the Steuer page first`);
     }
-    const documentIds = [...new Set(w.sections.flatMap((s) => s.documents.map((d) => d.id)))];
+    const documentIds = worksheetDocumentIds(w);
     return {
-      summary: `Ausfüllhilfe Steuer ${year} als PDF: ${w.documentCount} Dokumente in ${w.sections.length} Anlagen, ${w.bookingCount} steuerrelevante Buchungen${w.depot ? ", Depotzahlen des Jahres" : ""}`,
+      summary: `Ausfüllhilfe Steuer ${year} als PDF: ${w.form?.values.length ? `${w.form.values.length} Werte nach Kennzahl, ` : ""}${w.documentCount} Dokumente in ${w.sections.length} Anlagen, ${w.bookingCount} steuerrelevante Buchungen${w.depot ? ", Depotzahlen des Jahres" : ""}`,
       arguments: { year, person_id: personId ?? null, document_ids: documentIds },
       count: w.documentCount + w.bookingCount,
       note: `${w.hints.length ? `Hints in the PDF: ${w.hints.join(" ")} ` : ""}The PDF is stored as a document linked to the flagged documents.`,
@@ -104,6 +104,14 @@ export const taxWorksheetPdf: WriteToolDefinition = {
   },
 };
 
+/** The flagged documents and those behind a value by Kennzahl, each once. */
+export function worksheetDocumentIds(w: TaxWorksheet): number[] {
+  return [...new Set([
+    ...w.sections.flatMap((s) => s.documents.map((d) => d.id)),
+    ...(w.form?.values ?? []).flatMap((v) => v.contributions.map((c) => c.document_id)),
+  ])];
+}
+
 /**
  * The worksheet as a PDF, stored as a document linked to the flagged
  * documents. The proposal above and the button on the Steuer page
@@ -115,7 +123,7 @@ export async function storeTaxWorksheetPdf(w: TaxWorksheet, today: string): Prom
     filename: `Ausfüllhilfe Steuer ${w.year}.pdf`,
     title: `Ausfüllhilfe Steuererklärung ${w.year}`,
     pdf_base64: pdf.toString("base64"),
-    linked_document_ids: [...new Set(w.sections.flatMap((s) => s.documents.map((d) => d.id)))].slice(0, 200),
+    linked_document_ids: worksheetDocumentIds(w).slice(0, 200),
   })) as unknown as { id: number };
 }
 
