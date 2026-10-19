@@ -72,12 +72,12 @@ describe("filesystem category grouping", () => {
         afterCategorySlug: "betreuung",
         segment: "erika-mustermann",
       },
-      correspondentSlug: "amtsgericht-augsburg",
+      correspondentSlug: "amtsgericht-musterstadt",
       status: "ready",
       docDate: "2026-07-15",
       documentNumber: null,
       uploadedAt: new Date("2026-07-15T10:00:00Z"),
-      sender: "Amtsgericht Augsburg",
+      sender: "Amtsgericht Musterstadt",
       title: "Rechenschaftsbericht",
       originalFilename: "scan.pdf",
       sha256: "1234567890abcdef",
@@ -90,8 +90,8 @@ describe("filesystem category grouping", () => {
       "betreuung",
       "erika-mustermann",
       "betreuung-rechenschaftsbericht",
-      "amtsgericht-augsburg",
-      "2026_amtsgericht-augsburg_rechenschaftsbericht__12345678.pdf",
+      "amtsgericht-musterstadt",
+      "2026_amtsgericht-musterstadt_rechenschaftsbericht__12345678.pdf",
     ));
   });
 });
