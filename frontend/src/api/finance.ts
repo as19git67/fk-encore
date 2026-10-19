@@ -1096,7 +1096,7 @@ export async function enrichDepotTransactionsFromDocuments(
   })
 }
 
-export type PortfolioTxSortField = 'executed_at' | 'net_amount' | 'name'
+export type PortfolioTxSortField = 'account' | 'executed_at' | 'net_amount' | 'name'
 
 export interface ListPortfolioTransactionsOptions {
   accounts?: number[]

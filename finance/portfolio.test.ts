@@ -425,6 +425,29 @@ describe("finance/portfolio — getPortfolio", () => {
   });
 });
 
+describe("finance/portfolio — order of the positions", () => {
+  it("lists open positions by depot, then name, and closed ones after them", async () => {
+    const bc = await insertBankcontact();
+    const zeta = await insertAccount(bc, "depot", "Zeta-Depot");
+    const alpha = await insertAccount(bc, "depot", "Alpha-Depot");
+    // The bigger position sits in the depot that sorts last: value no longer decides.
+    await insertHolding({ accountId: zeta, asOf: "2026-09-01", isin: ISIN_A, name: "Gamma AG", amount: "100", price: "100.00", value: "10000.00" });
+    await insertHolding({ accountId: alpha, asOf: "2026-09-01", isin: ISIN_B, name: "Zebra AG", amount: "1", price: "10.00", value: "10.00" });
+    await insertHolding({ accountId: alpha, asOf: "2026-09-01", wkn: "CCC333", name: "Beta AG", amount: "1", price: "10.00", value: "10.00" });
+    // Sold out: closed, so it comes last although its depot sorts first.
+    await insertTx({ accountId: alpha, kind: "buy", executedAt: "2025-01-10", wkn: "DDD444", name: "Aaa AG", amount: "1", net: "-10.00" });
+    await insertTx({ accountId: alpha, kind: "sell", executedAt: "2025-02-10", wkn: "DDD444", name: "Aaa AG", amount: "1", net: "12.00" });
+
+    const resp = await getPortfolio({});
+    expect(resp.positions.map((p) => [p.name, p.open])).toEqual([
+      ["Beta AG", true],
+      ["Zebra AG", true],
+      ["Gamma AG", true],
+      ["Aaa AG", false],
+    ]);
+  });
+});
+
 describe("finance/portfolio — today's price", () => {
   it("values a position at the newest quote when it is not older than the snapshot", async () => {
     const bc = await insertBankcontact();
@@ -599,9 +622,19 @@ describe("finance/portfolio — listPortfolioTransactions", () => {
     return { d1, d2 };
   }
 
+  it("lists by depot, then security, then newest first", async () => {
+    await seed();
+    const resp = await listPortfolioTransactions({});
+    expect(resp.items.map((i) => [i.account_label, i.name, i.executed_at])).toEqual([
+      ["Depot 1", "Alpha AG", "2025-05-10"],
+      ["Depot 1", "Alpha AG", "2025-01-10"],
+      ["Depot 2", "Beta ETF", "2025-03-10"],
+    ]);
+  });
+
   it("lists across depots, newest first, with labels, keys and sums", async () => {
     const { d1, d2 } = await seed();
-    const resp = await listPortfolioTransactions({});
+    const resp = await listPortfolioTransactions({ sortBy: "executed_at" });
     expect(resp.total).toBe(3);
     expect(resp.items.map((i) => i.executed_at)).toEqual([
       "2025-05-10",
@@ -644,7 +677,7 @@ describe("finance/portfolio — listPortfolioTransactions", () => {
     const byAmount = await listPortfolioTransactions({ sortBy: "net_amount", sortDir: "asc" });
     expect(byAmount.items.map((i) => i.net_amount)).toEqual(["-1000.00", "-100.00", "20.00"]);
 
-    const page = await listPortfolioTransactions({ limit: 2, offset: 2 });
+    const page = await listPortfolioTransactions({ sortBy: "executed_at", limit: 2, offset: 2 });
     expect(page.total).toBe(3);
     expect(page.items).toHaveLength(1);
     expect(page.items[0].executed_at).toBe("2025-01-10");
