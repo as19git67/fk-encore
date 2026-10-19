@@ -55,6 +55,20 @@ describe('module routes', () => {
     expect(router.currentRoute.value.path).toBe(to)
   })
 
+  it('moves the tax page to Finanzen and keeps its query', async () => {
+    await router.push('/dokumente/steuer?year=2024')
+    expect(router.currentRoute.value.name).toBe('finance-tax')
+    expect(router.currentRoute.value.query).toEqual({ year: '2024' })
+    await router.push('/dokumente/steuer/hints')
+    expect(router.currentRoute.value.name).toBe('dokumente-steuer-hints')
+  })
+
+  it('marks at most one settings group per module', () => {
+    for (const mod of modules) {
+      expect(mod.menuItems.filter((item) => item.settings).length, mod.id).toBeLessThanOrEqual(1)
+    }
+  })
+
   it('keeps the documents catch-all detail route last so siblings win', async () => {
     await router.push('/dokumente/verarbeitung')
     expect(router.currentRoute.value.name).toBe('dokumente-verarbeitung')

@@ -358,7 +358,7 @@ describe("tax", () => {
     expect(out.text).toContain("Anlage N (anlage-n, income) — 1:");
     expect(out.text).toContain("72 | 2026-02-02 | Jahressteuerbescheinigung | Beispielbank (ai 91 %)");
     expect(out.ref).toEqual({ type: "document", ids: [71, 72] });
-    expect(out.block).toMatchObject({ kind: "documents", subtitle: "Steuer 2025", route: "/dokumente/steuer?year=2025" });
+    expect(out.block).toMatchObject({ kind: "documents", subtitle: "Steuer 2025", route: "/finanzen/steuer?year=2025" });
     expect(out.block?.rows[1]).toMatchObject({ id: 72, section: "Anlage KAP" });
   });
 
@@ -442,7 +442,7 @@ describe("tax_worksheet", () => {
     expect(out.text).toContain("The values read from the documents could not be loaded");
     expect(out.text).toContain("No value of a document is known to the worksheet: never state one");
     expect(out.text).not.toContain("Anlage V");
-    expect(out.block).toMatchObject({ kind: "documents", subtitle: "Ausfüllhilfe 2025 · 2 Anlagen · 3 Buchungen", route: "/dokumente/steuer?year=2025" });
+    expect(out.block).toMatchObject({ kind: "documents", subtitle: "Ausfüllhilfe 2025 · 2 Anlagen · 3 Buchungen", route: "/finanzen/steuer?year=2025" });
     expect(out.block?.rows[0]).toMatchObject({ section: "Anlage N", route: "/dokumente/71" });
     expect(out.block?.rows[0]).not.toHaveProperty("amount");
   });

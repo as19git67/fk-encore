@@ -5,9 +5,12 @@ export interface ModuleMenuItem {
   icon: string
   /** Omitted for group headers that only open a submenu (see `children`). */
   routeName?: string
-  permission?: string
+  /** Several permissions: the user needs all of them. */
+  permission?: string | string[]
   /** When set, this item renders as a submenu (e.g. a "settings" group). */
   children?: ModuleMenuItem[]
+  /** The module's settings group: shown as the gear, not in the strip. */
+  settings?: boolean
 }
 
 export interface ModuleConfig {
@@ -123,6 +126,7 @@ export const modules: ModuleConfig[] = [
       {
         label: 'Einstellungen',
         icon: 'pi pi-cog',
+        settings: true,
         children: [
           { label: 'Scan-Queue', icon: 'pi pi-spinner', routeName: 'fotos-settings-scan-queue', permission: 'data.manage' },
           { label: 'Wartung', icon: 'pi pi-wrench', routeName: 'fotos-settings-maintenance', permission: 'data.manage' },
@@ -177,10 +181,10 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.upload' },
       },
       {
+        // The tax page moved to Finanzen › Steuer; old links and remembered
+        // entry paths still land there.
         path: 'steuer',
-        name: 'dokumente-steuer',
-        component: () => import('../views/DocumentsSteuerView.vue'),
-        meta: { permission: 'documents.view' },
+        redirect: (to) => ({ name: 'finance-tax', query: to.query }),
       },
       {
         path: 'steuer/hints',
@@ -274,10 +278,10 @@ export const modules: ModuleConfig[] = [
       { label: 'Arbeitskorb', icon: 'pi pi-inbox', routeName: 'dokumente-korb', permission: 'documents.view' },
       { label: 'Später', icon: 'pi pi-clock', routeName: 'dokumente-spaeter', permission: 'documents.view' },
       { label: 'Sammelmappen', icon: 'pi pi-folder', routeName: 'dokumente-mappen', permission: 'documents.view' },
-      { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
       {
         label: 'Einstellungen',
         icon: 'pi pi-cog',
+        settings: true,
         children: [
           { label: 'Kategorie-Vorschläge', icon: 'pi pi-folder-open', routeName: 'dokumente-kategorie-vorschlaege', permission: 'documents.manage_taxonomy' },
           { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
@@ -418,6 +422,14 @@ export const modules: ModuleConfig[] = [
         redirect: { name: 'finance-direct-debits' },
       },
       {
+        // The documents of a tax year by Anlage, with the Ausfüllhilfe that
+        // also reads bookings, businesses and the depot: needs both modules.
+        path: 'steuer',
+        name: 'finance-tax',
+        component: () => import('../views/finance/TaxView.vue'),
+        meta: { permission: ['finance.view', 'documents.view'] },
+      },
+      {
         path: 'betriebe',
         name: 'finance-businesses',
         component: () => import('../views/finance/BusinessesView.vue'),
@@ -468,12 +480,20 @@ export const modules: ModuleConfig[] = [
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Prognose', icon: 'pi pi-chart-line', routeName: 'finance-forecast', permission: 'finance.view' },
       { label: 'Erwartete Zahlungen', icon: 'pi pi-calendar-clock', routeName: 'finance-direct-debits', permission: 'finance.view' },
-      { label: 'Betriebe', icon: 'pi pi-warehouse', routeName: 'finance-businesses', permission: 'finance.view' },
+      {
+        label: 'Steuer',
+        icon: 'pi pi-percentage',
+        children: [
+          { label: 'Belege nach Anlage', icon: 'pi pi-receipt', routeName: 'finance-tax', permission: ['finance.view', 'documents.view'] },
+          { label: 'Betriebe', icon: 'pi pi-warehouse', routeName: 'finance-businesses', permission: 'finance.view' },
+        ],
+      },
       { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
       { label: 'Belegabgleich', icon: 'pi pi-receipt', routeName: 'finance-receipt-enrichment', permission: 'finance.view' },
       {
         label: 'Einstellungen',
         icon: 'pi pi-cog',
+        settings: true,
         children: [
           { label: 'Konto-Zugriff', icon: 'pi pi-key', routeName: 'finance-admin-access', permission: 'finance.admin' },
           { label: 'KI-Tagging', icon: 'pi pi-tags', routeName: 'finance-tag-queue', permission: 'data.manage' },

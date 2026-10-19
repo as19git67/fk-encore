@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3'
-import DocumentsSteuerView from '../views/DocumentsSteuerView.vue'
+import TaxView from '../views/finance/TaxView.vue'
 import { defaultHandlers } from './handlers'
 import { http, HttpResponse, delay } from 'msw'
 import { MOCK_DOCUMENTS } from './mock-data'
@@ -42,15 +42,15 @@ const taxHandlers = [
   ...defaultHandlers,
 ]
 
-const meta: Meta<typeof DocumentsSteuerView> = {
-  title: 'Views/DocumentsSteuerView',
-  component: DocumentsSteuerView,
-  decorators: [routeFromParameters('/dokumente/steuer')],
+const meta: Meta<typeof TaxView> = {
+  title: 'Views/TaxView',
+  component: TaxView,
+  decorators: [routeFromParameters('/finanzen/steuer')],
   parameters: { msw: { handlers: taxHandlers } },
 }
 
 export default meta
-type Story = StoryObj<typeof DocumentsSteuerView>
+type Story = StoryObj<typeof TaxView>
 
 export const MitBelegen: Story = { name: 'Mit Belegen' }
 

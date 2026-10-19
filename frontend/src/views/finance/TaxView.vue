@@ -5,14 +5,14 @@ import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
-import PageLayout from '../components/layout/PageLayout.vue'
-import ListToolbar from '../components/layout/ListToolbar.vue'
-import EmptyState from '../components/layout/EmptyState.vue'
-import PageSkeleton from '../components/layout/PageSkeleton.vue'
-import ErrorBanner from '../components/layout/ErrorBanner.vue'
-import TaxWorksheetDialog from '../components/documents/TaxWorksheetDialog.vue'
-import { useListToolbar } from '../composables/useListToolbar'
-import type { FilterChip } from '../components/layout/listToolbar'
+import PageLayout from '../../components/layout/PageLayout.vue'
+import ListToolbar from '../../components/layout/ListToolbar.vue'
+import EmptyState from '../../components/layout/EmptyState.vue'
+import PageSkeleton from '../../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../../components/layout/ErrorBanner.vue'
+import TaxWorksheetDialog from '../../components/documents/TaxWorksheetDialog.vue'
+import { useListToolbar } from '../../composables/useListToolbar'
+import type { FilterChip } from '../../components/layout/listToolbar'
 import {
   backfillDocumentTax,
   backfillTaxValues,
@@ -24,11 +24,11 @@ import {
   type TaxAssignmentSource,
   type TaxSectionGroup,
   type TaxYearCount,
-} from '../api/documents'
-import { useAuthStore } from '../stores/auth'
-import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
-import { anchorKey, focusListAnchor, saveListAnchor } from '../utils/listAnchor'
-import type { ListAnchor } from '../utils/listAnchor'
+} from '../../api/documents'
+import { useAuthStore } from '../../stores/auth'
+import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../../utils/routeQueryUpdate'
+import { anchorKey, focusListAnchor, saveListAnchor } from '../../utils/listAnchor'
+import type { ListAnchor } from '../../utils/listAnchor'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,7 +43,7 @@ const auth = useAuthStore()
  * anchor — a bare document id would send the user to whichever copy comes
  * first, which is not where they were.
  */
-const ANCHOR_KEY = 'dokumente-steuer'
+const ANCHOR_KEY = 'finance-tax'
 function taxAnchorKind(sectionSlug: string): string {
   return `tax-${sectionSlug}`
 }

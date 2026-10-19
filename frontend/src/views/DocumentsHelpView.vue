@@ -214,9 +214,9 @@ function goBack() {
         nächste gleich so eingeordnet.
       </p>
       <p class="hint">
-        Der Menüpunkt <strong>Steuer</strong> in der Seitennavigation zeigt
-        alle steuerrelevanten Dokumente gruppiert pro Jahr – ideal für die
-        Abgabe.
+        Unter <strong>Finanzen › Steuer › Belege nach Anlage</strong> stehen
+        alle steuerrelevanten Dokumente gruppiert pro Jahr, zusammen mit der
+        Ausfüllhilfe – ideal für die Abgabe.
       </p>
     </section>
 
