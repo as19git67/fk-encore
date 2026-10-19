@@ -36,7 +36,7 @@ import {
   documents,
   userSubjectPersons,
 } from "../db/schema";
-import { amountAnchored, parseGermanAmountCents } from "./tax-amounts";
+import { amountAnchored, centsColumnAfter, parseGermanAmountCents } from "./tax-amounts";
 import {
   checkEvidenceValues,
   evidenceKindsFor,
@@ -136,6 +136,7 @@ export function buildValuesPrompt(kind: EvidenceKind, year: number, text: string
     '"flags": [{"field": "<key>", "value": true|false, "quote": "<die Stelle, die es sagt>"}]}.\n' +
     "Nur Felder, die im Text stehen; ein Feld, das fehlt, lässt du weg. " +
     "Beträge in Euro mit Komma, wie gedruckt (z. B. \"1.234,56\"). " +
+    "Stehen Euro und Cent in getrennten Spalten (\"1.234  56\"), gehören beide zum Betrag: \"1.234,56\". " +
     "Steht ein Betrag für mehrere Personen getrennt da, nimm den Gesamtbetrag.\n\n" +
     `Dokument:\n"""\n${clipText(text)}\n"""`
   );
@@ -183,7 +184,14 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
       out.push({ field: field.key, value: 0, printed, quote, status: "rejected", note: "Zahl nicht lesbar" });
       continue;
     }
-    const cents = Math.abs(parsed);
+    let cents = Math.abs(parsed);
+    let note: string | null = null;
+    // Euro read, Cent column left behind: "48.200 78" read as "48.200".
+    const column = printed.includes(",") ? null : centsColumnAfter(text, cents);
+    if (column) {
+      cents += column;
+      note = "Cent aus der Cent-Spalte ergänzt";
+    }
     const anchored = amountAnchored(text, cents);
     out.push({
       field: field.key,
@@ -191,7 +199,7 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
       printed,
       quote,
       status: anchored ? "read" : "rejected",
-      note: anchored ? null : "Zahl steht nicht im Text",
+      note: anchored ? note : "Zahl steht nicht im Text",
     });
   }
 
@@ -217,7 +225,7 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
   const reasons = checkEvidenceValues(kind, kept);
   if (reasons.length) {
     const note = `Prüfen: ${reasons.join("; ")}`;
-    for (const v of out) if (v.status === "read" && field(kind, v.field)?.kind === "amount") v.note = note;
+    for (const v of out) if (v.status === "read" && field(kind, v.field)?.kind === "amount") v.note = v.note ? `${v.note}; ${note}` : note;
   }
   return out;
 }

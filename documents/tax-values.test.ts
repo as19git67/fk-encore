@@ -63,6 +63,22 @@ describe("checkReadValues", () => {
     ]);
   });
 
+  it("reads Euro and Cent from columns of their own", () => {
+    // Synthetic printout with a Euro and a Cent column.
+    const text = "3. Bruttoarbeitslohn 23.456   78\n4. Einbehaltene Lohnsteuer von 3. 2.345   06";
+    const values = checkReadValues(LOHN, {
+      values: [
+        { field: "bruttoarbeitslohn", printed: "23.456,78" },
+        // The Cent column left behind: the cents come from the text.
+        { field: "lohnsteuer", printed: "2.345" },
+      ],
+    }, text);
+    expect(values.map((v) => [v.field, v.value, v.status, v.note])).toEqual([
+      ["bruttoarbeitslohn", 2345678, "read", null],
+      ["lohnsteuer", 234506, "read", "Cent aus der Cent-Spalte ergänzt"],
+    ]);
+  });
+
   it("attaches the kind's plausibility rule to values that cannot both be right", () => {
     const text = "Bruttoarbeitslohn 10.000,00\nLohnsteuer 6.000,00";
     const values = checkReadValues(LOHN, {

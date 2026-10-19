@@ -7,7 +7,10 @@
  * taken, however plausible — the same anchoring the depot statements use.
  */
 
-/** Cents from a German-printed amount: "48.200,00", "1 234,5", "-12,30 €", "1.234". */
+/**
+ * Cents from a German-printed amount: "48.200,00", "1 234,5", "-12,30 €",
+ * "1.234", and "48.200 78" with the cents from a Cent column of their own.
+ */
 export function parseGermanAmountCents(printed: string): number | null {
   let s = printed.replace(/\s*(?:€|EUR|Euro)\s*/gi, "").trim();
   let sign = 1;
@@ -19,6 +22,9 @@ export function parseGermanAmountCents(printed: string): number | null {
     sign = -1;
     s = s.slice(0, -1).trim();
   }
+  // A Cent column: "48.200 78". Two digits after a space never group thousands.
+  const split = /^(\d[\d.]*)[ \u00a0]+(\d{2})$/.exec(s);
+  if (split) s = `${split[1]},${split[2]}`;
   if (!/^\d[\d. \u00a0]*(?:,\d{1,2})?$/.test(s)) return null;
   const [whole, fraction = ""] = s.split(",");
   const digits = whole!.replace(/[. \u00a0]/g, "");
@@ -28,7 +34,11 @@ export function parseGermanAmountCents(printed: string): number | null {
   return Number.isSafeInteger(cents) ? sign * cents : null;
 }
 
-/** The ways one amount can be printed: "48.200,00", "48200,00", "48 200,00". */
+/**
+ * The ways one amount can be printed: "48.200,00", "48200,00", "48 200,00",
+ * and with the cents in a column of their own, "48.200 00" (the printout of
+ * the elektronische Lohnsteuerbescheinigung has a Euro and a Cent column).
+ */
 function printedForms(cents: number): string[] {
   const abs = Math.abs(cents);
   const euros = Math.floor(abs / 100);
@@ -36,7 +46,10 @@ function printedForms(cents: number): string[] {
   const plain = String(euros);
   const grouped = plain.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   const spaced = plain.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  const forms = new Set([`${grouped},${fraction}`, `${plain},${fraction}`, `${spaced},${fraction}`]);
+  const forms = new Set([
+    `${grouped},${fraction}`, `${plain},${fraction}`, `${spaced},${fraction}`,
+    `${grouped} ${fraction}`, `${plain} ${fraction}`,
+  ]);
   // Whole amounts are often printed without cents ("1.000 €").
   if (abs % 100 === 0) {
     forms.add(grouped);
@@ -53,7 +66,27 @@ function printedForms(cents: number): string[] {
 export function amountAnchored(text: string, cents: number): boolean {
   const flat = text.replace(/\u00a0/g, " ");
   return printedForms(cents).some((form) => {
-    const escaped = form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s");
+    const escaped = form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
     return new RegExp(`(?<![\\d.,])${escaped}(?![\\d]|[.,]\\d)`).test(flat);
   });
+}
+
+/**
+ * The cents a whole-euro reading left behind in a Cent column: "48.200 78"
+ * read as "48.200" gives 78. Null when the amount stands without such a
+ * column. A line number that follows ("12.") is not a Cent column, nor is
+ * a rate ("19 %").
+ */
+export function centsColumnAfter(text: string, cents: number): number | null {
+  const abs = Math.abs(cents);
+  if (abs % 100 !== 0) return null;
+  const plain = String(abs / 100);
+  const grouped = plain.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const flat = text.replace(/\u00a0/g, " ");
+  for (const form of new Set([grouped, plain])) {
+    const escaped = form.replace(/\./g, "\\.");
+    const m = new RegExp(`(?<![\\d.,])${escaped}\\s+(\\d{2})(?![\\d.,%])`).exec(flat);
+    if (m) return Number(m[1]);
+  }
+  return null;
 }
