@@ -183,6 +183,14 @@ Simplifications: expenses contain everything that flows out (also insurance
 contributions and savings plans to third-party securities accounts without a mirror transaction); cash
 withdrawals count as expenses; no notification on deviation.
 
+## Addendum: supplement for a later pension start
+
+A statutory pension drawn after the regular age gets 0.5 % more for each
+month it was not taken (§ 77 Abs. 2 Satz 1 Nr. 2 b SGB VI,
+`LATE_START_SUPPLEMENT_PER_MONTH` in `finance/forecast-engine.ts`). Earning
+points from work continued past the regular age are not added; the
+projection still ends at the regular age.
+
 ## Checked and fine
 
 - Purchasing power: all series and detail values are deflated with their year and the same
@@ -208,7 +216,6 @@ withdrawals count as expenses; no notification on deviation.
   lump sums do not count (the 120-month spreading of
   pension benefits is missing); whether the 9/10 rule is met for the KVdR is
   decided by the choice of mode per person.
-- No surcharge for a later pension start (0.5 %/month).
 - The row „Überbrückung gedeckt / nicht gedeckt“ (bridging covered / not covered) compares need and
   available wealth at the start without returns during the phase; the verdict
   „Geld reicht“ (money suffices) comes from the full simulation.

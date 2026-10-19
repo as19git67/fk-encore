@@ -423,7 +423,7 @@ function save() {
         </div>
       </div>
       <p v-if="s('kind') === 'statutory'" class="hint">
-        Werte wie in der Renteninformation: Die prognostizierte Rente gilt in heutigen Werten für Beiträge bis zur Regelaltersgrenze und wird ab heute mit der Rentenanpassung fortgeschrieben. Wer früher aufhört, bekommt anteilig weniger — zwischen der bisher erreichten Anwartschaft und der Prognose — und für jeden Monat vor der Regelaltersgrenze den Abschlag. Der Beginn liegt im Monat nach dem Geburtsmonat.
+        Werte wie in der Renteninformation: Die prognostizierte Rente gilt in heutigen Werten für Beiträge bis zur Regelaltersgrenze und wird ab heute mit der Rentenanpassung fortgeschrieben. Wer früher aufhört, bekommt anteilig weniger — zwischen der bisher erreichten Anwartschaft und der Prognose — und für jeden Monat vor der Regelaltersgrenze den Abschlag. Wer die Rente erst nach der Regelaltersgrenze bezieht, bekommt für jeden Monat 0,5 % Zuschlag. Der Beginn liegt im Monat nach dem Geburtsmonat.
       </p>
       <p v-else class="hint">Rente nominal zum Beginn, wie die Standmitteilung sie prognostiziert; die Anpassung greift ab dem Beginn.</p>
     </template>

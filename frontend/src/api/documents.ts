@@ -943,12 +943,17 @@ export interface UploadDefaults {
   group_id: number | null
 }
 
+export interface UploadDefaultsState extends UploadDefaults {
+  /** A group is saved, but the user is no longer a member of it. */
+  stale: boolean
+}
+
 export function getUploadDefaults() {
-  return apiFetch<UploadDefaults>(`/documents/upload-defaults`)
+  return apiFetch<UploadDefaultsState>(`/documents/upload-defaults`)
 }
 
 export function setUploadDefaults(payload: UploadDefaults) {
-  return apiFetch<UploadDefaults>(`/documents/upload-defaults`, {
+  return apiFetch<UploadDefaultsState>(`/documents/upload-defaults`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
@@ -1052,8 +1057,11 @@ export interface InboxFolderEntry {
   email: string
   /** First folder below the inbox root that routes scans to this user. */
   folder: string
+  /** Group the user saved for new documents; imports join it unless stale. */
   default_group_id: number | null
   default_group_name: string | null
+  /** The user is no longer a member of the saved group; imports land private. */
+  default_group_stale: boolean
   /** Files outside any user folder go to this user. */
   is_fallback: boolean
   /** Another user with a lower id owns the same folder name. */
@@ -1275,6 +1283,17 @@ export function correctTaxValue(id: number, valueCents: number): Promise<TaxValu
 
 export function backfillDocumentTax() {
   return apiFetch<{ queued: number }>('/documents/tax/backfill', { method: 'POST' })
+}
+
+/**
+ * Reads the form values off evidence classified before the reading existed
+ * (admin). `remaining` counts the evidence still unread after this call.
+ */
+export function backfillTaxValues(year?: number, limit = 2000) {
+  return apiFetch<{ queued: number; remaining: number }>('/documents/tax-values/backfill', {
+    method: 'POST',
+    body: JSON.stringify({ ...(year != null ? { year } : {}), limit }),
+  })
 }
 
 // ─── Tax hint admin ───────────────────────────────────────────────────────

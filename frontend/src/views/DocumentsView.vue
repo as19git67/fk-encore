@@ -32,6 +32,7 @@ import {
   listDocumentCategories,
   listDocumentTypesCatalog,
   listCorrespondents,
+  getUploadDefaults,
   listGroups,
   listSubjectPersons,
   searchDocuments,
@@ -731,6 +732,19 @@ useRealtimeEvent('documents', 'status.changed', (ev) => {
   }
 })
 
+// A saved default group the user is no longer a member of sends new
+// documents to private without a word; the cog button warns about it.
+const uploadDefaultsStale = ref(false)
+
+async function loadUploadDefaults() {
+  if (!auth.hasPermission('documents.upload')) return
+  try {
+    uploadDefaultsStale.value = (await getUploadDefaults()).stale
+  } catch (err: any) {
+    console.warn('[documents] failed to load upload defaults:', err)
+  }
+}
+
 async function loadGroups() {
   try {
     const res = await listGroups()
@@ -747,7 +761,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadSubjectPeople(), loadCorrespondents(), load()])
+  await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadUploadDefaults(), loadSubjectPeople(), loadCorrespondents(), load()])
 })
 </script>
 
@@ -776,8 +790,13 @@ onMounted(async () => {
           icon="pi pi-cog"
           text
           rounded
-          aria-label="Standardeinstellungen für neue Dokumente"
-          v-tooltip.bottom="'Standard-Gruppe für neue Dokumente'"
+          :severity="uploadDefaultsStale ? 'warn' : undefined"
+          :aria-label="uploadDefaultsStale
+            ? 'Standardeinstellungen für neue Dokumente – Standard-Gruppe gilt nicht mehr'
+            : 'Standardeinstellungen für neue Dokumente'"
+          v-tooltip.bottom="uploadDefaultsStale
+            ? 'Standard-Gruppe gilt nicht mehr: neue Dokumente bleiben privat'
+            : 'Standard-Gruppe für neue Dokumente'"
           @click="defaultsDialogVisible = true"
         />
         <Button
@@ -1054,7 +1073,7 @@ onMounted(async () => {
     <DocumentUploadDefaultsDialog
       v-model:visible="defaultsDialogVisible"
       :groups="groups"
-      @saved="info = 'Standard für neue Dokumente gespeichert.'"
+      @saved="info = 'Standard für neue Dokumente gespeichert.'; uploadDefaultsStale = false"
     />
 
     <DocumentFilterMenu

@@ -189,8 +189,8 @@ describe("numberTokens / contentPairQualifies", () => {
     expect(oneSidedExtras("a 1 2 3", "a 1 2")).toEqual(["3"]);
     expect(oneSidedExtras("a 1 2", "a 1 2 3 3")).toEqual(["3", "3"]);
     expect(oneSidedExtras("a 1 4", "a 1 5")).toBeNull();
-    const v = contentPairVerdict(side({ id: 1, extracted_text: `${LETTER} Tel 04106 7082500` }), side({ id: 2 }), 0.99);
-    expect(v).toEqual({ ok: false, reason: "numbers", extras: ["04106", "7082500"] });
+    const v = contentPairVerdict(side({ id: 1, extracted_text: `${LETTER} Tel 01234 567890` }), side({ id: 2 }), 0.99);
+    expect(v).toEqual({ ok: false, reason: "numbers", extras: ["01234", "567890"] });
   });
 
   it("ignores a differing date or correspondent when the numbers agree", () => {
@@ -293,7 +293,7 @@ describe("auto-merge against the database", () => {
     for (let i = 0; i < 5; i++) {
       const letter = LETTER.replace("4711-0815", `4711-08${20 + i}`);
       const plain = await insertDoc({ text: letter });
-      const withFooter = await insertDoc({ text: `${letter} Beispiel AG, Musterstadt, Tel 04106 7082500` });
+      const withFooter = await insertDoc({ text: `${letter} Beispiel AG, Musterstadt, Tel 01234 567890` });
       await insertPair(plain, withFooter, 0.99);
       footerPairs.push([plain, withFooter]);
     }

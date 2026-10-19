@@ -204,6 +204,9 @@ export function formHints(form: WorksheetForm | null, year: number, documentCoun
   if (open) hints.push(`${open} value(s) were read but not confirmed yet: check each against its document, then confirm or correct it.`);
   const rejected = form.skipped.filter((s) => s.status === "rejected").length;
   if (rejected) hints.push(`${rejected} value(s) could not be found in their document's text and are left out; correct them if the document says otherwise.`);
+  if (form.previous?.missing.length) {
+    hints.push(`${form.previous.missing.length} field(s) had a value in ${form.previous.year} but none yet in ${year} (${form.previous.missing.map((m) => m.label).join(", ")}): check whether evidence is still missing.`);
+  }
   if (form.values.some((v) => !v.checked)) hints.push("Fields marked \"Kennzahl prüfen\" are not checked against the official form yet: find the line on the form.");
   return hints;
 }
@@ -251,7 +254,7 @@ const STATUS_TEXT: Record<string, string> = { read: "unconfirmed", confirmed: "c
 /** The values by form field: Anlage → owner → line, Kennzahl, label, value and where it came from. */
 export function formText(w: TaxWorksheet): string[] {
   const form = w.form;
-  if (!form || (!form.values.length && !form.skipped.length)) return [];
+  if (!form || (!form.values.length && !form.skipped.length && !form.previous?.missing.length)) return [];
   const out: string[] = [`\n== Values by form field (${form.joint ? "joint assessment" : "single assessment"}; form ${form.catalogue_year}${form.exact ? "" : ", unchecked"}) ==`];
   const groups = new Map<string, typeof form.values>();
   for (const v of form.values) {
@@ -262,12 +265,19 @@ export function formText(w: TaxWorksheet): string[] {
     out.push(`  ${name}`);
     for (const v of values) {
       const state = v.open ? `${v.open} unconfirmed` : "all confirmed";
-      out.push(`    ${v.place} | ${v.label} | ${centsEur(v.cents)} | ${state}${v.prefilled ? " | prefilled by the Finanzamt, check only" : ""}`);
+      const prev = form.previous && v.previous_cents !== null ? ` | ${form.previous.year}: ${centsEur(v.previous_cents)}` : "";
+      out.push(`    ${v.place} | ${v.label} | ${centsEur(v.cents)}${prev} | ${state}${v.prefilled ? " | prefilled by the Finanzamt, check only" : ""}`);
       for (const c of v.contributions) {
         out.push(`      from document ${c.document_id} (${c.document_title}, ${c.evidence_kind_name}): ${c.field_label} ${centsEur(c.cents)}${c.cents !== c.value_cents ? ` (share of ${centsEur(c.value_cents)})` : ""}, ${STATUS_TEXT[c.status] ?? c.status}${c.page ? `, page ${c.page}` : ""}`);
       }
       if (v.form_note) out.push(`      form: ${v.form_note}`);
       for (const n of v.notes) out.push(`      note: ${n}`);
+    }
+  }
+  if (form.previous?.missing.length) {
+    out.push(`  Had a value in ${form.previous.year}, none yet in ${form.year}:`);
+    for (const m of form.previous.missing) {
+      out.push(`    ${m.anlage_name} — ${m.owner_label} | ${m.place} | ${m.label} | ${form.previous.year}: ${centsEur(m.previous_cents)} from ${m.previous_documents.map((d) => `document ${d.document_id} (${d.document_title})`).join(", ") || "-"}`);
     }
   }
   if (form.skipped.length) {

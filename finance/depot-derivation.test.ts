@@ -304,6 +304,17 @@ describe("classifySecuTransaction", () => {
     expect(c("990.00", "WERTPAPIERABRECHNUNG VERKAUF WKN AAA111")).toBe("sell");
   });
 
+  it("takes a booking that quotes the settlement's amount for the trade, not for a tax", () => {
+    const c = (amount: string, purpose: string) =>
+      classifySecuTransaction({ amount, transaction_code: null, purpose });
+    // Synthetic, worded like a broker's booking of a sale: no kind, only the
+    // settlement's gross amount and the tax withheld from it.
+    const text = "BEISPIEL AG DL-,01 WPKNR: AAA111 ISIN: DE000000AAA1 Abr.Betrag Brutto 1.000,00 EUR Steuerabzug 12,34- EUR";
+    expect(c("987.66", text)).toBe("sell");
+    expect(c("-1012.34", text.replace("Steuerabzug 12,34-", "Provision 12,34-"))).toBe("buy");
+    expect(c("12.40", "DIVIDENDE WKN AAA111 Abr.Betrag 12,40 EUR")).toBe("dividend");
+  });
+
   it("skips a tax correction that quotes the trade it corrects", () => {
     const c = (amount: string, purpose: string) =>
       classifySecuTransaction({ amount, transaction_code: null, purpose });

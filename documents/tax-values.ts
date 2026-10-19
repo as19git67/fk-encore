@@ -18,9 +18,15 @@
  *
  * A re-read replaces `read` and `rejected` rows and leaves what the user
  * confirmed or corrected.
+ *
+ * What the user corrected is learned (stage 5): when a document of the same
+ * sender and kind is read, the latest corrections of that sender's earlier
+ * evidence go into the prompt as examples — the number that was read, the
+ * number that is right, the line it stands in. Only the same owner's
+ * documents teach, so no household sees another's evidence.
  */
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import db from "../db/database";
 import {
   documentSubjectPersons,
@@ -30,7 +36,7 @@ import {
   documents,
   userSubjectPersons,
 } from "../db/schema";
-import { amountAnchored, parseGermanAmountCents } from "./tax-amounts";
+import { amountAnchored, centsColumnAfter, parseGermanAmountCents } from "./tax-amounts";
 import {
   checkEvidenceValues,
   evidenceKindsFor,
@@ -88,16 +94,49 @@ function describeField(f: EvidenceField): string {
   return `- "${f.key}" (${what}): ${f.label}${f.hint ? ` — ${f.hint}` : ""}`;
 }
 
-export function buildValuesPrompt(kind: EvidenceKind, year: number, text: string): string {
+/** A value the user corrected on an earlier document of the same sender and kind. */
+export interface CorrectionExample {
+  field: string;
+  /** What was read, as printed. */
+  printed: string | null;
+  /** What is right, in cents. */
+  cents: number;
+  quote: string | null;
+}
+
+const germanAmount = (cents: number) =>
+  (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** The corrections as the prompt states them; fields the kind does not have are left out. */
+export function describeCorrections(kind: EvidenceKind, examples: readonly CorrectionExample[]): string {
+  const lines = examples.flatMap((e) => {
+    const f = field(kind, e.field);
+    if (!f || f.kind !== "amount") return [];
+    const read = e.printed ? `gelesen wurde "${e.printed}", ` : "";
+    const where = e.quote ? ` (steht in: "${e.quote}")` : "";
+    return [`- "${f.key}" (${f.label}): ${read}richtig ist ${germanAmount(e.cents)}${where}`];
+  });
+  if (!lines.length) return "";
+  return (
+    "Bei früheren Belegen desselben Absenders hat der Nutzer diese Werte berichtigt. " +
+    "Lies die Felder genauso, wenn das Dokument gleich aufgebaut ist; " +
+    "die Beträge dort gelten nicht für dieses Dokument:\n" +
+    `${lines.join("\n")}\n\n`
+  );
+}
+
+export function buildValuesPrompt(kind: EvidenceKind, year: number, text: string, examples: readonly CorrectionExample[] = []): string {
   return (
     `Das Dokument ist: ${kind.name} (Steuerjahr ${year}).\n` +
     "Lies diese Felder:\n" +
     `${kind.fields.map(describeField).join("\n")}\n\n` +
+    describeCorrections(kind, examples) +
     "Antworte als " +
     '{"values": [{"field": "<key>", "printed": "<Zahl wie gedruckt>", "quote": "<die Zeile, in der sie steht>"}], ' +
     '"flags": [{"field": "<key>", "value": true|false, "quote": "<die Stelle, die es sagt>"}]}.\n' +
     "Nur Felder, die im Text stehen; ein Feld, das fehlt, lässt du weg. " +
     "Beträge in Euro mit Komma, wie gedruckt (z. B. \"1.234,56\"). " +
+    "Stehen Euro und Cent in getrennten Spalten (\"1.234  56\"), gehören beide zum Betrag: \"1.234,56\". " +
     "Steht ein Betrag für mehrere Personen getrennt da, nimm den Gesamtbetrag.\n\n" +
     `Dokument:\n"""\n${clipText(text)}\n"""`
   );
@@ -145,7 +184,14 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
       out.push({ field: field.key, value: 0, printed, quote, status: "rejected", note: "Zahl nicht lesbar" });
       continue;
     }
-    const cents = Math.abs(parsed);
+    let cents = Math.abs(parsed);
+    let note: string | null = null;
+    // Euro read, Cent column left behind: "48.200 78" read as "48.200".
+    const column = printed.includes(",") ? null : centsColumnAfter(text, cents);
+    if (column) {
+      cents += column;
+      note = "Cent aus der Cent-Spalte ergänzt";
+    }
     const anchored = amountAnchored(text, cents);
     out.push({
       field: field.key,
@@ -153,7 +199,7 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
       printed,
       quote,
       status: anchored ? "read" : "rejected",
-      note: anchored ? null : "Zahl steht nicht im Text",
+      note: anchored ? note : "Zahl steht nicht im Text",
     });
   }
 
@@ -179,7 +225,7 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
   const reasons = checkEvidenceValues(kind, kept);
   if (reasons.length) {
     const note = `Prüfen: ${reasons.join("; ")}`;
-    for (const v of out) if (v.status === "read" && field(kind, v.field)?.kind === "amount") v.note = note;
+    for (const v of out) if (v.status === "read" && field(kind, v.field)?.kind === "amount") v.note = v.note ? `${v.note}; ${note}` : note;
   }
   return out;
 }
@@ -218,6 +264,8 @@ export function ownerFor(scope: FormScope | undefined, persons: readonly LinkedP
 
 interface EvidenceDocument {
   id: number;
+  userId: number;
+  correspondent: string | null;
   taxRole: string;
   taxYear: number | null;
   documentType: string | null;
@@ -229,6 +277,8 @@ async function loadEvidenceDocument(documentId: number): Promise<EvidenceDocumen
   const [row] = await db
     .select({
       id: documents.id,
+      userId: documents.user_id,
+      correspondent: documents.correspondent_slug,
       taxRole: documents.tax_role,
       taxYear: documents.tax_year,
       documentType: documents.document_type,
@@ -265,10 +315,51 @@ async function pageOf(documentId: number, printed: string | null): Promise<numbe
   return found?.boxes.length ? Math.min(...found.boxes.map((b) => b.page)) : null;
 }
 
+/** At most this many corrections go into one prompt, the latest first. */
+export const MAX_CORRECTION_EXAMPLES = 6;
+
+/**
+ * The latest correction per field on the owner's other evidence of the same
+ * sender and kind. Without a known sender nothing is learned: another
+ * issuer prints its certificate differently.
+ */
+export async function correctionExamples(doc: Pick<EvidenceDocument, "id" | "userId" | "correspondent">, kind: string): Promise<CorrectionExample[]> {
+  if (!doc.correspondent) return [];
+  const rows = await db
+    .select({
+      field: documentTaxValue.field_key,
+      printed: documentTaxValue.printed,
+      cents: documentTaxValue.value,
+      quote: documentTaxValue.quote,
+    })
+    .from(documentTaxValue)
+    .innerJoin(documents, eq(documents.id, documentTaxValue.document_id))
+    .where(and(
+      eq(documentTaxValue.status, "corrected"),
+      eq(documentTaxValue.evidence_kind, kind),
+      eq(documents.user_id, doc.userId),
+      eq(documents.correspondent_slug, doc.correspondent),
+      ne(documents.id, doc.id),
+    ))
+    .orderBy(desc(documentTaxValue.updated_at), desc(documentTaxValue.id))
+    .limit(50);
+  const out: CorrectionExample[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (seen.has(r.field)) continue;
+    // A "correction" to the number that was read teaches nothing.
+    if (r.printed !== null && parseGermanAmountCents(r.printed) !== null && Math.abs(parseGermanAmountCents(r.printed)!) === Number(r.cents)) continue;
+    seen.add(r.field);
+    out.push({ field: r.field, printed: r.printed, cents: Number(r.cents), quote: r.quote });
+    if (out.length >= MAX_CORRECTION_EXAMPLES) break;
+  }
+  return out;
+}
+
 /** The model's two steps; injectable for tests. */
 export interface TaxValueReader {
   pickKind(kinds: readonly EvidenceKind[], text: string): Promise<EvidenceKind | null>;
-  readValues(kind: EvidenceKind, year: number, text: string): Promise<unknown>;
+  readValues(kind: EvidenceKind, year: number, text: string, examples: readonly CorrectionExample[]): Promise<unknown>;
 }
 
 export const modelReader: TaxValueReader = {
@@ -277,8 +368,8 @@ export const modelReader: TaxValueReader = {
     if (kinds.length === 1) return kinds[0]!;
     return parseKindAnswer(await jsonPrompt(buildKindPrompt(kinds, text), SYSTEM, 100), kinds);
   },
-  readValues(kind, year, text) {
-    return jsonPrompt(buildValuesPrompt(kind, year, text), SYSTEM, 1500);
+  readValues(kind, year, text, examples) {
+    return jsonPrompt(buildValuesPrompt(kind, year, text, examples), SYSTEM, 1500);
   },
 };
 
@@ -298,7 +389,8 @@ export async function runTaxValues(documentId: number, reader: TaxValueReader = 
   if (!doc) return null;
   const kinds = candidateKinds(doc);
   const kind = kinds.length ? await reader.pickKind(kinds, doc.text) : null;
-  const values = kind ? checkReadValues(kind, await reader.readValues(kind, doc.taxYear!, doc.text), doc.text) : [];
+  const examples = kind ? await correctionExamples(doc, kind.key) : [];
+  const values = kind ? checkReadValues(kind, await reader.readValues(kind, doc.taxYear!, doc.text, examples), doc.text) : [];
 
   const persons = await linkedPersons(documentId);
   const rows = await Promise.all(values.map(async (v) => {

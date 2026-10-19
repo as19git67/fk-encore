@@ -299,6 +299,8 @@ const AMOUNT = String.raw`(?<!(?:§|Abs\.|Nr\.|Art\.)\s?)(-? ?\d{1,3}(?:[. ]\d{3
 /** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
 const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
+/** After a quantity label: no currency before the number, so the number is no amount of money. */
+const NO_MONEY = String.raw`(?![^\d\n-]{0,40}?(?:EUR|USD|CHF|GBP|€)\s*-?\s*\d)`;
 
 /** "Steuern", also as OCR reads it off a scan ("Steuem"). */
 const STEUERN = String.raw`Steue(?:rn|m)`;
@@ -735,8 +737,10 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   };
 
   const quantity = track("quantity", () =>
-    // Not "Stückzinsen" (accrued interest, an amount of money).
-    amountAfter(text, [String.raw`Stück\s*/\s*Nominale`, String.raw`Stück(?!zins)`, String.raw`Stk\.?`, String.raw`\bSt\.`, String.raw`Nominale`, String.raw`Anzahl`, String.raw`Menge`], markers) ??
+    // Not "Stückzinsen" (accrued interest, an amount of money), and not a
+    // "Stück" whose number follows a currency: that is money too ("Gewinn je
+    // Stück EUR 12,34"). A bond's nominal may be in euros, a count of shares is not.
+    amountAfter(text, [String.raw`Stück\s*/\s*Nominale`, String.raw`Stück(?!zins)${NO_MONEY}`, String.raw`Stk\.?${NO_MONEY}`, String.raw`\bSt\.`, String.raw`Nominale`, String.raw`Anzahl`, String.raw`Menge`], markers) ??
     (() => {
       const m = new RegExp(String.raw`${AMOUNT}\s*(?:Stück|Stk\.?|St\.)`, "i").exec(text);
       if (!m) return null;

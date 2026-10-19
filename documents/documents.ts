@@ -127,6 +127,12 @@ import { DOCUMENT_TYPES, isValidDocumentTypeSlug } from "./document-types";
 import { retentionFor, retainUntilYear } from "./retention";
 import { isSuggestionVisible, recordUserCategoryProposal } from "./suggestion-writer";
 import {
+  loadDefaultGroupForUser,
+  readUploadDefaults,
+  UPLOAD_DEFAULTS_PREF_KEY,
+  type UploadDefaultsPref,
+} from "./upload-defaults";
+import {
   collectionMembershipCondition,
   fetchCollectionsForDocuments,
   type DocumentCollectionBadge,
@@ -1082,7 +1088,7 @@ async function storeDocumentBuffer(params: {
     userId,
   );
 
-  const defaultGroupId = await loadDefaultGroupForUser(userId);
+  const defaultGroupId = await loadDefaultGroupForUser(userId, `upload "${originalName}"`);
 
   const ownerRootSeg = composeOwnerRootSegment({
     visibility: "private",
@@ -1239,43 +1245,6 @@ function parseGermanAmount(value: string): number | null {
   const normalized = value.replace(/[. ](?=\d{3}(?:\D|$))/g, "").replace(",", ".");
   const amount = Number(normalized);
   return Number.isFinite(amount) && amount > 0 ? amount : null;
-}
-
-const UPLOAD_DEFAULTS_PREF_KEY = "upload_defaults";
-
-interface UploadDefaultsPref {
-  group_id: number | null;
-}
-
-/**
- * Read the configured default group for new uploads. Returns null when
- * the user has no preference, the preference is malformed, or the user
- * is no longer a member of the saved group (which we treat the same
- * as "no preference" so a stale pref doesn't fail uploads).
- */
-async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
-  const row = await dbFirst<{ value: unknown }>(
-    db
-      .select({ value: documentsUserPref.value })
-      .from(documentsUserPref)
-      .where(
-        and(
-          eq(documentsUserPref.user_id, userId),
-          eq(documentsUserPref.key, UPLOAD_DEFAULTS_PREF_KEY),
-        ),
-      ),
-  );
-  if (!row) return null;
-  const v = row.value as UploadDefaultsPref | null;
-  const groupId = v?.group_id ?? null;
-  if (groupId == null) return null;
-  // Still a member?
-  try {
-    await assertGroupMember(userId, groupId);
-  } catch {
-    return null;
-  }
-  return groupId;
 }
 
 // ─── List / get / file ──────────────────────────────────────────────────────
@@ -2480,7 +2449,13 @@ export const relocateAllDocuments = api(
 // ─── Upload defaults (per-user preference) ─────────────────────────────────
 
 export interface UploadDefaultsResponse {
+  /** The saved group, or null when new uploads stay private. */
   group_id: number | null;
+  /**
+   * A group is saved, but the caller is no longer a member of it, so new
+   * documents land private until another group is chosen.
+   */
+  stale: boolean;
 }
 
 export interface SetUploadDefaultsRequest {
@@ -2495,21 +2470,8 @@ export const getUploadDefaults = api(
   { expose: true, method: "GET", path: "/documents/upload-defaults", auth: true },
   async (): Promise<UploadDefaultsResponse> => {
     checkModule();
-    const userId = getUserId();
-    const row = await dbFirst<{ value: unknown }>(
-      db
-        .select({ value: documentsUserPref.value })
-        .from(documentsUserPref)
-        .where(
-          and(
-            eq(documentsUserPref.user_id, userId),
-            eq(documentsUserPref.key, UPLOAD_DEFAULTS_PREF_KEY),
-          ),
-        ),
-    );
-    if (!row) return { group_id: null };
-    const v = row.value as UploadDefaultsPref | null;
-    return { group_id: v?.group_id ?? null };
+    const state = await readUploadDefaults(getUserId());
+    return { group_id: state.saved_group_id, stale: state.stale };
   },
 );
 
@@ -2538,7 +2500,7 @@ export const setUploadDefaults = api(
         target: [documentsUserPref.user_id, documentsUserPref.key],
         set: { value, updated_at: new Date().toISOString() },
       });
-    return { group_id: req.group_id };
+    return { group_id: req.group_id, stale: false };
   },
 );
 

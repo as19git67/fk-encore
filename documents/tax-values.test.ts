@@ -20,6 +20,8 @@ import {
   buildKindPrompt,
   buildValuesPrompt,
   checkReadValues,
+  correctionExamples,
+  describeCorrections,
   ownerFor,
   parseKindAnswer,
   queueTaxValuesIfEvidence,
@@ -58,6 +60,22 @@ describe("checkReadValues", () => {
       ["lohnsteuer", 795040, "read", null],
       ["kirchensteuer", 61200, "rejected", "Zahl steht nicht im Text"],
       ["rv_arbeitnehmer", 0, "rejected", "Zahl nicht lesbar"],
+    ]);
+  });
+
+  it("reads Euro and Cent from columns of their own", () => {
+    // Synthetic printout with a Euro and a Cent column.
+    const text = "3. Bruttoarbeitslohn 23.456   78\n4. Einbehaltene Lohnsteuer von 3. 2.345   06";
+    const values = checkReadValues(LOHN, {
+      values: [
+        { field: "bruttoarbeitslohn", printed: "23.456,78" },
+        // The Cent column left behind: the cents come from the text.
+        { field: "lohnsteuer", printed: "2.345" },
+      ],
+    }, text);
+    expect(values.map((v) => [v.field, v.value, v.status, v.note])).toEqual([
+      ["bruttoarbeitslohn", 2345678, "read", null],
+      ["lohnsteuer", 234506, "read", "Cent aus der Cent-Spalte ergänzt"],
     ]);
   });
 
@@ -105,6 +123,28 @@ describe("prompts", () => {
     const prompt = buildValuesPrompt(LOHN, 2025, LOHN_TEXT);
     for (const f of LOHN.fields) expect(prompt).toContain(`"${f.key}"`);
     expect(prompt).toContain("Steuerjahr 2025");
+  });
+});
+
+describe("corrections in the prompt", () => {
+  it("states what was read, what is right and where it stands, only for the kind's amounts", () => {
+    const text = describeCorrections(LOHN, [
+      { field: "bruttoarbeitslohn", printed: "48.200,00", cents: 4810000, quote: "3. Bruttoarbeitslohn 48.200,00" },
+      { field: "lohnsteuer", printed: null, cents: 795040, quote: null },
+      { field: "unbekannt", printed: "1,00", cents: 200, quote: null },
+    ]);
+    expect(text).toContain('- "bruttoarbeitslohn" (Bruttoarbeitslohn): gelesen wurde "48.200,00", richtig ist 48.100,00 (steht in: "3. Bruttoarbeitslohn 48.200,00")');
+    expect(text).toContain('- "lohnsteuer" (Einbehaltene Lohnsteuer): richtig ist 7.950,40\n');
+    expect(text).not.toContain("unbekannt");
+    expect(text).toContain("die Beträge dort gelten nicht für dieses Dokument");
+    expect(describeCorrections(LOHN, [])).toBe("");
+  });
+
+  it("goes into the values prompt before the document", () => {
+    const prompt = buildValuesPrompt(LOHN, 2025, LOHN_TEXT, [{ field: "lohnsteuer", printed: "795,04", cents: 795040, quote: null }]);
+    expect(prompt.indexOf("berichtigt")).toBeGreaterThan(-1);
+    expect(prompt.indexOf("berichtigt")).toBeLessThan(prompt.indexOf("Dokument:\n"));
+    expect(buildValuesPrompt(LOHN, 2025, LOHN_TEXT)).not.toContain("berichtigt");
   });
 });
 
@@ -237,5 +277,74 @@ describe("runTaxValues", () => {
     await runTaxValues(DOC, reader(answer));
     expect((await queueTaxValuesBackfill({ year: YEAR })).queued).toBe(0);
     expect((await queueTaxValuesBackfill({ year: YEAR, reread: true })).queued).toBe(1);
+  });
+});
+
+describe("learning from corrections", () => {
+  const OWNER = 991650;
+  const STRANGER = 991651;
+  const NEW = 991652;
+  const OLD_A = 991653;
+  const OLD_B = 991654;
+  const OTHER_SENDER = 991655;
+  const FOREIGN = 991656;
+  const IDS = [NEW, OLD_A, OLD_B, OTHER_SENDER, FOREIGN];
+
+  async function doc(id: number, user: number, sender: string): Promise<void> {
+    await db.execute(sql`
+      INSERT INTO documents
+        (id, user_id, sha256, original_filename, mime_type, size_bytes, disk_path,
+         status, extracted_text, tax_role, tax_relevant, tax_year, document_type, correspondent_slug)
+      VALUES
+        (${id}, ${user}, ${`sha-${id}`}, 'd.pdf', 'application/pdf', 1, ${`/tmp/d-${id}.pdf`},
+         'ready', ${LOHN_TEXT}, 'beleg', true, ${YEAR}, 'bescheinigung', ${sender})`);
+  }
+
+  async function corrected(documentId: number, field: string, printed: string, cents: number, at: string, kind = "lohnsteuerbescheinigung"): Promise<void> {
+    await db.insert(documentTaxValue).values({
+      document_id: documentId, tax_year: YEAR, owner: "self", evidence_kind: kind, field_key: field,
+      value: cents, printed, quote: `${field} ${printed}`, status: "corrected", updated_at: at,
+    });
+  }
+
+  beforeEach(async () => {
+    for (const id of [OWNER, STRANGER]) {
+      await db.execute(sql`INSERT INTO users (id, email, name, password_hash)
+        VALUES (${id}, ${`u${id}@test.local`}, ${`User${id}`}, 'x') ON CONFLICT (id) DO NOTHING`);
+    }
+    await db.delete(documents).where(inArray(documents.id, IDS));
+    await doc(NEW, OWNER, "beispiel-gmbh");
+    await db.execute(sql`INSERT INTO document_tax_sections (document_id, tax_section) VALUES (${NEW}, 'anlage-n')`);
+    await doc(OLD_A, OWNER, "beispiel-gmbh");
+    await doc(OLD_B, OWNER, "beispiel-gmbh");
+    await doc(OTHER_SENDER, OWNER, "muster-ag");
+    await doc(FOREIGN, STRANGER, "beispiel-gmbh");
+    await corrected(OLD_A, "bruttoarbeitslohn", "4.820,00", 4820000, "2026-01-01T00:00:00Z");
+    await corrected(OLD_B, "bruttoarbeitslohn", "48.200,00", 4810000, "2026-02-01T00:00:00Z");
+    // Confirmed as read, only stored as "corrected": nothing to learn.
+    await corrected(OLD_B, "lohnsteuer", "7.950,40", 795040, "2026-02-01T00:00:00Z");
+    await corrected(OTHER_SENDER, "kirchensteuer", "1,00", 61200, "2026-03-01T00:00:00Z");
+    await corrected(FOREIGN, "solidaritaetszuschlag", "1,00", 4000, "2026-03-01T00:00:00Z");
+    await corrected(OLD_A, "arbeitskosten", "1,00", 64000, "2026-03-01T00:00:00Z", "handwerkerrechnung");
+  });
+  afterAll(async () => {
+    await db.delete(documents).where(inArray(documents.id, IDS));
+  });
+
+  it("takes the latest correction per field of the same owner, sender and kind", async () => {
+    const examples = await correctionExamples({ id: NEW, userId: OWNER, correspondent: "beispiel-gmbh" }, "lohnsteuerbescheinigung");
+    expect(examples).toEqual([{ field: "bruttoarbeitslohn", printed: "48.200,00", cents: 4810000, quote: "bruttoarbeitslohn 48.200,00" }]);
+    // Without a known sender there is nothing to learn from.
+    expect(await correctionExamples({ id: NEW, userId: OWNER, correspondent: null }, "lohnsteuerbescheinigung")).toEqual([]);
+  });
+
+  it("hands the examples to the reader", async () => {
+    const seen: unknown[] = [];
+    const r: TaxValueReader = {
+      async pickKind(kinds) { return kinds.find((k) => k.key === "lohnsteuerbescheinigung") ?? null; },
+      async readValues(_kind, _year, _text, examples) { seen.push(examples); return { values: [] }; },
+    };
+    await runTaxValues(NEW, r);
+    expect(seen).toEqual([[{ field: "bruttoarbeitslohn", printed: "48.200,00", cents: 4810000, quote: "bruttoarbeitslohn 48.200,00" }]]);
   });
 });
