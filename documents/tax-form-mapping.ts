@@ -14,7 +14,7 @@
  */
 
 import { findEvidenceKind } from "./tax-evidence-kinds";
-import { formCatalogue, type FormField } from "./tax-forms/catalogue";
+import { formCatalogue, kennzahlFor, type FormField } from "./tax-forms/catalogue";
 
 export type EvidenceValueStatus = "read" | "rejected" | "confirmed" | "corrected";
 
@@ -25,6 +25,8 @@ export type EvidenceValueStatus = "read" | "rejected" | "confirmed" | "corrected
 export type ValueOwner = "self" | "spouse" | "joint" | `child:${number}` | `property:${number}`;
 
 export interface EvidenceValue {
+  /** The stored row (`document_tax_value.id`), carried through so a value can be confirmed or corrected. */
+  id?: number;
   documentId: number;
   evidenceKind: string;
   /** The evidence field's key within its kind. */
@@ -36,6 +38,8 @@ export interface EvidenceValue {
 }
 
 export interface Contribution {
+  /** The stored evidence value, when the input carried it. */
+  valueId?: number;
   documentId: number;
   evidenceKind: string;
   field: string;
@@ -48,6 +52,8 @@ export interface FormValue {
   field: FormField;
   /** `self`, `spouse`, `return`, `child:<id>`, `property:<id>`, or `child:?` / `property:?` while unassigned. */
   owner: string;
+  /** The Kennzahl this owner's value goes under (the spouse's column where the Vordruck has one). */
+  kennzahl: string | null;
   cents: number;
   contributions: Contribution[];
   notes: string[];
@@ -191,10 +197,10 @@ export function mapToForm(year: number, values: readonly EvidenceValue[], opts: 
     }
     for (const target of owners(field, v.owner, opts.joint)) {
       const id = `${field.key}|${target.owner}`;
-      const entry = byKey.get(id) ?? { field, owner: target.owner, cents: 0, contributions: [], notes: [] };
+      const entry = byKey.get(id) ?? { field, owner: target.owner, kennzahl: kennzahlFor(field, target.owner), cents: 0, contributions: [], notes: [] };
       const cents = Math.round(v.value * target.share);
       entry.cents += cents;
-      entry.contributions.push({ documentId: v.documentId, evidenceKind: v.evidenceKind, field: v.field, cents, status: v.status });
+      entry.contributions.push({ ...(v.id !== undefined ? { valueId: v.id } : {}), documentId: v.documentId, evidenceKind: v.evidenceKind, field: v.field, cents, status: v.status });
       if (target.note && !entry.notes.includes(target.note)) entry.notes.push(target.note);
       if (is35a && docFlags?.get("bargeld") === undefined) {
         const note = "Zahlungsart prüfen: nach § 35a Abs. 5 EStG zählt nur unbare Zahlung.";

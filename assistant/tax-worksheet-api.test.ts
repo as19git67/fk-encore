@@ -38,9 +38,25 @@ describe("GET /assistant/tax-worksheet", () => {
     expect(w.sections[0]!.documents[0]).not.toHaveProperty("amount");
     // The receipt rule picked one number per document; a tax certificate prints a dozen.
     expect(clients.documents.getDocumentReceiptSuggestion).not.toHaveBeenCalled();
-    expect(w.hints.some((h) => h.includes("not read yet"))).toBe(true);
+    // Without values from the documents service the page says to take each figure from the document.
+    expect(w.form).toBeNull();
+    expect(w.hints.some((h) => h.includes("take each figure from the document itself"))).toBe(true);
     expect(w.documentCount).toBe(1);
     expect(clients.documents.listTaxDocuments).toHaveBeenCalledWith(expect.objectContaining({ year: 2025 }));
+  });
+
+  it("carries the values by form field and says what is left to check", async () => {
+    flagged();
+    clients.documents.getTaxFormValues.mockResolvedValue({
+      year: 2025, catalogue_year: 2025, exact: true, joint: false, documents_read: 1, documents_unread: 0,
+      values: [{ key: "n.lohnsteuer", anlage: "anlage-n", anlage_name: "Anlage N", label: "Lohnsteuer", owner: "self", owner_label: "Sie", line: 6, kennzahl: "140", place: "Zeile 6 · Kz 140", checked: true, source: "Anlage N 2025", form_note: null, prefilled: true, cents: 795040, contributions: [], notes: [], open: 2 }],
+      skipped: [],
+    });
+    const w = await getTaxWorksheet({ year: 2025, person_id: 4 });
+    expect(clients.documents.getTaxFormValues).toHaveBeenCalledWith({ year: 2025, tax_return_person: 4 });
+    expect(w.form?.values[0]).toMatchObject({ place: "Zeile 6 · Kz 140", cents: 795040 });
+    expect(w.hints).toContain("2 value(s) were read but not confirmed yet: check each against its document, then confirm or correct it.");
+    expect(w.hints.some((h) => h.includes("could not be loaded"))).toBe(false);
   });
 
   it("rejects a year out of range and needs documents.view", async () => {

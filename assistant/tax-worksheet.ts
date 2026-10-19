@@ -6,13 +6,15 @@
  * the way the forms ask for it. The sums are computed here, never by the
  * model.
  *
- * Documents carry no amount here. One amount per document cannot be right
- * for evidence that prints a dozen values (a Lohnsteuerbescheinigung, a
- * bank's Jahressteuerbescheinigung); the values are read per form field in
- * documentation/plans/steuer-ausfuellhilfe.md, stage 2.
+ * The documents' values come by form field (documentation/plans/
+ * steuer-ausfuellhilfe.md, stage 3): each piece of evidence is read for the
+ * values the form asks for, and the documents service sums them per Anlage,
+ * line and Kennzahl with the law applied (`documents/tax-form-values.ts`).
+ * A document never carries one amount of its own.
  */
 
 import { documents, finance } from "~encore/clients";
+import type { TaxFormValuesResponse } from "../documents/tax-form-values";
 
 interface TaxDoc { id: number; title: string | null; original_filename?: string; doc_date: string | null; sender?: string | null; correspondent_display?: string | null }
 interface TaxBucket { slug: string; name: string; group: string; documents: { document: TaxDoc; confidence: number | null; source: string }[] }
@@ -59,8 +61,13 @@ export interface WorksheetBusiness {
   exempt: boolean | null;
 }
 
+/** The documents' values by form field, as the documents service sums them (amounts in cents). */
+export type WorksheetForm = TaxFormValuesResponse;
+
 export interface TaxWorksheet {
   year: number;
+  /** Null when the values could not be loaded; the documents are still listed. */
+  form: WorksheetForm | null;
   /** The businesses of the register with the year's EÜR each (stage 2 of betriebe-euer.md). */
   businesses: WorksheetBusiness[];
   sections: WorksheetSection[];
@@ -73,8 +80,8 @@ export interface TaxWorksheet {
   hints: string[];
 }
 
-/** Said wherever the documents are listed: their values are not read yet. */
-export const NO_AMOUNTS_HINT = "The values on the documents are not read yet: take each figure from the document itself. Reading them per form field is planned (steuer-ausfuellhilfe).";
+/** Said when the values by form field could not be loaded. */
+export const NO_FORM_HINT = "The values read from the documents could not be loaded: take each figure from the document itself.";
 const BOOKING_LIMIT = 500;
 
 function title(d: TaxDoc): string {
@@ -83,9 +90,14 @@ function title(d: TaxDoc): string {
 
 export async function buildTaxWorksheet(input: { year: number; personId?: number; mayFinance: boolean }): Promise<TaxWorksheet> {
   const { year, personId, mayFinance } = input;
-  const [thisYear, lastYear] = await Promise.all([
+  const [thisYear, lastYear, form] = await Promise.all([
     documents.listTaxDocuments({ year, tax_return_person: personId }) as unknown as Promise<TaxListing>,
     documents.listTaxDocuments({ year: year - 1, tax_return_person: personId }).catch(() => null) as unknown as Promise<TaxListing | null>,
+    // Values missing is no reason to lose the worksheet: it lists the documents without them.
+    Promise.resolve()
+      .then(() => documents.getTaxFormValues({ year, tax_return_person: personId }) as unknown as Promise<WorksheetForm | undefined>)
+      .then((f) => f ?? null)
+      .catch(() => null),
   ]);
 
   const distinct = new Map<number, TaxDoc>();
@@ -161,11 +173,12 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
       if (b.documents.length && !now.has(b.slug)) hints.push(`${b.name}: ${b.documents.length} document(s) last year, none flagged for ${year} yet.`);
     }
   }
-  if (distinct.size) hints.push(NO_AMOUNTS_HINT);
+  hints.push(...formHints(form, year, distinct.size));
   if (!mayFinance) hints.push("Bookings and depot figures are left out: the user has no finance access.");
 
   return {
     year,
+    form,
     businesses,
     sections,
     documentCount: distinct.size,
@@ -177,11 +190,32 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
   };
 }
 
+/** What the user should know about the values by form field. */
+export function formHints(form: WorksheetForm | null, year: number, documentCount: number): string[] {
+  if (!form) return documentCount ? [NO_FORM_HINT] : [];
+  const hints: string[] = [];
+  if (!form.exact) {
+    hints.push(`There is no form catalogue for ${year} yet: the fields of ${form.catalogue_year} are used, and every line and Kennzahl must be checked on the ${year} form.`);
+  }
+  if (form.documents_unread) {
+    hints.push(`${form.documents_unread} evidence document(s) of ${year} are not read yet: their values are missing from the form values; take them from the documents.`);
+  }
+  const open = form.values.reduce((n, v) => n + v.open, 0);
+  if (open) hints.push(`${open} value(s) were read but not confirmed yet: check each against its document, then confirm or correct it.`);
+  const rejected = form.skipped.filter((s) => s.status === "rejected").length;
+  if (rejected) hints.push(`${rejected} value(s) could not be found in their document's text and are left out; correct them if the document says otherwise.`);
+  if (form.values.some((v) => !v.checked)) hints.push("Fields marked \"Kennzahl prüfen\" are not checked against the official form yet: find the line on the form.");
+  return hints;
+}
+
 const eur = (n: number) => `${n.toFixed(2)} EUR`;
+const centsEur = (c: number) => eur(c / 100);
 
 /** The worksheet as the model reads it. */
 export function worksheetText(w: TaxWorksheet): string {
   const out: string[] = [`Worksheet for the tax return of ${w.year}: ${w.documentCount} flagged document(s) in ${w.sections.length} Anlage(n), ${w.bookingCount} tax-relevant booking(s).`];
+  out.push(...formText(w));
+  if (w.sections.length) out.push(`\n== Flagged documents by Anlage ==`);
   for (const s of w.sections) {
     out.push(`\n== ${s.name} (${s.slug}) ==`);
     for (const d of s.documents) {
@@ -206,6 +240,39 @@ export function worksheetText(w: TaxWorksheet): string {
     out.push(`  income (dividends, interest): ${eur(Number(w.depot.income))} from ${w.depot.dividend_count} payment(s); realized gain: ${eur(Number(w.depot.realized))}${w.depot.realized_complete ? "" : " (incomplete)"} from ${w.depot.sell_count} sale(s); taxes withheld: ${eur(Number(w.depot.taxes))}; fees: ${eur(Number(w.depot.fees))}`);
   }
   if (w.hints.length) out.push("\nHints:\n" + w.hints.map((h) => `  - ${h}`).join("\n"));
-  out.push("\nNo amount of a document is known to the worksheet: never state one, and point the user to the document for each figure.");
+  out.push(w.form?.values.length
+    ? "\nState a document's figure only as listed under the form values above, with its line and Kennzahl; a value marked unconfirmed must be checked against its document. For anything not listed, point the user to the document."
+    : "\nNo value of a document is known to the worksheet: never state one, and point the user to the document for each figure.");
   return out.join("\n");
+}
+
+const STATUS_TEXT: Record<string, string> = { read: "unconfirmed", confirmed: "confirmed", corrected: "corrected by the user", rejected: "rejected" };
+
+/** The values by form field: Anlage → owner → line, Kennzahl, label, value and where it came from. */
+export function formText(w: TaxWorksheet): string[] {
+  const form = w.form;
+  if (!form || (!form.values.length && !form.skipped.length)) return [];
+  const out: string[] = [`\n== Values by form field (${form.joint ? "joint assessment" : "single assessment"}; form ${form.catalogue_year}${form.exact ? "" : ", unchecked"}) ==`];
+  const groups = new Map<string, typeof form.values>();
+  for (const v of form.values) {
+    const k = `${v.anlage_name} — ${v.owner_label}`;
+    groups.set(k, [...(groups.get(k) ?? []), v]);
+  }
+  for (const [name, values] of groups) {
+    out.push(`  ${name}`);
+    for (const v of values) {
+      const state = v.open ? `${v.open} unconfirmed` : "all confirmed";
+      out.push(`    ${v.place} | ${v.label} | ${centsEur(v.cents)} | ${state}${v.prefilled ? " | prefilled by the Finanzamt, check only" : ""}`);
+      for (const c of v.contributions) {
+        out.push(`      from document ${c.document_id} (${c.document_title}, ${c.evidence_kind_name}): ${c.field_label} ${centsEur(c.cents)}${c.cents !== c.value_cents ? ` (share of ${centsEur(c.value_cents)})` : ""}, ${STATUS_TEXT[c.status] ?? c.status}${c.page ? `, page ${c.page}` : ""}`);
+      }
+      if (v.form_note) out.push(`      form: ${v.form_note}`);
+      for (const n of v.notes) out.push(`      note: ${n}`);
+    }
+  }
+  if (form.skipped.length) {
+    out.push("  Not taken into the form:");
+    for (const s of form.skipped) out.push(`    document ${s.document_id} (${s.document_title}): ${s.field_label}${s.printed ? ` "${s.printed}"` : ""} — ${s.reason}`);
+  }
+  return out;
 }

@@ -198,8 +198,21 @@ Kennzahl naming each document and amount.
   the law as notes: § 35a reductions and caps, Sparer-Pauschbetrag, the
   Arbeitnehmer-Pauschbetrag, childcare (80 %/4.800 € from 2025, two thirds/
   4.000 € before), Schulgeld, Spenden, zumutbare Belastung, prefilled data.
-- Next: fill `line`/`kennzahl`/`source` in `tax-forms/2025.ts` from the
-  official forms; a test refuses a Kennzahl without its source.
+- Kennzahlen 2025: done. `line`, `kennzahl` and `source` in
+  `tax-forms/2025.ts` are read off the official 2025 Vordrucke of the
+  Formular-Management-System (formulare-bfinv.de, edition 2025/4.1.1.0),
+  each field's Kennzahl being the number printed beside its input box.
+  Two fields were added to `FormField`: `kennzahlSpouse` for Vordrucke that
+  hold both spouses side by side (Anlage Vorsorgeaufwand: Person A in the
+  300s, Person B in the 400s) and `formNote` for what the form says beyond
+  line and Kennzahl. Left open on purpose, with a note: Anlage V prints no
+  Kennzahlen in 2025 (lines only; Grundsteuer and Versicherungen depend on
+  whether they are passed on to the tenant); Wahlleistungen and
+  Beitragserstattungen sit in different lines for statutory and private
+  insurance; Anlage AV has no field for the contributions, the provider
+  transmits them. The Anlage Sonderausgaben is filled in jointly, so the
+  Kirchensteuer fields are one value per return. Tests pin a sample of the
+  Kennzahlen and refuse two fields sharing one on the same Vordruck.
 - Stage 2: done. Queue service `tax_values` (`documents/tax-values.ts`),
   queued after classify and after a manual tax edit whenever the document
   is `beleg` with a tax year and a candidate kind, and waiting for classify
@@ -216,4 +229,21 @@ Kennzahl naming each document and amount.
   a document that is no evidence any more loses its read values. Admin
   backfill `POST /documents/tax-values/backfill` (`year`, `reread`, `limit`)
   in `documents/tax-values-api.ts`.
-- Stages 3–5: open.
+- Stage 3: done. `GET /documents/tax/form-values` (`documents/tax-form-values.ts`)
+  runs the stored values of the documents the caller may see through
+  `mapToForm` and returns per Anlage and owner the field with line,
+  Kennzahl (Person B's where the form has one), the place as text ("Zeile 5
+  · Kz 110", "Kennzahl prüfen" while unchecked), the sum and every
+  contribution with document, quote, page and status; rejected values come
+  as `skipped` so they can be corrected. Joint assessment is assumed while
+  the household has a spouse without a return of their own for the year.
+  `POST /documents/tax/values/:id/confirm` and `/correct` (`documents.edit`)
+  set `confirmed` / `corrected` with `corrected_by`; both survive a re-read.
+  `buildTaxWorksheet` carries the result as `form` and says in its hints
+  what is left: evidence not read yet, values not confirmed, rejected
+  values, unchecked Kennzahlen. The Steuer page dialog shows Anlage →
+  person → Zeile · Kz → value with its documents and confirms or corrects
+  each contribution in place; the assistant's `tax_worksheet` lists the
+  same tree and may state a document's figure only as listed there.
+  The PDF still lists the evidence (stage 4).
+- Stages 4–5: open.

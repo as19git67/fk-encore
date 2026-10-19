@@ -18,8 +18,23 @@ describe("mapToForm", () => {
     expect(self.contributions.map((c) => [c.documentId, c.cents])).toEqual([[1, 3000000], [2, 1200000]]);
     expect(self.notes).toContain("Vom Finanzamt elektronisch vorausgefüllt: nur prüfen.");
     expect(find(m, "n.bruttoarbeitslohn", "spouse")!.cents).toBe(2500000);
-    // No Kennzahl is guessed.
-    expect(self.field.kennzahl).toBeNull();
+    // Each spouse files an Anlage N of their own: the same Kennzahl for both.
+    expect([self.kennzahl, find(m, "n.bruttoarbeitslohn", "spouse")!.kennzahl]).toEqual(["110", "110"]);
+  });
+
+  it("puts the spouse's value under Person B's Kennzahl where one Vordruck holds both", () => {
+    const m = mapToForm(2025, [
+      v(1, "lohnsteuerbescheinigung", "rv_arbeitnehmer", 450000),
+      v(3, "lohnsteuerbescheinigung", "rv_arbeitnehmer", 380000, "spouse"),
+    ], { joint: true });
+    expect(find(m, "vorsorge.rv_arbeitnehmer", "self")!.kennzahl).toBe("300");
+    expect(find(m, "vorsorge.rv_arbeitnehmer", "spouse")!.kennzahl).toBe("400");
+  });
+
+  it("carries the stored value's id to its contribution, so it can be confirmed or corrected", () => {
+    const m = mapToForm(2025, [{ ...v(1, "lohnsteuerbescheinigung", "lohnsteuer", 795040), id: 42 }], { joint: false });
+    expect(find(m, "n.lohnsteuer", "self")!.contributions[0]!.valueId).toBe(42);
+    expect(find(mapToForm(2025, [v(1, "lohnsteuerbescheinigung", "lohnsteuer", 795040)], { joint: false }), "n.lohnsteuer", "self")!.contributions[0]).not.toHaveProperty("valueId");
   });
 
   it("splits a shared bank certificate half and half under joint assessment", () => {

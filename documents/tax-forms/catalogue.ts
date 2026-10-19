@@ -34,8 +34,23 @@ export interface FormField {
   anlage: TaxSectionSlug;
   /** Zeile on the year's Vordruck; null until checked. */
   line: number | null;
-  /** Kennzahl on the year's Vordruck; null until checked. */
+  /**
+   * Kennzahl on the year's Vordruck; null until checked — or, once `source`
+   * is set, because the Vordruck prints none for the field (Anlage V).
+   */
   kennzahl: string | null;
+  /**
+   * The spouse's (Person B's) Kennzahl where one Vordruck holds both spouses
+   * side by side (Anlage Vorsorgeaufwand, AV). Null where each spouse fills
+   * an Anlage of their own (N, KAP, R) or the field is one per return.
+   */
+  kennzahlSpouse: string | null;
+  /**
+   * What the Vordruck says beyond line and Kennzahl, from the same source:
+   * where the line depends on a fact the evidence does not settle, or why
+   * the field is not entered at all.
+   */
+  formNote: string | null;
   /** The field as the form names it. */
   label: string;
   kind: FormValueKind;
@@ -66,10 +81,29 @@ export function formCatalogue(year: number): { year: number; fields: readonly Fo
   const own = CATALOGUES[year];
   if (own) return { year, fields: own, exact: true };
   const fallback = CATALOGUE_YEARS.find((y) => y < year) ?? CATALOGUE_YEARS[CATALOGUE_YEARS.length - 1]!;
-  const fields = CATALOGUES[fallback]!.map((f) => ({ ...f, line: null, kennzahl: null, source: null }));
+  const fields = CATALOGUES[fallback]!.map((f) => ({ ...f, line: null, kennzahl: null, kennzahlSpouse: null, formNote: null, source: null }));
   return { year: fallback, fields, exact: false };
 }
 
 export function findFormField(year: number, key: string): FormField | undefined {
   return formCatalogue(year).fields.find((f) => f.key === key);
+}
+
+/** The Kennzahl a value of `owner` goes under: the spouse's where the Vordruck has one. */
+export function kennzahlFor(field: FormField, owner: string): string | null {
+  return owner === "spouse" && field.kennzahlSpouse ? field.kennzahlSpouse : field.kennzahl;
+}
+
+/**
+ * How the worksheet names where a field goes: "Zeile 5 · Kz 110", "Zeile 13
+ * (ohne Kennzahl)", "siehe Hinweis zum Vordruck" where the line depends on
+ * a fact the note names, or "Kennzahl prüfen" while the field is not
+ * checked against the year's Vordruck.
+ */
+export function placeLabel(field: FormField, owner: string): string {
+  if (!field.source) return "Kennzahl prüfen";
+  const kz = kennzahlFor(field, owner);
+  // The note says which line, or why there is none.
+  if (field.line === null) return kz ? `Kz ${kz}` : field.formNote ? "siehe Hinweis zum Vordruck" : "nicht auf dem Vordruck";
+  return kz ? `Zeile ${field.line} · Kz ${kz}` : `Zeile ${field.line} (ohne Kennzahl)`;
 }

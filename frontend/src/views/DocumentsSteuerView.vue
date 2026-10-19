@@ -471,6 +471,7 @@ onMounted(async () => {
       :year="selectedYear"
       :person-id="taxReturnPersonId"
       :can-store="auth.hasPermission('documents.upload')"
+      :can-edit="auth.hasPermission('documents.edit')"
     />
   </PageLayout>
 </template>

@@ -1,19 +1,24 @@
 <script setup lang="ts">
 /**
- * The Ausfüllhilfe for one tax year, opened from the Steuer page: per
- * Anlage the flagged documents (their values are not read yet, see
- * documentation/plans/steuer-ausfuellhilfe.md), the tax-relevant bookings
- * by tag, the businesses' EÜR, the depot's
- * figures and the hints — what the assistant's `tax_worksheet` tool reads,
- * without a chat. "Als PDF ablegen" stores it as a document linked to the
- * flagged documents, the same PDF the assistant proposes.
+ * The Ausfüllhilfe for one tax year, opened from the Steuer page: the
+ * values read off the evidence by Anlage, line and Kennzahl (documentation/
+ * plans/steuer-ausfuellhilfe.md, stage 3), each traceable to the documents
+ * it came from and confirmable or correctable here; then per Anlage the
+ * flagged documents, the tax-relevant bookings by tag, the businesses' EÜR,
+ * the depot's figures and the hints — what the assistant's `tax_worksheet`
+ * tool reads, without a chat. "Als PDF ablegen" stores it as a document
+ * linked to the flagged documents, the same PDF the assistant proposes.
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
+import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
+import Tag from 'primevue/tag'
 import { getTaxWorksheet, storeTaxWorksheetPdf, type TaxWorksheet, type TaxWorksheetPdfResult } from '../../api/assistant'
+import { confirmTaxValue, correctTaxValue } from '../../api/documents'
 import { formatCurrency } from '../../utils/financeFormat'
+import { eurosToCents, groupFormValues, TAX_VALUE_STATUS_LABEL, taxValueSeverity } from '../../utils/taxFormValues'
 
 const props = defineProps<{
   visible: boolean
@@ -21,6 +26,8 @@ const props = defineProps<{
   /** A household member's own Steuerakte; null for the user's own return. */
   personId: number | null
   canStore: boolean
+  /** May confirm and correct the values read off the documents. */
+  canEdit?: boolean
 }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
 
@@ -33,6 +40,58 @@ const stored = ref<TaxWorksheetPdfResult | null>(null)
 /** The worksheet's amounts are EUR. */
 function eur(n: number): string {
   return formatCurrency(n.toFixed(2))
+}
+
+/** The form values' amounts are cents. */
+function cents(n: number): string {
+  return formatCurrency((n / 100).toFixed(2))
+}
+
+const formGroups = computed(() => groupFormValues(worksheet.value?.form?.values ?? []))
+const openValues = computed(() => (worksheet.value?.form?.values ?? []).reduce((n, v) => n + v.open, 0))
+
+/** The evidence value being corrected, and the amount typed for it (EUR). */
+const editing = ref<number | null>(null)
+const editAmount = ref<number | null>(null)
+const saving = ref<number | null>(null)
+
+function startCorrect(valueId: number, valueCents: number) {
+  editing.value = valueId
+  editAmount.value = valueCents / 100
+}
+
+function cancelCorrect() {
+  editing.value = null
+  editAmount.value = null
+}
+
+/** Store the change, then read the worksheet again: the sums and notes follow from it. */
+async function change(valueId: number, action: () => Promise<unknown>) {
+  if (saving.value !== null) return
+  saving.value = valueId
+  error.value = ''
+  try {
+    await action()
+    cancelCorrect()
+    worksheet.value = await getTaxWorksheet(props.year, props.personId)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Der Wert konnte nicht gespeichert werden'
+  } finally {
+    saving.value = null
+  }
+}
+
+function confirmValue(valueId: number) {
+  void change(valueId, () => confirmTaxValue(valueId))
+}
+
+function saveCorrection(valueId: number) {
+  const value = eurosToCents(editAmount.value)
+  if (value === null) {
+    error.value = 'Bitte einen Betrag in Euro eingeben'
+    return
+  }
+  void change(valueId, () => correctTaxValue(valueId, value))
 }
 
 async function load() {
@@ -85,9 +144,124 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
     <template v-else-if="worksheet">
       <p class="hint">
         {{ worksheet.documentCount }} markierte Dokumente in {{ worksheet.sections.length }} Anlagen,
-        {{ worksheet.bookingCount }} steuerrelevante Buchungen. Die Werte auf den Belegen werden noch nicht
-        ausgelesen: jede Zahl bitte direkt aus dem Dokument übernehmen.
+        {{ worksheet.bookingCount }} steuerrelevante Buchungen.
+        <template v-if="worksheet.form?.values.length">
+          Die Werte unten sind von den Belegen ausgelesen;
+          <template v-if="openValues">{{ openValues }} davon noch ungeprüft — bitte je Wert am Dokument prüfen.</template>
+          <template v-else>alle sind geprüft.</template>
+        </template>
+        <template v-else>Von den Belegen sind noch keine Werte ausgelesen: jede Zahl bitte direkt aus dem Dokument übernehmen.</template>
       </p>
+
+      <section v-if="formGroups.length" class="part">
+        <h3>Werte nach Kennzahl</h3>
+        <p v-if="worksheet.form && !worksheet.form.exact" class="hint">
+          Für {{ worksheet.year }} gibt es noch keinen geprüften Formularkatalog: Zeilen und Kennzahlen am Vordruck
+          {{ worksheet.year }} prüfen.
+        </p>
+        <div v-for="g in formGroups" :key="g.id" class="form-group">
+          <h4>{{ g.anlage }} <span class="owner">· {{ g.owner }}</span></h4>
+          <table class="sheet">
+            <thead>
+              <tr><th class="place">Zeile · Kz</th><th>Bezeichnung</th><th class="num">Wert</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="v in g.values" :key="`${v.key}|${v.owner}`">
+                <td class="place" :class="{ unchecked: !v.checked }">{{ v.place }}</td>
+                <td>
+                  {{ v.label }}
+                  <Tag v-if="v.prefilled" class="chip" severity="secondary" value="vorausgefüllt" />
+                  <ul class="contribs">
+                    <li v-for="c in v.contributions" :key="c.value_id">
+                      <div class="contrib-head">
+                        <RouterLink :to="{ name: 'dokumente-detail', params: { id: String(c.document_id) } }">{{ c.document_title }}</RouterLink>
+                        <span class="amount">{{ cents(c.cents) }}<template v-if="c.cents !== c.value_cents"> (Hälfte von {{ cents(c.value_cents) }})</template></span>
+                        <Tag class="chip" :severity="taxValueSeverity(c.status)" :value="TAX_VALUE_STATUS_LABEL[c.status]" />
+                        <template v-if="canEdit && editing !== c.value_id">
+                          <Button
+                            v-if="c.status === 'read'"
+                            icon="pi pi-check"
+                            text
+                            rounded
+                            size="small"
+                            :loading="saving === c.value_id"
+                            :aria-label="`${c.field_label} bestätigen`"
+                            v-tooltip.top="'Bestätigen'"
+                            @click="confirmValue(c.value_id)"
+                          />
+                          <Button
+                            icon="pi pi-pencil"
+                            text
+                            rounded
+                            size="small"
+                            :aria-label="`${c.field_label} korrigieren`"
+                            v-tooltip.top="'Korrigieren'"
+                            @click="startCorrect(c.value_id, c.value_cents)"
+                          />
+                        </template>
+                      </div>
+                      <span class="sub">
+                        {{ c.evidence_kind_name }}: {{ c.field_label }}<template v-if="c.page">, Seite {{ c.page }}</template>
+                        <template v-if="c.quote"> — „{{ c.quote }}“</template>
+                      </span>
+                      <span v-if="c.note" class="sub">{{ c.note }}</span>
+                      <div v-if="editing === c.value_id" class="correct">
+                        <InputNumber
+                          v-model="editAmount"
+                          mode="currency"
+                          currency="EUR"
+                          locale="de-DE"
+                          :min="0"
+                          :input-props="{ 'aria-label': `${c.field_label} laut Beleg in Euro` }"
+                          @keydown.enter="saveCorrection(c.value_id)"
+                        />
+                        <Button label="Abbrechen" severity="secondary" text size="small" @click="cancelCorrect" />
+                        <Button label="Speichern" size="small" :loading="saving === c.value_id" @click="saveCorrection(c.value_id)" />
+                      </div>
+                    </li>
+                  </ul>
+                  <span v-if="v.form_note" class="sub">Vordruck: {{ v.form_note }}</span>
+                  <span v-for="n in v.notes" :key="n" class="sub">{{ n }}</span>
+                </td>
+                <td class="num">{{ cents(v.cents) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <template v-if="worksheet.form?.skipped.length">
+          <h4>Nicht übernommen</h4>
+          <ul class="plain">
+            <li v-for="s in worksheet.form.skipped" :key="s.value_id">
+              <RouterLink :to="{ name: 'dokumente-detail', params: { id: String(s.document_id) } }">{{ s.document_title }}</RouterLink>:
+              {{ s.field_label }}<template v-if="s.printed"> „{{ s.printed }}“</template> — {{ s.reason }}
+              <Button
+                v-if="canEdit && s.status === 'rejected' && editing !== s.value_id"
+                icon="pi pi-pencil"
+                text
+                rounded
+                size="small"
+                :aria-label="`${s.field_label} korrigieren`"
+                v-tooltip.top="'Wert laut Beleg eintragen'"
+                @click="startCorrect(s.value_id, s.value_cents)"
+              />
+              <div v-if="editing === s.value_id" class="correct">
+                <InputNumber
+                  v-model="editAmount"
+                  mode="currency"
+                  currency="EUR"
+                  locale="de-DE"
+                  :min="0"
+                  :input-props="{ 'aria-label': `${s.field_label} laut Beleg in Euro` }"
+                  @keydown.enter="saveCorrection(s.value_id)"
+                />
+                <Button label="Abbrechen" severity="secondary" text size="small" @click="cancelCorrect" />
+                <Button label="Speichern" size="small" :loading="saving === s.value_id" @click="saveCorrection(s.value_id)" />
+              </div>
+            </li>
+          </ul>
+        </template>
+      </section>
 
       <section v-if="worksheet.sections.length" class="part">
         <h3>Anlagen</h3>
@@ -215,6 +389,65 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
 
 .total td {
   font-weight: 600;
+}
+
+.form-group {
+  margin-bottom: var(--space-3);
+}
+
+.form-group h4,
+.part h4 {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.owner {
+  color: var(--p-text-muted-color);
+  font-weight: 400;
+}
+
+.place {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.place.unchecked {
+  color: var(--p-text-muted-color);
+  font-style: italic;
+}
+
+.chip {
+  margin-left: var(--space-1);
+  font-size: var(--text-xs);
+}
+
+.contribs {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+}
+
+.contribs li {
+  margin-bottom: var(--space-1);
+}
+
+.contrib-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+}
+
+.correct {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
 }
 
 .docs {

@@ -31,6 +31,7 @@ export const clients = {
     listDocumentCategories: vi.fn(),
     listCorrespondents: vi.fn(),
     listTaxDocuments: vi.fn(),
+    getTaxFormValues: vi.fn(),
     searchDocumentsEndpoint: vi.fn(),
     getDocument: vi.fn(),
     setDocumentFollowUp: vi.fn(),
