@@ -1396,6 +1396,65 @@ function matchesKey(
   return positionKey(r) === key;
 }
 
+/**
+ * The position under `key` in these depots, as the overview folds it —
+ * or, when no depot holds it now and no transaction names it, from the
+ * last snapshot of each depot that listed it (a holding gap links there):
+ * a closed position with its history rather than none.
+ */
+async function findPosition(
+  ids: number[],
+  key: string,
+  identity: SecurityIdentity,
+  holdings: HoldingRow[],
+  txs: DepotTxRow[],
+  people: string[],
+): Promise<{ built: ReturnType<typeof buildPortfolio>; position: PortfolioPosition | undefined }> {
+  let built = buildPortfolio(holdings, txs, people, await latestQuotes(quotedKeys(holdings)));
+  let position = built.positions.find((p) => p.key === key);
+  if (!position) {
+    const seen = dedupeSnapshotRows(
+      (
+        await db
+          .select({
+            account_id: financeAccountHolding.account_id,
+            as_of: financeAccountHolding.as_of,
+            isin: financeAccountHolding.isin,
+            wkn: financeAccountHolding.wkn,
+            name: financeAccountHolding.name,
+            amount: financeAccountHolding.amount,
+            price: financeAccountHolding.price,
+            value: financeAccountHolding.value,
+            currency: financeAccountHolding.currency,
+            acquisition_price: financeAccountHolding.acquisition_price,
+            source: financeAccountHolding.source,
+          })
+          .from(financeAccountHolding)
+          .where(inArray(financeAccountHolding.account_id, ids))
+      ).map((r) => identity.complete(r)),
+    ).filter((r) => matchesKey(r, key));
+    const lastByAccount = new Map<number, (typeof seen)[number]>();
+    for (const r of seen) {
+      const prev = lastByAccount.get(r.account_id);
+      if (!prev || r.as_of > prev.as_of) lastByAccount.set(r.account_id, r);
+    }
+    const gone: HoldingRow[] = [...lastByAccount.values()].map(({ source: _source, ...r }) => ({ ...r, amount: "0", value: null }));
+    if (gone.length > 0) {
+      built = buildPortfolio([...holdings, ...gone], txs, people, await latestQuotes(quotedKeys(holdings)));
+      position = built.positions.find((p) => p.key === key);
+    }
+  }
+  return { built, position };
+}
+
+/**
+ * A position key as a link may carry it: from before the identifiers were
+ * joined it may name the WKN, or an ISIN as OCR read it.
+ */
+function normalizeKey(identity: SecurityIdentity, key: string): string {
+  return identity.key({ isin: /^[A-Z]{2}[A-Z0-9]{10}$/.test(key) ? key : null, wkn: /^[A-Z0-9]{6}$/.test(key) ? key : null, name: key });
+}
+
 export const getPortfolioPosition = api(
   {
     expose: true,
@@ -1423,46 +1482,8 @@ export const getPortfolioPosition = api(
       loadTransactions(ids, identity),
       householdNames(),
     ]);
-    // A link from before the identifiers were joined may name the WKN, or
-    // an ISIN as OCR read it.
-    key = identity.key({ isin: /^[A-Z]{2}[A-Z0-9]{10}$/.test(key) ? key : null, wkn: /^[A-Z0-9]{6}$/.test(key) ? key : null, name: key });
-    let built = buildPortfolio(holdings, txs, people, await latestQuotes(quotedKeys(holdings)));
-    let position = built.positions.find((p) => p.key === key);
-    if (!position) {
-      // Only in older snapshots (a holding gap links here): no depot holds
-      // it now and no transaction names it. Shown as a closed position
-      // with its history rather than not found.
-      const seen = dedupeSnapshotRows(
-        (
-          await db
-            .select({
-              account_id: financeAccountHolding.account_id,
-              as_of: financeAccountHolding.as_of,
-              isin: financeAccountHolding.isin,
-              wkn: financeAccountHolding.wkn,
-              name: financeAccountHolding.name,
-              amount: financeAccountHolding.amount,
-              price: financeAccountHolding.price,
-              value: financeAccountHolding.value,
-              currency: financeAccountHolding.currency,
-              acquisition_price: financeAccountHolding.acquisition_price,
-              source: financeAccountHolding.source,
-            })
-            .from(financeAccountHolding)
-            .where(inArray(financeAccountHolding.account_id, ids))
-        ).map((r) => identity.complete(r)),
-      ).filter((r) => matchesKey(r, key));
-      const lastByAccount = new Map<number, (typeof seen)[number]>();
-      for (const r of seen) {
-        const prev = lastByAccount.get(r.account_id);
-        if (!prev || r.as_of > prev.as_of) lastByAccount.set(r.account_id, r);
-      }
-      const gone: HoldingRow[] = [...lastByAccount.values()].map(({ source: _source, ...r }) => ({ ...r, amount: "0", value: null }));
-      if (gone.length > 0) {
-        built = buildPortfolio([...holdings, ...gone], txs, people, await latestQuotes(quotedKeys(holdings)));
-        position = built.positions.find((p) => p.key === key);
-      }
-    }
+    key = normalizeKey(identity, key);
+    const { built, position } = await findPosition(ids, key, identity, holdings, txs, people);
     if (!position) throw APIError.notFound(`position ${key} not found`);
 
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
@@ -1738,7 +1759,9 @@ export const removePositionFromDepot = api(
       loadTransactions([accountId], identity),
       householdNames(),
     ]);
-    const position = buildPortfolio(holdings, txs, people).positions.find((p) => p.key === key);
+    // The same position the page shows: by any key it is linked with, and
+    // also when only older snapshots still list it.
+    const { position } = await findPosition([accountId], normalizeKey(identity, key), identity, holdings, txs, people);
     if (!position) throw APIError.notFound(`position ${key} not found in this depot`);
     if (!position.isin && !position.wkn) {
       throw APIError.failedPrecondition("the position has neither ISIN nor WKN");

@@ -618,6 +618,20 @@ Ausmachender Betrag 100,00 EUR`;
     expect((await getPortfolioReview({})).holding_gaps.map((g) => g.position_key)).not.toContain(ISIN_A);
   });
 
+  it("takes out a security only an older bank snapshot lists, linked by its WKN", async () => {
+    const { depot } = await setup();
+    // Synthetic: the bank listed a fund by its WKN alone, and no longer does.
+    await db.insert(financeAccountHolding).values([
+      { account_id: depot, as_of: "2026-01-01", isin: ISIN_A, name: "Alpha Industries AG", amount: "25", currency: "EUR" },
+      { account_id: depot, as_of: "2026-01-01", wkn: "BBB222", name: "Beta Fonds A", amount: "4", currency: "EUR" },
+    ]);
+    expect((await getPortfolioReview({})).holding_gaps.map((g) => g.position_key)).toContain("BBB222");
+    expect((await getPortfolioPosition({ key: "BBB222" })).position.open).toBe(false);
+
+    await removePositionFromDepot({ key: "BBB222", accountId: depot });
+    expect((await getPortfolioReview({})).holding_gaps.map((g) => g.position_key)).not.toContain("BBB222");
+  });
+
   it("uses the one depot that already has transactions of the security — once the user took it in", async () => {
     const { depot } = await setup();
     await db.insert(financeDepotTransaction).values({
