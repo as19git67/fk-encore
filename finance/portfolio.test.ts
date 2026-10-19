@@ -622,9 +622,9 @@ describe("finance/portfolio — listPortfolioTransactions", () => {
     return { d1, d2 };
   }
 
-  it("lists by depot, then security, then newest first", async () => {
+  it("sorts by depot, then security, then newest first on request", async () => {
     await seed();
-    const resp = await listPortfolioTransactions({});
+    const resp = await listPortfolioTransactions({ sortBy: "account" });
     expect(resp.items.map((i) => [i.account_label, i.name, i.executed_at])).toEqual([
       ["Depot 1", "Alpha AG", "2025-05-10"],
       ["Depot 1", "Alpha AG", "2025-01-10"],
@@ -634,7 +634,7 @@ describe("finance/portfolio — listPortfolioTransactions", () => {
 
   it("lists across depots, newest first, with labels, keys and sums", async () => {
     const { d1, d2 } = await seed();
-    const resp = await listPortfolioTransactions({ sortBy: "executed_at" });
+    const resp = await listPortfolioTransactions({});
     expect(resp.total).toBe(3);
     expect(resp.items.map((i) => i.executed_at)).toEqual([
       "2025-05-10",
@@ -677,7 +677,7 @@ describe("finance/portfolio — listPortfolioTransactions", () => {
     const byAmount = await listPortfolioTransactions({ sortBy: "net_amount", sortDir: "asc" });
     expect(byAmount.items.map((i) => i.net_amount)).toEqual(["-1000.00", "-100.00", "20.00"]);
 
-    const page = await listPortfolioTransactions({ sortBy: "executed_at", limit: 2, offset: 2 });
+    const page = await listPortfolioTransactions({ limit: 2, offset: 2 });
     expect(page.total).toBe(3);
     expect(page.items).toHaveLength(1);
     expect(page.items[0].executed_at).toBe("2025-01-10");

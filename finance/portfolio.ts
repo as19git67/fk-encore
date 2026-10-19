@@ -1225,7 +1225,7 @@ export const listPortfolioTransactions = api(
     }
     const where = and(...conditions);
 
-    const sortField: TxSortField = p.sortBy ?? "account";
+    const sortField: TxSortField = p.sortBy ?? "executed_at";
     // Depot and name read A to Z unless asked otherwise; date and amount newest / largest first.
     const dir = p.sortDir ? (p.sortDir === "asc" ? asc : desc) : sortField === "account" ? asc : desc;
     const security = sql`COALESCE(${t.name}, ${t.isin}, ${t.wkn})`;
@@ -2367,8 +2367,12 @@ export const getPortfolioReview = api(
         ),
       );
 
+    // Transactions read newest first, like every transaction list in the portfolio.
+    const newestFirst = <T extends { executed_at: string }>(rows: T[]): T[] =>
+      rows.sort((a, b) => b.executed_at.localeCompare(a.executed_at));
+
     return {
-      conflicts: byDepot(conflicts, (c) => c.position_key),
+      conflicts: newestFirst(conflicts),
       unmatched_documents: unmatched,
       unverified_documents: unverified,
       holding_gaps: byDepot(
@@ -2383,9 +2387,8 @@ export const getPortfolioReview = api(
       ignored_other: ignoredOther,
       ignored_count: ignoredRows.length,
       ignored_securities_count: ignoredSecurities?.n ?? 0,
-      misbooked_accumulations: byDepot(
+      misbooked_accumulations: newestFirst(
         misbooked.map((m) => ({ ...m, account_label: labelById.get(m.account_id) ?? "" })),
-        (m) => m.isin ?? m.wkn ?? "",
       ),
       new_securities: byDepot(
         securities.map((sec) => ({
