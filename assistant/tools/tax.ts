@@ -59,7 +59,7 @@ export const taxWorksheet: ToolSpec = {
         total: ids.length,
         subtitle: `Ausfüllhilfe ${year} · ${w.form?.values.length ? `${w.form.values.length} Werte nach Kennzahl · ` : ""}${w.sections.length} Anlagen · ${w.bookingCount} Buchungen`,
         rows,
-        route: `/dokumente/steuer?year=${year}`,
+        route: `/finanzen/steuer?year=${year}`,
       },
     };
   },

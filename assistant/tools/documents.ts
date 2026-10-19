@@ -270,7 +270,7 @@ export const taxDocuments: ToolSpec = {
         total: ids.length,
         subtitle: res.year ? `Steuer ${res.year}` : undefined,
         rows,
-        route: `/dokumente/steuer${query({ year })}`,
+        route: `/finanzen/steuer${query({ year })}`,
       },
     };
   },
