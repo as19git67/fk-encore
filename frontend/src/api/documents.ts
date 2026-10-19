@@ -1277,6 +1277,17 @@ export function backfillDocumentTax() {
   return apiFetch<{ queued: number }>('/documents/tax/backfill', { method: 'POST' })
 }
 
+/**
+ * Reads the form values off evidence classified before the reading existed
+ * (admin). `remaining` counts the evidence still unread after this call.
+ */
+export function backfillTaxValues(year?: number, limit = 2000) {
+  return apiFetch<{ queued: number; remaining: number }>('/documents/tax-values/backfill', {
+    method: 'POST',
+    body: JSON.stringify({ ...(year != null ? { year } : {}), limit }),
+  })
+}
+
 // ─── Tax hint admin ───────────────────────────────────────────────────────
 
 export interface TaxHintEntry {
