@@ -29,25 +29,27 @@ const LOHN_B = 991663;
 const HANDWERK = 991664;
 const FOREIGN = 991665;
 const UNREAD = 991666;
-const DOCS = [LOHN_A, LOHN_B, HANDWERK, FOREIGN, UNREAD];
+const LAST_LOHN = 991667;
+const LAST_SPENDE = 991668;
+const DOCS = [LOHN_A, LOHN_B, HANDWERK, FOREIGN, UNREAD, LAST_LOHN, LAST_SPENDE];
 // Every query is the test user's, so other files' 2025 documents do not count.
 const YEAR = 2025;
 
-async function insertDoc(id: number, owner: number, title: string, read = true): Promise<void> {
+async function insertDoc(id: number, owner: number, title: string, read = true, year = YEAR): Promise<void> {
   await db.execute(sql`
     INSERT INTO documents
       (id, user_id, sha256, original_filename, mime_type, size_bytes, disk_path,
        status, extracted_text, tax_role, tax_relevant, tax_year, document_type, title)
     VALUES
       (${id}, ${owner}, ${`sha-${id}`}, 'd.pdf', 'application/pdf', 1, ${`/tmp/d-${id}.pdf`},
-       'ready', 'Beispieltext', 'beleg', true, ${YEAR}, 'bescheinigung', ${title})`);
+       'ready', 'Beispieltext', 'beleg', true, ${year}, 'bescheinigung', ${title})`);
   if (read) await db.execute(sql`INSERT INTO document_tax_reading (document_id, evidence_kind) VALUES (${id}, 'lohnsteuerbescheinigung')`);
 }
 
-async function value(documentId: number, kind: string, field: string, cents: number, owner: string, status = "read", extra: { printed?: string; quote?: string; note?: string } = {}): Promise<number> {
+async function value(documentId: number, kind: string, field: string, cents: number, owner: string, status = "read", extra: { printed?: string; quote?: string; note?: string; year?: number } = {}): Promise<number> {
   const [row] = await db.insert(documentTaxValue).values({
     document_id: documentId,
-    tax_year: YEAR,
+    tax_year: extra.year ?? YEAR,
     owner,
     evidence_kind: kind,
     field_key: field,
@@ -190,6 +192,45 @@ describe("values by form field", () => {
     expect((await correctDocumentTaxValue({ id: lohnsteuer, value_cents: 460000 })).status).toBe("corrected");
     // Another user's Steuerakte is not found.
     await expect(getTaxFormValues({ year: YEAR, tax_return_person: 1 })).rejects.toThrow("not found");
+  });
+});
+
+describe("last year beside this year", () => {
+  beforeEach(async () => {
+    await db.execute(sql`INSERT INTO users (id, email, name, password_hash)
+      VALUES (${USER}, ${`u${USER}@test.local`}, ${`User${USER}`}, 'x') ON CONFLICT (id) DO NOTHING`);
+    await cleanup();
+    await insertDoc(LOHN_A, USER, "Lohnsteuerbescheinigung Beispiel GmbH");
+    await value(LOHN_A, "lohnsteuerbescheinigung", "bruttoarbeitslohn", 4200000, "self");
+    await insertDoc(LAST_LOHN, USER, "Lohnsteuerbescheinigung Vorjahr", true, YEAR - 1);
+    await value(LAST_LOHN, "lohnsteuerbescheinigung", "bruttoarbeitslohn", 3950000, "self", "confirmed", { year: YEAR - 1 });
+    await insertDoc(LAST_SPENDE, USER, "Zuwendungsbestätigung Beispielverein", true, YEAR - 1);
+    await value(LAST_SPENDE, "zuwendungsbestaetigung", "betrag", 20000, "joint", "confirmed", { year: YEAR - 1 });
+  });
+  afterAll(cleanup);
+
+  it("puts last year's value beside this year's and lists what came last year but not yet", async () => {
+    const r = await buildTaxFormValues(USER, YEAR);
+    expect(r.values.find((v) => v.key === "n.bruttoarbeitslohn")!.previous_cents).toBe(3950000);
+    expect(r.previous).toEqual({
+      year: YEAR - 1,
+      missing: [{
+        key: "sonder.spenden",
+        anlage_name: expect.stringContaining("Sonderausgaben"),
+        label: "Zuwendungen an steuerbegünstigte Organisationen",
+        owner_label: "Erklärung",
+        place: "Zeile 5 · Kz 123",
+        previous_cents: 20000,
+        previous_documents: [{ document_id: LAST_SPENDE, document_title: "Zuwendungsbestätigung Beispielverein" }],
+      }],
+    });
+  });
+
+  it("has no comparison without values last year", async () => {
+    await db.delete(documents).where(inArray(documents.id, [LAST_LOHN, LAST_SPENDE]));
+    const r = await buildTaxFormValues(USER, YEAR);
+    expect(r.previous).toBeNull();
+    expect(r.values[0]!.previous_cents).toBeNull();
   });
 });
 

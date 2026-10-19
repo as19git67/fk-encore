@@ -19,12 +19,12 @@ const contribution = (id: number, title: string, cents: number, status: Contribu
 const value = (over: Partial<FormValue>): FormValue => ({
   key: "n.bruttoarbeitslohn", anlage: "anlage-n", anlage_name: "Anlage N", label: "Bruttoarbeitslohn",
   owner: "self", owner_label: "Person A (Sie)", line: 5, kennzahl: "110", place: "Zeile 5 · Kz 110", checked: true,
-  source: "Anlage N 2025", form_note: null, prefilled: false, cents: 0, contributions: [], notes: [], open: 0,
+  source: "Anlage N 2025", form_note: null, prefilled: false, cents: 0, contributions: [], notes: [], open: 0, previous_cents: null,
   ...over,
 });
 
 const FORM: WorksheetForm = {
-  year: 2025, catalogue_year: 2025, exact: true, joint: true, documents_read: 3, documents_unread: 0,
+  year: 2025, catalogue_year: 2025, exact: true, joint: true, documents_read: 3, documents_unread: 0, previous: null,
   values: [
     value({ key: "n.lohnsteuer", label: "Lohnsteuer", line: 6, kennzahl: "140", place: "Zeile 6 · Kz 140", cents: 795040, contributions: [contribution(1, "Lohnsteuerbescheinigung Beispiel GmbH", 795040, "confirmed")] }),
     value({
@@ -75,7 +75,25 @@ describe("kennzahlSheet", () => {
   it("marks unchecked Kennzahlen and is empty without values", () => {
     const unchecked = kennzahlSheet({ ...FORM, values: [value({ checked: false, place: "Kennzahl prüfen", cents: 100, contributions: [contribution(1, "Beleg", 100, "confirmed")] })], skipped: [] });
     expect(unchecked.groups[0]!.rows[0]!.marks).toEqual(["Kennzahl prüfen"]);
-    expect(kennzahlSheet(null)).toEqual({ groups: [], appendix: [], skipped: [] });
+    expect(kennzahlSheet(null)).toEqual({ groups: [], appendix: [], skipped: [], missing: [] });
+  });
+});
+
+describe("last year in the PDF", () => {
+  const withPrevious: WorksheetForm = {
+    ...FORM,
+    values: [value({ cents: 4200000, previous_cents: 3950000, contributions: [contribution(1, "Lohnsteuerbescheinigung Beispiel GmbH", 4200000, "confirmed")] })],
+    skipped: [],
+    previous: {
+      year: 2024,
+      missing: [{ key: "sonder.spenden", anlage_name: "Sonderausgaben", label: "Spenden", owner_label: "Gemeinsam", place: "Zeile 5 · Kz 123", previous_cents: 20000, previous_documents: [{ document_id: 8, document_title: "Zuwendungsbestätigung Beispielverein" }] }],
+    },
+  };
+
+  it("names last year's value in the row and lists what came last year but not yet", () => {
+    const sheet = kennzahlSheet(withPrevious);
+    expect(sheet.groups[0]!.rows[0]!.marks).toEqual(["Vorjahr 39.500,00 €"]);
+    expect(sheet.missing).toEqual(["Sonderausgaben – Gemeinsam: Zeile 5 · Kz 123 Spenden, 2024: 200,00 € (aus Zuwendungsbestätigung Beispielverein)"]);
   });
 });
 

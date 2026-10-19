@@ -153,7 +153,7 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
         <template v-else>Von den Belegen sind noch keine Werte ausgelesen: jede Zahl bitte direkt aus dem Dokument übernehmen.</template>
       </p>
 
-      <section v-if="formGroups.length" class="part">
+      <section v-if="formGroups.length || worksheet.form?.previous?.missing.length" class="part">
         <h3>Werte nach Kennzahl</h3>
         <p v-if="worksheet.form && !worksheet.form.exact" class="hint">
           Für {{ worksheet.year }} gibt es noch keinen geprüften Formularkatalog: Zeilen und Kennzahlen am Vordruck
@@ -163,7 +163,10 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
           <h4>{{ g.anlage }} <span class="owner">· {{ g.owner }}</span></h4>
           <table class="sheet">
             <thead>
-              <tr><th class="place">Zeile · Kz</th><th>Bezeichnung</th><th class="num">Wert</th></tr>
+              <tr>
+                <th class="place">Zeile · Kz</th><th>Bezeichnung</th><th class="num">Wert</th>
+                <th v-if="worksheet.form?.previous" class="num prev">{{ worksheet.form.previous.year }}</th>
+              </tr>
             </thead>
             <tbody>
               <tr v-for="v in g.values" :key="`${v.key}|${v.owner}`">
@@ -224,10 +227,25 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
                   <span v-for="n in v.notes" :key="n" class="sub">{{ n }}</span>
                 </td>
                 <td class="num">{{ cents(v.cents) }}</td>
+                <td v-if="worksheet.form?.previous" class="num prev">{{ v.previous_cents === null ? '–' : cents(v.previous_cents) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        <template v-if="worksheet.form?.previous?.missing.length">
+          <h4>{{ worksheet.form.previous.year }} vorhanden, {{ worksheet.year }} noch ohne Wert</h4>
+          <p class="hint">Fehlt hier noch ein Beleg?</p>
+          <ul class="plain">
+            <li v-for="m in worksheet.form.previous.missing" :key="`${m.key}|${m.owner_label}`">
+              {{ m.anlage_name }} · {{ m.owner_label }}: {{ m.place }} {{ m.label }} —
+              {{ worksheet.form.previous.year }} {{ cents(m.previous_cents) }}
+              <template v-for="(d, i) in m.previous_documents" :key="d.document_id">
+                {{ i === 0 ? 'aus ' : ', ' }}<RouterLink :to="{ name: 'dokumente-detail', params: { id: String(d.document_id) } }">{{ d.document_title }}</RouterLink>
+              </template>
+            </li>
+          </ul>
+        </template>
 
         <template v-if="worksheet.form?.skipped.length">
           <h4>Nicht übernommen</h4>
@@ -410,6 +428,10 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
 .place {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.prev {
+  color: var(--p-text-muted-color);
 }
 
 .place.unchecked {

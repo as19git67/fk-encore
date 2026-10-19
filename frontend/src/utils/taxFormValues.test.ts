@@ -20,6 +20,7 @@ const value = (key: string, anlage: string, owner: string): TaxFormValue => ({
   contributions: [],
   notes: [],
   open: 0,
+  previous_cents: null,
 })
 
 describe('groupFormValues', () => {

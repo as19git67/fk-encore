@@ -338,6 +338,19 @@ export interface TaxFormValue {
   notes: string[]
   /** Contributions not confirmed or corrected yet. */
   open: number
+  /** The same field and owner last year, in cents; null when there was none. */
+  previous_cents: number | null
+}
+
+/** A field with a value last year and none this year. */
+export interface TaxFormMissing {
+  key: string
+  anlage_name: string
+  label: string
+  owner_label: string
+  place: string
+  previous_cents: number
+  previous_documents: { document_id: number; document_title: string }[]
 }
 
 export interface TaxFormSkipped {
@@ -365,6 +378,8 @@ export interface TaxWorksheetForm {
   skipped: TaxFormSkipped[]
   documents_read: number
   documents_unread: number
+  /** Last year, when it had values: the fields missing this year. */
+  previous: { year: number; missing: TaxFormMissing[] } | null
 }
 
 export interface TaxWorksheet {

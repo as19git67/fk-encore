@@ -42,6 +42,8 @@ export interface KennzahlSheet {
   groups: SheetGroup[];
   appendix: SheetAppendix[];
   skipped: string[];
+  /** Fields with a value last year and none this year. */
+  missing: string[];
 }
 
 const STATE: Record<string, string> = { read: "ungeprüft", confirmed: "bestätigt", corrected: "korrigiert", rejected: "nicht belegt" };
@@ -55,7 +57,7 @@ function byPlace(a: WorksheetForm["values"][number], b: WorksheetForm["values"][
 
 /** The values by Kennzahl as the PDF lists them; pure, for the tests. */
 export function kennzahlSheet(form: WorksheetForm | null): KennzahlSheet {
-  const out: KennzahlSheet = { groups: [], appendix: [], skipped: [] };
+  const out: KennzahlSheet = { groups: [], appendix: [], skipped: [], missing: [] };
   if (!form) return out;
   const groups = new Map<string, WorksheetForm["values"]>();
   for (const v of form.values) {
@@ -85,6 +87,7 @@ export function kennzahlSheet(form: WorksheetForm | null): KennzahlSheet {
         from = `siehe Anhang ${n}`;
       }
       const marks: string[] = [];
+      if (form.previous && v.previous_cents !== null) marks.push(`Vorjahr ${euroCents(v.previous_cents)}`);
       if (!v.checked) marks.push("Kennzahl prüfen");
       if (v.open) marks.push(v.open === v.contributions.length ? "ungeprüft" : `${v.open} ungeprüft`);
       if (v.prefilled) marks.push("vorausgefüllt – nur prüfen");
@@ -99,6 +102,9 @@ export function kennzahlSheet(form: WorksheetForm | null): KennzahlSheet {
       });
     }
     out.groups.push({ title, rows });
+  }
+  for (const m of form.previous?.missing ?? []) {
+    out.missing.push(`${m.anlage_name} – ${m.owner_label}: ${m.place} ${m.label}, ${form.previous!.year}: ${euroCents(m.previous_cents)}${m.previous_documents.length ? ` (aus ${m.previous_documents.map((d) => d.document_title).join(", ")})` : ""}`);
   }
   for (const s of form.skipped) {
     out.skipped.push(`${s.document_title} (Nr. ${s.document_id}): ${s.field_label}${s.printed ? ` „${s.printed}“` : ""} – ${s.reason}`);
@@ -175,6 +181,11 @@ export function renderTaxWorksheetPdf(w: TaxWorksheet, generatedOn: string): Pro
     heading(g.title);
     kzHead();
     for (const r of g.rows) kzRow(r);
+  }
+  if (sheet.missing.length) {
+    heading(`Im Vorjahr vorhanden, ${w.year} noch ohne Wert`);
+    pdf.font("Helvetica").fontSize(9);
+    for (const m of sheet.missing) pdf.text(t(`• ${m}`), left, pdf.y, { width: right - left });
   }
   if (sheet.skipped.length) {
     heading("Nicht übernommene Werte");
