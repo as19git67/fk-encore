@@ -91,7 +91,7 @@ category and is currently formed from the subject persons linked to the
 document. This yields, for example:
 
 ```
-betreuung/erika-mustermann/betreuung-rechenschaftsbericht/amtsgericht-augsburg/*.pdf
+betreuung/erika-mustermann/betreuung-rechenschaftsbericht/amtsgericht-musterstadt/*.pdf
 ```
 
 The following root categories are currently configured:
