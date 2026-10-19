@@ -102,11 +102,12 @@ const search = useListSearch({
 
 const sort = useSort({
   fields: [
+    { value: 'account', label: 'Depot' },
     { value: 'executed_at', label: 'Datum' },
     { value: 'net_amount', label: 'Betrag' },
     { value: 'name', label: 'Wertpapier' },
   ],
-  defaultState: { field: 'executed_at', direction: 'desc' },
+  defaultState: { field: 'account', direction: 'asc' },
 })
 
 // ── Portfolio (summary, positions, years) ────────────────────────────
@@ -390,6 +391,14 @@ const positionsEmptyMessage = computed(() => {
   }
   return 'Sobald ein Depot Bestände meldet, erscheinen sie hier.'
 })
+
+/** The depots holding a position, by label — the first one is the one it sorts under. */
+function depotLabels(p: PortfolioPosition): string {
+  return p.account_ids
+    .map((id) => accountLabelById.value.get(id) ?? `#${id}`)
+    .sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base', numeric: true }))
+    .join(', ')
+}
 
 function isSignedCell(val: string | null): string {
   return `gain-${gainSign(val)}`
@@ -825,7 +834,7 @@ onBeforeUnmount(() => {
                   <span v-if="p.total_return_pct !== null" class="pf-pct">{{ formatSignedPercent(p.total_return_pct) }}</span>
                 </td>
                 <td class="pf-col-depots">
-                  {{ p.account_ids.map((id) => accountLabelById.get(id) ?? `#${id}`).join(', ') }}
+                  {{ depotLabels(p) }}
                 </td>
               </tr>
             </tbody>

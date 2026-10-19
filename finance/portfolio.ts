@@ -627,6 +627,37 @@ function cashOf(tx: DepotTxRow): number | null {
   return Math.abs(a * p);
 }
 
+const depotNameCollator = new Intl.Collator("de", { sensitivity: "base", numeric: true });
+
+/** Depot first, then security name — the order every portfolio view lists securities in. */
+export function compareDepotThenName(
+  a: { depot: string; name: string },
+  b: { depot: string; name: string },
+): number {
+  return depotNameCollator.compare(a.depot, b.depot) || depotNameCollator.compare(a.name, b.name);
+}
+
+/** The depot a position sorts under: the first of its depots by label. */
+function positionDepotLabel(p: PortfolioPosition, labelById: ReadonlyMap<number, string>): string {
+  const labels = p.account_ids.map((id) => labelById.get(id) ?? "").sort(depotNameCollator.compare);
+  return labels[0] ?? "";
+}
+
+/**
+ * Open positions before closed ones, each group by depot, then name. A
+ * position several depots hold sorts under the first of them by label.
+ */
+export function sortPositionsByDepot(
+  positions: PortfolioPosition[],
+  labelById: ReadonlyMap<number, string>,
+): PortfolioPosition[] {
+  const sortKey = (p: PortfolioPosition) => ({ depot: positionDepotLabel(p, labelById), name: p.name ?? p.key });
+  return [...positions].sort((a, b) => {
+    if (a.open !== b.open) return a.open ? -1 : 1;
+    return compareDepotThenName(sortKey(a), sortKey(b));
+  });
+}
+
 export function buildPortfolio(
   holdings: HoldingRow[],
   txs: DepotTxRow[],
@@ -1060,13 +1091,16 @@ export const getPortfolio = api(
     ]);
     const { currency, mixed } = scopeCurrency(depots);
     const quotes = await latestQuotes(quotedKeys(holdings));
+    const built = buildPortfolio(holdings, txs, people, quotes);
+    const labelById = new Map(allDepots.map((d) => [d.id, d.label]));
 
     return {
       accounts: allDepots,
       closed_hidden: closedHidden,
       currency,
       mixed_currency: mixed,
-      ...buildPortfolio(holdings, txs, people, quotes),
+      ...built,
+      positions: sortPositionsByDepot(built.positions, labelById),
     };
   },
 );
@@ -1100,7 +1134,7 @@ export interface PortfolioTransaction {
   document_ids: number[];
 }
 
-type TxSortField = "executed_at" | "net_amount" | "name";
+type TxSortField = "account" | "executed_at" | "net_amount" | "name";
 
 interface PortfolioTransactionsParams {
   /** Comma-separated depot account ids; omitted = every open readable depot. */
@@ -1191,13 +1225,22 @@ export const listPortfolioTransactions = api(
     }
     const where = and(...conditions);
 
-    const sortField: TxSortField = p.sortBy ?? "executed_at";
-    const dir = p.sortDir === "asc" ? asc : desc;
+    const sortField: TxSortField = p.sortBy ?? "account";
+    // Depot and name read A to Z unless asked otherwise; date and amount newest / largest first.
+    const dir = p.sortDir ? (p.sortDir === "asc" ? asc : desc) : sortField === "account" ? asc : desc;
+    const security = sql`COALESCE(${t.name}, ${t.isin}, ${t.wkn})`;
     const orderBy =
-      sortField === "net_amount"
+      sortField === "account"
+        ? [
+            dir(sql`(SELECT ${financeAccount.label} FROM ${financeAccount} WHERE ${financeAccount.id} = ${t.account_id})`),
+            dir(security),
+            desc(t.executed_at),
+            desc(t.id),
+          ]
+        : sortField === "net_amount"
         ? [dir(sql`CAST(${t.net_amount} AS NUMERIC)`), desc(t.executed_at), desc(t.id)]
         : sortField === "name"
-          ? [dir(sql`COALESCE(${t.name}, ${t.isin}, ${t.wkn})`), desc(t.executed_at), desc(t.id)]
+          ? [dir(security), desc(t.executed_at), desc(t.id)]
           : [dir(t.executed_at), dir(t.id)];
 
     const [rows, [agg]] = await Promise.all([
@@ -1516,7 +1559,7 @@ export const getPortfolioPosition = api(
         as_of: dateOnly(h.as_of),
       });
     }
-    shares.sort((a, b) => a.account_label.localeCompare(b.account_label));
+    shares.sort((a, b) => compareDepotThenName({ depot: a.account_label, name: "" }, { depot: b.account_label, name: "" }));
 
     // Day series across depots: every snapshot row of this position.
     const historyRows = await db
@@ -1722,7 +1765,7 @@ async function positionDepotSecurities(
       removable_holdings: counts.holdings,
     });
   }
-  return out;
+  return out.sort((a, b) => compareDepotThenName({ depot: a.account_label, name: "" }, { depot: b.account_label, name: "" }));
 }
 
 interface RemovePositionParams {
@@ -2313,25 +2356,45 @@ export const getPortfolioReview = api(
       }
     }
 
+    const byDepot = <T extends { account_label: string; name: string | null }>(
+      rows: T[],
+      fallback: (row: T) => string,
+    ): T[] =>
+      rows.sort((a, b) =>
+        compareDepotThenName(
+          { depot: a.account_label, name: a.name ?? fallback(a) },
+          { depot: b.account_label, name: b.name ?? fallback(b) },
+        ),
+      );
+
     return {
-      conflicts,
+      conflicts: byDepot(conflicts, (c) => c.position_key),
       unmatched_documents: unmatched,
       unverified_documents: unverified,
-      holding_gaps: recon.gaps.map((g) => ({
-        ...g,
-        account_label: labelById.get(g.account_id) ?? "",
-        name: names.get(g.position_key) ?? null,
-      })),
+      holding_gaps: byDepot(
+        recon.gaps.map((g) => ({
+          ...g,
+          account_label: labelById.get(g.account_id) ?? "",
+          name: names.get(g.position_key) ?? null,
+        })),
+        (g) => g.position_key,
+      ),
       unverifiable_changes: recon.unverifiable,
       ignored_other: ignoredOther,
       ignored_count: ignoredRows.length,
       ignored_securities_count: ignoredSecurities?.n ?? 0,
-      misbooked_accumulations: misbooked.map((m) => ({ ...m, account_label: labelById.get(m.account_id) ?? "" })),
-      new_securities: securities.map((sec) => ({
-        ...sec,
-        account_label: labelById.get(sec.account_id) ?? "",
-        ignored: sec.status === "ignored",
-      })),
+      misbooked_accumulations: byDepot(
+        misbooked.map((m) => ({ ...m, account_label: labelById.get(m.account_id) ?? "" })),
+        (m) => m.isin ?? m.wkn ?? "",
+      ),
+      new_securities: byDepot(
+        securities.map((sec) => ({
+          ...sec,
+          account_label: labelById.get(sec.account_id) ?? "",
+          ignored: sec.status === "ignored",
+        })),
+        (sec) => sec.isin ?? sec.wkn ?? "",
+      ),
       unplaced_statements: unplacedStatements,
     };
   },
