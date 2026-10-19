@@ -33,6 +33,7 @@ vi.mock("~encore/clients", () => ({
 import db from "../db/database";
 import { documentCategories, documentTaxSections, documents } from "../db/schema";
 import { runClassify } from "./document-ops";
+import { classifyDocument } from "./llm-client";
 
 const USER_ID = 990400;
 const DOC_ID = 990490;
@@ -73,6 +74,7 @@ async function readTaxSlugs(): Promise<string[]> {
 beforeEach(async () => {
   await ensureUser(USER_ID);
   await db.insert(documentCategories).values({ slug: "altersvorsorge-rentenversicherung", name: "Private Rentenversicherung" }).onConflictDoNothing();
+  await db.insert(documentCategories).values({ slug: "finanzen-steuern", name: "Steuern" }).onConflictDoNothing();
 });
 
 describe("runClassify — deterministic insurance-admin tax rule", () => {
@@ -100,5 +102,45 @@ describe("runClassify — deterministic insurance-admin tax rule", () => {
     expect(row.tax_relevant).toBe(true);
     expect(row.tax_role).toBe("beleg");
     expect(await readTaxSlugs()).toContain("anlage-av");
+  });
+});
+
+describe("runClassify — the user's own Einkommensteuererklärung", () => {
+  it("files the return under Steuern as an Erklärung, not as a Bescheid, a pension contract or evidence", async () => {
+    // What the model made of it: a Bescheid, every Anlage it fills as evidence.
+    vi.mocked(classifyDocument).mockResolvedValueOnce({
+      ...structuredClone(AI),
+      category_slug: "behoerden-steuerbescheid",
+      title: "Einkommensteuerbescheid 2025",
+      sender: "Finanzamt Musterstadt",
+      document_type: "bescheid",
+      document_type_confidence: 0.8,
+      tax_year: 2026,
+      tax_sections: [
+        { slug: "anlage-n", confidence: 0.9 },
+        { slug: "vorsorgeaufwand", confidence: 0.8 },
+        { slug: "sonderausgaben", confidence: 0.7 },
+      ],
+    } as Awaited<ReturnType<typeof classifyDocument>>);
+    await seedDoc(
+      "Einkommensteuererklärung 2025\nHauptvordruck ESt 1 A\n" +
+        "Anlage N Bruttoarbeitslohn 23.456\n" +
+        "Anlage Vorsorgeaufwand Beiträge zur Basisrente 1.200\n" +
+        "Anlage AV Altersvorsorgebeiträge § 10a EStG (Riester)",
+    );
+    await runClassify(DOC_ID);
+
+    const row = await readDoc();
+    const [category] = await db
+      .select({ slug: documentCategories.slug })
+      .from(documentCategories)
+      .where(eq(documentCategories.id, row.category_id!));
+    expect(category!.slug).toBe("finanzen-steuern");
+    expect(row.document_type).toBe("erklaerung");
+    expect(row.title).toBe("Einkommensteuererklärung 2025");
+    expect(row.tax_year).toBe(2025);
+    expect(row.tax_role).toBe("bezug");
+    expect(row.tax_relevant).toBe(false);
+    expect(await readTaxSlugs()).toEqual(["mantelbogen"]);
   });
 });

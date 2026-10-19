@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   applyAgricultureFiscalYearTaxRule,
+  applyIncomeTaxReturnTaxRule,
+  incomeTaxReturnYear,
+  isIncomeTaxReturn,
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
   applyKirchensteuerBescheidYearTaxRule,
@@ -510,5 +513,59 @@ KEINE STEUERBESCHEINIGUNG`;
         taxRole: "beleg",
       }),
     ).toEqual({ taxSections: sections, taxRole: "beleg", matched: false });
+  });
+});
+
+describe("applyIncomeTaxReturnTaxRule", () => {
+  // Synthetic texts: the user's own return and the Bescheid that answers it.
+  const RETURN = [
+    "Einkommensteuererklärung 2025",
+    "Hauptvordruck ESt 1 A",
+    "Transferticket: aa0000000000000000",
+    "Anlage N Zeile 6 Bruttoarbeitslohn 23.456",
+    "Anlage Vorsorgeaufwand Beiträge zur Basisrente (Rürup) 1.200",
+    "Anlage AV Altersvorsorgebeiträge § 10a EStG (Riester)",
+  ].join("\n");
+  const PRINTOUT = [
+    "Einkommensteuererklärung für 2025",
+    "Anlage Sonderausgaben  Kirchensteuer 312",
+    "Anlage KAP  Kapitalerträge 80",
+  ].join("\n");
+  const BESCHEID = [
+    "Finanzamt Musterstadt",
+    "Bescheid für 2024 über Einkommensteuer und Solidaritätszuschlag",
+    "Abweichend von Ihrer Einkommensteuererklärung wurden die Werbungskosten … berücksichtigt.",
+    "Anlage KAP, Anlage Vorsorgeaufwand",
+    "Rechtsbehelfsbelehrung",
+  ].join("\n");
+  const SECTIONS = [
+    { slug: "anlage-n", confidence: 0.9 },
+    { slug: "anlage-v", confidence: 0.8 },
+    { slug: "vorsorgeaufwand", confidence: 0.8 },
+    { slug: "sonderausgaben", confidence: 0.7 },
+  ];
+
+  it("recognises the filed return by its form markers or its Anlagen", () => {
+    expect(isIncomeTaxReturn(RETURN)).toBe(true);
+    expect(isIncomeTaxReturn(PRINTOUT)).toBe(true);
+  });
+
+  it("leaves a Bescheid that quotes the return alone", () => {
+    expect(isIncomeTaxReturn(BESCHEID)).toBe(false);
+    expect(isIncomeTaxReturn("Ihre Einkommensteuererklärung ist eingegangen.")).toBe(false);
+  });
+
+  it("makes the return a bezug of the Mantelbogen instead of evidence for each Anlage", () => {
+    const out = applyIncomeTaxReturnTaxRule({ text: RETURN, taxSections: SECTIONS, taxRole: "beleg" });
+    expect(out).toEqual({ taxSections: [{ slug: "mantelbogen", confidence: 0.95 }], taxRole: "bezug", matched: true });
+    const kept = applyIncomeTaxReturnTaxRule({ text: BESCHEID, taxSections: SECTIONS, taxRole: "beleg" });
+    expect(kept).toEqual({ taxSections: SECTIONS, taxRole: "beleg", matched: false });
+  });
+
+  it("reads the year from the heading", () => {
+    expect(incomeTaxReturnYear(RETURN)).toBe(2025);
+    expect(incomeTaxReturnYear(PRINTOUT)).toBe(2025);
+    expect(incomeTaxReturnYear("Einkommensteuererklärung für das Jahr 2024")).toBe(2024);
+    expect(incomeTaxReturnYear("Einkommensteuererklärung")).toBeNull();
   });
 });
