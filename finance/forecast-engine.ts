@@ -474,6 +474,9 @@ class Context {
   }
 }
 
+/** Supplement per month a statutory pension starts after the regular age. */
+export const LATE_START_SUPPLEMENT_PER_MONTH = 0.005;
+
 /**
  * A statutory pension starts with the month after the birthday (§ 99 SGB
  * VI); whoever is born on the first of a month reaches the age on the last
@@ -705,6 +708,10 @@ export function simulate(input: ForecastInput): SimulationResult {
         const early = Math.max(0, regular - w.from);
         const offset = scenario.offsetDeductions.includes(it.personId) && it.deductionOffsetCost != null;
         if (early > 0 && !offset) amount = amount * (1 - early * it.deductionPerMonth);
+        // Drawn later than the regular age: the supplement for each month
+        // the pension was not taken (§ 77 Abs. 2 Satz 1 Nr. 2 b SGB VI).
+        const late = Math.max(0, w.from - regular);
+        if (late > 0) amount = amount * (1 + late * LATE_START_SUPPLEMENT_PER_MONTH);
         if (early > 0 && offset) {
           // Paid at the start of the simulation — the statement quotes today's price.
           buyBack.set(it.id, it.deductionOffsetCost!);

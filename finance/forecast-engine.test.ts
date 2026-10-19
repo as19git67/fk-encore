@@ -350,6 +350,21 @@ describe("simulate — pensions", () => {
     expect(boughtBack.years[0].expenses["buyback:41"]).toBe(60_000);
   });
 
+  it("adds the supplement for a statutory pension drawn after the regular age", () => {
+    // Regular age 67 (2037), drawn at 69: 24 months × 0.5 % = 12 % more, no deduction.
+    const milestones = [ms(2, 1, "statutory_pension", 69)];
+    const item = pension(1, 2_000, 2, { regularAge: 67, deductionPerMonth: 0.003 });
+    const res = simulate(input([cash(1_000_000), item], milestones, { endAge: 70 }));
+    expect(res.years.find((y) => y.year === 2039)!.income["item:41"]).toBeCloseTo(2_000 * 1.12 * 12, 3);
+    // Exactly at the regular age: neither deduction nor supplement.
+    const onTime = simulate(input([cash(1_000_000), item], [ms(2, 1, "statutory_pension", 67)], { endAge: 68 }));
+    expect(onTime.years.find((y) => y.year === 2037)!.income["item:41"]).toBeCloseTo(24_000, 3);
+    // A company pension has no supplement.
+    const company = pension(1, 500, 2, { kind: "company", regularAge: 67 });
+    const res2 = simulate(input([cash(1_000_000), company], milestones, { endAge: 70 }));
+    expect(res2.years.find((y) => y.year === 2039)!.income["item:41"]).toBeCloseTo(6_000, 3);
+  });
+
   it("starts a statutory pension the month after the birthday, unless born on the first", () => {
     const born15: ForecastPerson = { id: 3, label: "C", birthDate: "1970-06-15" };
     const milestones = [ms(7, 3, "statutory_pension", 63), ms(8, 3, "company_pension", 63)];
