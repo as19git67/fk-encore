@@ -245,5 +245,14 @@ Kennzahl naming each document and amount.
   person → Zeile · Kz → value with its documents and confirms or corrects
   each contribution in place; the assistant's `tax_worksheet` lists the
   same tree and may state a document's figure only as listed there.
-  The PDF still lists the evidence (stage 4).
-- Stages 4–5: open.
+- Stage 4: done. The PDF (`assistant/tax-worksheet-pdf.ts`) opens with the
+  values by Anlage and person, Zeile · Kennzahl · Bezeichnung · Wert in the
+  order of the form (line, then Kennzahl), each row naming its one document
+  or "siehe Anhang n" when it is a sum, and marking what is left to do
+  (Kennzahl unchecked, value unconfirmed, prefilled data). Values not taken
+  follow; the documents, bookings, businesses, depot and hints come after.
+  An appendix lists every summed value with each document, the value on
+  it, its share and status, and the total. `kennzahlSheet` builds the rows
+  and is tested on its own. The stored PDF is linked to the flagged
+  documents and to those behind a value.
+- Stage 5: open.
