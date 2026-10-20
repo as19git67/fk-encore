@@ -127,6 +127,31 @@ def test_an_unlabelled_environment_config_is_named_after_its_file(volume):
     assert main.cpu_twin(cfg).label == "gemma.gguf (CPU)"
 
 
+def test_the_twin_does_not_inherit_the_gpu_thread_count(volume, monkeypatch):
+    # On the card 4 threads only feed the GPU; the twin has to use the cores.
+    monkeypatch.delenv("LLM_CPU_THREADS", raising=False)
+    monkeypatch.setattr(main.os, "sched_getaffinity", lambda pid: set(range(12)))
+    twin = main.cpu_twin(_gpu_config(volume, threads=4))
+    assert twin.threads == 12
+
+
+def test_the_twin_thread_count_can_be_set_outright(volume, monkeypatch):
+    monkeypatch.setenv("LLM_CPU_THREADS", "10")
+    assert main.cpu_twin(_gpu_config(volume, threads=4)).threads == 10
+
+
+def test_a_zero_twin_thread_count_lets_llama_cpp_choose(volume, monkeypatch):
+    monkeypatch.setenv("LLM_CPU_THREADS", "0")
+    assert main.cpu_twin(_gpu_config(volume, threads=4)).threads == 0
+
+
+def test_an_unusable_twin_thread_count_falls_back_to_the_cpuset(volume, monkeypatch):
+    monkeypatch.setattr(main.os, "sched_getaffinity", lambda pid: set(range(6)))
+    for bad in ("ten", "-2"):
+        monkeypatch.setenv("LLM_CPU_THREADS", bad)
+        assert main.cpu_twin(_gpu_config(volume, threads=4)).threads == 6
+
+
 # ─── lend ──────────────────────────────────────────────────────────────────────
 
 

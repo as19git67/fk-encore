@@ -226,7 +226,11 @@ prerequisite for the nightly job.
    lends the GPU for the run through the same endpoints and returns it
    afterwards (`device: "cpu"` on `POST /assistant/benchmark/runs`; the
    history shows GPU and CPU runs side by side with median and p90 per
-   round). *Still to measure on the host:* one GPU run and one CPU run of
+   round). The twin does not inherit the GPU configuration's `threads`
+   (small on the card, where the CPU only feeds the GPU): it takes
+   `LLM_CPU_THREADS` or one thread per CPU of the container's cpuset, so
+   the night runs on all the cores it was given. *Still to measure on the
+   host:* one GPU run and one CPU run of
    the full case list; the two medians go here before stage 3 sizes its
    batches.
 3. **Nightly job, window setting, run table, admin panel** — as above.

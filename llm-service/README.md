@@ -403,7 +403,7 @@ must stay available meanwhile, so the card is lent rather than freed:
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /gpu/lend` | Swap to the *CPU twin* of the running configuration (`gpu_layers 0`, `n_cpu_moe 0`, `accelerator cpu`, everything else unchanged) and move the embedder to the CPU; answers `202`, progress in `/reload/status` |
+| `POST /gpu/lend` | Swap to the *CPU twin* of the running configuration (`gpu_layers 0`, `n_cpu_moe 0`, `accelerator cpu`, `threads` from `LLM_CPU_THREADS` or the cpuset, everything else unchanged) and move the embedder to the CPU; answers `202`, progress in `/reload/status` |
 | `POST /gpu/return` | Load the configuration from before the lease again and move the embedder back; `202` |
 
 `/reload/status` carries a `lease` object (`active`, `since`,
@@ -416,6 +416,14 @@ nightly job reads from `lease.active` and stops. A lease that fails to load
 clears itself; a return that fails (the scorer still holds the card) keeps
 the twin and the lease, so the caller unloads the scorer and calls
 `/gpu/return` again. Both calls are no-ops when there is nothing to do.
+
+The twin does not inherit the GPU configuration's `threads`: on the card
+that count only feeds the GPU and is kept small (the compose default is 4),
+which would leave the cores idle for the night. The twin uses
+`LLM_CPU_THREADS` when set, otherwise one thread per CPU the container may
+run on (`DEPLOY_ML_CPUSET`, e.g. 12 for `0-11`); `0` lets llama.cpp choose.
+Note that `DEPLOY_LLM_CPU_SHARES` still applies: another ML service busy on
+the same cpuset gets its share of those cores.
 
 The twin swap drains in-flight requests like any reload: `_state["llm"]`
 is cleared, the single inference worker is waited for, then llama-server
@@ -457,7 +465,8 @@ runtime](#switching-models-at-runtime)). Once one is active, everything from
 | `LLM_MODEL_EXTRA_URLS` | — | Space-separated URLs of further shards of a split GGUF. Point `LLM_MODEL_PATH` at shard 1; llama.cpp finds the rest. |
 | `LLM_MODEL_PATH` | `/models/qwen2.5-7b-instruct-q4_k_m.gguf` | Local path to the GGUF model file |
 | `LLM_CTX` | `8192` | Context window size |
-| `LLM_THREADS` | `$(nproc)` | CPU threads for inference |
+| `LLM_THREADS` | `$(nproc)` (compose: `4`) | CPU threads for inference |
+| `LLM_CPU_THREADS` | cpuset size | Threads of the CPU twin while the GPU is lent (`POST /gpu/lend`); `0` lets llama.cpp choose |
 | `LLM_ACCELERATOR` | `cpu` | Runtime guard: `cpu` or `cuda` |
 | `LLM_GPU_LAYERS` | `0` | llama.cpp layers offloaded to GPU; the GPU profile uses `-1` (all) |
 | `LLM_BATCH` | `512` | llama.cpp prompt-eval batch size (`n_batch`). The classifier prompt is ~15k tokens of fixed prefix before the document text, so prefill dominates `/classify`; `2048` keeps a GPU busy across that. No benefit on CPU. |
