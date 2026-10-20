@@ -221,10 +221,14 @@ prerequisite for the nightly job.
    the KI-Modell page says when the card is lent. Reload drains the
    single inference worker before the swap (`_drain_inference`), and
    `_reload_worker` now restores the previous configuration under its own
-   source on rollback. *Still to measure on the host:* the twin's speed
-   for a typical assistant turn (`llm-service/bench/chat_bench.py` against
-   the service after `POST /gpu/lend`); the number goes here before stage
-   3 sizes its batches.
+   source on rollback. The measurement has a button: the KI-Benchmark page
+   (Dokumente › Einstellungen) can run its cases "on the CPU twin", which
+   lends the GPU for the run through the same endpoints and returns it
+   afterwards (`device: "cpu"` on `POST /assistant/benchmark/runs`; the
+   history shows GPU and CPU runs side by side with median and p90 per
+   round). *Still to measure on the host:* one GPU run and one CPU run of
+   the full case list; the two medians go here before stage 3 sizes its
+   batches.
 3. **Nightly job, window setting, run table, admin panel** — as above.
    Backfill endpoint `POST /photos/aesthetic/backfill?model=` that marks
    photos for re-scoring without touching the rest of the quality job.

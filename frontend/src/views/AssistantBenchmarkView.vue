@@ -3,10 +3,13 @@
  * The assistant benchmark on a button (documentation/plans/ki-assistent.md,
  * "Benchmark"). The cases run through the real agent loop against the model
  * llm-service has loaded; the results are kept per run, so switching the
- * model under "KI-Modell" and running again compares the two.
+ * model under "KI-Modell" and running again compares the two. A run can
+ * also ask for the CPU twin of the loaded model: the GPU is lent for the
+ * run, as the nightly aesthetic job does it, and handed back afterwards.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import MultiSelect from 'primevue/multiselect'
 import ProgressBar from 'primevue/progressbar'
@@ -23,7 +26,10 @@ import {
   listBenchCases,
   listBenchRuns,
   startBenchRun,
+  PHASE_LEND,
+  PHASE_RETURN,
   type BenchCaseInfo,
+  type BenchModel,
   type BenchCaseRun,
   type BenchRunDetail,
   type BenchRunSummary,
@@ -39,12 +45,27 @@ const runs = ref<BenchRunSummary[]>([])
 const selected = ref<BenchRunDetail | null>(null)
 const label = ref('')
 const chosenCases = ref<string[]>([])
+const onCpu = ref(false)
 const loaded = ref(false)
 const busy = ref<'start' | 'cancel' | null>(null)
 const error = ref<string | null>(null)
 
 const running = computed(() => runs.value.find((r) => r.status === 'running') ?? null)
 const caseTitle = (id: string | null) => cases.value.find((c) => c.id === id)?.title ?? id ?? ''
+
+/** What a running run is doing right now, in words. */
+function phaseText(run: BenchRunSummary): string {
+  if (run.current_case === PHASE_LEND) return 'GPU wird verliehen, das Modell lädt auf der CPU'
+  if (run.current_case === PHASE_RETURN) return 'GPU kommt zurück, das Modell lädt wieder auf der GPU'
+  if (run.current_case) return `gerade „${caseTitle(run.current_case)}“`
+  return ''
+}
+
+/** GPU or CPU, read from where the model's layers were. */
+function device(model: BenchModel | null): string {
+  if (!model || model.gpu_layers === undefined) return '–'
+  return model.gpu_layers === 0 ? 'CPU' : 'GPU'
+}
 const caseOptions = computed(() => cases.value.map((c) => ({ value: c.id, label: c.title })))
 
 const STATUS: Record<BenchStatus, { label: string; severity: 'info' | 'success' | 'danger' | 'secondary' }> = {
@@ -137,6 +158,7 @@ async function start() {
     const run = await startBenchRun({
       label: label.value.trim() || undefined,
       case_ids: chosenCases.value.length ? chosenCases.value : undefined,
+      device: onCpu.value ? 'cpu' : 'loaded',
     })
     selected.value = run
     await refreshRuns()
@@ -187,7 +209,7 @@ function remove(run: BenchRunSummary) {
 <template>
   <PageLayout
     title="KI-Benchmark"
-    hint="Prüft, ob das geladene Modell für typische Fragen die richtigen Werkzeuge mit den richtigen Argumenten wählt, und misst die Zeit je Runde."
+    hint="Prüft, ob das geladene Modell für typische Fragen die richtigen Werkzeuge mit den richtigen Argumenten wählt, und misst die Zeit je Runde – auf der GPU oder auf dem CPU-Zwilling."
     width="wide"
     :ready="loaded"
   >
@@ -203,14 +225,15 @@ function remove(run: BenchRunSummary) {
           echten Systemprompt und Werkzeugkatalog, aber mit festen, erfundenen Werkzeugergebnissen und
           dem festen Datum {{ today }}. Es werden keine Daten gelesen oder geändert. Jede Runde wartet
           im KI-Slot hinter den Fragen der Nutzer; gemessen wird nur die Zeit des Modells. Zum Vergleich:
-          unter <em>KI-Modell</em> ein anderes Modell aktivieren und erneut laufen lassen.
+          unter <em>KI-Modell</em> ein anderes Modell aktivieren und erneut laufen lassen, oder denselben
+          Lauf auf dem CPU-Zwilling starten – so läuft das Modell nachts, wenn die GPU die Fotos bewertet.
         </p>
 
         <div v-if="running" class="progress" aria-live="polite">
           <div class="progress-head">
             <span>
               Lauf „{{ running.label }}“: {{ running.cases_done }} von {{ running.cases_total }} Fällen
-              <template v-if="running.current_case"> – gerade „{{ caseTitle(running.current_case) }}“</template>
+              <template v-if="phaseText(running)"> – {{ phaseText(running) }}</template>
             </span>
             <Button
               label="Abbrechen"
@@ -246,6 +269,10 @@ function remove(run: BenchRunSummary) {
               selected-items-label="{0} Fälle"
             />
           </div>
+          <div class="field field-check">
+            <Checkbox v-model="onCpu" input-id="bench-cpu" binary />
+            <label for="bench-cpu">Auf dem CPU-Zwilling messen (GPU wird für den Lauf verliehen)</label>
+          </div>
           <Button
             label="Benchmark starten"
             icon="pi pi-play"
@@ -264,7 +291,7 @@ function remove(run: BenchRunSummary) {
         </header>
         <p class="muted">
           Gestartet {{ when(selected.started_at) }}<template v-if="selected.model">
-            · {{ selected.model.model_filename }} · {{ selected.model.backend }} · Kontext {{ selected.model.ctx_size }}</template>
+            · {{ selected.model.model_filename }} · {{ selected.model.backend }} · Kontext {{ selected.model.ctx_size }}<template v-if="selected.model.gpu_layers !== undefined"> · {{ device(selected.model) }}</template></template>
         </p>
         <p v-if="selected.error" class="failure" role="alert">{{ selected.error }}</p>
 
@@ -332,6 +359,7 @@ function remove(run: BenchRunSummary) {
                 <th scope="col">Gestartet</th>
                 <th scope="col">Bezeichnung</th>
                 <th scope="col">Status</th>
+                <th scope="col">Gerät</th>
                 <th scope="col" class="num">Bestanden</th>
                 <th scope="col" class="num">Werkzeug</th>
                 <th scope="col" class="num">Argumente</th>
@@ -347,6 +375,7 @@ function remove(run: BenchRunSummary) {
                   <button type="button" class="link" @click="select(r.id)">{{ r.label }}</button>
                 </td>
                 <td><Tag :value="STATUS[r.status].label" :severity="STATUS[r.status].severity" /></td>
+                <td>{{ device(r.model) }}</td>
                 <td class="num">{{ r.summary ? `${r.summary.passed} / ${r.summary.cases}` : `${r.cases_done} / ${r.cases_total}` }}</td>
                 <td class="num">{{ percent(r.summary?.tool_hit_rate) }}</td>
                 <td class="num">{{ percent(r.summary?.args_hit_rate) }}</td>
@@ -420,6 +449,17 @@ function remove(run: BenchRunSummary) {
 .field label {
   font-size: var(--text-sm);
   color: var(--p-text-muted-color);
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  flex-basis: 100%;
+}
+
+.field-check label {
+  color: var(--p-text-color);
 }
 
 .progress {

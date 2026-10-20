@@ -12,6 +12,11 @@
  *   POST   /assistant/benchmark/runs/:id/cancel
  *   DELETE /assistant/benchmark/runs/:id
  *
+ * A run can ask for the CPU twin of the loaded model (`device: "cpu"`,
+ * documentation/plans/foto-aesthetik.md, stage 2): the GPU is lent through
+ * the llm-service for the length of the run and returned afterwards, so the
+ * same cases measure the night-time configuration against the day-time one.
+ *
  * Permission: `data.manage`, like the other model tools.
  */
 
@@ -79,7 +84,26 @@ export interface BenchModel {
   model_filename: string;
   backend: string;
   ctx_size: number;
+  /** `cpu` or `cuda`; missing on runs filed before the GPU lease existed. */
+  accelerator?: string;
+  /** 0 = nothing on the card; what decides whether a run was the CPU twin. */
+  gpu_layers?: number;
+  /** `env`, `file` or `lease`. */
+  source?: string;
 }
+
+export type BenchDevice = "loaded" | "cpu";
+
+/**
+ * Stand-ins in `current_case` while the GPU changes hands, so the page can
+ * say what the run is waiting for. No case has an id with a colon.
+ */
+export const PHASE_LEND = "gpu:lend";
+export const PHASE_RETURN = "gpu:return";
+
+/** How long a model swap may take before the run gives up on it. */
+const LEASE_TIMEOUT_MS = 30 * 60_000;
+const LEASE_POLL_MS = 2_000;
 
 export interface BenchRunSummary {
   id: number;
@@ -133,12 +157,49 @@ let active: { id: number; controller: AbortController; done: Promise<void> } | n
 async function currentModel(): Promise<BenchModel | null> {
   try {
     const status = (await user.getLlmStatus()) as unknown as { live: BenchModel };
-    const { label, model_filename, backend, ctx_size } = status.live;
-    return { label, model_filename, backend, ctx_size };
+    const { label, model_filename, backend, ctx_size, accelerator, gpu_layers, source } = status.live;
+    return { label, model_filename, backend, ctx_size, accelerator, gpu_layers, source };
   } catch (err) {
     log.warn("assistant benchmark: model status unavailable", { error: String(err) });
     return null;
   }
+}
+
+class LeaseFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LeaseFailedError";
+  }
+}
+
+/**
+ * Waits for the llm-service to finish the swap a lend or return started:
+ * `ready` or `idle` means the model is up, `error` carries the reason.
+ */
+async function waitForSwap(what: string, signal: AbortSignal, sleep: (ms: number) => Promise<void>): Promise<void> {
+  const deadline = Date.now() + LEASE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw new BenchCancelledError();
+    const { reload } = await user.getLlmGpuLease();
+    if (reload.state === "ready" || reload.state === "idle") return;
+    if (reload.state === "error") throw new LeaseFailedError(`${what} failed: ${reload.detail ?? "unknown error"}`);
+    await sleep(LEASE_POLL_MS);
+  }
+  throw new LeaseFailedError(`${what} did not finish within ${LEASE_TIMEOUT_MS / 60_000} minutes`);
+}
+
+/** Sleep that ends early on cancel, so a cancelled run is not stuck in a poll. */
+function sleepUnless(signal: AbortSignal): (ms: number) => Promise<void> {
+  return (ms) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(done, ms);
+      function done() {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", done);
+        resolve();
+      }
+      signal.addEventListener("abort", done, { once: true });
+    });
 }
 
 export interface StartBenchRequest {
@@ -146,6 +207,12 @@ export interface StartBenchRequest {
   label?: string;
   /** A subset of case ids; default: every case. */
   case_ids?: string[];
+  /**
+   * `loaded` (default) measures what the llm-service is running; `cpu`
+   * lends the GPU for the run, so the cases run on the CPU twin of the
+   * loaded model, and returns it when the run ends.
+   */
+  device?: BenchDevice;
 }
 
 export const startBenchmarkRun = api(
@@ -164,8 +231,10 @@ export const startBenchmarkRun = api(
       .set({ status: "failed", error: "interrupted by a restart", finished_at: sql`now()`, current_case: null })
       .where(eq(assistantBenchmarkRun.status, "running"));
 
+    const device: BenchDevice = req.device === "cpu" ? "cpu" : "loaded";
     const model = await currentModel();
-    const label = req.label?.trim().slice(0, 80) || model?.label || model?.model_filename || "unbekanntes Modell";
+    const baseLabel = model?.label || model?.model_filename || "unbekanntes Modell";
+    const label = req.label?.trim().slice(0, 80) || (device === "cpu" ? `${baseLabel} (CPU)` : baseLabel);
     const [row] = await db
       .insert(assistantBenchmarkRun)
       .values({
@@ -174,25 +243,65 @@ export const startBenchmarkRun = api(
         model: model as unknown as Record<string, unknown> | null,
         case_ids: cases.map((c) => c.id),
         cases_total: cases.length,
+        current_case: device === "cpu" ? PHASE_LEND : null,
       })
       .returning();
 
     const controller = new AbortController();
-    const done = execute(row.id, cases, controller.signal).finally(() => {
+    const done = execute(row.id, cases, device, controller.signal).finally(() => {
       if (active?.id === row.id) active = null;
     });
     active = { id: row.id, controller, done };
-    log.info("assistant benchmark started", { run_id: row.id, cases: cases.length, label });
+    log.info("assistant benchmark started", { run_id: row.id, cases: cases.length, label, device });
     return toDetail(row);
   },
 );
 
-async function execute(runId: number, cases: BenchCase[], signal: AbortSignal): Promise<void> {
+/**
+ * Moves the model to the CPU twin for the run. Returns how to undo it: a
+ * no-op when the GPU was already lent by someone else (the nightly job),
+ * whose lease is not ours to end.
+ */
+async function lendForRun(runId: number, signal: AbortSignal): Promise<() => Promise<void>> {
+  const sleep = sleepUnless(signal);
+  const lent = await user.lendLlmGpu();
+  const ours = lent.status === "accepted";
+  if (ours) await waitForSwap("lending the GPU", signal, sleep);
+  const model = await currentModel();
+  await db
+    .update(assistantBenchmarkRun)
+    .set({ model: model as unknown as Record<string, unknown> | null, current_case: null, updated_at: sql`now()` })
+    .where(eq(assistantBenchmarkRun.id, runId));
+  if (!ours) return async () => {};
+  return async () => {
+    await db
+      .update(assistantBenchmarkRun)
+      .set({ current_case: PHASE_RETURN, updated_at: sql`now()` })
+      .where(eq(assistantBenchmarkRun.id, runId));
+    await user.returnLlmGpu();
+    // Not cancellable: a cancelled run still owes the card back.
+    await waitForSwap("returning the GPU", new AbortController().signal, (ms) => new Promise((r) => setTimeout(r, ms)));
+  };
+}
+
+async function execute(runId: number, cases: BenchCase[], device: BenchDevice, signal: AbortSignal): Promise<void> {
   const benchAs = benchUser();
   const tools = catalogFor(benchAs);
   const results: CaseRun[] = [];
-  const finish = (status: "done" | "failed" | "cancelled", error: string | null = null) =>
-    db
+  let giveBack: (() => Promise<void>) | null = null;
+  const finish = async (status: "done" | "failed" | "cancelled", error: string | null = null) => {
+    if (giveBack) {
+      try {
+        await giveBack();
+      } catch (err) {
+        // The cases are measured and kept; only the way back failed, which
+        // the admin can repeat from the KI-Modell page.
+        const detail = err instanceof Error ? err.message : String(err);
+        log.error(err, "assistant benchmark: returning the GPU failed", { run_id: runId });
+        error = error ? `${error}; ${detail}` : `GPU not returned: ${detail}`;
+      }
+    }
+    await db
       .update(assistantBenchmarkRun)
       .set({
         status,
@@ -203,8 +312,10 @@ async function execute(runId: number, cases: BenchCase[], signal: AbortSignal): 
         updated_at: sql`now()`,
       })
       .where(eq(assistantBenchmarkRun.id, runId));
+  };
 
   try {
+    if (device === "cpu") giveBack = await lendForRun(runId, signal);
     for (const c of cases) {
       if (signal.aborted) throw new BenchCancelledError();
       await db
