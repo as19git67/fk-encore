@@ -330,11 +330,15 @@ interface ListParams {
   taxRelevant?: boolean;
   /**
    * Amount range on the absolute amount, inclusive at both ends: 100
-   * matches a 100 € expense as well as a 100 € credit. `direction`
-   * narrows to money in (`in`) or out (`out`).
+   * matches a 100 € expense as well as a 100 € credit; `direction`
+   * picks the side.
    */
   amountMin?: number;
   amountMax?: number;
+  /**
+   * Money flow: `out` keeps only outgoing bookings (amount < 0, Ausgaben),
+   * `in` only incoming ones (amount > 0, Einnahmen). Omitted means both.
+   */
   direction?: "in" | "out";
   from?: string; // ISO date
   to?: string;

@@ -60,6 +60,23 @@ describe("list_transactions", () => {
     expect(out.block?.subtitle).toBeUndefined();
     expect(clients.finance.getOverview).not.toHaveBeenCalled();
   });
+
+  it("passes direction and amount range on, says so, and links to the same filtered list", async () => {
+    clients.finance.getOverview.mockResolvedValue({ sections: [{ name: "Täglich", accounts: [GIRO] }], unassigned: [] });
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 6, account_id: 1, booking_date: "2026-10-11", amount: "-8.50", counterparty: "Beispiel Café", purpose: "Kaffee" }], total: 1 });
+    const out = await tool("list_transactions").run({ account_id: 1, tags: ["Urlaub"], direction: "out", amount_min: 5 }, ctx());
+    expect(clients.finance.listTransactions).toHaveBeenCalledWith(expect.objectContaining({ tagsCsv: "Urlaub", direction: "out", amountMin: 5 }));
+    expect(out.text).toContain("Only money out (Ausgaben).");
+    expect(out.block?.route).toContain("/finanzen/uebersicht/konto/1?");
+    expect(out.block?.route).toContain("direction=out");
+    expect(out.block?.route).toContain("amountMin=5");
+  });
+
+  it("ignores a direction it does not know", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    await tool("list_transactions").run({ direction: "both" }, ctx());
+    expect(clients.finance.listTransactions).toHaveBeenCalledWith(expect.objectContaining({ direction: undefined }));
+  });
 });
 
 const ALBUMS = [

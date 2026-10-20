@@ -7,6 +7,7 @@ import { computed } from 'vue'
 import type { Proposal, ResultBlock } from '../../api/assistant'
 import type { TurnStep } from '../../utils/assistantTurn'
 import { parseBlocks } from '../../utils/assistantMarkdown'
+import ScrollX from '../layout/ScrollX.vue'
 import AssistantBlock from './AssistantBlock.vue'
 import ProposalCard from './ProposalCard.vue'
 
@@ -78,6 +79,35 @@ function isFolded(i: number): boolean {
               </template>
             </template>
           </p>
+          <pre v-else-if="b.type === 'pre'">{{ b.text }}</pre>
+          <ScrollX v-else-if="b.type === 'table'" class="table-scroll">
+            <table>
+              <thead v-if="b.head.length">
+                <tr>
+                  <th v-for="(cell, j) in b.head" :key="j" scope="col" :class="b.align[j] && `align-${b.align[j]}`">
+                    <template v-for="(run, k) in cell" :key="k">
+                      <strong v-if="run.bold">{{ run.text }}</strong>
+                      <em v-else-if="run.italic">{{ run.text }}</em>
+                      <code v-else-if="run.code">{{ run.text }}</code>
+                      <template v-else>{{ run.text }}</template>
+                    </template>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, r) in b.rows" :key="r">
+                  <td v-for="(cell, j) in row" :key="j" :class="b.align[j] && `align-${b.align[j]}`">
+                    <template v-for="(run, k) in cell" :key="k">
+                      <strong v-if="run.bold">{{ run.text }}</strong>
+                      <em v-else-if="run.italic">{{ run.text }}</em>
+                      <code v-else-if="run.code">{{ run.text }}</code>
+                      <template v-else>{{ run.text }}</template>
+                    </template>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
           <component :is="b.type" v-else>
             <li v-for="(item, j) in b.items" :key="j">
               <template v-for="(run, k) in item" :key="k">
@@ -155,16 +185,64 @@ function isFolded(i: number): boolean {
 
 .text--rich p,
 .text--rich ul,
-.text--rich ol {
+.text--rich ol,
+.text--rich pre {
   margin: 0;
 }
 
-.text--rich p + p,
-.text--rich p + ul,
-.text--rich p + ol,
-.text--rich ul + p,
-.text--rich ol + p {
+.text--rich > * + * {
   margin-top: var(--space-2);
+}
+
+/* ScrollX makes room for its focus ring with padding it takes off again
+   outside; the gap above a table keeps that. */
+.text--rich > .table-scroll {
+  margin: calc(-1 * var(--focus-ring-reach));
+}
+
+.text--rich > * + .table-scroll {
+  margin-top: calc(var(--space-2) - var(--focus-ring-reach));
+}
+
+.text--rich pre {
+  font-size: 0.92em;
+  white-space: pre-wrap;
+  padding: var(--space-2);
+  border-radius: 0.25em;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.text--rich table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.text--rich th,
+.text--rich td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--p-content-border-color);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+}
+
+.text--rich th {
+  font-weight: 600;
+  border-bottom-width: 2px;
+}
+
+.text--rich tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.text--rich .align-right {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.text--rich .align-center {
+  text-align: center;
 }
 
 .text--rich ul,
