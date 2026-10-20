@@ -395,6 +395,34 @@ loading it are minutes apart in cost, so pull the weights first, watch the
 progress, and activate once the file is on the volume — that keeps the actual
 outage to the load itself.
 
+### Lending the GPU for the night
+
+The aesthetic scorer (`aesthetic-service`, see
+`documentation/plans/foto-aesthetik.md`) needs the whole card and Gemma 4
+must stay available meanwhile, so the card is lent rather than freed:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /gpu/lend` | Swap to the *CPU twin* of the running configuration (`gpu_layers 0`, `n_cpu_moe 0`, `accelerator cpu`, everything else unchanged) and move the embedder to the CPU; answers `202`, progress in `/reload/status` |
+| `POST /gpu/return` | Load the configuration from before the lease again and move the embedder back; `202` |
+
+`/reload/status` carries a `lease` object (`active`, `since`,
+`previous_label`, `previous_source`, `embedder_device`) and reports the twin
+with `source: "lease"`. Nothing is persisted for a lease: a container that
+restarts during the night boots into the configuration the admin chose. An
+admin's `POST /reload` or `POST /config/reset` ends the lease, which the
+nightly job reads from `lease.active` and stops. A lease that fails to load
+(not enough RAM for the experts) rolls back to the GPU configuration and
+clears itself; a return that fails (the scorer still holds the card) keeps
+the twin and the lease, so the caller unloads the scorer and calls
+`/gpu/return` again. Both calls are no-ops when there is nothing to do.
+
+The twin swap drains in-flight requests like any reload: `_state["llm"]`
+is cleared, the single inference worker is waited for, then llama-server
+restarts with the new flags. `llama-server` in the CUDA build still keeps a
+small CUDA context with `--n-gpu-layers 0` (a few hundred MB); the scorer's
+8-bit Q-Align fits beside it.
+
 ### Who owns llama-server
 
 For `LLM_BACKEND=server` the FastAPI process starts and stops the

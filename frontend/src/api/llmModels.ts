@@ -77,7 +77,7 @@ export interface LlmLiveConfig {
   flash_attn: boolean
   label: string
   config_id: number | null
-  /** `env` = the container's environment, `file` = an activated configuration. */
+  /** `env` = the container's environment, `file` = an activated configuration, `lease` = the CPU twin while the GPU is lent. */
   source: string
   model_present: boolean
   /** Set when llm-service ran the configuration differently than asked — `inproc` via llama-server. */
@@ -107,6 +107,15 @@ export interface LlmDownloadState {
   completed: string[]
 }
 
+/** The nightly GPU hand-over to the aesthetic scorer: while `active`, the CPU twin of `previous_label` is running. */
+export interface LlmGpuLease {
+  active: boolean
+  since: number | null
+  previous_label: string
+  previous_source: string | null
+  embedder_device: string | null
+}
+
 export interface LlmStatus {
   intended: LlmConfigRow | null
   live: LlmLiveConfig
@@ -115,6 +124,7 @@ export interface LlmStatus {
   llm_loaded: boolean
   /** Null when llm-service does not report it. */
   backends: LlmBackends | null
+  lease: LlmGpuLease
   in_sync: boolean
 }
 

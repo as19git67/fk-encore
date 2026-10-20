@@ -20,8 +20,11 @@ import {
   deleteLlmConfig,
   deleteLlmModelFile,
   downloadLlmModel,
+  getLlmGpuLease,
   getLlmStatus,
+  lendLlmGpu,
   listLlmConfigs,
+  returnLlmGpu,
   listLlmModelFiles,
   resetLlmConfig,
   updateLlmConfig,
@@ -438,6 +441,66 @@ describe("status", () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNREFUSED"); }));
     await expect(getLlmStatus()).rejects.toThrow(/unreachable/);
   });
+
+  it("reports no lease when the service does not know about one", async () => {
+    stubLlmService({
+      "/reload/status": {
+        body: {
+          reload: { state: "idle", detail: null, label: "", started_at: null, finished_at: null },
+          config: liveConfig(),
+          download: IDLE_DOWNLOAD,
+          llm_loaded: true,
+        },
+      },
+    });
+    const status = await getLlmStatus();
+    expect(status.lease.active).toBe(false);
+  });
+
+  it("stays in sync while the GPU is lent", async () => {
+    // The CPU twin runs under the activated row's id with source "lease";
+    // that is the configuration the admin chose, running as planned.
+    const { config } = await createLlmConfig(input({ label: "Gemma GPU" }));
+    await db.update(llmModelConfig).set({ is_active: true }).where(eq(llmModelConfig.id, config.id));
+    const lease = {
+      active: true,
+      since: 1,
+      previous_label: "Gemma GPU",
+      previous_source: "file",
+      embedder_device: "cuda",
+    };
+    stubLlmService({
+      "/reload/status": {
+        body: {
+          reload: { state: "ready", detail: null, label: "Gemma GPU (CPU)", started_at: 1, finished_at: 2 },
+          config: liveConfig({ config_id: config.id, source: "lease", label: "Gemma GPU (CPU)" }),
+          download: IDLE_DOWNLOAD,
+          llm_loaded: true,
+          lease,
+        },
+      },
+    });
+
+    const status = await getLlmStatus();
+    expect(status.lease).toEqual(lease);
+    expect(status.in_sync).toBe(true);
+  });
+
+  it("stays in sync while the environment's configuration is lent", async () => {
+    stubLlmService({
+      "/reload/status": {
+        body: {
+          reload: { state: "ready", detail: null, label: "", started_at: 1, finished_at: 2 },
+          config: liveConfig({ source: "lease", label: "qwen2.5-7b-instruct-q4_k_m.gguf (CPU)" }),
+          download: IDLE_DOWNLOAD,
+          llm_loaded: true,
+          lease: { active: true, since: 1, previous_label: "", previous_source: "env", embedder_device: "cpu" },
+        },
+      },
+    });
+    const status = await getLlmStatus();
+    expect(status.in_sync).toBe(true);
+  });
 });
 
 // ─── Model files ──────────────────────────────────────────────────────────────
@@ -509,5 +572,54 @@ describe("model files", () => {
     });
     const res = await deleteLlmModelFile({ filename: "old.gguf" });
     expect(res.filename).toBe("old.gguf");
+  });
+});
+
+// ─── GPU lease ────────────────────────────────────────────────────────────────
+
+describe("GPU lease", () => {
+  const LEASE_ACCEPTED = {
+    status: "accepted",
+    reload: { state: "stopping", detail: null, label: "x (CPU)", started_at: 1, finished_at: null },
+    lease: { active: true, since: 1, previous_label: "x", previous_source: "file", embedder_device: "cuda" },
+  };
+
+  it("lends and returns through the llm-service", async () => {
+    const calls = stubLlmService({
+      "/gpu/lend": { body: LEASE_ACCEPTED },
+      "/gpu/return": { body: { ...LEASE_ACCEPTED, lease: { ...LEASE_ACCEPTED.lease, active: false } } },
+    });
+    const lent = await lendLlmGpu();
+    expect(lent.status).toBe("accepted");
+    expect(lent.lease.active).toBe(true);
+    const returned = await returnLlmGpu();
+    expect(returned.lease.active).toBe(false);
+    expect(calls.map((c) => [c.method, c.url])).toEqual([
+      ["POST", "/gpu/lend"],
+      ["POST", "/gpu/return"],
+    ]);
+  });
+
+  it("passes a refusal on as aborted", async () => {
+    stubLlmService({ "/gpu/lend": { status: 409, body: { detail: "a reload is already running" } } });
+    await expect(lendLlmGpu()).rejects.toThrow(/already running/);
+  });
+
+  it("reads the lease state for the nightly job", async () => {
+    stubLlmService({
+      "/reload/status": {
+        body: {
+          reload: { state: "ready", detail: null, label: "x (CPU)", started_at: 1, finished_at: 2 },
+          config: liveConfig({ source: "lease" }),
+          download: IDLE_DOWNLOAD,
+          llm_loaded: true,
+          lease: LEASE_ACCEPTED.lease,
+        },
+      },
+    });
+    const state = await getLlmGpuLease();
+    expect(state.lease.active).toBe(true);
+    expect(state.reload.state).toBe("ready");
+    expect(state.llm_loaded).toBe(true);
   });
 });

@@ -82,6 +82,7 @@ const STATUS: LlmStatus = {
   download: IDLE_DOWNLOAD,
   llm_loaded: true,
   backends: { inproc: false, server: true },
+  lease: { active: false, since: null, previous_label: '', previous_source: null, embedder_device: null },
   in_sync: true,
 }
 
@@ -152,6 +153,24 @@ export const InprocUeberServer: Story = {
               ...STATUS.live,
               notice: "backend 'inproc' needs llama-cpp-python, which this image does not ship; the model runs in llama-server on the CPU instead (0 GPU layers)",
             },
+          }),
+        ),
+        ...llmHandlers,
+      ],
+    },
+  },
+}
+
+export const GpuVerliehen: Story = {
+  name: 'GPU an die Ästhetikbewertung verliehen',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/admin/llm-status', () =>
+          HttpResponse.json({
+            ...STATUS,
+            live: { ...STATUS.live, label: `${STATUS.live.label} (CPU)`, gpu_layers: 0, n_cpu_moe: 0, accelerator: 'cpu', source: 'lease' },
+            lease: { active: true, since: 1_700_000_000, previous_label: STATUS.live.label, previous_source: 'file', embedder_device: 'cuda' },
           }),
         ),
         ...llmHandlers,

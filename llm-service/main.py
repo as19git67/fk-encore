@@ -1159,10 +1159,24 @@ def _drain_inference() -> None:
     _inference_executor.submit(lambda: None).result(timeout=RELOAD_DRAIN_TIMEOUT)
 
 
-def _reload_worker(cfg: LlmConfig, notice: str | None = None) -> None:
-    """Swap the loaded model. Runs on the reload thread."""
+def _reload_worker(
+    cfg: LlmConfig,
+    notice: str | None = None,
+    *,
+    source: str = "file",
+    persist: bool = True,
+) -> None:
+    """Swap the loaded model. Runs on the reload thread.
+
+    *source* is what /reload/status reports the configuration came from and
+    *persist* whether a successful load is written to the models volume. An
+    admin's activation is a `file` that persists; the GPU lease swaps to a
+    `lease` configuration and back without touching the file, so a container
+    restarted in the night boots into the configuration the admin chose.
+    """
 
     previous: LlmConfig = _state["config"]
+    previous_source: str = _state["config_source"]
     previous_notice = _state.get("backend_notice")
 
     # Reject new work first, then wait for the work already accepted.
@@ -1179,7 +1193,7 @@ def _reload_worker(cfg: LlmConfig, notice: str | None = None) -> None:
         _ensure_model_present(cfg)
 
         _set_reload_state("loading")
-        _apply_config(cfg, source="file", notice=notice)
+        _apply_config(cfg, source=source, notice=notice)
         _load_llm()
     except Exception:
         # Try to get back to the model that was working. If that fails too the
@@ -1190,7 +1204,10 @@ def _reload_worker(cfg: LlmConfig, notice: str | None = None) -> None:
         try:
             if _llama_server.is_running:
                 _llama_server.stop()
-            _apply_config(previous, source=_state["config_source"], notice=previous_notice)
+            # Its own source, not the one just applied: a lease that failed
+            # to load must not leave the restored configuration labelled as
+            # a lease, nor a failed activation the file's label.
+            _apply_config(previous, source=previous_source, notice=previous_notice)
             _load_llm()
             log.info("Previous configuration restored")
         except Exception:
@@ -1201,7 +1218,8 @@ def _reload_worker(cfg: LlmConfig, notice: str | None = None) -> None:
     # one the container boots into after a restart.
     # What loaded, not what was asked for: a model that went up without its
     # projector boots without it too, instead of failing on it again.
-    save_active(MODELS_DIR, _state["config"])
+    if persist:
+        save_active(MODELS_DIR, _state["config"])
     log.info("Reload complete: %s (%s)", cfg.model_path.name, cfg.label or "unnamed")
 
 
@@ -1292,6 +1310,10 @@ async def reload_model(req: ReloadRequest) -> dict[str, Any]:
             detail=f"{cfg.model_path.name} is not on the models volume and no model_url was given",
         )
 
+    # An admin's reload wins over the nightly lease: whatever the job was
+    # doing, the configuration asked for here is the one that persists, and
+    # the job sees the lease gone in /reload/status and stops.
+    _lease_clear()
     _submit_reload(functools.partial(_reload_worker, cfg, notice), label=cfg.label)
     return {"status": "accepted", "reload": dict(_reload_status)}
 
@@ -1304,6 +1326,7 @@ async def reload_status() -> dict[str, Any]:
         "config": _config_view(),
         "download": _downloads.status(),
         "backends": _backends(),
+        "lease": _lease_view(),
     }
 
 
@@ -1320,6 +1343,7 @@ async def reset_config() -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="a reload is already running")
 
     removed = clear_active(MODELS_DIR)
+    _lease_clear()
     _submit_reload(_reload_worker_env, label="")
     return {"status": "accepted", "removed_file": removed, "reload": dict(_reload_status)}
 
@@ -1338,6 +1362,198 @@ def _reload_worker_env() -> None:
     _apply_config(cfg, source="env", notice=notice)
     _load_llm()
     log.info("Back on the environment configuration (%s)", _BOOT_CONFIG.model_path.name)
+
+
+# ─── GPU lease ─────────────────────────────────────────────────────────────────
+#
+# The nightly aesthetic job (documentation/plans/foto-aesthetik.md) needs the
+# whole card for Q-Align, and Gemma 4 must stay available meanwhile. So the
+# card is lent, not freed: `POST /gpu/lend` swaps the running configuration
+# for its CPU twin (no layers offloaded, experts in RAM, same projector) and
+# moves the embedder off the card; `POST /gpu/return` swaps back. Neither
+# touches the persisted configuration, so a container restarted mid-lease
+# boots on the GPU as the admin configured it, and an admin's own /reload or
+# /config/reset ends the lease — the job reads that from /reload/status.
+
+LEASE_SOURCE = "lease"
+
+_lease: dict[str, Any] = {
+    "active": False,
+    "since": None,
+    "previous_label": "",
+    "previous_source": None,
+    "embedder_device": None,
+}
+# What to go back to: the configuration, its source and its notice as they
+# were before the lease. Only meaningful while _lease["active"].
+_lease_previous: tuple[LlmConfig, str, str | None] | None = None
+
+
+def cpu_twin(cfg: LlmConfig) -> LlmConfig:
+    """The same model with nothing on the card.
+
+    `n_cpu_moe` is dropped too: it names experts to keep *off* the GPU, which
+    with no layers offloaded is every one of them already, and llama-server
+    refuses the flag without offload. Everything else — context, batch, KV
+    type, projector, timeouts — stays, so the twin answers the same requests
+    the GPU configuration did, only slower.
+    """
+
+    label = cfg.label or cfg.model_path.name
+    return dataclasses.replace(
+        cfg,
+        accelerator="cpu",
+        gpu_layers=0,
+        n_cpu_moe=0,
+        label=f"{label} (CPU)",
+    )
+
+
+def _holds_gpu(cfg: LlmConfig) -> bool:
+    """Whether loading *cfg* puts model weights on the card."""
+
+    return cfg.gpu_layers != 0
+
+
+def _lease_view() -> dict[str, Any]:
+    return dict(_lease)
+
+
+def _lease_clear() -> None:
+    global _lease_previous
+    _lease_previous = None
+    _lease.update(
+        {
+            "active": False,
+            "since": None,
+            "previous_label": "",
+            "previous_source": None,
+            "embedder_device": None,
+        }
+    )
+
+
+def _move_embedder(device: str) -> None:
+    """Move the sentence-transformer between card and CPU.
+
+    Runs on the inference executor so it never races an /embed call that is
+    encoding on the model, and frees the CUDA cache afterwards so the memory
+    actually leaves the card rather than sitting in PyTorch's allocator.
+    """
+
+    embedder = _state["embedder"]
+    if embedder is None or _state["embedder_device"] == device:
+        return
+
+    def move() -> None:
+        embedder.to(device)
+        _state["embedder_device"] = device
+        if device == "cpu":
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 — a CPU-only image has no CUDA to empty
+                pass
+        log.info("Embedder moved to %s", device)
+
+    _inference_executor.submit(move).result(timeout=RELOAD_DRAIN_TIMEOUT)
+
+
+def _lend_worker(twin: LlmConfig, previous: tuple[LlmConfig, str, str | None]) -> None:
+    """Hand the card over. Runs on the reload thread.
+
+    The embedder goes first because it is cheap and cannot fail in a way
+    that leaves the model half-swapped; if the model swap then fails,
+    `_reload_worker` has already restored the GPU configuration, and the
+    embedder goes back with it so the service is exactly as it was.
+    """
+
+    home = _lease_embedder_home()
+    _move_embedder("cpu")
+    try:
+        if _holds_gpu(previous[0]):
+            _reload_worker(twin, previous[2], source=LEASE_SOURCE, persist=False)
+    except Exception:
+        _lease_clear()
+        _move_embedder(home)
+        raise
+
+
+def _return_worker(previous: tuple[LlmConfig, str, str | None], embedder_device: str) -> None:
+    """Take the card back. Runs on the reload thread.
+
+    The model first: if the card is still held by the scorer, that is the
+    load that fails, the rollback keeps the CPU twin running and the lease
+    stays active, so the job can unload the scorer and try again. The
+    embedder goes back only once the model is up.
+    """
+
+    cfg, source, notice = previous
+    if _holds_gpu(cfg):
+        _reload_worker(cfg, notice, source=source, persist=False)
+    _move_embedder(embedder_device)
+    _lease_clear()
+
+
+def _lease_embedder_home() -> str:
+    return _lease.get("embedder_device") or _state["embedder_device"] or LLM_EMBED_DEVICE
+
+
+@app.post("/gpu/lend", status_code=202)
+async def lend_gpu() -> dict[str, Any]:
+    """Move Gemma and the embedder off the card for the nightly job.
+
+    202 and asynchronous like /reload; poll /reload/status until `reload.state`
+    is `ready` (lease active) or `error` (the GPU configuration is back and
+    the lease is off). A second call while lent is a no-op.
+    """
+
+    global _lease_previous
+
+    if _reload_running:
+        raise HTTPException(status_code=409, detail="a reload is already running")
+    if _downloads.busy:
+        raise HTTPException(
+            status_code=409,
+            detail="a model download is running — wait for it or cancel it first",
+        )
+    if _lease["active"]:
+        return {"status": "already_lent", "reload": dict(_reload_status), "lease": _lease_view()}
+
+    current: LlmConfig = _state["config"]
+    previous = (current, _state["config_source"], _state.get("backend_notice"))
+    twin = cpu_twin(current)
+    _lease_previous = previous
+    _lease.update(
+        {
+            "active": True,
+            "since": time.time(),
+            "previous_label": current.label or current.model_path.name,
+            "previous_source": _state["config_source"],
+            "embedder_device": _state["embedder_device"] or LLM_EMBED_DEVICE,
+        }
+    )
+    _submit_reload(functools.partial(_lend_worker, twin, previous), label=twin.label)
+    return {"status": "accepted", "reload": dict(_reload_status), "lease": _lease_view()}
+
+
+@app.post("/gpu/return", status_code=202)
+async def return_gpu() -> dict[str, Any]:
+    """Load the configuration from before the lease again. A call without an
+    active lease is a no-op."""
+
+    if _reload_running:
+        raise HTTPException(status_code=409, detail="a reload is already running")
+    if not _lease["active"] or _lease_previous is None:
+        return {"status": "not_lent", "reload": dict(_reload_status), "lease": _lease_view()}
+
+    previous = _lease_previous
+    _submit_reload(
+        functools.partial(_return_worker, previous, _lease_embedder_home()),
+        label=previous[0].label or previous[0].model_path.name,
+    )
+    return {"status": "accepted", "reload": dict(_reload_status), "lease": _lease_view()}
 
 
 # ─── Model files on the volume ────────────────────────────────────────────────
