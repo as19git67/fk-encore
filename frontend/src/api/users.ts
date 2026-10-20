@@ -43,6 +43,11 @@ export interface Invite {
   accepted_at: string | null
 }
 
+/** The signed-in user with the roles and permissions they hold right now. */
+export function me() {
+  return apiFetch<UserWithRoles>('/auth/me')
+}
+
 /**
  * Redeem an invitation. There is no email argument on purpose — the server
  * takes the address from the invite, so a link issued for one person cannot

@@ -51,7 +51,7 @@ async function handleRegister() {
   loading.value = true
   try {
     await auth.register(inviteToken.value, name.value, password.value)
-    router.push('/fotos')
+    router.push('/')
   } catch (err: any) {
     error.value = err.message || 'Registrierung fehlgeschlagen'
   } finally {

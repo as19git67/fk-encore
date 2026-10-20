@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { modules, detectModule, MODULE_ROUTE_KEY_PREFIX } from '../config/modules'
+import { modules, detectModule, landingPath, MODULE_ROUTE_KEY_PREFIX } from '../config/modules'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import ForgotPasswordView from '../views/ForgotPasswordView.vue'
@@ -25,8 +25,11 @@ function readLastRoute(): string | null {
   if (!raw) return null
   // Minimal sanity checks: must be an in-app path, not the root itself
   // (would loop), not a public auth route.
+  // The profile is never a place to come back to: it is where a user without
+  // any module landed, and remembering it kept them there after they got one.
   if (!raw.startsWith('/') || raw === '/' || raw.startsWith('/login') ||
-      raw.startsWith('/register') || raw.startsWith('/forgot-password')) {
+      raw.startsWith('/register') || raw.startsWith('/forgot-password') ||
+      raw.startsWith('/profile')) {
     return null
   }
   return raw
@@ -53,12 +56,15 @@ const router = createRouter({
   },
   routes: [
     // Default: restore the most recently open view, falling back to the
-    // content feed (the app "home") for first-time visitors. Older accounts
-    // already have a saved last-route in localStorage so they keep landing
-    // on whatever they had open before this default flipped.
+    // first module the user may use (Fotos for most). The permission check
+    // below still runs on whatever this resolves to.
     {
       path: '/',
-      redirect: () => readLastRoute() ?? '/fotos/stream',
+      redirect: () => {
+        const auth = useAuthStore()
+        auth.loadFromStorage()
+        return readLastRoute() ?? landingPath((p) => auth.hasPermission(p))
+      },
     },
 
     // Public routes
@@ -109,7 +115,9 @@ router.beforeEach((to, from) => {
   if (from.name && from.fullPath !== to.fullPath) saveScrollOffset(from.fullPath)
 })
 
-router.beforeEach((to) => {
+let userRefreshedThisLoad = false
+
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
   auth.loadFromStorage()
 
@@ -117,10 +125,23 @@ router.beforeEach((to) => {
     return { name: 'login' }
   }
 
-  // Check route-level permission
+  // The stored user is a copy from login. Fetch the current roles once per
+  // page load, so a role granted since then shows up after a reload.
+  if (auth.isAuthenticated && !userRefreshedThisLoad && !PUBLIC_ROUTE_NAMES.has(to.name as string)) {
+    userRefreshedThisLoad = true
+    await auth.refreshUser()
+  }
+
+  // Check route-level permission. Before turning the user away, ask the
+  // server once more — the role may have been granted a moment ago.
   const requiredPermission = to.meta.permission as string | string[] | undefined
   if (requiredPermission && !auth.hasPermission(requiredPermission)) {
-    return { name: 'profile' }
+    await auth.refreshUser()
+    if (!auth.hasPermission(requiredPermission)) {
+      const fallback = landingPath((p) => auth.hasPermission(p))
+      // Never redirect onto the page that was just refused.
+      return fallback === to.fullPath ? { name: 'profile' } : fallback
+    }
   }
 })
 

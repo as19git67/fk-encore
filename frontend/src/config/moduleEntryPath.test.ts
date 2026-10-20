@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { moduleEntryPath, MODULE_ROUTE_KEY_PREFIX, modules } from './modules'
+import { landingPath, moduleEntryPath, MODULE_ROUTE_KEY_PREFIX, modules } from './modules'
 
 const dokumente = modules.find((m) => m.id === 'dokumente')!
 const fotos = modules.find((m) => m.id === 'fotos')!
@@ -116,5 +116,28 @@ describe('moduleEntryPath', () => {
     // No module-specific page is left behind, so none of them can be
     // reachable without the module's own permission.
     expect(admin.menuItems.some((item) => item.children)).toBe(false)
+  })
+})
+
+describe('landingPath', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  const granting = (...keys: string[]) => (p: string) => keys.includes(p)
+
+  it('opens the first module the user may use instead of Fotos', () => {
+    // Dokumente and Finanzen only: Fotos would bounce to the profile page.
+    expect(landingPath(granting('documents.view', 'module.finance'))).toBe('/dokumente')
+    expect(landingPath(granting('module.finance'))).toBe('/finanzen')
+  })
+
+  it('restores the last route of that module', () => {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente', '/dokumente/korb')
+    expect(landingPath(granting('documents.view'))).toBe('/dokumente/korb')
+  })
+
+  it('falls back to the profile without any module', () => {
+    expect(landingPath(granting())).toBe('/profile')
   })
 })

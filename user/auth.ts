@@ -4,8 +4,10 @@ import type {
   RefreshRequest, RefreshResponse,
   RequestPasswordResetRequest, RequestPasswordResetResponse,
   ResetPasswordRequest, ResetPasswordResponse,
+  UserWithRolesAndPermissions,
 } from "../db/types";
-import { loginLogic, logoutLogic, refreshTokenLogic, requestPasswordResetLogic, resetPasswordLogic } from "./auth.service";
+import { getAuthData } from "~encore/auth";
+import { currentUserLogic, loginLogic, logoutLogic, refreshTokenLogic, requestPasswordResetLogic, resetPasswordLogic } from "./auth.service";
 import { getAuthToken } from "./auth-handler";
 
 console.log("[boot] user/auth.ts: all imports resolved");
@@ -48,6 +50,24 @@ export const refresh = api(
       return await refreshTokenLogic(req);
     } catch (err: any) {
       if (err.message?.includes("invalid or expired")) {
+        throw APIError.unauthenticated(err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * The signed-in user with their current roles and permissions — so the UI
+ * picks up roles granted after login without logging out and in again.
+ */
+export const me = api(
+  { expose: true, auth: true, method: "GET", path: "/auth/me" },
+  async (): Promise<UserWithRolesAndPermissions> => {
+    try {
+      return await currentUserLogic(Number(getAuthData()!.userID));
+    } catch (err: any) {
+      if (err.message?.includes("not found")) {
         throw APIError.unauthenticated(err.message);
       }
       throw err;

@@ -724,6 +724,22 @@ export function moduleEntryPath(mod: ModuleConfig): string {
 }
 
 /**
+ * Where a signed-in user lands when no remembered route applies: the first
+ * module they may use, in menu order. Fotos used to be hard-wired here, so a
+ * user with only Dokumente and Finanzen bounced off its permission check onto
+ * the profile page. Only someone without any module ends up there.
+ */
+export function landingPath(hasPermission: (permission: string) => boolean): string {
+  const permitted = modules.filter((m) => !m.permission || hasPermission(m.permission))
+  // The assistant and Admin work on the other modules' data; every module
+  // role also grants the assistant, so it must not shadow the module itself.
+  const mod = permitted.find((m) => !SECONDARY_LANDING.has(m.id)) ?? permitted[0]
+  return mod ? moduleEntryPath(mod) : '/profile'
+}
+
+const SECONDARY_LANDING = new Set(['assistent', 'admin'])
+
+/**
  * Get the default route name for a module.
  */
 export function getModuleDefaultRoute(mod: ModuleConfig): string {

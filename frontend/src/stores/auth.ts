@@ -36,12 +36,31 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * Ask the server for the user's current roles and permissions. The copy
+   * from the login response goes stale as soon as an admin grants a role —
+   * a user invited without roles then saw no module at all until they logged
+   * out and in again. Failures keep the stored copy; a dead session is the
+   * API client's to handle.
+   */
+  async function refreshUser(): Promise<void> {
+    if (!token.value) return
+    try {
+      const fresh = await usersApi.me()
+      user.value = fresh
+      localStorage.setItem('auth_user', JSON.stringify(fresh))
+    } catch {
+      /* keep what we have */
+    }
+  }
+
   // When the tab becomes visible again after being idle, proactively
-  // refresh the token so the first request doesn't trigger a 401.
+  // refresh the token so the first request doesn't trigger a 401, and pick
+  // up roles changed in the meantime.
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && token.value) {
-        ensureFreshToken()
+        void ensureFreshToken().then(refreshUser)
       }
     })
   }
@@ -124,5 +143,5 @@ export const useAuthStore = defineStore('auth', () => {
     return (Array.isArray(permission) ? permission : [permission]).every((p) => granted.includes(p))
   }
 
-  return { user, token, isAuthenticated, hasPermission, loadFromStorage, login, loginWithPasskey, register, logout }
+  return { user, token, isAuthenticated, hasPermission, loadFromStorage, refreshUser, login, loginWithPasskey, register, logout }
 })
