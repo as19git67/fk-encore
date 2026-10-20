@@ -1842,6 +1842,13 @@
       "when": 1788739205210,
       "tag": "0262_document_tax_values",
       "breakpoints": true
+    },
+    {
+      "idx": 263,
+      "version": "7",
+      "when": 1788739206210,
+      "tag": "0263_photo_aesthetic",
+      "breakpoints": true
     }
   ]
 }

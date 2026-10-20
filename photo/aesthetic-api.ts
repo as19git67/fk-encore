@@ -1,0 +1,149 @@
+/**
+ * Endpoints of the nightly aesthetic job (documentation/plans/
+ * foto-aesthetik.md, stage 3), behind Fotos › Einstellungen › Ästhetik.
+ * All of them need `data.manage`: they lend the household's GPU.
+ */
+
+import { api, APIError } from "encore.dev/api";
+import log from "encore.dev/log";
+import { getAuthData } from "~encore/auth";
+import { requirePermission } from "../user/auth-handler";
+import { AESTHETIC_MODEL, inWindow, windowTimeZone } from "./aesthetic-score";
+import {
+  InvalidSettingsError,
+  countBacklog,
+  countScored,
+  getAestheticSettings,
+  listRuns,
+  resetAestheticScores,
+  saveAestheticSettings,
+  type AestheticRun,
+  type AestheticSettings,
+} from "./aesthetic-store";
+import { activeRun, stopActiveRun, tryStart, type ScorerStatus } from "./aesthetic-nightly";
+import { realNightDeps, scorerStatus } from "./aesthetic-deps";
+
+function requireAdmin(): void {
+  const auth = getAuthData();
+  if (!auth) throw APIError.unauthenticated("Unauthorized");
+  requirePermission(auth, "data.manage");
+}
+
+export interface AestheticOverview {
+  settings: AestheticSettings;
+  /** The zone the window is read in. */
+  time_zone: string;
+  in_window: boolean;
+  /** The scorer version the job scores towards. */
+  model: string;
+  /** Photos scored by that version. */
+  scored: number;
+  /** Photos still waiting for it. */
+  backlog: number;
+  /** The run in progress in this app, if any. */
+  active_run_id: number | null;
+  runs: AestheticRun[];
+  /** The aesthetic-service's own state; null when it did not answer. */
+  scorer: ScorerStatus | null;
+  scorer_error: string | null;
+}
+
+export const getAestheticOverview = api(
+  { expose: true, method: "GET", path: "/photos/aesthetic", auth: true },
+  async (): Promise<AestheticOverview> => {
+    requireAdmin();
+    const [settings, scored, backlog, runs] = await Promise.all([
+      getAestheticSettings(),
+      countScored(AESTHETIC_MODEL),
+      countBacklog(AESTHETIC_MODEL),
+      listRuns(20),
+    ]);
+    let scorer: ScorerStatus | null = null;
+    let scorerError: string | null = null;
+    try {
+      scorer = await scorerStatus();
+    } catch (err) {
+      scorerError = (err as Error).message;
+    }
+    const zone = windowTimeZone();
+    return {
+      settings,
+      time_zone: zone,
+      in_window: inWindow(new Date(), settings.window_start, settings.window_end, zone),
+      model: AESTHETIC_MODEL,
+      scored,
+      backlog,
+      active_run_id: activeRun()?.runId ?? null,
+      runs,
+      scorer,
+      scorer_error: scorerError,
+    };
+  },
+);
+
+export interface SaveAestheticSettingsRequest {
+  enabled: boolean;
+  window_start: string;
+  window_end: string;
+}
+
+export const saveAestheticSettingsApi = api(
+  { expose: true, method: "PUT", path: "/photos/aesthetic/settings", auth: true },
+  async (req: SaveAestheticSettingsRequest): Promise<AestheticSettings> => {
+    requireAdmin();
+    try {
+      return await saveAestheticSettings(req);
+    } catch (err) {
+      if (err instanceof InvalidSettingsError) throw APIError.invalidArgument(err.message);
+      throw err;
+    }
+  },
+);
+
+export interface StartAestheticRunResponse {
+  started: boolean;
+  run_id: number | null;
+  /** Why nothing started, in words for the page. */
+  reason: string | null;
+}
+
+/** "Jetzt starten": a run outside the window, until the backlog is done or it is stopped. */
+export const startAestheticRun = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/run", auth: true },
+  async (): Promise<StartAestheticRunResponse> => {
+    requireAdmin();
+    const result = await tryStart("manual", realNightDeps());
+    if (!result.started) return { started: false, run_id: null, reason: result.reason };
+    // The run takes hours; the page follows it through the overview.
+    result.done.catch((err) => log.error(err, "aesthetic: manual run ended with an error"));
+    return { started: true, run_id: result.runId, reason: null };
+  },
+);
+
+export const stopAestheticRun = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/stop", auth: true },
+  async (): Promise<{ stopping: boolean }> => {
+    requireAdmin();
+    return { stopping: stopActiveRun() };
+  },
+);
+
+export interface AestheticBackfillRequest {
+  /** Only photos scored (or marked unreadable) by this version; every scored photo when absent. */
+  model?: string;
+}
+
+/**
+ * Hands photos back to the backlog so the next run scores them again, for a
+ * new scorer version. Touches `aesthetic_model` only; the quality job and
+ * the values already in the details stay as they are until the new score
+ * replaces them.
+ */
+export const backfillAesthetic = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/backfill", auth: true },
+  async (req: AestheticBackfillRequest): Promise<{ marked: number }> => {
+    requireAdmin();
+    const model = req.model?.trim() || undefined;
+    return { marked: await resetAestheticScores(model) };
+  },
+);

@@ -97,6 +97,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'data.manage' },
       },
       {
+        path: 'einstellungen/aesthetik',
+        name: 'fotos-settings-aesthetic',
+        component: () => import('../views/PhotoAestheticView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
         path: 'einstellungen/bibliotheken',
         name: 'fotos-settings-libraries',
         component: () => import('../views/LibrariesView.vue'),
@@ -130,6 +136,7 @@ export const modules: ModuleConfig[] = [
         children: [
           { label: 'Scan-Queue', icon: 'pi pi-spinner', routeName: 'fotos-settings-scan-queue', permission: 'data.manage' },
           { label: 'Wartung', icon: 'pi pi-wrench', routeName: 'fotos-settings-maintenance', permission: 'data.manage' },
+          { label: 'Ästhetik', icon: 'pi pi-star', routeName: 'fotos-settings-aesthetic', permission: 'data.manage' },
           { label: 'Externe Bibliotheken', icon: 'pi pi-folder', routeName: 'fotos-settings-libraries', permission: 'photos.libraries.manage' },
           { label: 'OSM-Regionen', icon: 'pi pi-map', routeName: 'fotos-settings-osm', permission: 'osm.admin' },
           { label: 'Gefahrenzone', icon: 'pi pi-exclamation-triangle', routeName: 'fotos-settings-purge', permission: 'photos.purge' },
