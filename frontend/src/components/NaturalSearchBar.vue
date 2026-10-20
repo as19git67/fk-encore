@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../utils/searchInputAttrs'
 import Button from 'primevue/button'
 
 defineProps<{
@@ -25,7 +26,7 @@ defineEmits<{
     <div class="ns__bar">
       <div class="ns__input-wrapper">
         <i class="pi pi-search ns__icon" />
-        <input
+        <input v-bind="searchInputAttrs"
           :value="modelValue"
           type="text" class="ns__input"
           :placeholder="placeholder || 'z.B. „Kirchen in München von 2004 bis 2017“'"

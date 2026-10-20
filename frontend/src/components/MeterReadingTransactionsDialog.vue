@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../utils/searchInputAttrs'
 /**
  * "Zahlung verknüpfen" on a reading (Issue #792, Etappe 8 / #1018).
  *
@@ -176,7 +177,7 @@ watch(
     <template v-if="canEdit">
       <h3>Zahlung suchen</h3>
       <div class="search-row">
-        <InputText
+        <InputText v-bind="searchInputAttrs"
           v-model="query"
           placeholder="Empfänger, Verwendungszweck oder Betrag — leer: ±45 Tage um die Ablesung"
           class="search-input"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../../utils/searchInputAttrs'
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import Dialog from 'primevue/dialog'
@@ -367,7 +368,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
         />
         <div v-else class="stmt__search">
           <label for="stmt-search" class="stmt__search-label">Dokument suchen (Titel, Text oder Nummer)</label>
-          <InputText id="stmt-search" v-model="query" size="small" placeholder="z. B. Dynamik oder Nachtrag" autocomplete="off" />
+          <InputText v-bind="searchInputAttrs" id="stmt-search" v-model="query" size="small" placeholder="z. B. Dynamik oder Nachtrag" autocomplete="off" />
           <p v-if="searching" class="muted stmt__hint">Suche …</p>
           <p v-else-if="query.trim().length >= 2 && shownCandidates.length === 0" class="muted stmt__hint">Nichts gefunden.</p>
           <ul v-if="shownCandidates.length" class="stmt__links">

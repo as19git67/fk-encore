@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 import BasketMemberList from '../collections/BasketMemberList.vue'
 import BasketFooter from '../collections/BasketFooter.vue'
 import { useBasketStore } from '../../stores/basket'
@@ -413,7 +414,7 @@ async function compareSnapshots() {
           <Button label="Vorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" />
         </div>
         <div v-if="manualLinkOpen" class="basket-document-search">
-          <InputText v-model="documentQuery" placeholder="Dokument suchen" @keyup.enter="searchBasketDocuments" />
+          <InputText v-bind="searchInputAttrs" v-model="documentQuery" placeholder="Dokument suchen" @keyup.enter="searchBasketDocuments" />
           <Button icon="pi pi-search" size="small" aria-label="Dokument suchen" @click="searchBasketDocuments" />
         </div>
         <p v-for="document in documentResults" :key="document.id" class="basket-document-result">

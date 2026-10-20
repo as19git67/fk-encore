@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 /**
  * One business (documentation/plans/betriebe-euer.md, stage 1): its fixed
  * assets with the chosen year's depreciation and book value, and its
@@ -905,7 +906,7 @@ async function removeParcel(p: BusinessParcel) {
       </div>
       <div class="field">
         <label for="l-q">Dokument suchen</label>
-        <InputText id="l-q" v-model="linkQuery" placeholder="Titel, Absender, Inhalt …" @input="onLinkQuery" />
+        <InputText v-bind="searchInputAttrs" id="l-q" v-model="linkQuery" placeholder="Titel, Absender, Inhalt …" @input="onLinkQuery" />
         <label v-if="data?.business.document_category" class="field-check">
           <input v-model="linkOnlyCategory" type="checkbox" /> nur Kategorie „{{ data.business.document_category }}“
         </label>

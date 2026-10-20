@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../utils/searchInputAttrs'
 import { ref, watch, computed } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
@@ -65,7 +66,7 @@ function cancel() {
     </p>
     <span class="search">
       <i class="pi pi-search" />
-      <InputText v-model="query" placeholder="Album suchen…" class="search-input" />
+      <InputText v-bind="searchInputAttrs" v-model="query" placeholder="Album suchen…" class="search-input" />
     </span>
     <div class="album-list">
       <label v-for="a in visibleAlbums" :key="a.id" class="album-row">

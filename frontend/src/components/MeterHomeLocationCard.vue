@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../utils/searchInputAttrs'
 /**
  * Home location of the household + "fetch degree days" (#1023 follow-up).
  *
@@ -211,7 +212,7 @@ async function fetchNow() {
 
       <template v-if="canManage">
         <div class="search-row">
-          <InputText
+          <InputText v-bind="searchInputAttrs"
             v-model="query"
             :placeholder="home ? 'Anderen Ort suchen (Stadt oder Gemeinde)' : 'Ort suchen (Stadt oder Gemeinde)'"
             class="search-input"

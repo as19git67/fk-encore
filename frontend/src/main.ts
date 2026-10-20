@@ -11,6 +11,7 @@ import './style.css'
 import Tooltip from 'primevue/tooltip'
 import { deviceSupportsHoverTooltips } from './utils/tooltips'
 import { installAppUpdateMonitor } from './utils/appUpdate'
+import { searchInputPassThrough } from './utils/searchInputAttrs'
 
 function getFirstDayOfWeek(): number {
   try {
@@ -71,6 +72,7 @@ const F4milPreset = definePreset(Aura, {
 
 app.use(PrimeVue, {
   locale: buildPrimeVueLocale(),
+  pt: searchInputPassThrough,
   theme: {
     preset: F4milPreset,
     options: {
