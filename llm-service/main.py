@@ -1405,8 +1405,37 @@ def cpu_twin(cfg: LlmConfig) -> LlmConfig:
         accelerator="cpu",
         gpu_layers=0,
         n_cpu_moe=0,
+        threads=cpu_twin_threads(),
         label=f"{label} (CPU)",
     )
+
+
+def cpu_twin_threads() -> int:
+    """How many threads the twin computes with.
+
+    The GPU configuration's `threads` is not inherited: on a card the CPU
+    only feeds the GPU, so admins and the compose default keep it small (4),
+    and that number would leave most of the cores idle for the one night the
+    model runs on them. `LLM_CPU_THREADS` names the twin's count outright;
+    without it the count is the CPUs this process may run on — the compose
+    `cpuset`, not the host — so the twin fills exactly the cores it was
+    given. An env value of 0 hands the choice to llama.cpp.
+    """
+
+    env = os.environ.get("LLM_CPU_THREADS", "").strip()
+    if env:
+        try:
+            value = int(env)
+        except ValueError:
+            log.warning("LLM_CPU_THREADS=%r is not a number; using the cpuset", env)
+        else:
+            if value >= 0:
+                return value
+            log.warning("LLM_CPU_THREADS=%d is negative; using the cpuset", value)
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 0
 
 
 def _holds_gpu(cfg: LlmConfig) -> bool:

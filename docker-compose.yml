@@ -433,6 +433,10 @@ services:
       LLM_EMBED_DEVICE: ${LLM_EMBED_DEVICE:-cpu}
       LLM_EMBED_BATCH_SIZE: ${LLM_EMBED_BATCH_SIZE:-32}
       LLM_THREADS: ${LLM_THREADS:-4}
+      # Threads of the CPU twin while the GPU is lent to the aesthetic scorer.
+      # Empty = one per CPU in the cpuset above; LLM_THREADS is not inherited
+      # because on the card it only feeds the GPU and stays small.
+      LLM_CPU_THREADS: ${LLM_CPU_THREADS:-}
       # Prefill/KV tuning. The defaults here are llama.cpp's own, i.e. the CPU
       # profile; the GPU block in docker-compose.env.example raises them. A
       # mapping entry always wins over the image ENV, so these must repeat the
