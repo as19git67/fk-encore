@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
 import { sessions, refreshTokens, rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
-import { loginLogic, logoutLogic, refreshTokenLogic, validateToken } from "./auth.service";
+import { currentUserLogic, loginLogic, logoutLogic, refreshTokenLogic, validateToken } from "./auth.service";
 import { createUserLogic, getPermissionsForUser } from "./user.service";
 import { __resetRateLimiterForTests } from "./rateLimiter";
 import { createRoleLogic } from "../role/role.service";
@@ -44,6 +44,22 @@ describe("Auth Logic", () => {
     expect(result.user.email).toBe("u@test.com");
     expect(result.user.roles).toHaveLength(1);
     expect(result.user.permissions).toContain("users.list");
+  });
+
+  it("reports roles granted after login through currentUserLogic", async () => {
+    await seedPermissions();
+    const user = await createUserLogic({ email: "u@test.com", name: "User", password: "secret123" });
+    const login = await loginLogic({ email: "u@test.com", password: "secret123" });
+    expect(login.user.permissions).toHaveLength(0);
+
+    const role = await createRoleLogic({ name: "Editor" });
+    const perms = await db.select().from(permissions);
+    await assignPermissionLogic(role.id, perms[0].id);
+    await assignRoleLogic({ userId: user.id, roleId: role.id });
+
+    const current = await currentUserLogic(user.id);
+    expect(current.roles.map((r) => r.name)).toEqual(["Editor"]);
+    expect(current.permissions).toContain("users.list");
   });
 
   it("should throw on invalid email", async () => {

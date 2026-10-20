@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { moduleEntryPath, MODULE_ROUTE_KEY_PREFIX, modules } from './modules'
+import { clearModuleRoutes, landingPath, moduleEntryPath, refusedRouteFallback, MODULE_ROUTE_KEY_PREFIX, modules } from './modules'
 
 const dokumente = modules.find((m) => m.id === 'dokumente')!
 const fotos = modules.find((m) => m.id === 'fotos')!
@@ -116,5 +116,69 @@ describe('moduleEntryPath', () => {
     // No module-specific page is left behind, so none of them can be
     // reachable without the module's own permission.
     expect(admin.menuItems.some((item) => item.children)).toBe(false)
+  })
+})
+
+describe('landingPath', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  const granting = (...keys: string[]) => (p: string) => keys.includes(p)
+
+  it('opens the first module the user may use instead of Fotos', () => {
+    // Dokumente and Finanzen only: Fotos would bounce to the profile page.
+    expect(landingPath(granting('documents.view', 'module.finance'))).toBe('/dokumente')
+    expect(landingPath(granting('module.finance'))).toBe('/finanzen')
+  })
+
+  it('restores the last route of that module', () => {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente', '/dokumente/korb')
+    expect(landingPath(granting('documents.view'))).toBe('/dokumente/korb')
+  })
+
+  it('falls back to the profile without any module', () => {
+    expect(landingPath(granting())).toBe('/profile')
+  })
+})
+
+describe('refusedRouteFallback', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  const granting = (...keys: string[]) => (p: string) => keys.includes(p)
+  const moduleUser = granting('photos.view', 'documents.view', 'module.finance', 'finance.view')
+
+  it("opens the module's start page instead of the profile", () => {
+    // An admin's settings page, remembered on a shared browser, sent every
+    // later Dokumente user to their profile when they picked the module.
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente', '/dokumente/ki-modell')
+    expect(refusedRouteFallback('/dokumente/ki-modell', moduleUser)).toBe('/dokumente')
+    expect(localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente')).toBeNull()
+    expect(moduleEntryPath(dokumente)).toBe('/dokumente')
+  })
+
+  it('keeps a remembered page other than the refused one', () => {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'finanzen', '/finanzen/konten')
+    expect(refusedRouteFallback('/finanzen/admin/zugriff', moduleUser)).toBe('/finanzen')
+    expect(localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + 'finanzen')).toBe('/finanzen/konten')
+  })
+
+  it('lands elsewhere when the module itself is not granted', () => {
+    expect(refusedRouteFallback('/fotos/galerie', granting('documents.view'))).toBe('/dokumente')
+    expect(refusedRouteFallback('/dokumente', granting())).toBe('/profile')
+  })
+})
+
+describe('clearModuleRoutes', () => {
+  it('forgets every module page but nothing else', () => {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente', '/dokumente/korb')
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'finanzen', '/finanzen/konten')
+    localStorage.setItem('unrelated', 'x')
+    clearModuleRoutes()
+    expect(localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente')).toBeNull()
+    expect(localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + 'finanzen')).toBeNull()
+    expect(localStorage.getItem('unrelated')).toBe('x')
   })
 })

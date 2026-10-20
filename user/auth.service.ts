@@ -195,6 +195,27 @@ export async function refreshTokenLogic(req: RefreshRequest): Promise<RefreshRes
   return { token, refreshToken, user, expiresAt };
 }
 
+/**
+ * The signed-in user as the server sees them now. The browser keeps the user
+ * from the login response, so roles granted afterwards only reach the UI
+ * through here (or the next token refresh).
+ */
+export async function currentUserLogic(userId: number): Promise<UserWithRolesAndPermissions> {
+  const userRow = await dbFirst<typeof users.$inferSelect>(
+    db.select().from(users).where(eq(users.id, userId))
+  );
+
+  if (!userRow) {
+    throw new Error("user not found");
+  }
+
+  return {
+    ...toUser(userRow),
+    roles: await getRolesForUser(userRow.id),
+    permissions: await getPermissionsForUser(userRow.id),
+  };
+}
+
 export async function validateToken(token: string): Promise<{ userID: string; permissions: string[] }> {
   const session = await dbFirst<{ user_id: number }>(
     db

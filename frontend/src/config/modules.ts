@@ -724,6 +724,54 @@ export function moduleEntryPath(mod: ModuleConfig): string {
 }
 
 /**
+ * Where a signed-in user lands when no remembered route applies: the first
+ * module they may use, in menu order. Fotos used to be hard-wired here, so a
+ * user with only Dokumente and Finanzen bounced off its permission check onto
+ * the profile page. Only someone without any module ends up there.
+ */
+export function landingPath(hasPermission: (permission: string) => boolean): string {
+  const permitted = modules.filter((m) => !m.permission || hasPermission(m.permission))
+  // The assistant and Admin work on the other modules' data; every module
+  // role also grants the assistant, so it must not shadow the module itself.
+  const mod = permitted.find((m) => !SECONDARY_LANDING.has(m.id)) ?? permitted[0]
+  return mod ? moduleEntryPath(mod) : '/profile'
+}
+
+const SECONDARY_LANDING = new Set(['assistent', 'admin'])
+
+/**
+ * Where to send a user the router just refused `fullPath`. Inside a module
+ * they may use, that is the module's start page: the refused page is usually
+ * a remembered one from someone else on the same browser — an admin's
+ * settings page — and the menu would otherwise throw every later user of the
+ * module onto their profile. The remembered entry goes, so the next pick from
+ * the menu opens the start page directly. Elsewhere it is `landingPath`.
+ */
+export function refusedRouteFallback(fullPath: string, hasPermission: (permission: string) => boolean): string {
+  const path = fullPath.split(/[?#]/)[0] ?? fullPath
+  const mod = detectModule(path)
+  if (mod && (!mod.permission || hasPermission(mod.permission)) && path !== mod.basePath) {
+    try {
+      if (localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + mod.id) === fullPath) {
+        localStorage.removeItem(MODULE_ROUTE_KEY_PREFIX + mod.id)
+      }
+    } catch { /* private mode — nothing remembered to forget */ }
+    return mod.basePath
+  }
+  const fallback = landingPath(hasPermission)
+  return fallback === fullPath ? '/profile' : fallback
+}
+
+/** Forget every module's remembered page — the next user starts fresh. */
+export function clearModuleRoutes(): void {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(MODULE_ROUTE_KEY_PREFIX)) localStorage.removeItem(key)
+    }
+  } catch { /* private mode */ }
+}
+
+/**
  * Get the default route name for a module.
  */
 export function getModuleDefaultRoute(mod: ModuleConfig): string {
