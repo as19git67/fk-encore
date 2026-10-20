@@ -204,11 +204,27 @@ prerequisite for the nightly job.
    GPU reservation; model download into the models volume. Test: the
    service answers `/status` without a model and refuses `/score` until
    loaded; a scoring test runs only where a GPU is present.
-2. **GPU hand-over in the llm-service** — a CPU configuration for the
-   production model (seeded `llm_model_config` row, `n_gpu_layers = 0`,
-   experts in RAM) and a check that reload drains in-flight requests and
-   that `/reload/status` exposes enough for the job. Measure the CPU
-   speed of Gemma 4 for a typical assistant turn and record it here.
+2. **GPU hand-over in the llm-service** — *done.* Not a seeded row after
+   all: a row would name a file that only the production host knows, and
+   an activation flips `is_active` and persists, which a hand-over for
+   the night must not. Instead the llm-service derives the *CPU twin* of
+   whatever is running (`cpu_twin()` in `main.py`: `gpu_layers 0`,
+   `n_cpu_moe 0`, `accelerator cpu`, everything else kept) on
+   `POST /gpu/lend`, moves the embedder to the CPU, and restores both on
+   `POST /gpu/return`; `/reload/status` carries `lease` and the twin runs
+   with `source: "lease"`. Nothing is persisted, so a restart in the night
+   boots on the GPU; an admin's `/reload` or `/config/reset` ends the
+   lease. A lend that fails rolls back to the GPU and clears the lease; a
+   return that fails (the scorer still on the card) keeps the twin and
+   the lease for a retry. The app side is `lendLlmGpu`, `returnLlmGpu`
+   and `getLlmGpuLease` in `user/llm-models.ts` (service-internal), and
+   the KI-Modell page says when the card is lent. Reload drains the
+   single inference worker before the swap (`_drain_inference`), and
+   `_reload_worker` now restores the previous configuration under its own
+   source on rollback. *Still to measure on the host:* the twin's speed
+   for a typical assistant turn (`llm-service/bench/chat_bench.py` against
+   the service after `POST /gpu/lend`); the number goes here before stage
+   3 sizes its batches.
 3. **Nightly job, window setting, run table, admin panel** — as above.
    Backfill endpoint `POST /photos/aesthetic/backfill?model=` that marks
    photos for re-scoring without touching the rest of the quality job.

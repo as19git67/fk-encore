@@ -9,6 +9,10 @@
  *   POST   /admin/llm-configs/reset           go back to the container's env
  *   GET    /admin/llm-status                  what is loaded right now
  *
+ *   POST   /internal/llm/gpu/lend             (service-internal) move the model off the GPU
+ *   POST   /internal/llm/gpu/return           (service-internal) load the GPU configuration again
+ *   GET    /internal/llm/gpu/lease            (service-internal) the lease and reload state
+ *
  *   GET    /admin/llm-models/files            GGUF files on the models volume
  *   POST   /admin/llm-models/download         fetch a new one
  *   GET    /admin/llm-models/download/status  progress
@@ -480,6 +484,29 @@ export interface LlmDownloadState {
   completed: string[];
 }
 
+/**
+ * The GPU lease (documentation/plans/foto-aesthetik.md, stage 2): while
+ * `active`, the llm-service runs the CPU twin of the configuration named by
+ * `previous_label` so the aesthetic scorer can have the card.
+ */
+export interface LlmGpuLease {
+  active: boolean;
+  since: number | null;
+  previous_label: string;
+  /** `env` or `file`: how the configuration before the lease was chosen. */
+  previous_source: string | null;
+  /** Where the embedder was before the lease and goes back to. */
+  embedder_device: string | null;
+}
+
+const NO_LEASE: LlmGpuLease = {
+  active: false,
+  since: null,
+  previous_label: "",
+  previous_source: null,
+  embedder_device: null,
+};
+
 export interface LlmStatusResponse {
   /** What the database says should be loaded. Null when nothing is activated. */
   intended: LlmConfigRow | null;
@@ -490,6 +517,8 @@ export interface LlmStatusResponse {
   llm_loaded: boolean;
   /** Null when llm-service is older and does not report it. */
   backends: LlmBackends | null;
+  /** The nightly GPU hand-over; `active: false` when llm-service does not report one. */
+  lease: LlmGpuLease;
   /**
    * False when the service is running something other than the activated
    * configuration — a failed load that rolled back, or a container that was
@@ -515,11 +544,14 @@ export const getLlmStatus = api(
       download: LlmDownloadState;
       llm_loaded: boolean;
       backends?: LlmBackends;
+      lease?: LlmGpuLease;
     }>("/reload/status");
 
-    const in_sync = intended
-      ? status.config.config_id === intended.id
-      : status.config.source === "env";
+    const lease = status.lease ?? NO_LEASE;
+    // During a lease the CPU twin runs under the same config_id, so the row
+    // check still holds; only the source has to be read from before the lease.
+    const source = lease.active ? lease.previous_source : status.config.source;
+    const in_sync = intended ? status.config.config_id === intended.id : source === "env";
 
     return {
       intended: (intended as LlmConfigRow) ?? null,
@@ -528,8 +560,54 @@ export const getLlmStatus = api(
       download: status.download,
       llm_loaded: status.llm_loaded,
       backends: status.backends ?? null,
+      lease,
       in_sync,
     };
+  },
+);
+
+// ─── GPU lease ────────────────────────────────────────────────────────────────
+//
+// Service-internal: the nightly aesthetic job (photo service) calls these
+// through ~encore/clients. No permission check because no user calls them;
+// Encore refuses an external request to an unexposed endpoint.
+
+export interface LlmGpuLeaseResponse {
+  /** `accepted`, `already_lent` or `not_lent`. */
+  status: string;
+  reload: LlmReloadState;
+  lease: LlmGpuLease;
+}
+
+export const lendLlmGpu = api(
+  { expose: false, method: "POST", path: "/internal/llm/gpu/lend" },
+  async (): Promise<LlmGpuLeaseResponse> => {
+    return llmFetch<LlmGpuLeaseResponse>("/gpu/lend", { method: "POST" });
+  },
+);
+
+export const returnLlmGpu = api(
+  { expose: false, method: "POST", path: "/internal/llm/gpu/return" },
+  async (): Promise<LlmGpuLeaseResponse> => {
+    return llmFetch<LlmGpuLeaseResponse>("/gpu/return", { method: "POST" });
+  },
+);
+
+export interface LlmGpuLeaseStatus {
+  lease: LlmGpuLease;
+  reload: LlmReloadState;
+  llm_loaded: boolean;
+}
+
+export const getLlmGpuLease = api(
+  { expose: false, method: "GET", path: "/internal/llm/gpu/lease" },
+  async (): Promise<LlmGpuLeaseStatus> => {
+    const status = await llmFetch<{
+      reload: LlmReloadState;
+      llm_loaded: boolean;
+      lease?: LlmGpuLease;
+    }>("/reload/status");
+    return { lease: status.lease ?? NO_LEASE, reload: status.reload, llm_loaded: status.llm_loaded };
   },
 );
 

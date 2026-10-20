@@ -399,6 +399,12 @@ function formatEta(seconds: number | null): string {
         </template>
       </Message>
 
+      <Message v-if="status.lease.active" severity="info" :closable="false">
+        Die GPU ist an die Ästhetikbewertung verliehen: <strong>{{ status.lease.previous_label }}</strong>
+        läuft solange auf der CPU und antwortet langsamer. Ein Aktivieren oder Zurücksetzen hier
+        beendet die Verleihung.
+      </Message>
+
       <Message v-if="!status.in_sync" severity="warn" :closable="false">
         Gewünscht ist <strong>{{ status.intended?.label ?? 'die Umgebung' }}</strong>, geladen ist
         <strong>{{ status.live.label || status.live.model_filename }}</strong>. Der llm-service ist
