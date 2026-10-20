@@ -22,6 +22,7 @@ import {
   checkReadValues,
   correctionExamples,
   describeCorrections,
+  householdOwner,
   ownerFor,
   parseKindAnswer,
   queueTaxValuesIfEvidence,
@@ -153,12 +154,20 @@ describe("ownerFor", () => {
   const spouse = { id: 2, relationKind: "spouse" };
   const child = { id: 3, relationKind: "child" };
   it("follows the Bezugspersonen on the document", () => {
-    expect(ownerFor("person", [])).toBe("self");
+    expect(ownerFor("person", [])).toBe("none");
+    expect(ownerFor("person", [self])).toBe("self");
     expect(ownerFor("person", [spouse])).toBe("spouse");
     expect(ownerFor("person", [self, spouse])).toBe("joint");
     expect(ownerFor("return", [spouse])).toBe("joint");
     expect(ownerFor("child", [child])).toBe("child:3");
-    expect(ownerFor("child", [child, { id: 4, relationKind: "child" }])).toBe("self");
+    expect(ownerFor("child", [child, { id: 4, relationKind: "child" }])).toBe("none");
+  });
+
+  it("gives a document that names neither spouse to the user only when no document can name the user", () => {
+    expect(householdOwner("person", [], false)).toBe("self");
+    expect(householdOwner("person", [], true)).toBe("none");
+    expect(householdOwner("person", [spouse], true)).toBe("spouse");
+    expect(householdOwner("person", [self], true)).toBe("self");
   });
 });
 
@@ -250,7 +259,7 @@ describe("runTaxValues", () => {
       .where(and(eq(documentTaxValue.document_id, DOC), eq(documentTaxValue.field_key, "bruttoarbeitslohn")));
     await runTaxValues(DOC, reader({ values: [{ field: "bruttoarbeitslohn", printed: "48.200,00" }] }));
     expect(await stored()).toEqual([
-      { field: "bruttoarbeitslohn", value: 4800000, owner: "self", status: "corrected" },
+      { field: "bruttoarbeitslohn", value: 4800000, owner: "none", status: "corrected" },
     ]);
   });
 

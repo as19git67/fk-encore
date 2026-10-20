@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Message from 'primevue/message'
+import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import ListToolbar from '../../components/layout/ListToolbar.vue'
@@ -61,6 +62,12 @@ function initialYearFromQuery(): number | null {
 
 const years = ref<TaxYearCount[]>([])
 const selectedYear = ref<number | null>(initialYearFromQuery())
+// One dropdown instead of a button per year: a household with twenty-five
+// years of documents filled half a phone screen with chips.
+const yearOptions = computed(() => [
+  { label: `Alle${years.value.length > 1 ? ` (${years.value.reduce((s, y) => s + y.count, 0)})` : ''}`, value: null },
+  ...years.value.map((y) => ({ label: `${y.year} (${y.count})`, value: y.year })),
+])
 const reviewNeededOnly = ref(route.query.review === '1')
 // Steuerakte scope: null = the caller's own tax return, a subject-person id =
 // that person's own Steuerakte (an adult child filing their own return).
@@ -379,21 +386,14 @@ onMounted(async () => {
           <div class="steuer-filters">
             <div v-if="years.length > 0" class="year-filters">
               <span class="year-filters-label">Steuerjahr:</span>
-              <Button
-                :label="`Alle${years.length > 1 ? ` (${years.reduce((s, y) => s + y.count, 0)})` : ''}`"
+              <Select
+                v-model="selectedYear"
+                :options="yearOptions"
+                option-label="label"
+                option-value="value"
                 size="small"
-                :severity="selectedYear === null ? 'primary' : 'secondary'"
-                :outlined="selectedYear !== null"
-                @click="selectedYear = null"
-              />
-              <Button
-                v-for="y in years"
-                :key="y.year"
-                :label="`${y.year} (${y.count})`"
-                size="small"
-                :severity="selectedYear === y.year ? 'primary' : 'secondary'"
-                :outlined="selectedYear !== y.year"
-                @click="selectedYear = y.year"
+                class="year-select"
+                aria-label="Steuerjahr"
               />
               <Button
                 label="Nur zu prüfen"
@@ -534,6 +534,9 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: var(--space-1);
   align-items: center;
+}
+.year-select {
+  min-width: 9rem;
 }
 .year-filters-label {
   font-size: var(--text-base);

@@ -24,6 +24,7 @@ import { api, APIError, Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
 import {
+  documentSubjectPersons,
   documentTaxReading,
   documentTaxValue,
   documents,
@@ -32,7 +33,8 @@ import {
 import { requirePermission } from "../user/auth-handler";
 import { findEvidenceKind } from "./tax-evidence-kinds";
 import { mapToForm, type EvidenceValue, type EvidenceValueStatus, type ValueOwner } from "./tax-form-mapping";
-import { formCatalogue, placeLabel } from "./tax-forms/catalogue";
+import { findFormField, formCatalogue, placeLabel } from "./tax-forms/catalogue";
+import { householdOwner, type LinkedPerson } from "./tax-values";
 import { TAX_SECTIONS } from "./tax-sections";
 import { loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 
@@ -64,7 +66,7 @@ export interface TaxFormValue {
   anlage: string;
   anlage_name: string;
   label: string;
-  /** `self`, `spouse`, `return`, `child:<id>`, `property:<id>`, `child:?`, `property:?`. */
+  /** `self`, `spouse`, `return`, `child:<id>`, `property:<id>`, `person:?`, `child:?`, `property:?`. */
   owner: string;
   owner_label: string;
   line: number | null;
@@ -197,6 +199,7 @@ export function ownerLabel(owner: string, joint: boolean, names: ReadonlyMap<str
   if (owner === "self") return joint ? "Person A (Sie)" : "Sie";
   if (owner === "spouse") return "Person B (Ehegatte)";
   if (owner === "return") return joint ? "Gemeinsam" : "Erklärung";
+  if (owner === "person:?") return "Person nicht zugeordnet";
   if (owner === "child:?") return "Kind nicht zugeordnet";
   if (owner === "property:?") return "Objekt nicht zugeordnet";
   if (owner.startsWith("child:")) return names.get(owner) ?? `Kind ${owner.slice(6)}`;
@@ -252,16 +255,50 @@ async function readingCounts(userId: number, year: number, personId: number | nu
   return { read: Number(row?.read ?? 0), unread: Number(row?.unread ?? 0) };
 }
 
+/**
+ * Whose each value is, from the Bezugspersonen linked to its document now:
+ * linking a person after the reading moves the value without a re-read.
+ * A document without links keeps the owner stored at reading, except an
+ * open `none`, which follows the household as it stands.
+ */
+async function currentOwners(userId: number, year: number, rows: readonly StoredValue[]): Promise<Map<number, ValueOwner>> {
+  const docIds = [...new Set(rows.map((r) => r.document_id))];
+  if (!docIds.length) return new Map();
+  const [links, selfRows] = await Promise.all([
+    db
+      .select({ document_id: documentSubjectPersons.document_id, id: userSubjectPersons.id, relationKind: userSubjectPersons.relation_kind })
+      .from(documentSubjectPersons)
+      .innerJoin(userSubjectPersons, eq(userSubjectPersons.id, documentSubjectPersons.subject_person_id))
+      .where(inArray(documentSubjectPersons.document_id, docIds)),
+    db
+      .select({ id: userSubjectPersons.id })
+      .from(userSubjectPersons)
+      .where(and(eq(userSubjectPersons.user_id, userId), eq(userSubjectPersons.relation_kind, "self"))),
+  ]);
+  const byDoc = new Map<number, LinkedPerson[]>();
+  for (const l of links) byDoc.set(l.document_id, [...(byDoc.get(l.document_id) ?? []), { id: l.id, relationKind: l.relationKind ?? "other" }]);
+  const out = new Map<number, ValueOwner>();
+  for (const r of rows) {
+    const persons = byDoc.get(r.document_id) ?? [];
+    if (!persons.length && r.owner !== "none") continue;
+    const formKey = findEvidenceKind(r.evidence_kind)?.fields.find((f) => f.key === r.field_key)?.formKey ?? null;
+    const scope = formKey ? findFormField(year, formKey)?.scope : undefined;
+    out.set(r.id, householdOwner(scope, persons, selfRows.length > 0));
+  }
+  return out;
+}
+
 /** One year's stored values summed by field and owner. */
 async function yearMapping(userId: number, year: number, personId: number | null) {
   const [rows, joint] = await Promise.all([storedValues(userId, year, personId), isJointReturn(userId, year, personId)]);
+  const owners = await currentOwners(userId, year, rows);
   const evidence: EvidenceValue[] = rows.map((r) => ({
     id: r.id,
     documentId: r.document_id,
     evidenceKind: r.evidence_kind,
     field: r.field_key,
     value: Number(r.value),
-    owner: r.owner as ValueOwner,
+    owner: owners.get(r.id) ?? (r.owner as ValueOwner),
     status: r.status,
   }));
   return { rows, joint, mapping: mapToForm(year, evidence, { joint }) };

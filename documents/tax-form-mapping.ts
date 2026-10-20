@@ -20,9 +20,10 @@ export type EvidenceValueStatus = "read" | "rejected" | "confirmed" | "corrected
 
 /**
  * Whose value it is: `self` / `spouse` (the two of a joint return), `joint`
- * (a shared account, a household invoice), `child:<id>`, `property:<id>`.
+ * (a shared account, a household invoice), `child:<id>`, `property:<id>`,
+ * or `none` when the document names neither spouse.
  */
-export type ValueOwner = "self" | "spouse" | "joint" | `child:${number}` | `property:${number}`;
+export type ValueOwner = "self" | "spouse" | "joint" | "none" | `child:${number}` | `property:${number}`;
 
 export interface EvidenceValue {
   /** The stored row (`document_tax_value.id`), carried through so a value can be confirmed or corrected. */
@@ -50,7 +51,7 @@ export interface Contribution {
 
 export interface FormValue {
   field: FormField;
-  /** `self`, `spouse`, `return`, `child:<id>`, `property:<id>`, or `child:?` / `property:?` while unassigned. */
+  /** `self`, `spouse`, `return`, `child:<id>`, `property:<id>`, or `person:?` / `child:?` / `property:?` while unassigned. */
   owner: string;
   /** The Kennzahl this owner's value goes under (the spouse's column where the Vordruck has one). */
   kennzahl: string | null;
@@ -110,6 +111,9 @@ function owners(field: FormField, owner: ValueOwner, joint: boolean): { owner: s
         const note = "Gemeinsamer Beleg: jedem Ehegatten zur Hälfte zugeordnet.";
         return [{ owner: "self", share: 0.5, note }, { owner: "spouse", share: 0.5, note }];
       }
+      // Under joint assessment a document that names neither spouse could be
+      // either one's: never guess, the user assigns it.
+      if (owner === "none" && joint) return [{ owner: "person:?", share: 1 }];
       return [{ owner: "self", share: 1 }];
   }
 }
@@ -157,6 +161,7 @@ function lawNotes(f: FormValue, year: number, joint: boolean, all: readonly Form
     if (total < 123000) n.push(`§ 9a Satz 1 Nr. 1a EStG: Werbungskosten dieser Person zusammen ${euro(total)}, unter dem Arbeitnehmer-Pauschbetrag von 1.230 €, der ohnehin abgezogen wird.`);
   }
   if (f.field.prefilled) n.push("Vom Finanzamt elektronisch vorausgefüllt: nur prüfen.");
+  if (f.owner === "person:?") n.push("Person zuordnen: der Beleg ist mit keinem der Ehegatten als Bezugsperson verknüpft.");
   if (f.owner === "child:?") n.push("Kind zuordnen: der Beleg nennt kein Kind des Haushalts.");
   if (f.owner === "property:?") n.push("Objekt zuordnen: der Beleg nennt kein vermietetes Objekt.");
   return n;
@@ -210,7 +215,7 @@ export function mapToForm(year: number, values: readonly EvidenceValue[], opts: 
     }
   }
 
-  const ownerRank = (o: string) => (o === "self" ? 0 : o === "spouse" ? 1 : o === "return" ? 2 : 3);
+  const ownerRank = (o: string) => (o === "self" ? 0 : o === "spouse" ? 1 : o === "person:?" ? 2 : o === "return" ? 3 : 4);
   const result = [...byKey.values()].sort((a, b) =>
     (order.get(a.field.key)! - order.get(b.field.key)!) || ownerRank(a.owner) - ownerRank(b.owner) || a.owner.localeCompare(b.owner));
   for (const f of result) f.notes.push(...lawNotes(f, year, opts.joint, result));

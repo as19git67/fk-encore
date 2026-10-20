@@ -255,7 +255,25 @@ export function ownerFor(scope: FormScope | undefined, persons: readonly LinkedP
   const spouse = persons.some((p) => p.relationKind === "spouse");
   if (self && spouse) return "joint";
   if (spouse) return "spouse";
-  return "self";
+  if (self) return "self";
+  // Whose it is depends on the assessment: alone it is the user's, jointly
+  // it could be either spouse's (tax-form-mapping.ts).
+  return "none";
+}
+
+/**
+ * The owner as the household stands now. Without an "Ich selbst" among the
+ * Bezugspersonen no document can name the user, so one that names neither
+ * spouse is the user's; with one, it could be either spouse's and stays
+ * `none` for the user to assign.
+ */
+export function householdOwner(
+  scope: FormScope | undefined,
+  persons: readonly LinkedPerson[],
+  householdHasSelf: boolean,
+): ValueOwner {
+  const owner = ownerFor(scope, persons);
+  return owner === "none" && !householdHasSelf ? "self" : owner;
 }
 
 // -----------------------------------------------------------------------

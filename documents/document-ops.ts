@@ -86,6 +86,7 @@ import { rankReadings, type Reading } from "./letterhead";
 import {
   applyAgricultureFiscalYearTaxRule,
   applyKirchensteuerBescheidYearTaxRule,
+  applyIncomeTaxAssessmentTaxRule,
   applyIncomeTaxReturnTaxRule,
   applyInsuranceAdminTaxRule,
   incomeTaxReturnYear,
@@ -852,6 +853,25 @@ export async function runClassify(documentId: number): Promise<{ classification:
       if (/bescheid/i.test(classification.title ?? "")) {
         classification.title = year ? `Einkommensteuererklärung ${year}` : "Einkommensteuererklärung";
       }
+    }
+    classification.tax_sections = adjusted.taxSections;
+    classification.tax_role = adjusted.taxRole;
+  }
+  // 7b-4. An Einkommensteuerbescheid is the result of a return, not evidence
+  //       for the Anlagen it lists; only the Kirchensteuer it settles is a
+  //       Sonderausgabe (tax-rules.ts).
+  {
+    const adjusted = applyIncomeTaxAssessmentTaxRule({
+      text: clipped,
+      taxSections: classification.tax_sections,
+      taxRole: classification.tax_role,
+    });
+    if (adjusted.matched) {
+      console.log(
+        `[documents] income tax assessment rule(${documentId}): ` +
+          `${classification.tax_role} ${classification.tax_sections.map((s) => s.slug).join(",") || "-"} → ` +
+          `${adjusted.taxRole} ${adjusted.taxSections.map((s) => s.slug).join(",")}`,
+      );
     }
     classification.tax_sections = adjusted.taxSections;
     classification.tax_role = adjusted.taxRole;

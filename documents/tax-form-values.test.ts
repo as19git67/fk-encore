@@ -137,6 +137,31 @@ describe("values by form field", () => {
     expect(r.joint).toBe(true);
   });
 
+  it("asks whose a value is when the document names neither spouse, and follows a person linked later", async () => {
+    await addSpouse();
+    await db.execute(sql`INSERT INTO user_subject_persons (user_id, full_name, relation_tag, relation_kind)
+      VALUES (${USER}, 'Max Beispiel', 'Ich', 'self')`);
+    await db.execute(sql`UPDATE document_tax_value SET owner = 'none' WHERE document_id = ${LOHN_B}`);
+    const open = await buildTaxFormValues(USER, YEAR);
+    expect(open.values.find((v) => v.key === "n.bruttoarbeitslohn" && v.owner === "person:?")).toMatchObject({
+      owner_label: "Person nicht zugeordnet",
+      cents: 1200000,
+    });
+    // The user links the spouse: the value moves without a re-read.
+    await db.execute(sql`INSERT INTO document_subject_persons (document_id, subject_person_id)
+      SELECT ${LOHN_B}, id FROM user_subject_persons WHERE user_id = ${USER} AND relation_kind = 'spouse'`);
+    const linked = await buildTaxFormValues(USER, YEAR);
+    expect(linked.values.find((v) => v.key === "n.bruttoarbeitslohn" && v.owner === "spouse")!.cents).toBe(1200000);
+    expect(linked.values.some((v) => v.owner === "person:?")).toBe(false);
+  });
+
+  it("gives an unassigned value to the user while no Bezugsperson can name the user", async () => {
+    await addSpouse();
+    await db.execute(sql`UPDATE document_tax_value SET owner = 'none' WHERE document_id = ${LOHN_B}`);
+    const r = await buildTaxFormValues(USER, YEAR);
+    expect(r.values.find((v) => v.key === "n.bruttoarbeitslohn" && v.owner === "self")!.cents).toBe(3000000 + 1200000);
+  });
+
   it("marks every place unchecked in a year without a catalogue of its own", async () => {
     const later = 2034;
     await db.execute(sql`UPDATE documents SET tax_year = ${later} WHERE id = ${LOHN_A}`);
