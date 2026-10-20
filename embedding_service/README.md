@@ -118,6 +118,14 @@ Semantic search using a natural language query (multilingual).
 
 ### `POST /quality`
 Calculates a composite quality score (0.0 - 1.0) based on aesthetics, sharpness, and composition.
+Once an aesthetic head is trained and in use, the aesthetics part comes from it and the
+response carries `aesthetic_model`.
+
+### `GET /aesthetic-head`, `POST /aesthetic-head/train`, `POST /aesthetic-head/score`
+The provisional aesthetic score (`documentation/plans/foto-aesthetik.md`, stage 4): a linear
+head on the stored CLIP vector, trained on photo ids with their nightly Q-Align value and saved
+in `${MODELS_DIR}/aesthetic_head/`. It is used only when it ranks held-out photos closer to
+Q-Align than the zero-shot prompts. `/score` reads stored vectors, no image.
 
 ### `POST /similar-groups`
 Clusters photos into visually similar groups within a sliding time window.

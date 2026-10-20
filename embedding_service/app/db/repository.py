@@ -152,3 +152,15 @@ async def search_by_dino(
 def _vector_literal(vector: List[float]) -> str:
     """Convert a Python float list to pgvector literal string."""
     return "[" + ",".join(str(v) for v in vector) + "]"
+
+
+async def get_clip_embeddings(session: AsyncSession, photo_ids: List[str]) -> List[tuple[str, list]]:
+    """(photo_id, CLIP vector) for the given IDs that have one; only the column the head needs."""
+    if not photo_ids:
+        return []
+    result = await session.execute(
+        select(Photo.photo_id, Photo.embedding_clip).where(
+            _photo_id_any(photo_ids), Photo.embedding_clip.is_not(None)
+        )
+    )
+    return [(row[0], row[1]) for row in result.all()]

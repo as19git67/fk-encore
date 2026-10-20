@@ -189,3 +189,49 @@ class RedundantPairsGroupResult(BaseModel):
 
 class RedundantPairsResponse(BaseModel):
     groups: List[RedundantPairsGroupResult]
+
+
+# ---------------------------------------------------------------------------
+# /aesthetic-head (foto-aesthetik, stage 4)
+# ---------------------------------------------------------------------------
+
+class AestheticSample(BaseModel):
+    photo_id: str
+    score: float = Field(..., ge=0.0, le=1.0, description="Q-Align aesthetics scaled to 0–1")
+
+
+class AestheticHeadTrainRequest(BaseModel):
+    samples: List[AestheticSample] = Field(..., min_length=1)
+
+
+class AestheticHeadReport(BaseModel):
+    version: str
+    active: bool = Field(..., description="Used by /quality: beats the zero-shot prompts on the test photos")
+    trained_at: str
+    samples: int = Field(..., description="Q-Align scores sent that had a CLIP vector here")
+    train: int
+    validation: int
+    test: int
+    ridge_lambda: float
+    spearman_head: float
+    spearman_zero_shot: float
+    mae_head: float
+
+
+class AestheticHeadStatus(BaseModel):
+    head: Optional[AestheticHeadReport] = None
+
+
+class AestheticHeadScoreRequest(BaseModel):
+    photo_ids: List[str] = Field(..., min_length=1, max_length=2000)
+
+
+class AestheticHeadScore(BaseModel):
+    photo_id: str
+    score: float
+
+
+class AestheticHeadScoreResponse(BaseModel):
+    version: str
+    scores: List[AestheticHeadScore]
+    missing: List[str] = Field(..., description="Photo ids without a CLIP vector here")

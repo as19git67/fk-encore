@@ -4,7 +4,7 @@
  * photos still need a score, and writing a score back.
  */
 
-import { and, desc, eq, inArray, isNull, like, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, ne, notInArray, notLike, or, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { dbExec, dbFirst } from "../db/adapter";
 import {
@@ -152,6 +152,79 @@ export async function resetAestheticScores(model?: string): Promise<number> {
     : sql`${photos.aesthetic_model} IS NOT NULL`;
   const { changes } = await dbExec(db.update(photos).set({ aesthetic_model: null }).where(where));
   return changes;
+}
+
+// ─── Provisional score (stage 4) ─────────────────────────────────────────────
+
+/** A Q-Align score the head learns from: the photo id as the embedding service knows it, 0–1. */
+export interface HeadSample {
+  photo_id: string;
+  score: number;
+}
+
+/**
+ * Up to `limit` photos scored by `model` with their aesthetic value, drawn at
+ * random so a large library trains on a fair slice rather than its newest
+ * photos.
+ */
+export async function trainingSamples(model: string, limit: number): Promise<HeadSample[]> {
+  const value = sql<number>`(${photos.ai_quality_details}->>'clip_aesthetics')::float8`;
+  const rows = (await db
+    .select({ id: photos.id, score: value })
+    .from(photos)
+    .where(and(eq(photos.aesthetic_model, model), sql`${photos.ai_quality_details}->>'clip_aesthetics' IS NOT NULL`))
+    .orderBy(sql`random()`)
+    .limit(limit)) as { id: number; score: number }[];
+  return rows.map((r) => ({ photo_id: String(r.id), score: Math.min(1, Math.max(0, r.score)) }));
+}
+
+/**
+ * Images the head may score: nothing from Q-Align on them (a score or an
+ * unreadable mark) and not already scored by this head version. Paged by id.
+ */
+function provisionalTarget(headVersion: string): SQL {
+  return and(
+    like(photos.mime_type, "image/%"),
+    or(isNull(photos.aesthetic_model), and(notLike(photos.aesthetic_model, "qalign%"), ne(photos.aesthetic_model, headVersion))),
+  )!;
+}
+
+export async function countProvisionalTargets(headVersion: string): Promise<number> {
+  const row = await dbFirst<{ n: number }>(
+    db.select({ n: sql<number>`count(*)::int` }).from(photos).where(provisionalTarget(headVersion)),
+  );
+  return row?.n ?? 0;
+}
+
+export async function provisionalBatch(headVersion: string, afterId: number, limit: number): Promise<number[]> {
+  const rows = (await db
+    .select({ id: photos.id })
+    .from(photos)
+    .where(and(provisionalTarget(headVersion), gt(photos.id, afterId)))
+    .orderBy(asc(photos.id))
+    .limit(limit)) as { id: number }[];
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Writes the head's value as `clip_aesthetics` and names the head in
+ * `aesthetic_model`, the composite rebuilt like for a Q-Align score. A photo
+ * the nightly run scored in the meantime is left alone.
+ */
+export async function writeProvisionalScore(photoId: number, headVersion: string, value: number): Promise<void> {
+  const row = await dbFirst<{ details: Record<string, number> | null; score: number | null; model: string | null }>(
+    db
+      .select({ details: photos.ai_quality_details, score: photos.ai_quality_score, model: photos.aesthetic_model })
+      .from(photos)
+      .where(eq(photos.id, photoId)),
+  );
+  if (!row || row.model?.startsWith("qalign")) return;
+  const details = { ...(row.details ?? {}), clip_aesthetics: Math.round(Math.min(1, Math.max(0, value)) * 100) / 100 };
+  const composite = compositeFromDetails(details);
+  await db
+    .update(photos)
+    .set({ ai_quality_details: details, ai_quality_score: composite ?? row.score, aesthetic_model: headVersion })
+    .where(and(eq(photos.id, photoId), or(isNull(photos.aesthetic_model), notLike(photos.aesthetic_model, "qalign%"))));
 }
 
 // ─── Runs ────────────────────────────────────────────────────────────────────

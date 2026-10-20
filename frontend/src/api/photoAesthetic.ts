@@ -1,6 +1,7 @@
 /**
  * The nightly aesthetic run (documentation/plans/foto-aesthetik.md, stage 3):
- * window, state, history, and the manual start.
+ * window, state, history, and the manual start; and the provisional head
+ * (stage 4) that scores photos the night has not reached.
  */
 
 import { apiFetch } from './client'
@@ -43,6 +44,36 @@ export interface ScorerStatus {
   version: string | null
 }
 
+/** The linear head on the CLIP vector in the embedding service. */
+export interface AestheticHeadReport {
+  version: string
+  /** Used for new photos: beats the zero-shot prompts on the test photos. */
+  active: boolean
+  trained_at: string
+  samples: number
+  train: number
+  validation: number
+  test: number
+  ridge_lambda: number
+  /** Rank correlation with Q-Align on the test photos. */
+  spearman_head: number
+  spearman_zero_shot: number
+  mae_head: number
+}
+
+export interface AestheticHeadJob {
+  trigger: 'after_run' | 'manual'
+  status: 'running' | 'done' | 'skipped' | 'failed'
+  phase: 'train' | 'apply' | null
+  applied: number
+  without_vector: number
+  note: string | null
+  error: string | null
+  report: AestheticHeadReport | null
+  started_at: string
+  ended_at: string | null
+}
+
 export interface AestheticOverview {
   settings: AestheticSettings
   time_zone: string
@@ -54,6 +85,10 @@ export interface AestheticOverview {
   runs: AestheticRun[]
   scorer: ScorerStatus | null
   scorer_error: string | null
+  head: AestheticHeadReport | null
+  head_error: string | null
+  head_pending: number | null
+  head_job: AestheticHeadJob | null
 }
 
 export interface StartAestheticRunResponse {
@@ -80,4 +115,8 @@ export function stopAestheticRun(): Promise<{ stopping: boolean }> {
 
 export function backfillAesthetic(model?: string): Promise<{ marked: number }> {
   return apiFetch('/photos/aesthetic/backfill', { method: 'POST', body: JSON.stringify(model ? { model } : {}) })
+}
+
+export function trainAestheticHead(): Promise<{ started: boolean }> {
+  return apiFetch('/photos/aesthetic/head/train', { method: 'POST' })
 }

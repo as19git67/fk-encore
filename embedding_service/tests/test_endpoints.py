@@ -65,6 +65,7 @@ repo_stub.get_photos_by_ids = AsyncMock(return_value=[])
 repo_stub.search_by_clip = AsyncMock(return_value=[])
 repo_stub.search_by_dino = AsyncMock(return_value=[])
 repo_stub.get_dino_embeddings_sorted_by_time = AsyncMock(return_value=[])
+repo_stub.get_clip_embeddings = AsyncMock(return_value=[])
 sys.modules["app.db.repository"] = repo_stub
 
 # app.services.embedding_service stub
@@ -413,6 +414,73 @@ class TestQualityEndpoint:
     def test_missing_file_returns_422(self):
         response = client.post("/quality")
         assert response.status_code == 422
+
+
+class TestAestheticHead:
+    """The provisional aesthetic head (foto-aesthetik, stage 4) in /quality and its own endpoints."""
+
+    @staticmethod
+    def _head(active: bool = True, value: float = 0.8):
+        import numpy as np
+        from app.services import aesthetic_head as ah
+
+        report = ah.HeadReport(
+            version=ah.HEAD_VERSION, active=active, trained_at="2026-10-20T00:00:00+00:00",
+            samples=1000, train=700, validation=150, test=150, ridge_lambda=10.0,
+            spearman_head=0.7, spearman_zero_shot=0.3, mae_head=0.05,
+        )
+        return ah.Head(weights=np.zeros(512), bias=value, report=report)
+
+    def test_quality_uses_active_head_and_names_it(self):
+        with patch("app.api.endpoints.aesthetic_head.active_head", lambda: self._head(value=0.8)):
+            body = client.post(
+                "/quality", files={"file": ("t.jpg", _make_jpeg_bytes(), "image/jpeg")}
+            ).json()
+        assert body["clip_aesthetics"] == 0.8
+        assert body["aesthetic_model"] == "vith_head_v1"
+
+    def test_quality_without_head_keeps_zero_shot(self):
+        with patch("app.api.endpoints.aesthetic_head.active_head", lambda: None):
+            body = client.post(
+                "/quality", files={"file": ("t.jpg", _make_jpeg_bytes(), "image/jpeg")}
+            ).json()
+        assert "aesthetic_model" not in body
+
+    def test_score_refuses_without_active_head(self):
+        with patch("app.api.endpoints.aesthetic_head.active_head", lambda: None):
+            response = client.post("/aesthetic-head/score", json={"photo_ids": ["1"]})
+        assert response.status_code == 409
+
+    def test_score_reads_stored_vectors_and_lists_missing(self):
+        rows = [("1", [0.1] * 512), ("2", [0.2] * 512)]
+        with patch("app.api.endpoints.aesthetic_head.active_head", lambda: self._head(value=0.6)), \
+                patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=rows)):
+            body = client.post("/aesthetic-head/score", json={"photo_ids": ["1", "2", "3"]}).json()
+        assert body["version"] == "vith_head_v1"
+        assert body["scores"] == [{"photo_id": "1", "score": 0.6}, {"photo_id": "2", "score": 0.6}]
+        assert body["missing"] == ["3"]
+
+    def test_train_refuses_too_few_vectors(self):
+        with patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=[("1", [0.1] * 512)])):
+            response = client.post("/aesthetic-head/train", json={"samples": [{"photo_id": "1", "score": 0.5}]})
+        assert response.status_code == 409
+
+    def test_train_fits_and_saves(self, tmp_path, monkeypatch):
+        import numpy as np
+
+        monkeypatch.setenv("MODELS_DIR", str(tmp_path))
+        rng = np.random.default_rng(1)
+        vectors = rng.normal(size=(600, 512)).astype(np.float32)
+        w = rng.normal(size=512) * 0.01
+        scores = np.clip(0.5 + vectors @ w, 0, 1)
+        rows = [(str(i), vectors[i].tolist()) for i in range(600)]
+        samples = [{"photo_id": str(i), "score": float(scores[i])} for i in range(600)]
+        with patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=rows)):
+            body = client.post("/aesthetic-head/train", json={"samples": samples}).json()
+        assert body["head"]["samples"] == 600
+        assert body["head"]["spearman_head"] > 0.9
+        assert (tmp_path / "aesthetic_head" / "vith_head_v1.npz").exists()
+        assert client.get("/aesthetic-head").json()["head"]["version"] == "vith_head_v1"
 
 
 class TestRedundantPairsEndpoint:

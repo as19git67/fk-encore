@@ -8052,6 +8052,8 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
       clip_technical?: number;
       face_sharpness?: number;
       eyes_open_score?: number;
+      /** Set when the provisional head replaced the zero-shot aesthetics (stage 4). */
+      aesthetic_model?: string;
     };
     let compositeScore = result.score;
     const details: Record<string, number> = {};
@@ -8091,12 +8093,17 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
       if (typeof previous.qalign_quality === "number") details.qalign_quality = previous.qalign_quality;
       compositeScore = compositeFromDetails(details) ?? compositeScore;
     }
+    // Who wrote clip_aesthetics: a Q-Align score or its unreadable mark stays
+    // (the CASE below), otherwise the provisional head if /quality used it.
+    const aestheticModel = result.aesthetic_model ?? null;
 
     await db
       .update(photos)
       .set({
         ai_quality_score: compositeScore,
         ai_quality_details: Object.keys(details).length > 0 ? details : null,
+        // In SQL, so a nightly score written since the read above also stays.
+        aesthetic_model: sql`CASE WHEN ${photos.aesthetic_model} LIKE 'qalign%' THEN ${photos.aesthetic_model} ELSE ${aestheticModel} END`,
       })
       .where(eq(photos.id, photoId));
 

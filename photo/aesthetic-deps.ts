@@ -15,6 +15,10 @@ import { convertHeicToJpeg } from "./heic-convert.service";
 import { getPhotoDiskPath } from "./photo.service";
 import * as store from "./aesthetic-store";
 import type { LeaseView, NightDeps, ScoreOutcome, ScorerStatus } from "./aesthetic-nightly";
+import { startHeadJob, type HeadDeps, type HeadReport, type HeadScore } from "./aesthetic-head";
+import { fetchWithTimeout } from "./rpc-timeout";
+
+const EMBEDDING_SERVICE_URL = (process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001").replace(/\/$/, "");
 
 export const AESTHETIC_SERVICE_URL = (process.env.AESTHETIC_SERVICE_URL || "http://localhost:8004").replace(/\/$/, "");
 
@@ -112,6 +116,48 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+// ─── Provisional head in the embedding service (stage 4) ────────────────────
+
+/** Training reads up to 20 000 vectors and solves a 1024² system: seconds, with headroom. */
+const HEAD_TRAIN_TIMEOUT_MS = 10 * 60_000;
+const HEAD_SCORE_TIMEOUT_MS = 2 * 60_000;
+
+async function embeddingJson<T>(pathname: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+  const res = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}${pathname}`, { ...init, queue: "embedding" });
+  if (!res.ok) throw new Error(`embedding service ${pathname} ${res.status}: ${await detailOf(res)}`);
+  return (await res.json()) as T;
+}
+
+/** The head on disk in the embedding service; null when none was trained yet. */
+export async function headStatus(): Promise<HeadReport | null> {
+  const body = await embeddingJson<{ head: HeadReport | null }>("/aesthetic-head", { timeoutMs: CONTROL_TIMEOUT_MS });
+  return body.head;
+}
+
+export function realHeadDeps(): HeadDeps {
+  return {
+    samples: store.trainingSamples,
+    train: async (samples) => {
+      const body = await embeddingJson<{ head: HeadReport }>("/aesthetic-head/train", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ samples }),
+        timeoutMs: HEAD_TRAIN_TIMEOUT_MS,
+      });
+      return body.head;
+    },
+    score: (photoIds) =>
+      embeddingJson<{ version: string; scores: HeadScore[]; missing: string[] }>("/aesthetic-head/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo_ids: photoIds }),
+        timeoutMs: HEAD_SCORE_TIMEOUT_MS,
+      }),
+    provisionalBatch: store.provisionalBatch,
+    writeScore: store.writeProvisionalScore,
+  };
+}
+
 export function realNightDeps(): NightDeps {
   return {
     now: () => new Date(),
@@ -128,6 +174,10 @@ export function realNightDeps(): NightDeps {
     scorerLoad: () => lifecycle("/load"),
     scorerUnload: () => lifecycle("/unload"),
     score: scorePhoto,
+    // New Q-Align scores are new training data for the provisional head.
+    afterRun: () => {
+      startHeadJob("after_run", realHeadDeps());
+    },
     store: {
       getSettings: store.getAestheticSettings,
       countBacklog: store.countBacklog,

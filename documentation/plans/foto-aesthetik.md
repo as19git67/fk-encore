@@ -277,9 +277,29 @@ prerequisite for the nightly job.
    Not touched: the AI curation vote `indexPhotoQuality` derives from the
    composite stays as the quality job last set it; whether a new
    aesthetic score should move it belongs to stage 5.
-4. **Provisional score at import** — the MLP head on ViT-H/14 in
-   `compute_quality`, writing `clip_aesthetics` and
-   `aesthetic_model = "laion_vith_v1"`.
+4. **Provisional score at import** — *done.* Deviation from the decision
+   above: the head is not trained on AVA but on the household's own photos,
+   with the nightly Q-Align values as targets. It imitates the scorer that
+   overwrites it, on the photos it will see, and needs no 32 GB dataset
+   download. It is ridge regression on the 1024-dim CLIP ViT-H/14 vector
+   (`embedding_service/app/services/aesthetic_head.py`, closed form in
+   NumPy, strength chosen on a 15 % validation split), saved in the models
+   volume as `aesthetic_head/vith_head_v1.npz`. The 15 % test split gates
+   it: `/quality` uses the head only when its Spearman correlation with
+   Q-Align beats the zero-shot prompts on the same photos, and then reports
+   `aesthetic_model = "vith_head_v1"`, which `indexPhotoQuality` stores
+   (a Q-Align score or unreadable mark on the photo always stays). The
+   embedding service has `GET /aesthetic-head`, `POST /aesthetic-head/train`
+   (photo ids with their 0–1 Q-Align value; the vectors are already there)
+   and `POST /aesthetic-head/score` (stored vectors, no image read). The app
+   side is `photo/aesthetic-head.ts`: after every nightly run that scored
+   something, and on "Neu trainieren", it sends up to 20 000 random Q-Align
+   scores (from 500 on), and if the head is in use, scores every image
+   without a Q-Align value from its stored vector
+   (`writeProvisionalScore`), so the existing library gets the better value
+   too. A provisional score stays in the backlog of the nightly run. The
+   Ästhetik page shows the head's correlation next to the zero-shot one,
+   how many photos it learnt from and how many still lack a value.
 5. **Calibration and weights** — replay in
    `group-auto-pick.calibration.ts`, raise the aesthetic weight only with
    the measured gain; consider `qalign_quality` for the technical share.

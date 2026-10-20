@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw'
 import PhotoAestheticView from '../views/PhotoAestheticView.vue'
 import { defaultHandlers } from './handlers'
 import { routeFromParameters } from './storyRoute'
-import type { AestheticOverview, AestheticRun } from '../api/photoAesthetic'
+import type { AestheticHeadReport, AestheticOverview, AestheticRun } from '../api/photoAesthetic'
 
 /** Fotos › Einstellungen › Ästhetik: the nightly Q-Align run on the lent GPU. */
 
@@ -24,6 +24,11 @@ const FAILED: AestheticRun = {
   started_at: '2026-10-19T23:05:00Z', ended_at: '2026-10-19T23:20:00Z',
 }
 
+const HEAD: AestheticHeadReport = {
+  version: 'vith_head_v1', active: true, trained_at: '2026-10-21T04:12:00Z', samples: 17950, train: 12565,
+  validation: 2692, test: 2693, ridge_lambda: 100, spearman_head: 0.74, spearman_zero_shot: 0.36, mae_head: 0.06,
+}
+
 const BASE: AestheticOverview = {
   settings: { enabled: true, window_start: '01:00', window_end: '06:00', updated_at: '2026-10-20T15:00:00Z' },
   time_zone: 'Europe/Berlin',
@@ -35,6 +40,13 @@ const BASE: AestheticOverview = {
   runs: [NIGHT, MANUAL, FAILED],
   scorer: { state: 'unloaded', error: null, version: null },
   scorer_error: null,
+  head: HEAD,
+  head_error: null,
+  head_pending: 0,
+  head_job: {
+    trigger: 'after_run', status: 'done', phase: null, applied: 458, without_vector: 3, note: null, error: null,
+    report: HEAD, started_at: '2026-10-21T04:01:00Z', ended_at: '2026-10-21T04:13:00Z',
+  },
 }
 
 const RUNNING: AestheticOverview = {
@@ -86,6 +98,26 @@ export const DienstFehlt: Story = {
         runs: [],
         scorer: null,
         scorer_error: 'aesthetic-service unreachable at http://aesthetic_service:8000/status: fetch failed',
+        head: null,
+        head_pending: null,
+        head_job: null,
+      }),
+    },
+  },
+}
+
+export const KopfUngenutzt: Story = {
+  name: 'Vorläufiger Wert schlechter als CLIP, lernt gerade neu',
+  parameters: {
+    msw: {
+      handlers: handlers({
+        ...BASE,
+        head: { ...HEAD, active: false, samples: 640, test: 96, spearman_head: 0.31, spearman_zero_shot: 0.35 },
+        head_pending: null,
+        head_job: {
+          trigger: 'manual', status: 'running', phase: 'train', applied: 0, without_vector: 0, note: null, error: null,
+          report: null, started_at: new Date().toISOString(), ended_at: null,
+        },
       }),
     },
   },
