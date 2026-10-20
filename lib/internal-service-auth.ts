@@ -1,5 +1,5 @@
 /**
- * Outbound authentication for the five internal Python services.
+ * Outbound authentication for the internal Python services.
  *
  * llm-service, embedding_service, insightface-service, receipt-ocr-service
  * and taxonomy-tools each bind 0.0.0.0:8000 in their container and had no
@@ -45,6 +45,7 @@ const SERVICE_URLS: ReadonlyArray<readonly [string | undefined, string]> = [
   [process.env.INSIGHTFACE_SERVICE_URL, "http://localhost:8000"],
   [process.env.RECEIPT_OCR_SERVICE_URL, "http://localhost:8003"],
   [process.env.TAXONOMY_TOOLS_SERVICE_URL, "http://taxonomy_tools:8000"],
+  [process.env.AESTHETIC_SERVICE_URL, "http://localhost:8004"],
 ];
 
 function originOf(url: string): string | null {
@@ -88,7 +89,7 @@ function install(): void {
 
   if (!SECRET) {
     // Not fatal here on purpose: the app does far more than talk to these
-    // five services, and refusing to boot the whole thing over a missing
+    // services, and refusing to boot the whole thing over a missing
     // AI-service secret would be a worse failure than the 401s. The stack
     // itself refuses to come up without it (docker-compose uses `:?`), and
     // each service refuses to start, so this line is for someone running

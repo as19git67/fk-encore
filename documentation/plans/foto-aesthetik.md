@@ -243,9 +243,40 @@ prerequisite for the nightly job.
    per CPU of the cpuset). An assistant turn in the night is slow but
    usable, and the classification queue drains at a fraction of its daytime
    rate, which is what stage 3 sizes its batches against.
-3. **Nightly job, window setting, run table, admin panel** — as above.
-   Backfill endpoint `POST /photos/aesthetic/backfill?model=` that marks
-   photos for re-scoring without touching the rest of the quality job.
+3. **Nightly job, window setting, run table, admin panel** — *done.*
+   `photo/aesthetic-nightly.ts` holds the decisions with the services
+   injected (`aesthetic-deps.ts` wires the real ones), `aesthetic-cron.ts`
+   ticks every 5 minutes. Deviations from the sketch above: the hand-over
+   goes through `lendLlmGpu`/`returnLlmGpu` (stage 2), not two
+   configuration rows; the job is **off** by default (migration 0263) so a
+   host without `AESTHETIC_GPU_COUNT=1` never lends its card for nothing;
+   and the panel is its own page, Fotos › Einstellungen › Ästhetik
+   (`PhotoAestheticView.vue`), not a section of the KI-Modell page. A
+   window run starts only when the job is on, the window open, photos are
+   waiting, the GPU is not lent elsewhere (a benchmark run), the
+   llm-service is idle and the `llm` queue empty; "Jetzt starten" skips
+   the first two and the queue check and runs until the backlog is done or
+   it is stopped. Between batches of 200 the run ends when the window
+   closes, the job is switched off, an admin reloads the model (the lease
+   is gone, so nothing is returned) or "Anhalten" is pressed; five
+   transient scorer errors in a row end it as failed. The scorer's 1–5
+   values are scaled to 0–1: `clip_aesthetics` takes the aesthetics score
+   under the same key, `qalign_quality` is added, and `ai_quality_score`
+   is rebuilt from the details with the formula of `/quality`
+   (`compositeFromDetails` in `aesthetic-score.ts`); a photo the quality
+   job has not reached keeps its composite. `photos.aesthetic_model` says
+   who wrote `clip_aesthetics` (`qalign_v1`, or `qalign_v1:failed` for a
+   photo the scorer cannot read, which is then not retried each night),
+   and the quality job keeps a Q-Align value when it re-indexes a photo.
+   Runs are kept in `photo_aesthetic_run` with `gpu_returned`; a run that
+   could not give the GPU back (or a run a restart left open) is settled
+   by the next tick, which unloads the scorer and returns the GPU. The
+   window is read in the container's `TZ`, default Europe/Berlin.
+   `POST /photos/aesthetic/backfill` with an optional `model` hands scored
+   photos back to the backlog; the page offers it as "Alle neu bewerten".
+   Not touched: the AI curation vote `indexPhotoQuality` derives from the
+   composite stays as the quality job last set it; whether a new
+   aesthetic score should move it belongs to stage 5.
 4. **Provisional score at import** — the MLP head on ViT-H/14 in
    `compute_quality`, writing `clip_aesthetics` and
    `aesthetic_model = "laion_vith_v1"`.

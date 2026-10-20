@@ -217,6 +217,7 @@ services:
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LLM_SERVICE_URL: http://llm_service:8000
+      AESTHETIC_SERVICE_URL: http://aesthetic_service:8000
       # Per-request deadline for /classify & friends (documents/llm-client.ts).
       # The 120 s default fits a dense model held entirely in VRAM; a MoE model
       # with its experts offloaded to system RAM prefills a five-figure prompt

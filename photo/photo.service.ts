@@ -12,6 +12,7 @@ import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
+import { compositeFromDetails, isAestheticScore } from "./aesthetic-score";
 import { realtime, feed, sharedalbum } from "~encore/clients";
 import { markUsed, pickRegion } from "../osm-admin/region-router";
 import { getGeoClient } from "../osm-admin/geo-client";
@@ -8079,6 +8080,16 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
       }
     } catch (faceErr) {
       console.warn(`[quality] face composition scoring failed for photo ${photoId}:`, faceErr);
+    }
+
+    // A photo the nightly job has scored keeps the Q-Align value: the
+    // zero-shot CLIP signal from /quality is the weaker one, and a re-index
+    // must not undo a night's work (documentation/plans/foto-aesthetik.md).
+    const previous = photo.ai_quality_details;
+    if (isAestheticScore(photo.aesthetic_model) && typeof previous?.clip_aesthetics === "number") {
+      details.clip_aesthetics = previous.clip_aesthetics;
+      if (typeof previous.qalign_quality === "number") details.qalign_quality = previous.qalign_quality;
+      compositeScore = compositeFromDetails(details) ?? compositeScore;
     }
 
     await db

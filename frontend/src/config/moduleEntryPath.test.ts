@@ -99,6 +99,7 @@ describe('moduleEntryPath', () => {
     expect(settings?.children?.map((item) => [item.label, item.permission])).toEqual([
       ['Scan-Queue', 'data.manage'],
       ['Wartung', 'data.manage'],
+      ['Ästhetik', 'data.manage'],
       ['Externe Bibliotheken', 'photos.libraries.manage'],
       ['OSM-Regionen', 'osm.admin'],
       ['Gefahrenzone', 'photos.purge'],

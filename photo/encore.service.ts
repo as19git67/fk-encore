@@ -26,6 +26,9 @@ import "./recaps-cron";
 // One-time, resumable duplicate-candidate backfill for existing libraries.
 import "./duplicate-backfill-cron";
 
+// Nightly aesthetic scoring on the lent GPU (documentation/plans/foto-aesthetik.md).
+import "./aesthetic-cron";
+
 startLocalCron();
 
 import { startConfiguredWatchers } from "./library-watcher";

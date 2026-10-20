@@ -239,6 +239,11 @@ export const photos = pgTable("photos", {
   location_short: text("location_short"),
   ai_quality_score: real("ai_quality_score"),
   ai_quality_details: jsonb("ai_quality_details").$type<Record<string, number>>(),
+  // Which scorer wrote ai_quality_details.clip_aesthetics: NULL for the
+  // zero-shot CLIP signal, "qalign_v1" after the nightly job, and
+  // "qalign_v1:failed" for a photo the scorer cannot read (migration 0263,
+  // photo/aesthetic-store.ts).
+  aesthetic_model: text("aesthetic_model"),
   // Image dimensions post-EXIF-rotation (so a portrait phone shot stored
   // as 4032x3024 EXIF rot=6 lands here as width=3024, height=4032).
   // Used by the AI auto-pick orientation-diversity rule. NULL until
@@ -4803,6 +4808,42 @@ export const assistantBenchmarkRun = pgTable(
     finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
   },
   (table) => [index("assistant_benchmark_run_by_start").on(table.started_at)],
+);
+
+// ========== Nightly aesthetic scoring (documentation/plans/foto-aesthetik.md) ==========
+
+/** Whether the nightly job runs, and the local time window it may use the GPU in. One row. */
+export const photoAestheticSettings = pgTable("photo_aesthetic_settings", {
+  id: integer("id").primaryKey().default(1),
+  enabled: boolean("enabled").notNull().default(false),
+  window_start: text("window_start").notNull().default("01:00"),
+  window_end: text("window_end").notNull().default("06:00"),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AestheticRunTrigger = "window" | "manual";
+export type AestheticRunStatus = "running" | "done" | "stopped" | "failed";
+
+/** One night's run (or one manual start) of the aesthetic scorer. */
+export const photoAestheticRun = pgTable(
+  "photo_aesthetic_run",
+  {
+    id: serial("id").primaryKey(),
+    trigger: text("trigger").$type<AestheticRunTrigger>().notNull(),
+    status: text("status").$type<AestheticRunStatus>().notNull().default("running"),
+    phase: text("phase"),
+    model: text("model"),
+    backlog: integer("backlog").notNull().default(0),
+    scored: integer("scored").notNull().default(0),
+    failed: integer("failed").notNull().default(0),
+    remaining: integer("remaining"),
+    ended_reason: text("ended_reason"),
+    error: text("error"),
+    gpu_returned: boolean("gpu_returned").notNull().default(false),
+    started_at: timestamp("started_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    ended_at: timestamp("ended_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [index("photo_aesthetic_run_by_start").on(table.started_at)],
 );
 
 // ========== Businesses (documentation/plans/betriebe-euer.md) ==========

@@ -1,6 +1,6 @@
 // The outbound half of the internal-service authentication.
 //
-// The five Python services now refuse a request without a bearer token.
+// The internal Python services now refuse a request without a bearer token.
 // Attaching it is keyed on the destination rather than spread across the
 // ~30 call sites in sixteen client modules — a missed call site would be a
 // feature that 401s in production and nowhere else, since no test exercises
@@ -53,16 +53,17 @@ describe("with a secret configured", () => {
     INSIGHTFACE_SERVICE_URL: "http://insightface:8000",
     RECEIPT_OCR_SERVICE_URL: "http://receipt_ocr_service:8000",
     TAXONOMY_TOOLS_SERVICE_URL: "http://taxonomy_tools:8000",
+    AESTHETIC_SERVICE_URL: "http://aesthetic_service:8000",
   };
 
-  it("attaches the token to each of the five services", async () => {
+  it("attaches the token to each of the six services", async () => {
     await loadWithEnv(env);
 
     for (const base of Object.values(env).filter((v) => v.startsWith("http"))) {
       await fetch(`${base}/some/path`);
     }
 
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(6);
     for (const call of calls) {
       expect(call.headers.get("authorization"), call.url).toBe(`Bearer ${SECRET}`);
     }
@@ -133,11 +134,12 @@ describe("with a secret configured", () => {
       "http://localhost:8002/x", // llm
       "http://localhost:8003/x", // receipt-ocr
       "http://taxonomy_tools:8000/x",
+      "http://localhost:8004/x", // aesthetic
     ]) {
       await fetch(url);
     }
 
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(6);
     for (const call of calls) {
       expect(call.headers.get("authorization"), call.url).toBe(`Bearer ${SECRET}`);
     }
@@ -156,7 +158,7 @@ describe("with a secret configured", () => {
 
 describe("without a secret configured", () => {
   it("leaves fetch untouched and says so", async () => {
-    // Not fatal on purpose: the app does far more than talk to these five
+    // Not fatal on purpose: the app does far more than talk to these services
     // services. The stack itself refuses to come up without the variable.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await loadWithEnv({ INTERNAL_SERVICE_SECRET: undefined });
