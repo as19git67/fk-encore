@@ -1,15 +1,14 @@
 /**
  * Per-endpoint rate-limiting integration tests.
  *
- * Covers the six limited finance endpoints listed in
+ * Covers the five limited finance endpoints listed in
  * documentation/finance-rate-limiting.md §2:
  *
  *   1. POST /finance/tan-sessions/complete   (5 / 10m, per tan_reference)
  *   2. POST /finance/bankcontacts/:id/creds  (10 / 15m, per user×bankcontact)
  *   3. POST /finance/statements              (20 / 15m, per user×bankcontact)
  *   4. POST /finance/admin/import            (3 / 60m, per user)
- *   5. POST /finance/analysis/query          (30 / 10m, per user)
- *   6. POST /finance/tags/suggest            (5 / 60m, per user)
+ *   5. POST /finance/tags/suggest            (5 / 60m, per user)
  *
  * Each block runs: one "normal" call succeeds, then the max+1-th call
  * throws resource_exhausted. The tan-complete block additionally
@@ -44,26 +43,16 @@ import { setBankcontactCredentials } from "./bankcontacts";
 import { completeTanSession } from "./tan-sessions";
 import { triggerSync } from "./statements";
 import { importFinanceData } from "./data-import";
-import { query as analysisQuery } from "./analysis";
 import { suggestTagsBatch } from "./tag-suggester";
 import type { FinanzkraftExport } from "./import-schema";
 
 import * as fintsClient from "./fints-client";
-import * as llmClient from "./llm-client";
 
 vi.mock("./fints-client", async (orig) => {
   const actual = await orig<typeof import("./fints-client")>();
   return {
     ...actual,
     runSynchronize: vi.fn(),
-  };
-});
-
-vi.mock("./llm-client", async (orig) => {
-  const actual = await orig<typeof import("./llm-client")>();
-  return {
-    ...actual,
-    parseAnalysisQuery: vi.fn(),
   };
 });
 
@@ -126,7 +115,6 @@ beforeEach(async () => {
   __resetRateLimiterForTests();
   setAuth("1", []);
   vi.mocked(fintsClient.runSynchronize).mockReset();
-  vi.mocked(llmClient.parseAnalysisQuery).mockReset();
 });
 
 function expect429(err: unknown): void {
@@ -344,31 +332,7 @@ describe("rate-limiting — POST /finance/admin/import", () => {
 });
 
 // -----------------------------------------------------------------------
-// 5. POST /finance/analysis/query — 30 / 10m per user
-// -----------------------------------------------------------------------
-
-describe("rate-limiting — POST /finance/analysis/query", () => {
-  it("blocks the 31st LLM-backed query from the same user", async () => {
-    setAuth("1", ["finance.view", "finance.admin"]); // admin → no ACL narrowing
-    vi.mocked(llmClient.parseAnalysisQuery).mockResolvedValue({
-      tags: [],
-      op: "AND",
-    });
-
-    for (let i = 0; i < 30; i++) {
-      await analysisQuery({ question: `q ${i}` });
-    }
-    try {
-      await analysisQuery({ question: "one too many" });
-      throw new Error("expected 429");
-    } catch (err) {
-      expect429(err);
-    }
-  });
-});
-
-// -----------------------------------------------------------------------
-// 6. POST /finance/tags/suggest — 5 / 60m per user
+// 5. POST /finance/tags/suggest — 5 / 60m per user
 // -----------------------------------------------------------------------
 
 describe("rate-limiting — POST /finance/tags/suggest", () => {

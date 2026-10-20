@@ -167,6 +167,12 @@ the existing tag vocabulary. New tags are created only by the user.
 
 ## 4. Analysis queries (post-MVP, separate stage)
 
+> **Removed (2026-10):** the analysis page (`AnalysisView`, `finance/analysis.ts`,
+> saved analyses and their daily suggestions) is gone. Sums with subtotals by tag
+> or period now come from rule-based Sammelmappen the assistant creates
+> (`create_transaction_folder`) and from `POST /finance/transactions/totals`.
+
+
 ### 4.1 Endpoint
 
 `POST /finance/analysis/query`

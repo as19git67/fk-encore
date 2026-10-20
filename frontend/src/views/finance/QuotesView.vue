@@ -44,6 +44,11 @@ import {
 const route = useRoute()
 const router = useRouter()
 
+function openPortfolio() {
+  const accounts = queryString('accounts')
+  void router.push({ name: 'finance-portfolio', query: accounts ? { accounts } : {} })
+}
+
 // ── URL-backed scope ─────────────────────────────────────────────────
 const FILTER_KEYS = ['accounts'] as const
 
@@ -329,6 +334,16 @@ const STATUS_TEXT: Record<QuoteTile['status'], string> = {
 <template>
   <PageLayout title="Kurse" :hint="hint" width="wide" :ready="!loading">
     <template #actions>
+      <!-- Portfolio has no menu entry of its own; it opens from here, for the same depots. -->
+      <Button
+        label="Portfolio"
+        icon="pi pi-briefcase"
+        severity="secondary"
+        outlined
+        size="small"
+        data-testid="quotes-open-portfolio"
+        @click="openPortfolio"
+      />
       <Button
         icon="pi pi-refresh"
         text

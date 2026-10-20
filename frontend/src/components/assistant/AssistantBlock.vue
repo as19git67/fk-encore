@@ -178,11 +178,23 @@ function titleOf(r: Row): string {
   return key ? str(r[key]) : ''
 }
 
+/**
+ * Sums from transaction_totals: the total and its subtotals per tag or
+ * period. Conversations from before kept `by_tag` of the old analysis.
+ */
 const analysis = computed(() => {
   const row = props.block.rows[0] ?? {}
-  const byTag = Array.isArray(row.by_tag) ? (row.by_tag as Row[]).slice(0, 6) : []
-  return { sum: row.sum, count: row.count, byTag }
+  const groups = Array.isArray(row.groups)
+    ? (row.groups as Row[])
+    : Array.isArray(row.by_tag)
+      ? (row.by_tag as Row[]).map((t) => ({ label: t.tag, sum: t.sum, count: t.count }))
+      : []
+  return { sum: row.sum, count: row.count, groups, overlapping: row.overlapping === true }
 })
+const analysisOpen = ref(false)
+const analysisGroups = computed(() =>
+  analysisOpen.value ? analysis.value.groups : analysis.value.groups.slice(0, 12),
+)
 </script>
 
 <template>
@@ -291,12 +303,25 @@ const analysis = computed(() => {
         <span :class="amountClass(analysis.sum)">{{ formatCurrency(str(analysis.sum)) }}</span>
         <span class="row-sub">aus {{ str(analysis.count) }} Buchungen</span>
       </p>
-      <ul v-if="analysis.byTag.length" class="rows">
-        <li v-for="t in analysis.byTag" :key="str(t.tag)" class="row row--static">
-          <span class="row-main"><span class="row-title">{{ str(t.tag) }}</span></span>
-          <span :class="amountClass(t.sum)">{{ formatCurrency(str(t.sum)) }}</span>
+      <ul v-if="analysis.groups.length" class="rows">
+        <li v-for="g in analysisGroups" :key="str(g.label)" class="row row--static">
+          <span class="row-main">
+            <span class="row-title">{{ str(g.label) }}</span>
+            <span class="row-sub">{{ str(g.count) }} Buchungen</span>
+          </span>
+          <span :class="amountClass(g.sum)">{{ formatCurrency(str(g.sum)) }}</span>
         </li>
       </ul>
+      <Button
+        v-if="analysis.groups.length > 12"
+        :label="analysisOpen ? 'Weniger zeigen' : `Alle ${analysis.groups.length} Gruppen`"
+        text
+        size="small"
+        @click="analysisOpen = !analysisOpen"
+      />
+      <p v-if="analysis.overlapping" class="row-sub">
+        Manche Buchungen tragen mehrere dieser Tags und zählen in jeder Gruppe.
+      </p>
     </div>
 
     <!-- Recaps, albums, meters: name, detail and their own page -->

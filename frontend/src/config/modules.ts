@@ -406,10 +406,10 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
+        // The analysis page is gone; sums by tag or period come from rule
+        // Sammelmappen the assistant creates.
         path: 'analyse',
-        name: 'finance-analysis',
-        component: () => import('../views/finance/AnalysisView.vue'),
-        meta: { permission: 'finance.view' },
+        redirect: { name: 'finance-overview' },
       },
       {
         path: 'prognose',
@@ -481,12 +481,12 @@ export const modules: ModuleConfig[] = [
     ],
     menuItems: [
       { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
-      { label: 'Portfolio', icon: 'pi pi-briefcase', routeName: 'finance-portfolio', permission: 'finance.view' },
+      { label: 'Erwartete Zahlungen', icon: 'pi pi-calendar-clock', routeName: 'finance-direct-debits', permission: 'finance.view' },
+      { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
+      // Portfolio has no entry of its own: the Kurse page links to it.
       { label: 'Kurse', icon: 'pi pi-wave-pulse', routeName: 'finance-quotes', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
-      { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Prognose', icon: 'pi pi-chart-line', routeName: 'finance-forecast', permission: 'finance.view' },
-      { label: 'Erwartete Zahlungen', icon: 'pi pi-calendar-clock', routeName: 'finance-direct-debits', permission: 'finance.view' },
       {
         label: 'Steuer',
         icon: 'pi pi-percentage',
@@ -495,7 +495,6 @@ export const modules: ModuleConfig[] = [
           { label: 'Betriebe', icon: 'pi pi-warehouse', routeName: 'finance-businesses', permission: 'finance.view' },
         ],
       },
-      { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
       { label: 'Belegabgleich', icon: 'pi pi-receipt', routeName: 'finance-receipt-enrichment', permission: 'finance.view' },
       {
         label: 'Einstellungen',

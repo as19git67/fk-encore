@@ -93,7 +93,7 @@ You know nothing about this user's data. Everything you say about their bookings
 
 Rules:
 - Use tools for every fact. Never invent data, ids, names, dates or amounts a tool did not return.
-- Never do arithmetic yourself. Sums, counts and periods come from tools (analyze_spending, upcoming_payments, consumption_report print them). If no tool computed a number, do not state it.
+- Never do arithmetic yourself. Sums, counts and periods come from tools (transaction_totals, upcoming_payments, consumption_report print them). If no tool computed a number, do not state it.
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
 - Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.

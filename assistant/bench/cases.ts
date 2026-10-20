@@ -217,8 +217,8 @@ export const BENCH_CASES: BenchCase[] = [
     id: "groceries-last-month",
     title: "Ausgaben einer Kategorie",
     question: "Wie viel habe ich letzten Monat für Lebensmittel ausgegeben?",
-    expect: [{ tool: "analyze_spending", args: { question: { $present: true } } }],
-    results: { analyze_spending: { total: -412.37, formula: "sum of 23 bookings tagged Lebensmittel, 2026-09-01..2026-09-30" } },
+    expect: [{ tool: "transaction_totals", args: { from: "2026-09-01", to: "2026-09-30", direction: "out" } }],
+    results: { transaction_totals: { total: -412.37, count: 23, period: "2026-09-01..2026-09-30" } },
   },
   {
     id: "expenses-by-tag",
@@ -227,7 +227,7 @@ export const BENCH_CASES: BenchCase[] = [
     expect: [{ tool: "list_transactions", args: { tags: { $contains: "urlaub" }, direction: "out" } }],
     results: {
       list_transactions: { rows: [{ id: 9201, date: "2026-08-12", counterparty: "Beispiel Hotel", purpose: "Übernachtung", amount: -310.0, tags: "Urlaub" }], total: 1 },
-      analyze_spending: { total: -310.0, formula: "sum of 1 booking tagged Urlaub, amount < 0" },
+      transaction_totals: { total: -310.0, count: 1 },
     },
   },
   {
@@ -568,6 +568,19 @@ export const BENCH_CASES: BenchCase[] = [
         count: 36,
       },
       transaction_report: PROPOSAL("Bericht „Wohnung“ als PDF: Miete 24, Hausgeld 12; 36 Buchungen"),
+    },
+  },
+  {
+    id: "rule-folder-by-month",
+    title: "Regel-Sammelmappe mit Zwischensummen",
+    question: "Leg mir eine Sammelmappe für alle Buchungen von Musterfirma Haustechnik seit Januar an, mit Zwischensummen pro Monat.",
+    expect: [{
+      tool: "create_transaction_folder",
+      args: { name: { $present: true }, q: { $contains: "musterfirma" }, from: "2026-01-01", group_by: "month" },
+    }],
+    results: {
+      transaction_totals: { total: -1250.4, count: 9 },
+      create_transaction_folder: PROPOSAL("Regel-Sammelmappe „Haustechnik 2026“ für Buchungen: Suche „Musterfirma Haustechnik“, ab 01.01.2026; jetzt 9 Buchungen, Summe −1.250,40 €; Zwischensummen je Monat"),
     },
   },
 

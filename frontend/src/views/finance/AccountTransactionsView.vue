@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import CollectionSelect from '../../components/collections/CollectionSelect.vue'
 import { collectionName } from '../../composables/useCollectionNames'
+import CollectionTotalsPanel from '../../components/finance/CollectionTotalsPanel.vue'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import ListToolbar from '../../components/layout/ListToolbar.vue'
 import EmptyState from '../../components/layout/EmptyState.vue'
@@ -1631,6 +1632,13 @@ function goBack() {
       </ul>
     </Popover>
 
+
+    <!-- ── Sums of a transaction Sammelmappe ─────────────────────────── -->
+    <CollectionTotalsPanel
+      v-if="mode?.kind === 'collection'"
+      :collection-id="mode.collectionId"
+      :refresh-key="txStore.total"
+    />
 
     <!-- ── Holdings table (depot accounts only) ─────────────────────── -->
     <section v-if="isDepot" class="holdings-section">

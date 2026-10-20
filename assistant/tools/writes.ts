@@ -15,6 +15,9 @@ import type { JsonSchema, RefType, ToolContext } from "../types";
 import { renderLetter } from "./letters";
 import { euerPdf, taxWorksheetPdf } from "./tax";
 import { findInDocuments, pageCount, type Box } from "./text-boxes";
+import { CRITERIA_PROPERTIES, GROUP_PROPERTIES, criteriaFromArgs, groupByFromArgs, totalsText } from "./finance";
+import type { TransactionCriteria } from "../../finance/transaction-conditions";
+import type { TotalsGroupBy, TransactionTotals } from "../../finance/transaction-totals";
 
 /** More than this many objects in one proposal is refused; the user narrows first. */
 const MAX_PHOTOS = 2000;
@@ -528,6 +531,80 @@ const transactionReport: WriteToolDefinition = {
   },
 };
 
+/** The filter in words, for the card. */
+function criteriaWords(c: TransactionCriteria): string {
+  const parts: string[] = [];
+  if (c.text) parts.push(`Suche „${c.text}“`);
+  if (c.tags?.length) parts.push(`${c.tags.length === 1 ? "Tag" : "Tags"} ${c.tags.map((t) => `„${t}“`).join(", ")}`);
+  if (c.from && c.to) parts.push(`${deDate(c.from)}–${deDate(c.to)}`);
+  else if (c.from) parts.push(`ab ${deDate(c.from)}`);
+  else if (c.to) parts.push(`bis ${deDate(c.to)}`);
+  if (c.direction) parts.push(c.direction === "out" ? "nur Ausgaben" : "nur Einnahmen");
+  if (c.amount_min !== undefined) parts.push(`ab ${c.amount_min} €`);
+  if (c.amount_max !== undefined) parts.push(`bis ${c.amount_max} €`);
+  if (c.tax_relevant !== undefined) parts.push(c.tax_relevant ? "steuerrelevant" : "nicht steuerrelevant");
+  if (c.account_ids?.length) parts.push(plural(c.account_ids.length, "Konto", "Konten"));
+  return parts.join(", ");
+}
+
+const SUBTOTAL_WORDS: Record<TotalsGroupBy, string> = {
+  none: "",
+  tag: "Zwischensummen je Tag",
+  month: "Zwischensummen je Monat",
+  quarter: "Zwischensummen je Quartal",
+  year: "Zwischensummen je Jahr",
+};
+
+const createTransactionFolder: WriteToolDefinition = {
+  name: "create_transaction_folder",
+  summary: "Propose a rule-based Sammelmappe of bookings: the transaction list's filter and search become its rule, so bookings that match later join by themselves. Its page shows subtotals per tag or per month, quarter or year and the total; the server computes them. Same filter names as list_transactions.",
+  permissions: ["module.finance", "finance.view"],
+  parameters: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "the folder's name, e.g. 'Handwerker 2026'" },
+      ...CRITERIA_PROPERTIES,
+      ...GROUP_PROPERTIES,
+    },
+    required: ["name"],
+  },
+  async prepare(args) {
+    const name = str(args.name);
+    if (!name) throw new Error("name is required");
+    const criteria = criteriaFromArgs(args);
+    if (Object.keys(criteria).length === 0) {
+      throw new Error("the rule must narrow something: a search, a period, tags, an account, a direction or an amount");
+    }
+    const grouping = groupByFromArgs(args);
+    const totals = (await finance.transactionTotals({ criteria, ...grouping })) as unknown as TransactionTotals;
+    const parts = [`Regel-Sammelmappe „${name}“ für Buchungen: ${criteriaWords(criteria)}`];
+    parts.push(`jetzt ${plural(totals.count, "Buchung", "Buchungen")}, Summe ${money(totals.total, totals.currency)}`);
+    if (grouping.group_by !== "none") parts.push(SUBTOTAL_WORDS[grouping.group_by]);
+    return {
+      summary: parts.join("; "),
+      arguments: {
+        name,
+        criteria,
+        totals: { group_by: grouping.group_by, ...(grouping.group_tags ? { tags: grouping.group_tags } : {}) },
+      },
+      count: totals.count,
+      note: totalsText(totals),
+    };
+  },
+  async execute(args) {
+    const res = (await collections.createRuleCollection({
+      name: String(args.name),
+      rule: { type: "transaction", criteria: args.criteria, totals: args.totals },
+    })) as unknown as { collection: { id: number; name: string; total: number } };
+    const c = res.collection;
+    return {
+      summary: `Regel-Sammelmappe „${c.name}“ angelegt mit ${plural(c.total, "Buchung", "Buchungen")} – neue passende Buchungen kommen von selbst dazu`,
+      route: `/finanzen/sammelmappe/${c.id}`,
+      details: { collection_id: c.id },
+    };
+  },
+};
+
 const MAX_BUNDLE_DOCUMENTS = 500;
 
 interface TaxBundleBucket { slug: string; name: string; group: string; documents: { document: { id: number; title: string | null; original_filename?: string } }[] }
@@ -614,6 +691,7 @@ export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   createCollection,
   buildCollectionPdf,
   transactionReport,
+  createTransactionFolder,
   renderLetter,
 ];
 

@@ -1047,6 +1047,10 @@ export const setCollectionRule = api(
     const previous = ruleOf(row);
     const rule = normalizeMemberRule(req.rule, previous?.excluded_ids ?? []);
     if (!rule) throw APIError.invalidArgument("the rule must narrow something");
+    // A changed filter keeps the folder's subtotals unless it names its own.
+    if (rule.type === "transaction" && !rule.totals && previous?.type === "transaction" && previous.totals) {
+      rule.totals = previous.totals;
+    }
     if (row.entity_type != null && row.entity_type !== rule.type) {
       throw APIError.failedPrecondition(`this collection holds ${row.entity_type} items only, not ${rule.type}`);
     }
