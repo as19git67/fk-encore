@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import InputNumber from 'primevue/inputnumber'
@@ -372,7 +373,7 @@ async function save() {
       </div>
 
       <div class="document-search-row">
-        <InputText
+        <InputText v-bind="searchInputAttrs"
           v-model="documentQuery"
           class="document-search-input"
           placeholder="Dokument suchen …"

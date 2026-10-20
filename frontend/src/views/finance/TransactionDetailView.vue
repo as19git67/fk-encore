@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 import FileButton from '../../components/collections/FileButton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -825,7 +826,7 @@ const extractedFields = computed(() => {
             <div class="document-panel-section">
               <h3>Dokument suchen</h3>
               <div class="document-search-row">
-                <InputText
+                <InputText v-bind="searchInputAttrs"
                   v-model="documentQuery"
                   placeholder="Dokument suchen"
                   @keyup.enter="searchTransactionDocuments"

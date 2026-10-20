@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 /**
  * Tags-für-N-Buchungen — tristate editor for a set of transactions,
  * served as a modal dialog. Replaces the previous route-based
@@ -260,7 +261,7 @@ async function save() {
     </div>
 
     <div class="bt-search-row">
-      <InputText
+      <InputText v-bind="searchInputAttrs"
         v-model="search"
         placeholder="Suchen"
         class="bt-search-input"

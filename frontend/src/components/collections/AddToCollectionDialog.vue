@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 /**
  * "Ablegen" — the one way to put things into the basket or a collection
  * (#1548). Every list and every detail page opens this same dialog.
@@ -245,7 +246,7 @@ async function createAndAdd() {
       <span>Neue Mappe nur für {{ ENTITY_LABELS[onlyType].plural }}</span>
     </label>
 
-    <InputText
+    <InputText v-bind="searchInputAttrs"
       v-if="collections.length > 6"
       v-model="search"
       placeholder="Sammelmappe suchen …"

@@ -1,4 +1,5 @@
 <script setup lang="ts" generic="T extends string | number">
+import { searchInputAttrs } from '../utils/searchInputAttrs'
 import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
@@ -162,7 +163,7 @@ function onClose() {
 
     <div class="search-row">
       <i class="pi pi-search search-icon" />
-      <InputText
+      <InputText v-bind="searchInputAttrs"
         v-model="search"
         class="search-input"
         placeholder="Suchen…"

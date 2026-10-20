@@ -12,6 +12,7 @@ import 'primeicons/primeicons.css'
 import '../src/style.css'
 import { useAuthStore } from '../src/stores/auth'
 import { MOCK_USER } from '../src/stories/mock-data'
+import { searchInputPassThrough } from '../src/utils/searchInputAttrs'
 
 // Initialize MSW – unhandled requests pass through to Vite dev server
 initialize({ onUnhandledRequest: 'bypass' })
@@ -124,7 +125,7 @@ setup((app) => {
       },
     },
   })
-  app.use(PrimeVue, { theme: { preset: F4milPreset } })
+  app.use(PrimeVue, { theme: { preset: F4milPreset }, pt: searchInputPassThrough })
   app.use(ConfirmationService)
   app.directive('tooltip', Tooltip)
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../utils/searchInputAttrs'
 import { TAX_ROLE_OPTIONS, isTaxRole } from '../utils/taxRole'
 import { ref, computed, watch } from 'vue'
 import Dialog from 'primevue/dialog'
@@ -274,7 +275,7 @@ function handleReset() {
 
       <div class="filter-row">
         <label class="filter-label">Absender</label>
-        <InputText
+        <InputText v-bind="searchInputAttrs"
           :model-value="local.sender ?? ''"
           placeholder="Absender filtern…"
           @update:model-value="(v: string | undefined) => local = { ...local, sender: v || undefined }"

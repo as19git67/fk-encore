@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 /**
  * Choosing which pages of one document reach the Sammelmappe's PDF.
  *
@@ -671,7 +672,7 @@ function save() {
       <div class="cps-search">
         <IconField class="cps-search-field">
           <InputIcon class="pi pi-search" />
-          <InputText
+          <InputText v-bind="searchInputAttrs"
             v-model="query"
             type="search"
             placeholder="Im Text suchen"
@@ -853,7 +854,7 @@ function save() {
         <div class="cps-preview-group cps-preview-search">
           <IconField class="cps-search-field">
             <InputIcon class="pi pi-search" />
-            <InputText
+            <InputText v-bind="searchInputAttrs"
               v-model="query"
               type="search"
               size="small"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 import { computed, onBeforeUnmount, onMounted, ref, useSlots } from 'vue'
 import Button from 'primevue/button'
 import IconField from 'primevue/iconfield'
@@ -169,7 +170,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
                beside it — a hand-styled input drifted from the theme. -->
           <IconField class="list-toolbar__field">
             <InputIcon class="pi pi-search" />
-            <InputText
+            <InputText v-bind="searchInputAttrs"
               ref="searchInput"
               size="small"
               :model-value="model.search!.value.value"
