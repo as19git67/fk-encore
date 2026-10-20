@@ -46,7 +46,7 @@ import { triggerTagWorker } from "./tag-worker";
 import { normalizeCounterparty } from "./tag-suggester";
 import { createSuggestionsForTransaction } from "./document-match.service";
 import { hasFinanceAdmin, readableFinanceAccountIds } from "./account-acl";
-import { taxRelevantCondition } from "./transaction-conditions";
+import { amountConditions, parseAmountBound, parseDirection, taxRelevantCondition } from "./transaction-conditions";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -328,6 +328,14 @@ interface ListParams {
    * transactions where neither applies. Omitted means "don't filter".
    */
   taxRelevant?: boolean;
+  /**
+   * Amount range on the absolute amount, inclusive at both ends: 100
+   * matches a 100 € expense as well as a 100 € credit. `direction`
+   * narrows to money in (`in`) or out (`out`).
+   */
+  amountMin?: number;
+  amountMax?: number;
+  direction?: "in" | "out";
   from?: string; // ISO date
   to?: string;
   limit?: number;
@@ -384,6 +392,13 @@ export const listTransactions = api(
     }
     if (p.from) conds.push(gte(financeTransaction.booking_date, p.from));
     if (p.to) conds.push(lte(financeTransaction.booking_date, p.to));
+    conds.push(
+      ...amountConditions({
+        min: parseAmountBound(p.amountMin),
+        max: parseAmountBound(p.amountMax),
+        direction: parseDirection(p.direction),
+      }),
+    );
 
     if (p.q && p.q.trim().length > 0) {
       const q = p.q.trim();

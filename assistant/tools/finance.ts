@@ -6,6 +6,7 @@
 import { finance } from "~encore/clients";
 import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
+import { parseAmountBound, parseDirection } from "../../finance/transaction-conditions";
 
 const FINANCE = ["module.finance", "finance.view"];
 
@@ -97,7 +98,7 @@ export const listAccounts: ToolSpec = {
 export const listTransactions: ToolSpec = {
   name: "list_transactions",
   kind: "read",
-  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account, tags and the tax-relevant flag; newest first. For sums use analyze_spending.",
+  summary: "Finance bookings filtered by text (counterparty or purpose), date range, amount range, direction, account, tags and the tax-relevant flag; newest first. For sums use analyze_spending.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -109,6 +110,9 @@ export const listTransactions: ToolSpec = {
       account_id: { type: "integer", description: "id from list_accounts" },
       tags: { type: "array", items: { type: "string" }, description: "the user's tags, all must match" },
       tax_relevant: { type: "boolean", description: "only bookings flagged as relevant for the tax return (true) or not flagged (false)" },
+      amount_min: { type: "number", description: "smallest absolute amount in the account currency, inclusive; 100 matches a 100 expense and a 100 credit" },
+      amount_max: { type: "number", description: "largest absolute amount, inclusive" },
+      direction: { type: "string", enum: ["in", "out"], description: "in = money received, out = money spent" },
       limit: { type: "integer", description: "rows to return, at most 50 (default 25)" },
     },
   },
@@ -122,6 +126,9 @@ export const listTransactions: ToolSpec = {
       accountId: int(args.account_id),
       tagsCsv: tags.length ? tags.join(",") : undefined,
       taxRelevant: bool(args.tax_relevant),
+      amountMin: parseAmountBound(args.amount_min),
+      amountMax: parseAmountBound(args.amount_max),
+      direction: parseDirection(args.direction),
       limit,
     })) as unknown as { items: TransactionView[]; total: number };
     const rows = res.items;
@@ -134,6 +141,8 @@ export const listTransactions: ToolSpec = {
     const route = accountId !== undefined
       ? `/finanzen/uebersicht/konto/${accountId}${query({
           q: str(args.q), dateFrom: isoDate(args.from), dateTo: isoDate(args.to), tags: tags.join(",") || undefined,
+          amountMin: parseAmountBound(args.amount_min), amountMax: parseAmountBound(args.amount_max),
+          direction: parseDirection(args.direction),
         })}`
       : undefined;
     return {
