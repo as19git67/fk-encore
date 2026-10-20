@@ -229,10 +229,20 @@ prerequisite for the nightly job.
    round). The twin does not inherit the GPU configuration's `threads`
    (small on the card, where the CPU only feeds the GPU): it takes
    `LLM_CPU_THREADS` or one thread per CPU of the container's cpuset, so
-   the night runs on all the cores it was given. *Still to measure on the
-   host:* one GPU run and one CPU run of
-   the full case list; the two medians go here before stage 3 sizes its
-   batches.
+   the night runs on all the cores it was given. Measured on the host
+   (2026-10-20, Gemma 4 26B-A4B, full case list, 6 P-cores):
+
+   | Device | Median | p90 |
+   |---|---|---|
+   | GPU | 890 ms | 2.1 s |
+   | CPU twin, 6 threads | 4.4 s | 11.2 s |
+   | CPU twin, 12 threads | 3.9 s | 9.6 s |
+
+   The twin answers about 4–5× slower than the card; the hyper-threading
+   siblings help a little, so `LLM_CPU_THREADS` may stay empty (one thread
+   per CPU of the cpuset). An assistant turn in the night is slow but
+   usable, and the classification queue drains at a fraction of its daytime
+   rate, which is what stage 3 sizes its batches against.
 3. **Nightly job, window setting, run table, admin panel** — as above.
    Backfill endpoint `POST /photos/aesthetic/backfill?model=` that marks
    photos for re-scoring without touching the rest of the quality job.
