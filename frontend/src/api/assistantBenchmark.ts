@@ -17,7 +17,20 @@ export interface BenchModel {
   model_filename: string
   backend: string
   ctx_size: number
+  /** `cpu` or `cuda`; missing on runs filed before the GPU lease existed. */
+  accelerator?: string
+  /** 0 = nothing on the card: the run was the CPU twin. */
+  gpu_layers?: number
+  /** `env`, `file` or `lease`. */
+  source?: string
 }
+
+/** `loaded` measures what llm-service is running; `cpu` lends the GPU for the run and measures the CPU twin. */
+export type BenchDevice = 'loaded' | 'cpu'
+
+/** Stand-ins in `current_case` while the GPU changes hands. */
+export const PHASE_LEND = 'gpu:lend'
+export const PHASE_RETURN = 'gpu:return'
 
 export interface BenchSummary {
   cases: number
@@ -75,7 +88,7 @@ export function getBenchRun(id: number): Promise<BenchRunDetail> {
   return apiFetch(`/assistant/benchmark/runs/${id}`)
 }
 
-export function startBenchRun(body: { label?: string; case_ids?: string[] }): Promise<BenchRunDetail> {
+export function startBenchRun(body: { label?: string; case_ids?: string[]; device?: BenchDevice }): Promise<BenchRunDetail> {
   return apiFetch('/assistant/benchmark/runs', { method: 'POST', body: JSON.stringify(body) })
 }
 

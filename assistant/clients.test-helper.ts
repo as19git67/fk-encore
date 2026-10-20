@@ -77,7 +77,7 @@ export const clients = {
     cancelSlot: vi.fn(async () => {}),
   },
   realtime: { publishEvent: vi.fn(async () => {}) },
-  user: { getLlmStatus: vi.fn() },
+  user: { getLlmStatus: vi.fn(), lendLlmGpu: vi.fn(), returnLlmGpu: vi.fn(), getLlmGpuLease: vi.fn() },
 };
 
 /** Forget scripted answers and recorded calls of the service endpoints. */

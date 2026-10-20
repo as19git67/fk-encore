@@ -214,4 +214,91 @@ describe("benchmark runs", () => {
     vi.mocked(getAuthData).mockReturnValue({ userID: "1", permissions: ["module.assistant"] });
     await expect(listBenchmarkRuns()).rejects.toThrow();
   });
+
+  describe("on the CPU twin", () => {
+    const LEASE = { active: true, since: 1, previous_label: "Beispielmodell", previous_source: "file", embedder_device: "cuda" };
+    const reload = (state: string, detail: string | null = null) => ({ state, detail, label: "", started_at: 1, finished_at: null });
+
+    beforeEach(() => {
+      for (const fn of [clients.user.lendLlmGpu, clients.user.returnLlmGpu, clients.user.getLlmGpuLease]) fn.mockReset();
+    });
+
+    it("lend the GPU, wait for the twin, file it as the model, run, and return the GPU", async () => {
+      clients.user.lendLlmGpu.mockResolvedValue({ status: "accepted", reload: reload("stopping"), lease: LEASE });
+      clients.user.returnLlmGpu.mockResolvedValue({ status: "accepted", reload: reload("stopping"), lease: LEASE });
+      // Still swapping on the first poll, up on the second — both ways.
+      clients.user.getLlmGpuLease
+        .mockResolvedValueOnce({ lease: LEASE, reload: reload("loading"), llm_loaded: false })
+        .mockResolvedValueOnce({ lease: LEASE, reload: reload("ready"), llm_loaded: true })
+        .mockResolvedValueOnce({ lease: { ...LEASE, active: false }, reload: reload("ready"), llm_loaded: true });
+      clients.user.getLlmStatus.mockImplementation(async () => ({
+        live: clients.user.lendLlmGpu.mock.calls.length
+          ? { label: "Beispielmodell (CPU)", model_filename: "beispiel.gguf", backend: "server", ctx_size: 16384, accelerator: "cpu", gpu_layers: 0, source: "lease" }
+          : { label: "Beispielmodell", model_filename: "beispiel.gguf", backend: "server", ctx_size: 16384, accelerator: "cuda", gpu_layers: 99, source: "file" },
+      }));
+      vi.mocked(chat).mockImplementation(scripted([{ tool: "list_accounts", args: {} }], "Girokonto und Depot."));
+
+      const started = await startBenchmarkRun({ case_ids: ["accounts"], device: "cpu" });
+      expect(started.label).toBe("Beispielmodell (CPU)");
+      expect(started.current_case).toBe("gpu:lend");
+      await __settleBenchmarkForTests();
+
+      const run = await getBenchmarkRun({ id: started.id });
+      expect(run.status).toBe("done");
+      expect(run.error).toBeNull();
+      expect(run.model).toMatchObject({ gpu_layers: 0, accelerator: "cpu", source: "lease" });
+      expect(run.summary).toMatchObject({ cases: 1, passed: 1 });
+      expect(clients.user.lendLlmGpu).toHaveBeenCalledTimes(1);
+      expect(clients.user.returnLlmGpu).toHaveBeenCalledTimes(1);
+      // The model was lent before the first case ran.
+      expect(clients.user.lendLlmGpu.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(chat).mock.invocationCallOrder[0]);
+    });
+
+    it("do not end a lease that was not theirs", async () => {
+      clients.user.lendLlmGpu.mockResolvedValue({ status: "already_lent", reload: reload("ready"), lease: LEASE });
+      vi.mocked(chat).mockImplementation(async () => ({ content: "Danke!", tool_calls: [], finish_reason: "stop" }));
+
+      const started = await startBenchmarkRun({ case_ids: ["thanks-no-tool"], device: "cpu" });
+      await __settleBenchmarkForTests();
+
+      expect((await getBenchmarkRun({ id: started.id })).status).toBe("done");
+      expect(clients.user.getLlmGpuLease).not.toHaveBeenCalled();
+      expect(clients.user.returnLlmGpu).not.toHaveBeenCalled();
+    });
+
+    it("fail the run when the twin does not load, without running a case", async () => {
+      clients.user.lendLlmGpu.mockResolvedValue({ status: "accepted", reload: reload("stopping"), lease: LEASE });
+      clients.user.getLlmGpuLease.mockResolvedValue({
+        lease: { ...LEASE, active: false },
+        reload: reload("error", "RuntimeError: not enough RAM"),
+        llm_loaded: true,
+      });
+      clients.user.returnLlmGpu.mockResolvedValue({ status: "not_lent", reload: reload("ready"), lease: { ...LEASE, active: false } });
+      vi.mocked(chat).mockImplementation(async () => ({ content: "x", tool_calls: [], finish_reason: "stop" }));
+
+      const started = await startBenchmarkRun({ case_ids: ["accounts"], device: "cpu" });
+      await __settleBenchmarkForTests();
+
+      const run = await getBenchmarkRun({ id: started.id });
+      expect(run.status).toBe("failed");
+      expect(run.error).toMatch(/lending the GPU failed: RuntimeError: not enough RAM/);
+      expect(run.results).toEqual([]);
+      expect(chat).not.toHaveBeenCalled();
+    });
+
+    it("keep the measured cases when returning the GPU fails, and say so", async () => {
+      clients.user.lendLlmGpu.mockResolvedValue({ status: "accepted", reload: reload("stopping"), lease: LEASE });
+      clients.user.returnLlmGpu.mockRejectedValue(new Error("llm-service unreachable"));
+      clients.user.getLlmGpuLease.mockResolvedValue({ lease: LEASE, reload: reload("ready"), llm_loaded: true });
+      vi.mocked(chat).mockImplementation(async () => ({ content: "Danke!", tool_calls: [], finish_reason: "stop" }));
+
+      const started = await startBenchmarkRun({ case_ids: ["thanks-no-tool"], device: "cpu" });
+      await __settleBenchmarkForTests();
+
+      const run = await getBenchmarkRun({ id: started.id });
+      expect(run.status).toBe("done");
+      expect(run.results).toHaveLength(1);
+      expect(run.error).toMatch(/GPU not returned: llm-service unreachable/);
+    });
+  });
 });

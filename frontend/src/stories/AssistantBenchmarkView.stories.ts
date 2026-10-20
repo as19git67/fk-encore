@@ -13,7 +13,7 @@ const CASES = [
   { id: 'letter-paid-invoices', title: 'Brief aus drei Rechnungen, Lücke für das Unbekannte', question: 'Schreib der Musterfirma …', tools: ['render_letter'] },
 ]
 
-const MODEL = { label: 'Beispielmodell 26B', model_filename: 'beispielmodell-26b-q4.gguf', backend: 'server', ctx_size: 16384 }
+const MODEL = { label: 'Beispielmodell 26B', model_filename: 'beispielmodell-26b-q4.gguf', backend: 'server', ctx_size: 16384, accelerator: 'cuda', gpu_layers: 99, source: 'file' }
 
 const DONE: BenchRunDetail = {
   id: 2,
@@ -63,6 +63,14 @@ const OLDER: BenchRunSummary = {
 
 const summaryOf = ({ results: _r, ...rest }: BenchRunDetail): BenchRunSummary => rest
 
+/** The same cases on the CPU twin, as the model runs at night while the GPU scores photos. */
+const CPU_TWIN: BenchRunSummary = {
+  ...summaryOf(DONE), id: 4, label: 'Beispielmodell 26B (CPU)',
+  model: { ...MODEL, label: 'Beispielmodell 26B (CPU)', accelerator: 'cpu', gpu_layers: 0, source: 'lease' },
+  started_at: '2026-10-17T01:10:00Z', finished_at: '2026-10-17T01:21:40Z',
+  summary: { ...DONE.summary!, median_ms_per_round: 9800, p90_ms_per_round: 24500 },
+}
+
 const handlers = (runs: BenchRunSummary[], detail: BenchRunDetail) => [
   http.get('/api/assistant/benchmark/cases', () => HttpResponse.json({ today: '2026-10-15', cases: CASES })),
   http.get('/api/assistant/benchmark/runs', () => HttpResponse.json({ runs })),
@@ -79,7 +87,7 @@ const meta: Meta<typeof AssistantBenchmarkView> = {
   title: 'Views/AssistantBenchmarkView',
   component: AssistantBenchmarkView,
   decorators: [routeFromParameters('/dokumente/ki-benchmark')],
-  parameters: { msw: { handlers: handlers([summaryOf(DONE), OLDER], DONE) } },
+  parameters: { msw: { handlers: handlers([CPU_TWIN, summaryOf(DONE), OLDER], DONE) } },
 }
 
 export default meta
@@ -92,6 +100,18 @@ export const Laeuft: Story = {
   parameters: {
     testViewport: { width: 390, height: 844 },
     msw: { handlers: handlers([summaryOf(RUNNING), summaryOf(DONE), OLDER], RUNNING) },
+  },
+}
+
+export const GpuWirdVerliehen: Story = {
+  name: 'Lauf auf dem CPU-Zwilling, GPU wird gerade verliehen',
+  parameters: {
+    msw: {
+      handlers: handlers(
+        [summaryOf({ ...RUNNING, id: 5, label: 'Beispielmodell 26B (CPU)', cases_done: 0, current_case: 'gpu:lend', results: [] }), CPU_TWIN, summaryOf(DONE)],
+        { ...RUNNING, id: 5, label: 'Beispielmodell 26B (CPU)', cases_done: 0, current_case: 'gpu:lend', results: [] },
+      ),
+    },
   },
 }
 
