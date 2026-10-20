@@ -155,11 +155,12 @@ docker compose --env-file .env up -d --force-recreate llm_service
 | `app`                | Encore.ts main application (frontend + API) | 8080          | 8080               |
 | `insightface`        | Face recognition (InsightFace/buffalo_l)   | 8000          | – (internal only)  |
 | `embedding_service`  | Photo embeddings (CLIP + DINOv2)           | 8000          | – (internal only)  |
+| `aesthetic_service`  | Photo aesthetics (Q-Align, GPU lent at night; see `documentation/plans/foto-aesthetik.md`) | 8000 | – (internal only) |
 | `embedding_postgres` | PostgreSQL with pgvector for embeddings    | 5432          | – (internal only)  |
 | `geo`                | Reverse-geocoding + POI lookup (Node + osm2pgsql) | 8080  | – (internal only)  |
 | `geo-db`             | PostGIS 16 — one DB per imported OSM region | 5432         | – (internal only)  |
 
-The ML services (insightface, embedding_service) are only reachable
+The ML services (insightface, embedding_service, aesthetic_service) are only reachable
 internally and not exposed to the outside.
 
 ## Configuration

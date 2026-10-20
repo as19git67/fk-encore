@@ -1,0 +1,19 @@
+# torch is installed explicitly in the Dockerfile from the cu128 index so a
+# CPU wheel cannot replace the CUDA build during dependency resolution.
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.9.2
+python-multipart==0.0.31
+Pillow==12.3.0
+
+# Q-Align (q-future/one-align) ships its mPLUG-Owl2 code as custom model
+# code and its model card pins transformers 4.36.1; the remote code imports
+# einops and icecream. accelerate carries device_map, bitsandbytes the
+# 8-bit/4-bit loading that makes the model fit beside the CUDA context.
+transformers==4.36.1
+accelerate==0.34.2
+bitsandbytes==0.45.0
+einops==0.8.0
+icecream==2.1.3
+sentencepiece==0.2.0
+huggingface_hub==0.26.2

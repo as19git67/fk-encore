@@ -486,6 +486,56 @@ services:
       # consistent.
       start_period: ${DEPLOY_LLM_START_PERIOD:-600s}
 
+  # ── Aesthetic Service (Q-Align photo scorer on a borrowed GPU) ─────────────
+  # Holds no model at rest. The nightly job in the app lends it the GPU after
+  # the llm_service has moved Gemma 4 to the CPU, calls /load, scores the
+  # backlog and calls /unload; see documentation/plans/foto-aesthetik.md.
+  # The image is amd64-only and CUDA-based; with AESTHETIC_GPU_COUNT=0 the
+  # container still starts and answers /status, and /load reports that no
+  # card is visible. It shares the llm_models volume so the Hugging Face
+  # cache (/models/hf-cache) is the one the llm_service already fills.
+  aesthetic_service:
+    image: ${DEPLOY_IMAGE_BASE:-ghcr.io/as19git67/fk-encore}/aesthetic:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-aesthetic${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    user: "568:568"
+    cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
+    # Background weight like the llm_service: when the scorer runs, nothing
+    # interactive should wait for it.
+    cpu_shares: ${DEPLOY_LLM_CPU_SHARES:-512}
+    labels:
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
+    depends_on:
+      chown-init:
+        condition: service_completed_successfully
+    environment:
+      MODELS_DIR: /models
+      HF_HOME: /models/hf-cache
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
+      AESTHETIC_MODEL_ID: ${AESTHETIC_MODEL_ID:-q-future/one-align}
+      AESTHETIC_DEVICE: ${AESTHETIC_DEVICE:-cuda}
+      # 8bit (~9 GB) fits the 16 GB card with headroom; 4bit (~5 GB) if it
+      # has to share; none = fp16 for a bigger card.
+      AESTHETIC_QUANT: ${AESTHETIC_QUANT:-8bit}
+      AESTHETIC_MAX_EDGE: ${AESTHETIC_MAX_EDGE:-1024}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - llm_models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: ${LLM_GPU_DRIVER:-nvidia}
+              count: ${AESTHETIC_GPU_COUNT:-0}
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 2m
+      timeout: 10s
+      retries: 5
+      # Nothing loads at start; the probe only needs uvicorn up.
+      start_period: 60s
+
   # ── Receipt OCR Service (PaddleOCR + small LLM for fast receipt extraction) ─
   receipt_ocr_service:
     image: ${DEPLOY_IMAGE_BASE:-ghcr.io/as19git67/fk-encore}/receipt-ocr:${DEPLOY_IMAGE_TAG:-latest}
