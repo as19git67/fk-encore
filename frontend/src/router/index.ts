@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { modules, detectModule, landingPath, MODULE_ROUTE_KEY_PREFIX } from '../config/modules'
+import { modules, detectModule, landingPath, refusedRouteFallback, MODULE_ROUTE_KEY_PREFIX } from '../config/modules'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import ForgotPasswordView from '../views/ForgotPasswordView.vue'
@@ -138,9 +138,7 @@ router.beforeEach(async (to) => {
   if (requiredPermission && !auth.hasPermission(requiredPermission)) {
     await auth.refreshUser()
     if (!auth.hasPermission(requiredPermission)) {
-      const fallback = landingPath((p) => auth.hasPermission(p))
-      // Never redirect onto the page that was just refused.
-      return fallback === to.fullPath ? { name: 'profile' } : fallback
+      return refusedRouteFallback(to.fullPath, (p) => auth.hasPermission(p))
     }
   }
 })

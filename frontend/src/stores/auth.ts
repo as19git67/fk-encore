@@ -6,6 +6,7 @@ import { startAuthentication } from '@simplewebauthn/browser'
 import { passkeyAuthOptions, passkeyAuthVerify } from '../api/passkeys'
 import { realtimeBus, type RealtimeChannel } from '../composables/useRealtime'
 import { ensureFreshToken } from '../api/client'
+import { clearModuleRoutes } from '../config/modules'
 
 const REALTIME_CHANNELS: RealtimeChannel[] = ['documents', 'photos', 'albums', 'feed', 'finance', 'scan-queue']
 
@@ -134,6 +135,9 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('auth_user')
     // Don't strand the next user on the previous user's last view.
     localStorage.removeItem('app_last_route')
+    // Nor on the pages they last had open in each module: those may be
+    // settings the next user is not allowed to see.
+    clearModuleRoutes()
     realtimeBus.disconnect()
   }
 
