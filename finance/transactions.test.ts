@@ -327,6 +327,31 @@ describe("finance/transactions — list (ACL filter)", () => {
     expect(july.total).toBe(2);
   });
 
+  it("filters by absolute amount range (inclusive) and direction", async () => {
+    const { a } = await createAccounts();
+    await insertTx(a, { amount: "-100.00", counterparty: "out100" });
+    await insertTx(a, { amount: "100.00", counterparty: "in100" });
+    await insertTx(a, { amount: "-500.01", counterparty: "out500" });
+    await insertTx(a, { amount: "12.50", counterparty: "in12" });
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+    const names = async (p: Parameters<typeof listTransactions>[0]) =>
+      (await listTransactions(p)).items.map((i) => i.counterparty).sort();
+
+    // The bounds compare the absolute amount, so both sides of 100 match.
+    expect(await names({ amountMin: 100 })).toEqual(["in100", "out100", "out500"]);
+    expect(await names({ amountMax: 100 })).toEqual(["in100", "in12", "out100"]);
+    expect(await names({ amountMin: 50, amountMax: 500 })).toEqual(["in100", "out100"]);
+
+    // The direction picks the sign.
+    expect(await names({ direction: "out" })).toEqual(["out100", "out500"]);
+    expect(await names({ amountMin: 100, direction: "in" })).toEqual(["in100"]);
+
+    // A negative bound is no bound.
+    expect(await names({ amountMin: -5 })).toHaveLength(4);
+  });
+
   it("filters by tax relevance across bookings and their splits", async () => {
     const { a } = await createAccounts();
     const flagged = await insertTx(a, { counterparty: "Flagged", is_tax_relevant: true });

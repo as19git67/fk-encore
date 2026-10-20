@@ -34,6 +34,7 @@ import InputText from 'primevue/inputtext'
 import MultiSelect from 'primevue/multiselect'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
+import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Popover from 'primevue/popover'
 import { useTransactionsStore } from '../../stores/finance/transactions'
@@ -45,6 +46,13 @@ import { useAuthStore } from '../../stores/auth'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import BatchTagDialog from '../../components/finance/BatchTagDialog.vue'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
+import {
+  amountRangeLabel,
+  directionLabel,
+  directionOptions,
+  parseAmountQuery,
+  parseDirectionQuery,
+} from '../../utils/amountFilter'
 import { compactDateLabels, fullDateLabel } from '../../utils/financeChartDates'
 import type {
   DepotTransaction,
@@ -227,6 +235,9 @@ const formTaxRelevant = computed({
   get: () => filtersStore.formTaxRelevant,
   set: (v) => { filtersStore.formTaxRelevant = v },
 })
+const formAmountMin = computed({ get: () => filtersStore.formAmountMin, set: (v) => { filtersStore.formAmountMin = v } })
+const formAmountMax = computed({ get: () => filtersStore.formAmountMax, set: (v) => { filtersStore.formAmountMax = v } })
+const formDirection = computed({ get: () => filtersStore.formDirection, set: (v) => { filtersStore.formDirection = v } })
 
 const taxRelevantOptions = [
   { label: 'Steuer: alle', value: null },
@@ -272,6 +283,9 @@ function buildQuery(): ListTransactionsQuery {
   if (filtersStore.appliedTaxRelevant !== null) base.taxRelevant = filtersStore.appliedTaxRelevant
   if (filtersStore.appliedFrom) base.from = isoDate(filtersStore.appliedFrom)
   if (filtersStore.appliedTo) base.to = isoDate(filtersStore.appliedTo)
+  if (filtersStore.appliedAmountMin !== null) base.amountMin = filtersStore.appliedAmountMin
+  if (filtersStore.appliedAmountMax !== null) base.amountMax = filtersStore.appliedAmountMax
+  if (filtersStore.appliedDirection) base.direction = filtersStore.appliedDirection
   if (collectionScope.value) base.collectionId = collectionScope.value
   return base
 }
@@ -327,10 +341,16 @@ filtersStore.appliedQuery = search.term.value
   const tags = typeof route.query.tags === 'string'
     ? route.query.tags.split(',').map((t) => t.trim()).filter(Boolean)
     : []
-  if (from || to || tags.length) {
+  const amountMin = parseAmountQuery(route.query.amountMin)
+  const amountMax = parseAmountQuery(route.query.amountMax)
+  const direction = parseDirectionQuery(route.query.direction)
+  if (from || to || tags.length || amountMin !== null || amountMax !== null || direction) {
     filtersStore.formFrom = from ? parseLocalDate(from) : null
     filtersStore.formTo = to ? parseLocalDate(to) : null
     filtersStore.formTags = tags
+    filtersStore.formAmountMin = amountMin
+    filtersStore.formAmountMax = amountMax
+    filtersStore.formDirection = direction
     filtersStore.apply()
   }
 }
@@ -347,6 +367,8 @@ const facetCount = computed(() => {
   if (filtersStore.appliedTags.length > 0) n++
   if (filtersStore.appliedTaxRelevant !== null) n++
   if (filtersStore.appliedFrom || filtersStore.appliedTo) n++
+  if (filtersStore.appliedAmountMin !== null || filtersStore.appliedAmountMax !== null) n++
+  if (filtersStore.appliedDirection) n++
   if (collectionScope.value && mode.value?.kind !== 'collection') n++
   return n
 })
@@ -367,7 +389,13 @@ const ruleInput = computed<MemberRuleInput | null>(() => {
   if (filtersStore.appliedTaxRelevant !== null) criteria.tax_relevant = filtersStore.appliedTaxRelevant
   if (filtersStore.appliedFrom) criteria.from = isoDate(filtersStore.appliedFrom)
   if (filtersStore.appliedTo) criteria.to = isoDate(filtersStore.appliedTo)
-  const narrows = !!(criteria.text || criteria.tags || criteria.tax_relevant !== undefined || criteria.from || criteria.to)
+  if (filtersStore.appliedAmountMin !== null) criteria.amount_min = filtersStore.appliedAmountMin
+  if (filtersStore.appliedAmountMax !== null) criteria.amount_max = filtersStore.appliedAmountMax
+  if (filtersStore.appliedDirection) criteria.direction = filtersStore.appliedDirection
+  const narrows = !!(
+    criteria.text || criteria.tags || criteria.tax_relevant !== undefined || criteria.from || criteria.to
+    || criteria.amount_min !== undefined || criteria.amount_max !== undefined || criteria.direction
+  )
   return narrows ? { type: 'transaction', criteria } : null
 })
 const canSaveRule = computed(() => ruleInput.value !== null && !isDepot.value)
@@ -423,6 +451,25 @@ const filterChips = computed<FilterChip[]>(() => {
         filtersStore.formTo = null
         applyFilters()
       },
+    })
+  }
+  const amountLabel = amountRangeLabel(filtersStore.appliedAmountMin, filtersStore.appliedAmountMax)
+  if (amountLabel) {
+    out.push({
+      key: 'amount',
+      label: amountLabel,
+      remove: () => {
+        filtersStore.formAmountMin = null
+        filtersStore.formAmountMax = null
+        applyFilters()
+      },
+    })
+  }
+  if (filtersStore.appliedDirection) {
+    out.push({
+      key: 'direction',
+      label: directionLabel(filtersStore.appliedDirection),
+      remove: () => { filtersStore.formDirection = null; applyFilters() },
     })
   }
   return out
@@ -1482,6 +1529,42 @@ function goBack() {
           v-model:from="formFrom"
           v-model:to="formTo"
         />
+        <!-- Amounts are absolute: "ab 100 €" keeps expenses and credits of
+             100 € or more; the direction narrows to one side. -->
+        <div class="tx-filter-row tx-filter-amount">
+          <InputNumber
+            v-model="formAmountMin"
+            :min="0"
+            :max-fraction-digits="2"
+            locale="de-DE"
+            suffix=" €"
+            placeholder="Betrag ab"
+            aria-label="Betrag ab"
+            class="tx-filter-input"
+            @keydown.enter="applyFilters"
+          />
+          <span class="tx-filter-sep" aria-hidden="true">–</span>
+          <InputNumber
+            v-model="formAmountMax"
+            :min="0"
+            :max-fraction-digits="2"
+            locale="de-DE"
+            suffix=" €"
+            placeholder="Betrag bis"
+            aria-label="Betrag bis"
+            class="tx-filter-input"
+            @keydown.enter="applyFilters"
+          />
+        </div>
+        <Select
+          v-model="formDirection"
+          :options="directionOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Ein- und Ausgänge"
+          aria-label="Richtung filtern"
+          class="tx-filter-input"
+        />
       </div>
       <div class="tx-filter-actions">
         <Button
@@ -1493,7 +1576,8 @@ function goBack() {
           icon="pi pi-times"
           severity="secondary"
           aria-label="Filter zurücksetzen"
-          :disabled="!hasActiveFilters && formTags.length === 0 && !formFrom && !formTo && formTaxRelevant === null"
+          :disabled="!hasActiveFilters && formTags.length === 0 && !formFrom && !formTo && formTaxRelevant === null
+            && formAmountMin === null && formAmountMax === null && formDirection === null"
           @click="clearFilters"
         />
       </div>
@@ -2100,6 +2184,16 @@ function goBack() {
 .tx-filter-input {
   width: 100%;
   min-width: 0;
+}
+.tx-filter-amount .tx-filter-input {
+  flex: 1 1 0;
+}
+.tx-filter-amount .tx-filter-input :deep(input) {
+  width: 100%;
+  min-width: 0;
+}
+.tx-filter-sep {
+  color: var(--p-text-muted-color);
 }
 .tx-filter-actions {
   display: flex;

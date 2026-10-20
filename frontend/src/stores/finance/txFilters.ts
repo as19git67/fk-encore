@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { toLocalIsoDate, parseLocalDate } from '../../utils/dateFormat'
+import type { TransactionDirection } from '../../utils/amountFilter'
 
 /**
  * Persists the filter form and applied-filter state for the transaction
@@ -15,6 +16,10 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
   const formToIso = ref<string | null>(null)
   /** null = no tax filter, true = tax-relevant only, false = the rest. */
   const formTaxRelevant = ref<boolean | null>(null)
+  /** Absolute amount bounds, inclusive; null = open. */
+  const formAmountMin = ref<number | null>(null)
+  const formAmountMax = ref<number | null>(null)
+  const formDirection = ref<TransactionDirection | null>(null)
 
   // Applied state (what was last submitted via "Suchen")
   const appliedQuery = ref('')
@@ -22,6 +27,9 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
   const appliedFromIso = ref<string | null>(null)
   const appliedToIso = ref<string | null>(null)
   const appliedTaxRelevant = ref<boolean | null>(null)
+  const appliedAmountMin = ref<number | null>(null)
+  const appliedAmountMax = ref<number | null>(null)
+  const appliedDirection = ref<TransactionDirection | null>(null)
 
   const hasActiveFilters = computed(
     () =>
@@ -29,7 +37,10 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
       appliedTags.value.length > 0 ||
       appliedFromIso.value !== null ||
       appliedToIso.value !== null ||
-      appliedTaxRelevant.value !== null,
+      appliedTaxRelevant.value !== null ||
+      appliedAmountMin.value !== null ||
+      appliedAmountMax.value !== null ||
+      appliedDirection.value !== null,
   )
 
   // Convenience: Date objects derived from ISO date strings
@@ -54,6 +65,15 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
     appliedFromIso.value = formFromIso.value
     appliedToIso.value = formToIso.value
     appliedTaxRelevant.value = formTaxRelevant.value
+    // A reversed range is what the user meant the other way round.
+    const [min, max] = formAmountMin.value !== null && formAmountMax.value !== null && formAmountMin.value > formAmountMax.value
+      ? [formAmountMax.value, formAmountMin.value]
+      : [formAmountMin.value, formAmountMax.value]
+    formAmountMin.value = min
+    formAmountMax.value = max
+    appliedAmountMin.value = min
+    appliedAmountMax.value = max
+    appliedDirection.value = formDirection.value
   }
 
   function clear() {
@@ -62,11 +82,17 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
     formFromIso.value = null
     formToIso.value = null
     formTaxRelevant.value = null
+    formAmountMin.value = null
+    formAmountMax.value = null
+    formDirection.value = null
     appliedQuery.value = ''
     appliedTags.value = []
     appliedFromIso.value = null
     appliedToIso.value = null
     appliedTaxRelevant.value = null
+    appliedAmountMin.value = null
+    appliedAmountMax.value = null
+    appliedDirection.value = null
   }
 
   return {
@@ -75,11 +101,17 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
     formFrom,
     formTo,
     formTaxRelevant,
+    formAmountMin,
+    formAmountMax,
+    formDirection,
     appliedQuery,
     appliedTags,
     appliedFrom,
     appliedTo,
     appliedTaxRelevant,
+    appliedAmountMin,
+    appliedAmountMax,
+    appliedDirection,
     hasActiveFilters,
     apply,
     clear,

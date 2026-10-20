@@ -1396,6 +1396,11 @@ export interface ListTransactionsQuery {
   /** `true` = only tax-relevant bookings or bookings with a
    *  tax-relevant split, `false` = only those without. */
   taxRelevant?: boolean
+  /** Absolute amount bounds, inclusive (a 100 € expense matches 100). */
+  amountMin?: number
+  amountMax?: number
+  /** `in` = money in (amount > 0), `out` = money out (amount < 0). */
+  direction?: 'in' | 'out'
   from?: string
   to?: string
   limit?: number
@@ -1414,6 +1419,9 @@ export async function listTransactions(
   if (q.q && q.q.trim().length > 0) params.set('q', q.q.trim())
   if (q.tags && q.tags.length > 0) params.set('tagsCsv', q.tags.join(','))
   if (q.taxRelevant !== undefined) params.set('taxRelevant', String(q.taxRelevant))
+  if (q.amountMin !== undefined) params.set('amountMin', String(q.amountMin))
+  if (q.amountMax !== undefined) params.set('amountMax', String(q.amountMax))
+  if (q.direction) params.set('direction', q.direction)
   if (q.from) params.set('from', q.from)
   if (q.to) params.set('to', q.to)
   if (q.limit !== undefined) params.set('limit', String(q.limit))

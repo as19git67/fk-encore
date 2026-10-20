@@ -488,6 +488,9 @@ export interface TransactionRuleCriteria {
   from?: string
   to?: string
   tax_relevant?: boolean
+  amount_min?: number
+  amount_max?: number
+  direction?: 'in' | 'out'
 }
 
 export type MemberRule =

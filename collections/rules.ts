@@ -33,7 +33,14 @@ import { loadUserGroupIds } from "../documents/visibility";
 import { parsePhotoFilterQuery, type PhotoFilterQuery } from "../photo/photo.filters";
 import { listGalleryIdsLogic } from "../photo/gallery-grid.service";
 import { visibleMetersWhere } from "../meter/meter.service";
-import { taggedWithCondition, taxRelevantCondition } from "../finance/transaction-conditions";
+import {
+  amountConditions,
+  parseAmountBound,
+  parseDirection,
+  taggedWithCondition,
+  taxRelevantCondition,
+  type TransactionDirection,
+} from "../finance/transaction-conditions";
 import type { SecurityStatus } from "../finance/depot-securities";
 
 export interface TransactionCriteria {
@@ -46,6 +53,10 @@ export interface TransactionCriteria {
   from?: string;
   to?: string;
   tax_relevant?: boolean;
+  /** Absolute amount range, inclusive (as the list's amount filter). */
+  amount_min?: number;
+  amount_max?: number;
+  direction?: TransactionDirection;
 }
 
 export interface SecurityCriteria {
@@ -114,6 +125,12 @@ export function normalizeMemberRule(input: unknown, keepExcluded: number[] = [])
       if (typeof c.from === "string" && ISO_DATE.test(c.from)) criteria.from = c.from;
       if (typeof c.to === "string" && ISO_DATE.test(c.to)) criteria.to = c.to;
       if (typeof c.tax_relevant === "boolean") criteria.tax_relevant = c.tax_relevant;
+      const amountMin = parseAmountBound(c.amount_min);
+      if (amountMin !== undefined) criteria.amount_min = amountMin;
+      const amountMax = parseAmountBound(c.amount_max);
+      if (amountMax !== undefined) criteria.amount_max = amountMax;
+      const direction = parseDirection(c.direction);
+      if (direction) criteria.direction = direction;
       if (Object.keys(criteria).length === 0) return null;
       return { type: "transaction", criteria, ...excluded };
     }
@@ -225,6 +242,7 @@ export async function matchingIds(rule: MemberRule, ownerId: number): Promise<nu
         const flagged = taxRelevantCondition();
         conds.push(c.tax_relevant ? flagged : not(flagged));
       }
+      conds.push(...amountConditions({ min: c.amount_min, max: c.amount_max, direction: c.direction }));
       for (const tag of c.tags ?? []) conds.push(taggedWithCondition(tag));
       const rows = await dbAll<{ id: number }>(
         db.select({ id: financeTransaction.id }).from(financeTransaction).where(and(...conds)),

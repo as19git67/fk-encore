@@ -158,13 +158,13 @@ async function account(readers: number[]): Promise<number> {
   return row!.id;
 }
 
-async function transaction(accountId: number, counterparty: string): Promise<number> {
+async function transaction(accountId: number, counterparty: string, amount = "-42.50"): Promise<number> {
   const [row] = await db
     .insert(financeTransaction)
     .values({
       account_id: accountId,
       booking_date: "2026-03-01",
-      amount: "-42.50",
+      amount,
       currency_code: "EUR",
       counterparty,
       dedupe_hash: `collections-test-${++seq}`,
@@ -608,6 +608,28 @@ describe("rule collections", () => {
     });
     expect(widened.collection.members).toHaveLength(2);
     expect(widened.collection.rule?.excluded_ids).toEqual([b]);
+  });
+
+  it("gathers transactions by absolute amount range and direction", async () => {
+    const acc = await account([OWNER]);
+    const bigOut = await transaction(acc, "Versicherung", "-250.00");
+    await transaction(acc, "Gehalt", "250.00");
+    await transaction(acc, "Kiosk", "-3.20");
+
+    const { collection } = await createRuleCollection({
+      name: "Große Ausgaben",
+      rule: { type: "transaction", criteria: { account_ids: [acc], amount_min: 100, direction: "out" } },
+    });
+    expect(collection.members.map((m) => m.entity_id)).toEqual([bigOut]);
+    expect(collection.rule).toMatchObject({ criteria: { amount_min: 100, direction: "out" } });
+
+    // Nonsense bounds and directions are dropped, not stored.
+    const loose = await setCollectionRule({
+      id: collection.id,
+      rule: { type: "transaction", criteria: { account_ids: [acc], amount_max: -1, direction: "sideways" } as never },
+    });
+    expect(loose.collection.rule).toMatchObject({ criteria: { account_ids: [acc] } });
+    expect(loose.collection.members).toHaveLength(3);
   });
 
   it("gathers meters by type and photos by gallery filter", async () => {
