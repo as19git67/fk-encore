@@ -573,3 +573,42 @@ export function applyIncomeTaxReturnTaxRule(input: {
   }
   return { taxSections: [{ slug: "mantelbogen", confidence: 0.95 }], taxRole: "bezug", matched: true };
 }
+
+/**
+ * An Einkommensteuerbescheid lists every income the Finanzamt assessed —
+ * Arbeitslohn, Kapitalerträge, Renten — and the model files it under each
+ * of those Anlagen as evidence. It is the result of a return, not evidence
+ * for the next one: its section is `steuerbescheid`, as a `bezug`. The one
+ * thing it proves for a later return is the Kirchensteuer it settles: a
+ * Nachzahlung or Erstattung counts as Sonderausgabe in the year it is paid
+ * (§ 10 Abs. 1 Nr. 4 EStG), so a Bescheid that names Kirchensteuer stays
+ * `beleg` for `sonderausgaben` and nothing else.
+ *
+ * Recognised by its heading ("Bescheid für 2024 über Einkommensteuer …")
+ * or by the word with a Rechtsbehelfsbelehrung; the user's own return
+ * (`isIncomeTaxReturn`) has neither.
+ */
+export function isIncomeTaxAssessment(text: string): boolean {
+  const ctx = normalizeForMatch(text);
+  if (/bescheidfür\d{4}über(?:die)?einkommensteuer/.test(ctx)) return true;
+  return ctx.includes("einkommensteuerbescheid") && ctx.includes("rechtsbehelfsbelehrung");
+}
+
+export function applyIncomeTaxAssessmentTaxRule(input: {
+  text: string;
+  taxSections: readonly TaxAssignment[];
+  taxRole: TaxRole;
+}): TaxRuleResult {
+  if (!isIncomeTaxAssessment(input.text)) {
+    return { taxSections: [...input.taxSections], taxRole: input.taxRole, matched: false };
+  }
+  const churchTax = normalizeForMatch(input.text).includes("kirchensteuer");
+  const sections: TaxAssignment[] = [{ slug: "steuerbescheid", confidence: 0.95 }];
+  if (churchTax) sections.push({ slug: "sonderausgaben", confidence: 0.8 });
+  const role: TaxRole = churchTax ? "beleg" : "bezug";
+  const same =
+    role === input.taxRole &&
+    sections.length === input.taxSections.length &&
+    sections.every((s, i) => s.slug === input.taxSections[i]?.slug);
+  return { taxSections: sections, taxRole: role, matched: !same };
+}

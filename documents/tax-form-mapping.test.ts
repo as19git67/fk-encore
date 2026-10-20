@@ -7,6 +7,17 @@ const v = (documentId: number, evidenceKind: string, field: string, value: numbe
 const find = (m: ReturnType<typeof mapToForm>, key: string, owner: string) => m.values.find((x) => x.field.key === key && x.owner === owner);
 
 describe("mapToForm", () => {
+  it("never guesses whose a value is under joint assessment when the document names neither spouse", () => {
+    const joint = mapToForm(2025, [v(1, "lohnsteuerbescheinigung", "bruttoarbeitslohn", 3000000, "none")], { joint: true });
+    const open = find(joint, "n.bruttoarbeitslohn", "person:?")!;
+    expect(open.cents).toBe(3000000);
+    expect(open.notes).toContain("Person zuordnen: der Beleg ist mit keinem der Ehegatten als Bezugsperson verknüpft.");
+    expect(find(joint, "n.bruttoarbeitslohn", "self")).toBeUndefined();
+    // Alone, there is only one person it can be.
+    const single = mapToForm(2025, [v(1, "lohnsteuerbescheinigung", "bruttoarbeitslohn", 3000000, "none")], { joint: false });
+    expect(find(single, "n.bruttoarbeitslohn", "self")!.cents).toBe(3000000);
+  });
+
   it("sums several employers per person and keeps where each value came from", () => {
     const m = mapToForm(2025, [
       v(1, "lohnsteuerbescheinigung", "bruttoarbeitslohn", 3000000),

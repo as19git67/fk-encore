@@ -183,10 +183,10 @@ export const EVIDENCE_KINDS: readonly EvidenceKind[] = [
     name: "Kirchensteuerbescheid",
     sections: ["sonderausgaben"],
     documentTypes: ["bescheid"],
-    recognise: "Bescheid über Kirchensteuer oder Kirchgeld mit Nachzahlung oder Erstattung.",
+    recognise: "Bescheid über Kirchensteuer oder Kirchgeld mit Nachzahlung oder Erstattung, auch die Kirchensteuer-Abrechnung im Einkommensteuerbescheid.",
     fields: [
-      { key: "nachzahlung", label: "Nachzahlung", kind: "amount", formKey: "sonder.kirchensteuer_gezahlt" },
-      { key: "erstattung", label: "Erstattung", kind: "amount", formKey: "sonder.kirchensteuer_erstattet" },
+      { key: "nachzahlung", label: "Nachzahlung", hint: "nur Kirchensteuer; im Einkommensteuerbescheid die Zeile Kirchensteuer, nie die Summe mit Einkommensteuer und Solidaritätszuschlag", kind: "amount", formKey: "sonder.kirchensteuer_gezahlt" },
+      { key: "erstattung", label: "Erstattung", hint: "nur Kirchensteuer; im Einkommensteuerbescheid die Zeile Kirchensteuer, nie die Summe mit Einkommensteuer und Solidaritätszuschlag", kind: "amount", formKey: "sonder.kirchensteuer_erstattet" },
     ],
   },
   {

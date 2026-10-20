@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   applyAgricultureFiscalYearTaxRule,
+  applyIncomeTaxAssessmentTaxRule,
   applyIncomeTaxReturnTaxRule,
   incomeTaxReturnYear,
+  isIncomeTaxAssessment,
   isIncomeTaxReturn,
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
@@ -567,5 +569,41 @@ describe("applyIncomeTaxReturnTaxRule", () => {
     expect(incomeTaxReturnYear(PRINTOUT)).toBe(2025);
     expect(incomeTaxReturnYear("Einkommensteuererklärung für das Jahr 2024")).toBe(2024);
     expect(incomeTaxReturnYear("Einkommensteuererklärung")).toBeNull();
+  });
+});
+
+describe("applyIncomeTaxAssessmentTaxRule", () => {
+  // Synthetic Bescheid texts.
+  const BESCHEID = [
+    "Finanzamt Musterstadt",
+    "Bescheid für 2024 über Einkommensteuer, Solidaritätszuschlag und Kirchensteuer",
+    "Einkünfte aus nichtselbständiger Arbeit 23.456",
+    "Kirchensteuer  Nachzahlung 42,00",
+    "Rechtsbehelfsbelehrung",
+  ].join("\n");
+  const NO_CHURCH = "Bescheid für 2024 über Einkommensteuer und Solidaritätszuschlag\nEinkünfte aus nichtselbständiger Arbeit 23.456";
+  const AS_EVIDENCE = [
+    { slug: "anlage-n", confidence: 0.9 },
+    { slug: "anlage-kap", confidence: 0.8 },
+  ];
+
+  it("recognises a Bescheid by its heading, never the user's own return", () => {
+    expect(isIncomeTaxAssessment(BESCHEID)).toBe(true);
+    expect(isIncomeTaxAssessment("Einkommensteuerbescheid 2024 … Rechtsbehelfsbelehrung")).toBe(true);
+    expect(isIncomeTaxAssessment("Einkommensteuererklärung 2025\nHauptvordruck ESt 1 A")).toBe(false);
+    expect(isIncomeTaxAssessment("Lohnsteuerbescheinigung 2025")).toBe(false);
+  });
+
+  it("takes the Bescheid out of the income Anlagen; only its Kirchensteuer stays evidence", () => {
+    expect(applyIncomeTaxAssessmentTaxRule({ text: BESCHEID, taxSections: AS_EVIDENCE, taxRole: "beleg" })).toEqual({
+      taxSections: [{ slug: "steuerbescheid", confidence: 0.95 }, { slug: "sonderausgaben", confidence: 0.8 }],
+      taxRole: "beleg",
+      matched: true,
+    });
+    expect(applyIncomeTaxAssessmentTaxRule({ text: NO_CHURCH, taxSections: AS_EVIDENCE, taxRole: "beleg" })).toEqual({
+      taxSections: [{ slug: "steuerbescheid", confidence: 0.95 }],
+      taxRole: "bezug",
+      matched: true,
+    });
   });
 });
