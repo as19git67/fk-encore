@@ -197,6 +197,18 @@ describe("starting", () => {
 });
 
 describe("a night", () => {
+  it("hands the scored count to the after-run hook, but not for an empty run", async () => {
+    const w = world(3);
+    const seen: number[] = [];
+    w.deps.afterRun = (n) => seen.push(n);
+    await runToEnd(w);
+    expect(seen).toEqual([3]);
+    w.photos.set(4, null);
+    w.outcome = () => ({ kind: "unscorable", reason: "not an image" });
+    await runToEnd(w, "manual");
+    expect(seen).toEqual([3]);
+  });
+
   it("lends, loads, scores everything, unloads and gives the GPU back", async () => {
     const w = world(5);
     const run = await runToEnd(w);

@@ -26,6 +26,12 @@ from app.config import settings
 from app.db.database import check_db_connection, get_db
 from app.db import repository
 from app.models.schemas import (
+    AestheticHeadReport,
+    AestheticHeadScore,
+    AestheticHeadScoreRequest,
+    AestheticHeadScoreResponse,
+    AestheticHeadStatus,
+    AestheticHeadTrainRequest,
     DinoEmbedResponse,
     DiverseSelectRequest,
     DiverseSelectResponse,
@@ -58,6 +64,7 @@ from app.services.similar_groups import find_similar_groups
 from app.services.scene_pairs import find_scene_pairs
 from app.services.diverse_select import select_diverse
 from app.services.redundant_pairs import find_redundant_pairs
+from app.services import aesthetic_head
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -417,18 +424,18 @@ async def compute_quality(
         )
         img_vec = np.array(clip_embedder.embed([image])[0], dtype=np.float32)
 
-        # Dimension 1 – overall aesthetics
-        clip_aesthetics = _clip_dimension_score(
-            img_vec, clip_embedder,
-            positive=[
-                "a beautiful aesthetically pleasing photograph",
-                "a stunning artistic photo with emotional impact",
-            ],
-            negative=[
-                "an ugly snapshot with no artistic merit",
-                "a boring uninteresting photograph",
-            ],
-        )
+        # Dimension 1 – overall aesthetics. The head trained on the nightly
+        # Q-Align scores replaces the zero-shot prompts once it beats them
+        # (documentation/plans/foto-aesthetik.md, stage 4).
+        head = aesthetic_head.active_head()
+        if head is not None:
+            clip_aesthetics = float(head.predict(img_vec)[0])
+        else:
+            clip_aesthetics = _clip_dimension_score(
+                img_vec, clip_embedder,
+                positive=aesthetic_head.AESTHETIC_POSITIVE,
+                negative=aesthetic_head.AESTHETIC_NEGATIVE,
+            )
 
         # Dimension 2 – composition and framing
         clip_composition = _clip_dimension_score(
@@ -600,11 +607,90 @@ async def compute_quality(
         "contrast_score": round(contrast_score, 4),
         "exposure_score": round(exposure_score, 4),
     }
+    if head is not None:
+        result["aesthetic_model"] = head.report.version
     if face_sharpness is not None:
         result["face_sharpness"] = round(face_sharpness, 4)
     if eyes_open_score is not None:
         result["eyes_open_score"] = round(eyes_open_score, 4)
     return result
+
+
+# ---------------------------------------------------------------------------
+# /aesthetic-head
+# ---------------------------------------------------------------------------
+
+def _head_report(head: Optional["aesthetic_head.Head"]) -> Optional[AestheticHeadReport]:
+    return AestheticHeadReport(**vars(head.report)) if head is not None else None
+
+
+@router.get("/aesthetic-head", response_model=AestheticHeadStatus, tags=["quality"])
+async def aesthetic_head_status() -> AestheticHeadStatus:
+    """The provisional aesthetic head on disk and how it did on its test photos."""
+    return AestheticHeadStatus(head=_head_report(aesthetic_head.load()))
+
+
+@router.post("/aesthetic-head/train", response_model=AestheticHeadStatus, tags=["quality"])
+async def aesthetic_head_train(request: AestheticHeadTrainRequest, db: DbDep) -> AestheticHeadStatus:
+    """Fits the head on the CLIP vectors of the photos the app sends with their Q-Align score.
+
+    The head is saved either way; `/quality` uses it only when `active`, i.e.
+    when it ranks the test photos closer to Q-Align than the zero-shot prompts.
+    """
+    import numpy as np
+    from fastapi.concurrency import run_in_threadpool
+
+    targets = {s.photo_id: s.score for s in request.samples}
+    rows = await repository.get_clip_embeddings(db, list(targets))
+    if len(rows) < aesthetic_head.MIN_SAMPLES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{len(rows)} Fotos mit Q-Align-Wert und CLIP-Vektor, gebraucht werden mindestens {aesthetic_head.MIN_SAMPLES}",
+        )
+    vectors = np.array([np.asarray(v, dtype=np.float32) for _, v in rows], dtype=np.float32)
+    y = np.array([targets[pid] for pid, _ in rows], dtype=np.float64)
+
+    try:
+        embedder = clip_embedder_class().get_instance(
+            model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
+        )
+        positive = np.array([embedder.embed_text(t) for t in aesthetic_head.AESTHETIC_POSITIVE], dtype=np.float32)
+        negative = np.array([embedder.embed_text(t) for t in aesthetic_head.AESTHETIC_NEGATIVE], dtype=np.float32)
+    except Exception as exc:
+        logger.exception("Text embedding for the aesthetic head failed")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Embedding error") from exc
+
+    def fit() -> "aesthetic_head.Head":
+        zero_shot = aesthetic_head.zero_shot_scores(vectors, positive, negative)
+        head = aesthetic_head.train(vectors, y, zero_shot)
+        aesthetic_head.save(head)
+        return head
+
+    head = await run_in_threadpool(fit)
+    logger.info("Aesthetic head trained: %s", head.report)
+    return AestheticHeadStatus(head=_head_report(head))
+
+
+@router.post("/aesthetic-head/score", response_model=AestheticHeadScoreResponse, tags=["quality"])
+async def aesthetic_head_score(request: AestheticHeadScoreRequest, db: DbDep) -> AestheticHeadScoreResponse:
+    """Scores stored photos from their CLIP vector, no image needed; 409 without an active head."""
+    import numpy as np
+
+    head = aesthetic_head.active_head()
+    if head is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Kein aktiver Ästhetik-Kopf")
+    rows = await repository.get_clip_embeddings(db, request.photo_ids)
+    found = {pid for pid, _ in rows}
+    scores: List[AestheticHeadScore] = []
+    if rows:
+        vectors = np.array([np.asarray(v, dtype=np.float32) for _, v in rows], dtype=np.float32)
+        for (pid, _), value in zip(rows, head.predict(vectors)):
+            scores.append(AestheticHeadScore(photo_id=pid, score=round(float(value), 4)))
+    return AestheticHeadScoreResponse(
+        version=head.report.version,
+        scores=scores,
+        missing=[pid for pid in request.photo_ids if pid not in found],
+    )
 
 
 # ---------------------------------------------------------------------------

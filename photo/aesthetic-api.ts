@@ -12,6 +12,7 @@ import { AESTHETIC_MODEL, inWindow, windowTimeZone } from "./aesthetic-score";
 import {
   InvalidSettingsError,
   countBacklog,
+  countProvisionalTargets,
   countScored,
   getAestheticSettings,
   listRuns,
@@ -21,7 +22,8 @@ import {
   type AestheticSettings,
 } from "./aesthetic-store";
 import { activeRun, stopActiveRun, tryStart, type ScorerStatus } from "./aesthetic-nightly";
-import { realNightDeps, scorerStatus } from "./aesthetic-deps";
+import { headStatus, realHeadDeps, realNightDeps, scorerStatus } from "./aesthetic-deps";
+import { headJob, startHeadJob, type HeadJob, type HeadReport } from "./aesthetic-head";
 
 function requireAdmin(): void {
   const auth = getAuthData();
@@ -46,6 +48,13 @@ export interface AestheticOverview {
   /** The aesthetic-service's own state; null when it did not answer. */
   scorer: ScorerStatus | null;
   scorer_error: string | null;
+  /** The provisional head in the embedding service; null before the first training. */
+  head: HeadReport | null;
+  head_error: string | null;
+  /** Photos the head would still score (no Q-Align value, not scored by this head). */
+  head_pending: number | null;
+  /** The training job in progress, or the last one since the app started. */
+  head_job: HeadJob | null;
 }
 
 export const getAestheticOverview = api(
@@ -65,6 +74,15 @@ export const getAestheticOverview = api(
     } catch (err) {
       scorerError = (err as Error).message;
     }
+    let head: HeadReport | null = null;
+    let headError: string | null = null;
+    let headPending: number | null = null;
+    try {
+      head = await headStatus();
+      if (head?.active) headPending = await countProvisionalTargets(head.version);
+    } catch (err) {
+      headError = (err as Error).message;
+    }
     const zone = windowTimeZone();
     return {
       settings,
@@ -77,6 +95,10 @@ export const getAestheticOverview = api(
       runs,
       scorer,
       scorer_error: scorerError,
+      head,
+      head_error: headError,
+      head_pending: headPending,
+      head_job: headJob(),
     };
   },
 );
@@ -145,5 +167,20 @@ export const backfillAesthetic = api(
     requireAdmin();
     const model = req.model?.trim() || undefined;
     return { marked: await resetAestheticScores(model) };
+  },
+);
+
+/**
+ * "Neu trainieren": fits the provisional head on the Q-Align scores so far
+ * and gives every photo without one the head's value. Runs on its own after
+ * each nightly run that scored something; the page follows it through the
+ * overview.
+ */
+export const trainAestheticHead = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/head/train", auth: true },
+  async (): Promise<{ started: boolean }> => {
+    requireAdmin();
+    const { started } = startHeadJob("manual", realHeadDeps());
+    return { started };
   },
 );

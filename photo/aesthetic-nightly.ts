@@ -83,6 +83,8 @@ export interface NightDeps {
   scorerLoad(): Promise<void>;
   scorerUnload(): Promise<void>;
   score(photoId: number): Promise<ScoreOutcome>;
+  /** Called once a run that scored photos has closed (retrains the provisional head). */
+  afterRun?(scored: number): void;
   store: NightStore;
 }
 
@@ -301,6 +303,13 @@ async function execute(runId: number, trigger: AestheticRunTrigger, deps: NightD
       gpu_returned: gpuReturned,
     });
     log.info("aesthetic: run ended", { runId, status, scored, failed, remaining, gpuReturned });
+    if (scored > 0) {
+      try {
+        deps.afterRun?.(scored);
+      } catch (err) {
+        log.warn("aesthetic: after-run hook failed", { error: (err as Error).message });
+      }
+    }
   }
 }
 

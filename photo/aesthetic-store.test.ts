@@ -6,17 +6,21 @@ import { photoAestheticRun, photos, users } from "../db/schema";
 import {
   InvalidSettingsError,
   countBacklog,
+  countProvisionalTargets,
   countScored,
   getAestheticSettings,
   markUnscorable,
   nextBatch,
+  provisionalBatch,
   resetAestheticScores,
   runsToRecover,
   saveAestheticSettings,
   startRun,
   updateRun,
   finishRun,
+  trainingSamples,
   writeAestheticScore,
+  writeProvisionalScore,
 } from "./aesthetic-store";
 
 const MODEL = "qalign_v1";
@@ -130,6 +134,45 @@ describe("writing a score", () => {
     expect((await photoRow(a)).aesthetic_model).toBeNull();
     expect((await photoRow(b)).aesthetic_model).toBeNull();
     expect((await photoRow(other)).aesthetic_model).toBe("qalign_v0");
+  });
+});
+
+describe("the provisional head", () => {
+  const HEAD = "vith_head_v1";
+  const parts = { clip_aesthetics: 0.1, clip_composition: 0.5, clip_technical: 0.4, sharpness: 0.8, contrast: 0.7, exposure: 0.9 };
+
+  it("learns from Q-Align scores only", async () => {
+    const scored = await makePhoto({ model: MODEL, details: { ...parts, clip_aesthetics: 0.73 } });
+    const head = await makePhoto({ model: HEAD, details: { ...parts, clip_aesthetics: 0.4 } });
+    const samples = await trainingSamples(MODEL, 1_000_000);
+    expect(samples).toContainEqual({ photo_id: String(scored), score: 0.73 });
+    expect(samples.map((s) => s.photo_id)).not.toContain(String(head));
+  });
+
+  it("scores images Q-Align has not reached and that this head has not scored", async () => {
+    const fresh = await makePhoto();
+    const olderHead = await makePhoto({ model: "vith_head_v0" });
+    await makePhoto({ model: HEAD });
+    await makePhoto({ model: MODEL });
+    await makePhoto({ model: `${MODEL}:failed` });
+    await makePhoto({ mime: "video/mp4" });
+    expect(await countProvisionalTargets(HEAD)).toBe(2);
+    expect(await provisionalBatch(HEAD, 0, 10)).toEqual([fresh, olderHead].sort((a, b) => a - b));
+    expect(await provisionalBatch(HEAD, Math.min(fresh, olderHead), 10)).toEqual([Math.max(fresh, olderHead)]);
+  });
+
+  it("writes the value and the composite, and never over a Q-Align score", async () => {
+    const id = await makePhoto({ details: parts, score: 0.5 });
+    await writeProvisionalScore(id, HEAD, 0.904);
+    const row = await photoRow(id);
+    expect(row.aesthetic_model).toBe(HEAD);
+    expect(row.ai_quality_details).toEqual({ ...parts, clip_aesthetics: 0.9 });
+    expect(row.ai_quality_score).toBeCloseTo(0.3 * 0.9 + 0.1 + 0.04 + 0.2 + 0.07 + 0.045, 5);
+
+    const night = await makePhoto({ model: MODEL, details: { ...parts, clip_aesthetics: 0.6 }, score: 0.5 });
+    await writeProvisionalScore(night, HEAD, 0.1);
+    expect((await photoRow(night)).aesthetic_model).toBe(MODEL);
+    expect((await photoRow(night)).ai_quality_details?.clip_aesthetics).toBe(0.6);
   });
 });
 

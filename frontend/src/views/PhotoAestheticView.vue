@@ -5,6 +5,8 @@
  * photo looks; Gemma keeps answering on the CPU meanwhile. The page sets the
  * window, shows how far the library is, follows a running night and keeps
  * the history; an admin can start a run outside the window or stop one.
+ * Stage 4 adds the provisional head: learnt from the night's scores, it
+ * gives new photos a value at import and shows how close it gets.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
@@ -24,6 +26,8 @@ import {
   saveAestheticSettings,
   startAestheticRun,
   stopAestheticRun,
+  trainAestheticHead,
+  type AestheticHeadJob,
   type AestheticOverview,
   type AestheticRun,
   type AestheticRunStatus,
@@ -37,13 +41,17 @@ const overview = ref<AestheticOverview | null>(null)
 const loaded = ref(false)
 const error = ref<string | null>(null)
 const info = ref<string | null>(null)
-const busy = ref<'save' | 'start' | 'stop' | 'backfill' | null>(null)
+const busy = ref<'save' | 'start' | 'stop' | 'backfill' | 'train' | null>(null)
 
 const enabled = ref(false)
 const windowStart = ref('01:00')
 const windowEnd = ref('06:00')
 
 const running = computed<AestheticRun | null>(() => overview.value?.runs.find((r) => r.status === 'running') ?? null)
+const headJob = computed<AestheticHeadJob | null>(() => overview.value?.head_job ?? null)
+const headBusy = computed(() => headJob.value?.status === 'running')
+/** Something on the page is moving: follow it. */
+const live = computed(() => !!running.value || headBusy.value)
 const dirty = computed(() => {
   const s = overview.value?.settings
   return !!s && (s.enabled !== enabled.value || s.window_start !== windowStart.value || s.window_end !== windowEnd.value)
@@ -99,6 +107,23 @@ function count(n: number): string {
   return n.toLocaleString('de-DE')
 }
 
+function rho(n: number): string {
+  return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function headJobText(job: AestheticHeadJob): string {
+  const by = job.trigger === 'manual' ? 'Von Hand' : 'Nach dem Nachtlauf'
+  if (job.status === 'running') {
+    return job.phase === 'apply'
+      ? `${by}: überträgt auf die Fotos, ${count(job.applied)} bisher`
+      : `${by}: lernt aus den Q-Align-Werten`
+  }
+  if (job.status === 'failed') return `${by} fehlgeschlagen: ${job.error ?? 'unbekannt'}`
+  if (job.status === 'skipped') return `${by}: ${job.note ?? 'nichts zu tun'}`
+  const missing = job.without_vector ? `, ${count(job.without_vector)} noch ohne CLIP-Vektor` : ''
+  return `${by}: ${count(job.applied)} Fotos vorläufig bewertet${missing}`
+}
+
 function message(e: unknown, fallback: string): string {
   return e instanceof Error ? e.message : fallback
 }
@@ -126,7 +151,7 @@ async function refresh() {
   } catch (e) {
     error.value = message(e, 'Der Stand konnte nicht geladen werden')
   }
-  if (running.value) schedulePoll()
+  if (live.value) schedulePoll()
 }
 
 onMounted(async () => {
@@ -137,7 +162,7 @@ onMounted(async () => {
   } finally {
     loaded.value = true
   }
-  if (running.value) schedulePoll()
+  if (live.value) schedulePoll()
 })
 
 onBeforeUnmount(() => {
@@ -182,6 +207,22 @@ async function stop() {
     await refresh()
   } catch (e) {
     error.value = message(e, 'Der Lauf konnte nicht angehalten werden')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function train() {
+  busy.value = 'train'
+  error.value = null
+  info.value = null
+  try {
+    const { started } = await trainAestheticHead()
+    if (!started) info.value = 'Es lernt gerade schon.'
+    adopt(await getAestheticOverview(), false)
+    if (live.value) schedulePoll()
+  } catch (e) {
+    error.value = message(e, 'Das Training konnte nicht gestartet werden')
   } finally {
     busy.value = null
   }
@@ -286,6 +327,63 @@ function rescoreAll() {
           „Jetzt starten“ verleiht die GPU sofort, auch außerhalb des Fensters, und läuft, bis alle Fotos bewertet sind
           oder du anhältst.
         </p>
+      </section>
+
+      <section class="card" aria-labelledby="ae-head">
+        <h2 id="ae-head" class="card-title">Vorläufiger Wert</h2>
+        <p class="muted">
+          Ein neues Foto wartet nicht bis zur Nacht: aus den Q-Align-Werten lernt die App, den Wert aus dem CLIP-Vektor zu
+          schätzen, den der Embedding-Dienst ohnehin berechnet. Nachts ersetzt Q-Align die Schätzung.
+        </p>
+        <p v-if="overview.head_error" class="failure">Der Embedding-Dienst antwortet nicht: {{ overview.head_error }}</p>
+        <template v-else-if="overview.head">
+          <dl class="tiles">
+            <div class="tile">
+              <dt>Status</dt>
+              <dd>{{ overview.head.active ? 'in Gebrauch' : 'ungenutzt' }}</dd>
+            </div>
+            <div class="tile">
+              <dt>Trifft Q-Align</dt>
+              <dd>{{ rho(overview.head.spearman_head) }}</dd>
+            </div>
+            <div class="tile">
+              <dt>CLIP bisher</dt>
+              <dd>{{ rho(overview.head.spearman_zero_shot) }}</dd>
+            </div>
+            <div class="tile">
+              <dt>Gelernt aus</dt>
+              <dd>{{ count(overview.head.samples) }}</dd>
+            </div>
+            <div v-if="overview.head.active && overview.head_pending !== null" class="tile">
+              <dt>Noch ohne Wert</dt>
+              <dd>{{ count(overview.head_pending) }}</dd>
+            </div>
+          </dl>
+          <p class="muted">
+            Rangkorrelation mit Q-Align auf {{ count(overview.head.test) }} zurückgehaltenen Fotos (1 = gleiche
+            Reihenfolge), trainiert am {{ when(overview.head.trained_at) }}.
+            <template v-if="!overview.head.active">
+              Der Kopf ist nicht besser als die bisherige CLIP-Schätzung und bleibt deshalb unbenutzt.
+            </template>
+          </p>
+        </template>
+        <p v-else class="muted">
+          Noch nicht trainiert. Das geschieht nach dem ersten Lauf, sobald 500 Fotos einen Q-Align-Wert haben.
+        </p>
+        <p v-if="headJob" class="muted" aria-live="polite" :class="{ failure: headJob.status === 'failed' }">
+          {{ headJobText(headJob) }}
+        </p>
+        <div class="buttons">
+          <Button
+            label="Neu trainieren"
+            icon="pi pi-sync"
+            severity="secondary"
+            outlined
+            :loading="busy === 'train' || headBusy"
+            :disabled="overview.scored === 0 || headBusy"
+            @click="train"
+          />
+        </div>
       </section>
 
       <section class="card" aria-labelledby="ae-window">
