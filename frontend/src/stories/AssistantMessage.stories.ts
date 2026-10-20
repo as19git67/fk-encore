@@ -139,3 +139,39 @@ export const VorschlagBrief: Story = {
     blocks: [PROPOSAL_LETTER_BLOCK],
   },
 }
+
+export const TabelleImText: Story = {
+  name: 'Antwort mit Tabelle im Text',
+  args: {
+    role: 'assistant',
+    content: [
+      'Der Verbrauch der letzten drei Jahre:',
+      '',
+      '| Jahr | Strom | Wasser |',
+      '|------|------:|-------:|',
+      '| 2023 | 3.410 kWh | 92 m³ |',
+      '| 2024 | 3.188 kWh | 88 m³ |',
+      '| **2025** | 2.957 kWh | 85 m³ |',
+      '',
+      'Der Stromverbrauch sinkt seit 2023.',
+    ].join('\n'),
+  },
+}
+
+export const AsciiTabelle: Story = {
+  name: 'Antwort mit ASCII-Tabelle',
+  args: {
+    role: 'assistant',
+    content: [
+      'Die Zähler im Überblick:',
+      '```',
+      '+-------------+-----------+------------------+',
+      '| Zähler      | Einheit   | Letzter Stand    |',
+      '+-------------+-----------+------------------+',
+      '| Strom Haus  | kWh       | 41.207,5         |',
+      '| Wasser      | m³        | 1.033            |',
+      '+-------------+-----------+------------------+',
+      '```',
+    ].join('\n'),
+  },
+}

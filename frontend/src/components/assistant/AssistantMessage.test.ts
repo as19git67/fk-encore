@@ -21,10 +21,10 @@ function docs(tool: string, ids: number[], subtitle?: string): ResultBlock {
   } as ResultBlock
 }
 
-function mount(blocks: ResultBlock[], messageId?: number): HTMLElement {
+function mount(blocks: ResultBlock[], messageId?: number, content = 'Antwort'): HTMLElement {
   const el = document.createElement('div')
   document.body.appendChild(el)
-  createApp({ render: () => h(AssistantMessage, { role: 'assistant', content: 'Antwort', blocks, messageId }) })
+  createApp({ render: () => h(AssistantMessage, { role: 'assistant', content, blocks, messageId }) })
     .use(PrimeVue)
     .component('RouterLink', RouterLink)
     .mount(el)
@@ -37,6 +37,18 @@ beforeEach(() => {
 })
 
 describe('AssistantMessage', () => {
+  it('renders a table in the answer as a real table, its cells as text', async () => {
+    const el = mount([], undefined, 'Stand:\n\n| Konto | Saldo |\n|---|---:|\n| Giro | 1.234,56 € |\n| <img src=x onerror=alert(1)> | 2 |')
+    await nextTick()
+    const table = el.querySelector('table')
+    expect(table).not.toBeNull()
+    expect([...table!.querySelectorAll('th')].map((c) => c.textContent?.trim())).toEqual(['Konto', 'Saldo'])
+    expect(table!.querySelectorAll('tbody tr')).toHaveLength(2)
+    expect(table!.querySelector('tbody td.align-right')?.textContent?.trim()).toBe('1.234,56 €')
+    expect(el.querySelector('img')).toBeNull()
+    expect(el.textContent).toContain('<img src=x onerror=alert(1)>')
+  })
+
   it('folds the earlier lists of a kind and keeps the last one open', async () => {
     const el = mount([docs('tax_documents', [1, 2, 3], 'Steuer 2025'), docs('search_documents', [2, 4]), docs('get_document_summary', [2])], 5)
     const sections = [...el.querySelectorAll('section.block')]
