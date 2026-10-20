@@ -221,6 +221,16 @@ export const BENCH_CASES: BenchCase[] = [
     results: { analyze_spending: { total: -412.37, formula: "sum of 23 bookings tagged Lebensmittel, 2026-09-01..2026-09-30" } },
   },
   {
+    id: "expenses-by-tag",
+    title: "Ausgaben mit einem Tag",
+    question: "Zeig mir die Ausgaben mit dem Tag Urlaub.",
+    expect: [{ tool: "list_transactions", args: { tags: { $contains: "urlaub" }, direction: "out" } }],
+    results: {
+      list_transactions: { rows: [{ id: 9201, date: "2026-08-12", counterparty: "Beispiel Hotel", purpose: "Übernachtung", amount: -310.0, tags: "Urlaub" }], total: 1 },
+      analyze_spending: { total: -310.0, formula: "sum of 1 booking tagged Urlaub, amount < 0" },
+    },
+  },
+  {
     id: "bookings-by-counterparty",
     title: "Buchungen eines Händlers",
     question: "Zeig mir alle Buchungen von Musterhandel im September.",

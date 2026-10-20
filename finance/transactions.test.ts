@@ -353,6 +353,21 @@ describe("finance/transactions — list (ACL filter)", () => {
     expect(plain).toBeGreaterThan(0);
   });
 
+  it("filters by direction: out keeps Ausgaben, in keeps Einnahmen", async () => {
+    const { a } = await createAccounts();
+    await insertTx(a, { counterparty: "Out", amount: "-20.00" });
+    await insertTx(a, { counterparty: "In", amount: "35.00" });
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const out = await listTransactions({ direction: "out" });
+    expect(out.items.map((i) => i.counterparty)).toEqual(["Out"]);
+    const incoming = await listTransactions({ direction: "in" });
+    expect(incoming.items.map((i) => i.counterparty)).toEqual(["In"]);
+    expect((await listTransactions({})).total).toBe(2);
+  });
+
   it("annotates each transaction with its tags", async () => {
     const { a } = await createAccounts();
     const txId = await insertTx(a);

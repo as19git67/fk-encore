@@ -328,6 +328,11 @@ interface ListParams {
    * transactions where neither applies. Omitted means "don't filter".
    */
   taxRelevant?: boolean;
+  /**
+   * Money flow: `out` keeps only outgoing bookings (amount < 0, Ausgaben),
+   * `in` only incoming ones (amount > 0, Einnahmen). Omitted means both.
+   */
+  direction?: "in" | "out";
   from?: string; // ISO date
   to?: string;
   limit?: number;
@@ -382,6 +387,8 @@ export const listTransactions = api(
       const flagged = taxRelevantCondition();
       conds.push(p.taxRelevant ? flagged : not(flagged));
     }
+    if (p.direction === "out") conds.push(sql`${financeTransaction.amount} < 0`);
+    if (p.direction === "in") conds.push(sql`${financeTransaction.amount} > 0`);
     if (p.from) conds.push(gte(financeTransaction.booking_date, p.from));
     if (p.to) conds.push(lte(financeTransaction.booking_date, p.to));
 
