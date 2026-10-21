@@ -1777,6 +1777,20 @@ export const osmRegionImports = pgTable("osm_region_imports", {
   updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
 });
 
+/**
+ * Removing idle regions (osm-admin/retention.ts). One row: whether the
+ * daily sweep runs, after how many days without use a region goes, and
+ * what the last sweep removed.
+ */
+export const osmRegionRetentionSettings = pgTable("osm_region_retention_settings", {
+  id: integer("id").primaryKey().default(1),
+  enabled: boolean("enabled").notNull().default(true),
+  idle_days: integer("idle_days").notNull().default(180),
+  last_run_at: timestamp("last_run_at", { withTimezone: true, mode: "string" }),
+  last_removed: jsonb("last_removed").notNull().default(sql`'[]'::jsonb`).$type<string[]>(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
 // `poi_references` is the cached pool of POI metadata + DINOv2 reference
 // embeddings used for image matching against user photos. The
 // `embedding vector(768)` column and its HNSW index live in raw SQL

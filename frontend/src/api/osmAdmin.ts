@@ -87,6 +87,41 @@ export async function approveOsmRegion(
   })
 }
 
+/** Removing idle regions — mirrors `osm-admin/retention.ts`. */
+export interface RegionRetentionSettings {
+  enabled: boolean
+  idleDays: number
+  lastRunAt: string | null
+  lastRemoved: string[]
+}
+
+export interface RegionRetentionState {
+  slug: string
+  idleSince: string
+  removeAfter: string | null
+  keptForTrip: boolean
+  due: boolean
+}
+
+export interface RegionRetention {
+  settings: RegionRetentionSettings
+  regions: RegionRetentionState[]
+}
+
+export async function getOsmRegionRetention(): Promise<RegionRetention> {
+  return apiFetch('/osm/retention')
+}
+
+export async function updateOsmRegionRetention(
+  enabled: boolean,
+  idleDays: number,
+): Promise<RegionRetention> {
+  return apiFetch('/osm/retention', {
+    method: 'POST',
+    body: JSON.stringify({ enabled, idleDays }),
+  })
+}
+
 export async function deleteOsmRegion(
   slug: string,
 ): Promise<{ slug: string; deleted: boolean }> {

@@ -51,7 +51,8 @@ describe("refreshRegion", () => {
     )[0];
     expect(row.replication_seq).toBe("4775");
     expect(row.last_error).toBeNull();
-    expect(row.last_used_at).toBe("2026-05-16 12:00:00+00");
+    // Keeping a region current is not using it (retention.ts).
+    expect(row.last_used_at).toBeNull();
   });
 
   it("returns ok=true with the existing seq when geo reports no diffs", async () => {
