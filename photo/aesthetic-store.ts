@@ -281,6 +281,23 @@ export async function listRuns(limit = 20): Promise<AestheticRun[]> {
 }
 
 /**
+ * Deletes finished runs from the history: the listed ones, or every one when
+ * `ids` is absent. A run still running or without the GPU back stays, since
+ * the next tick needs it to hand back what it left (`runsToRecover`).
+ * Returns how many went.
+ */
+export async function deleteRuns(ids?: number[]): Promise<number> {
+  if (ids && ids.length === 0) return 0;
+  const done = and(ne(photoAestheticRun.status, "running"), eq(photoAestheticRun.gpu_returned, true));
+  const where = ids ? and(done, inArray(photoAestheticRun.id, ids)) : done;
+  const rows = (await db
+    .delete(photoAestheticRun)
+    .where(where)
+    .returning({ id: photoAestheticRun.id })) as { id: number }[];
+  return rows.length;
+}
+
+/**
  * Runs that still owe something: one left `running` by a process that is
  * gone, or one that ended without the GPU back. The next tick closes and
  * hands back what these left.

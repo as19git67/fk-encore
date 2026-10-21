@@ -10,9 +10,12 @@ Pillow==12.3.0
 # code and its model card pins transformers 4.36.1; the remote code imports
 # einops and icecream. accelerate carries device_map, bitsandbytes the
 # 8-bit/4-bit loading that makes the model fit beside the CUDA context.
+# bitsandbytes must be at least 0.45.5 next to torch 2.7: older releases
+# import `triton.ops`, which Triton 3.3 (torch 2.7's) no longer has, and
+# ship no CUDA 12.8 library.
 transformers==4.36.1
 accelerate==0.34.2
-bitsandbytes==0.45.0
+bitsandbytes==0.45.5
 einops==0.8.0
 icecream==2.1.3
 sentencepiece==0.2.0

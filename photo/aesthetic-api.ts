@@ -14,6 +14,7 @@ import {
   countBacklog,
   countProvisionalTargets,
   countScored,
+  deleteRuns,
   getAestheticSettings,
   listRuns,
   resetAestheticScores,
@@ -182,5 +183,25 @@ export const trainAestheticHead = api(
     requireAdmin();
     const { started } = startHeadJob("manual", realHeadDeps());
     return { started };
+  },
+);
+
+/** "Verlauf leeren": every finished run goes; a running or stranded one stays. */
+export const clearAestheticRuns = api(
+  { expose: true, method: "DELETE", path: "/photos/aesthetic/runs", auth: true },
+  async (): Promise<{ deleted: number }> => {
+    requireAdmin();
+    return { deleted: await deleteRuns() };
+  },
+);
+
+/** One run out of the history; refused while it still runs or owes the GPU. */
+export const deleteAestheticRun = api(
+  { expose: true, method: "DELETE", path: "/photos/aesthetic/runs/:id", auth: true },
+  async ({ id }: { id: number }): Promise<{ deleted: number }> => {
+    requireAdmin();
+    const deleted = await deleteRuns([id]);
+    if (deleted === 0) throw APIError.failedPrecondition("Der Lauf ist nicht beendet oder schon gelöscht");
+    return { deleted };
   },
 );
