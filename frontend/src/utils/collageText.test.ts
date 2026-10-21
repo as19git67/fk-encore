@@ -5,6 +5,9 @@ import {
   collageFontPreset,
   clampUnit,
   wrapLines,
+  captionPlacement,
+  COLLAGE_CAPTION_GRID,
+  COLLAGE_CAPTION_LABELS,
 } from './collageText'
 
 describe('defaultTextOverlay', () => {
@@ -86,5 +89,19 @@ describe('wrapLines', () => {
 
   it('treats a non-positive max width as no-wrap', () => {
     expect(wrapLines('a b c d', 0, measure)).toEqual(['a b c d'])
+  })
+})
+
+describe('captionPlacement', () => {
+  it('reads edges, corners and the middle like the server', () => {
+    expect(captionPlacement('center')).toEqual({ align: 'center', vertical: 'middle' })
+    expect(captionPlacement('left')).toEqual({ align: 'left', vertical: 'middle' })
+    expect(captionPlacement('bottom')).toEqual({ align: 'center', vertical: 'bottom' })
+    expect(captionPlacement('top-right')).toEqual({ align: 'right', vertical: 'top' })
+  })
+
+  it('offers every place once in the picker grid, each with a label', () => {
+    expect(new Set(COLLAGE_CAPTION_GRID).size).toBe(9)
+    for (const p of COLLAGE_CAPTION_GRID) expect(COLLAGE_CAPTION_LABELS[p]).toBeTruthy()
   })
 })

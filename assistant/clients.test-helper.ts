@@ -60,6 +60,7 @@ export const clients = {
     createAlbum: vi.fn(),
     batchUpdateAlbumPhotos: vi.fn(),
     updatePhotoCuration: vi.fn(),
+    createPhotoCollage: vi.fn(),
     listComments: vi.fn(),
   },
   feed: {

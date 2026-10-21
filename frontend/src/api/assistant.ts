@@ -138,6 +138,35 @@ export interface Proposal {
   letter: LetterDraft | null
   /** A text document the proposal would file: title and Markdown. */
   text_document: { title: string; markdown: string } | null
+  /** A collage the proposal would render; afterwards the photo it became. */
+  collage?: CollagePreview | null
+}
+
+export type CollageTextPosition =
+  | 'center' | 'top' | 'bottom' | 'left' | 'right'
+  | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+export type CollageTextSize = 'small' | 'medium' | 'large'
+
+export interface CollagePreview {
+  /** In cell order. */
+  photos: { id: number; filename: string; auto_crop: { x: number; y: number } | null }[]
+  layout: string
+  text: string
+  text_position: CollageTextPosition
+  text_size: CollageTextSize
+  text_color: string
+  album_name: string | null
+  result: { photo_id: number; filename: string } | null
+}
+
+/** What the card lets the user change on a collage before it is rendered. */
+export interface CollageEdits {
+  layout?: string
+  text?: string
+  text_position?: CollageTextPosition
+  text_size?: CollageTextSize
+  text_color?: string
 }
 
 export type LetterDestination = 'document' | 'collection'
@@ -161,6 +190,7 @@ export interface ProposalEdits {
   body?: string
   destinations?: LetterDestination[]
   attachment_ids?: number[]
+  collage?: CollageEdits
 }
 
 export function executeProposal(id: number, edits?: ProposalEdits): Promise<Proposal> {
@@ -174,7 +204,7 @@ export function executeProposal(id: number, edits?: ProposalEdits): Promise<Prop
 }
 
 /** Downloads a file the API serves behind the user's token, under the name it suggests. */
-export async function downloadResult(path: string): Promise<void> {
+export async function downloadResult(path: string, fallbackName = 'ergebnis.pdf'): Promise<void> {
   const token = localStorage.getItem('auth_token')
   const resp = await fetch(`${API_BASE_URL}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -186,7 +216,7 @@ export async function downloadResult(path: string): Promise<void> {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = match?.[1] ?? 'ergebnis.pdf'
+  anchor.download = match?.[1] ?? fallbackName
   anchor.click()
   URL.revokeObjectURL(url)
 }

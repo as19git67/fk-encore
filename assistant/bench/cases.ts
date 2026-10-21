@@ -520,6 +520,15 @@ export const BENCH_CASES: BenchCase[] = [
       create_album: PROPOSAL("Album „Favoriten 2025“ anlegen und 143 Fotos hinzufügen"),
     },
   },
+  {
+    id: "photo-collage-caption",
+    title: "Collage mit Text vorschlagen",
+    question: "Mach aus den Fotos 1201, 1202, 1203 und 1204 eine Collage mit dem Text „Sommer 2025“ unten.",
+    expect: [{ tool: "create_photo_collage", args: { photo_ids: [1201, 1202, 1203, 1204], text: { $contains: "sommer 2025" }, text_position: "bottom" } }],
+    results: {
+      create_photo_collage: PROPOSAL("Collage aus 4 Fotos (Raster 2×2) mit dem Text „Sommer 2025“ unten als neues Foto ablegen"),
+    },
+  },
 
   {
     id: "tag-bookings",

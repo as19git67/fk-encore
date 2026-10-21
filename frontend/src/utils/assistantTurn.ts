@@ -49,6 +49,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_album: 'Album vorschlagen',
   add_photos_to_album: 'Fotos für ein Album vorschlagen',
   set_photo_favorite: 'Favoriten vorschlagen',
+  create_photo_collage: 'Collage vorschlagen',
   create_document_follow_up: 'Wiedervorlage vorschlagen',
   tag_transactions: 'Tags vorschlagen',
   find_text_in_document: 'In Dokumenten suchen',

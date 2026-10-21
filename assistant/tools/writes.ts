@@ -12,6 +12,7 @@ import { collections, documents, finance, photo } from "~encore/clients";
 import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
 import type { JsonSchema, RefType, ToolContext } from "../types";
+import { createPhotoCollage } from "./collage";
 import { renderLetter } from "./letters";
 import { createTextDocument } from "./text-documents";
 import { euerPdf, taxWorksheetPdf } from "./tax";
@@ -687,6 +688,7 @@ export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   createAlbum,
   addPhotosToAlbum,
   setPhotoFavorite,
+  createPhotoCollage,
   createDocumentFollowUp,
   tagTransactions,
   createCollection,

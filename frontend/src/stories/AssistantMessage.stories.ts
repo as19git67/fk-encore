@@ -9,6 +9,7 @@ import {
   METERS_BLOCK,
   PHOTOS_BLOCK,
   PROPOSAL_DISCARDED_BLOCK,
+  PROPOSAL_COLLAGE_BLOCK,
   PROPOSAL_EXECUTED_BLOCK,
   PROPOSAL_FAILED_BLOCK,
   PROPOSAL_LETTER_BLOCK,
@@ -173,5 +174,14 @@ export const AsciiTabelle: Story = {
       '+-------------+-----------+------------------+',
       '```',
     ].join('\n'),
+  },
+}
+
+export const VorschlagCollage: Story = {
+  name: 'Vorschlag: Collage mit Text',
+  args: {
+    role: 'assistant',
+    content: 'Ich habe eine Collage aus den vier Fotos vorgeschlagen, mit dem Text unten links. Layout und Text kannst du auf der Karte noch ändern.',
+    blocks: [PROPOSAL_COLLAGE_BLOCK],
   },
 }
