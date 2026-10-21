@@ -11,6 +11,8 @@
  * a soft failure (log and skip) rather than propagating to the user.
  */
 
+import { llmBudgetMs } from "../lib/llm-lease";
+
 console.log("[boot] finance/llm-client.ts: all imports resolved");
 
 const LLM_SERVICE_URL =
@@ -37,7 +39,7 @@ async function postJson<TBody, TResp>(
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<TResp> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), await llmBudgetMs(timeoutMs));
   let resp: Response;
   try {
     resp = await fetch(`${LLM_SERVICE_URL}${path}`, {

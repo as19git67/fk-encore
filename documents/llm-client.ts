@@ -14,6 +14,7 @@
  * so the scan-worker can defer (not fail) the job and retry later.
  */
 
+import { llmBudgetMs, resetLlmLeaseCache } from "../lib/llm-lease";
 import { CLASSIFY_PROMPTS } from "./classify-prompts";
 import { roleFromLegacy } from "./tax-role";
 import {
@@ -55,61 +56,30 @@ export async function resolveTimeoutMs(): Promise<number> {
   if (cachedTimeoutMs !== null && now - cachedTimeoutAt < TIMEOUT_CACHE_TTL_MS) {
     return cachedTimeoutMs;
   }
-  const lent = await gpuLent();
-  let resolved = lent ? SERVER_REQUEST_TIMEOUT_MS : ENV_TIMEOUT_MS;
+  let resolved = ENV_TIMEOUT_MS;
   try {
     const { default: db } = await import("../db/database");
     const { llmModelConfig } = await import("../db/schema");
     const { eq } = await import("drizzle-orm");
     const [row] = await db
-      .select({ app_timeout_ms: llmModelConfig.app_timeout_ms, request_timeout_s: llmModelConfig.request_timeout_s })
+      .select({ app_timeout_ms: llmModelConfig.app_timeout_ms })
       .from(llmModelConfig)
       .where(eq(llmModelConfig.is_active, true));
-    if (lent) {
-      if (row?.request_timeout_s) resolved = Math.max(row.request_timeout_s * 1000, row.app_timeout_ms ?? 0);
-    } else if (row?.app_timeout_ms) {
-      resolved = row.app_timeout_ms;
-    }
+    if (row?.app_timeout_ms) resolved = row.app_timeout_ms;
   } catch {
     // The database being unreachable is the scan-worker's problem, not this
     // function's — fall back rather than turning it into a classify failure.
   }
+  // On the CPU twin the caller waits as long as the server works (lib/llm-lease.ts).
+  resolved = await llmBudgetMs(resolved);
   cachedTimeoutMs = resolved;
   cachedTimeoutAt = now;
   return resolved;
 }
 
-/** llm-service's own default for how long it lets llama-server work on one request. */
-const SERVER_REQUEST_TIMEOUT_MS = 900_000;
-
-/**
- * Whether the llm-service has lent its GPU to the nightly aesthetic run (or
- * a CPU benchmark) and answers from the CPU twin of its model.
- *
- * The twin is many times slower. With the GPU budget the caller gave up
- * after two minutes while llama-server kept working on the abandoned request
- * for up to its own request timeout; the next caller then found the slot
- * taken and got 503 "inference busy", so nothing was classified all night.
- * While lent, the budget is therefore the server's own limit: the caller
- * waits as long as the server will work.
- */
-async function gpuLent(): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2000);
-  try {
-    const res = await fetch(`${LLM_SERVICE_URL}/reload/status`, { signal: controller.signal });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { lease?: { active?: boolean } };
-    return body.lease?.active === true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /** Test seam: drop the cached value so the next call queries again. */
 export function resetTimeoutCache(): void {
+  resetLlmLeaseCache();
   cachedTimeoutMs = null;
   cachedTimeoutAt = 0;
 }

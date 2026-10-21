@@ -9,6 +9,8 @@
 
 import type { ChatMessage, ChatToolCall } from "./types";
 
+import { llmBudgetMs } from "../lib/llm-lease";
+
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
 /** One round may prefill a long prompt on a busy GPU; above the per-call default of the other clients. */
 const TIMEOUT_MS = Number.parseInt(process.env.ASSISTANT_LLM_TIMEOUT_MS ?? "180000", 10);
@@ -131,7 +133,8 @@ export async function* sseData(body: ReadableStream<Uint8Array>): AsyncGenerator
 /** One streamed /chat call. */
 export const chat: ChatFn = async (req, onToken) => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const budgetMs = await llmBudgetMs(TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), budgetMs);
   let resp: Response;
   try {
     resp = await fetch(`${LLM_SERVICE_URL}/chat`, {
@@ -165,7 +168,7 @@ export const chat: ChatFn = async (req, onToken) => {
     return assembler.reply();
   } catch (err) {
     if ((err as Error).name === "AbortError") {
-      throw new LlmServiceUnavailableError(`llm-service /chat timed out after ${TIMEOUT_MS} ms`);
+      throw new LlmServiceUnavailableError(`llm-service /chat timed out after ${budgetMs} ms`);
     }
     throw err;
   } finally {

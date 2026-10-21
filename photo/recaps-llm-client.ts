@@ -14,6 +14,8 @@
  *    responsibility (stored in `recap.seed.llm_title`).
  */
 
+import { isGpuLent } from "../lib/llm-lease";
+
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
 const RECAP_TITLE_TIMEOUT_MS = parseInt(process.env.RECAP_TITLE_TIMEOUT_MS ?? "8000", 10);
 const RECAP_TITLE_ENABLED = (process.env.RECAPS_LLM_TITLES ?? "1") !== "0";
@@ -62,6 +64,10 @@ export async function generateRecapTitle(
   ctx: RecapTitleContext,
 ): Promise<RecapTitleResult | null> {
   if (!RECAP_TITLE_ENABLED) return null;
+  // On the CPU twin a title takes far longer than the 8 s budget, and an
+  // abandoned request keeps the service's one slot busy for everyone else.
+  // The recap has its fallback title; take it until the GPU is back.
+  if (await isGpuLent()) return null;
 
   const url = `${LLM_SERVICE_URL}/recap-title`;
   const controller = new AbortController();
