@@ -284,6 +284,24 @@ A generic endpoint for JSON-mode chat completions. Useful for finance tag sugges
 }
 ```
 
+### `POST /vision/json-prompt`
+One image plus a caller-written prompt, answered as a JSON object. Needs the
+multimodal projector (503 without it). The prompt stays with the caller (the
+photo critique in `photo/critique.ts`), so wording changes need no image
+rebuild; `schema` constrains the answer where the backend supports it.
+```json
+{
+  "image_b64": "...",
+  "image_mime": "image/jpeg",
+  "system": "...",
+  "prompt": "...",
+  "schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
+  "max_tokens": 768,
+  "temperature": 0.3
+}
+```
+Returns `{result, model, processing_ms}`.
+
 ### `POST /chat`
 Multi-turn chat with tool calling, for the assistant
 (`documentation/plans/ki-assistent.md`, stage 1). OpenAI message shape:

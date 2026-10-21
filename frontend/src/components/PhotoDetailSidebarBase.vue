@@ -8,6 +8,7 @@ import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
+import PhotoCritique from './PhotoCritique.vue'
 import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription, updatePhotoLinkVisibility } from '../api/photos'
@@ -103,6 +104,9 @@ const props = defineProps<{
 const editDate = defineModel<Date | null>('editDate', { default: null })
 
 const auth = useAuthStore()
+const showCritique = computed(() =>
+  auth.hasPermission('module.photos') && (props.selectedPhotoIds?.length ?? 0) < 2,
+)
 
 const { albums, albumsLoaded, fetchAlbums, users, fetchUsers } = useReferenceData()
 const ownerName = computed(() => users.value.find(u => u.id === props.photo.user_id)?.name)
@@ -597,6 +601,16 @@ watch(() => props.readOnly, (ro) => {
               <span class="opinion-count">{{ (photo.ai_quality_score * 100).toFixed(0) }}%</span>
             </div>
           </div>
+        </div>
+      </template>
+
+      <!-- Critique in words (foto-aesthetik.md, stage 6): on request only,
+           single-photo view only, for anyone signed in to the photo module. -->
+      <template v-if="showCritique">
+        <div class="sidebar-divider" />
+        <div class="sidebar-section">
+          <div class="section-label"><i class="pi pi-sparkles" /> Bildwirkung</div>
+          <PhotoCritique :photo-id="photo.id" />
         </div>
       </template>
 

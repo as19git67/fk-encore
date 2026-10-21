@@ -4828,6 +4828,22 @@ export const photoAestheticRun = pgTable(
   (table) => [index("photo_aesthetic_run_by_start").on(table.started_at)],
 );
 
+/**
+ * Gemma's critique of one photo in words (stage 6 of foto-aesthetik.md).
+ * Asked for on request only, kept until someone asks again. It describes the
+ * picture, never grades it: the score stays with the aesthetic scorer.
+ */
+export const photoCritique = pgTable("photo_critique", {
+  photo_id: integer("photo_id")
+    .primaryKey()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  summary: text("summary").notNull(),
+  strengths: jsonb("strengths").$type<string[]>().notNull().default([]),
+  weaknesses: jsonb("weaknesses").$type<string[]>().notNull().default([]),
+  model: text("model").notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
 // ========== Businesses (documentation/plans/betriebe-euer.md) ==========
 
 export type BusinessKind = "landwirtschaft" | "photovoltaik" | "gewerbe" | "vermietung";
