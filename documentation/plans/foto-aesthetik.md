@@ -165,6 +165,25 @@ once the composite is recomputed:
 - the gallery and album sort "Qualität" and the filter `qualityMin` /
   `qualityMax` (`photo/photo.filters.ts`, `utils/photoFilter.ts`).
 
+**The overall score without the CLIP prompts.** With Q-Align, the
+aesthetic score already judges the composition; the zero-shot prompts for
+composition and technique count it a second time through a weaker signal
+and water the aesthetics down. For a photo with a Q-Align value the
+composite can instead be built from Q-Align aesthetics, Q-Align's
+technical value and the measured sharpness (the face's where there is
+one), with the open-eyes penalty kept, because measured defects are what
+Q-Align barely punishes. Photos without a Q-Align value keep the original
+formula. The weights are not set by hand: `photo/composite-replay.ts`
+replays everyone's reviewed groups (the composite is one value per photo)
+the way stage 5 does for the auto-pick, compares today's formula with
+starting weights (`DEFAULT_COMPOSITE_WEIGHTS`) and cross-validated learned
+ones, and recommends a set only with the same margins. Adopting stores it
+in `photo_aesthetic_settings.composite` and rebuilds the score of every
+Q-Align photo in the background; "Bisherige Formel" goes back. Card
+"Gesamtnote ohne CLIP" on Fotos › Einstellungen › Ästhetik. The AI
+curation thresholds read the composite only when the quality job runs, so
+an adoption does not re-curate photos.
+
 Beyond that, with the aesthetic value available on its own:
 
 - **Sort and filter "Ästhetik"** next to "Qualität" in gallery, album and

@@ -13,6 +13,7 @@ import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBN
 export { ENABLE_LOCAL_FACES, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
 import db from "../db/database";
 import { compositeFromDetails, isAestheticScore } from "./aesthetic-score";
+import { getCompositeWeights } from "./aesthetic-store";
 import { realtime, feed, sharedalbum } from "~encore/clients";
 import { markUsed, pickRegion } from "../osm-admin/region-router";
 import { getGeoClient } from "../osm-admin/geo-client";
@@ -8084,7 +8085,7 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
     if (isAestheticScore(photo.aesthetic_model) && typeof previous?.clip_aesthetics === "number") {
       details.clip_aesthetics = previous.clip_aesthetics;
       if (typeof previous.qalign_quality === "number") details.qalign_quality = previous.qalign_quality;
-      compositeScore = compositeFromDetails(details) ?? compositeScore;
+      compositeScore = compositeFromDetails(details, await getCompositeWeights()) ?? compositeScore;
     }
     // Who wrote clip_aesthetics: a Q-Align score or its unreadable mark stays
     // (the CASE below), otherwise the provisional head if /quality used it.

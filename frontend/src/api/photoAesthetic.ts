@@ -11,6 +11,8 @@ export interface AestheticSettings {
   /** Local time "HH:MM". */
   window_start: string
   window_end: string
+  /** Adopted weights of the overall score for Q-Align photos; null keeps the original formula. */
+  composite: CompositeSetting | null
   updated_at: string
 }
 
@@ -161,4 +163,54 @@ export function replayAutoPick(): Promise<ReplayReport> {
 
 export function adoptAutoPickReplay(): Promise<{ report: ReplayReport }> {
   return apiFetch('/photos/aesthetic/replay/adopt', { method: 'POST' })
+}
+
+// ─── The overall score without the CLIP prompts ─────────────────────────────
+
+export interface CompositeWeights {
+  aesthetics: number
+  quality: number
+  blur: number
+}
+
+export interface CompositeSetting {
+  weights: CompositeWeights
+  groups: number
+  hit_rate_before: number
+  hit_rate_after: number
+  adopted_at: string
+}
+
+export interface CompositeVariant {
+  key: 'current' | 'default' | 'fitted'
+  label: string
+  groups: number
+  hits: number
+  hit_rate: number
+  /** Null for the original formula. */
+  weights: CompositeWeights | null
+}
+
+export interface CompositeReport {
+  /** Decided groups across all users. */
+  decided_groups: number
+  /** ...with Q-Align values throughout; the replay runs on these. */
+  qalign_groups: number
+  variants: CompositeVariant[]
+  recommended: 'default' | 'fitted' | null
+  reason: string | null
+  min_groups: number
+  adopted: CompositeSetting | null
+}
+
+export function replayCompositeScore(): Promise<CompositeReport> {
+  return apiFetch('/photos/aesthetic/composite/replay', { method: 'POST' })
+}
+
+export function adoptCompositeScore(): Promise<CompositeReport> {
+  return apiFetch('/photos/aesthetic/composite/adopt', { method: 'POST' })
+}
+
+export function resetCompositeScore(): Promise<void> {
+  return apiFetch('/photos/aesthetic/composite/reset', { method: 'POST' })
 }

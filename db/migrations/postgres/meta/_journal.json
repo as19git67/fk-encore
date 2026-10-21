@@ -1884,6 +1884,13 @@
       "when": 1788825846210,
       "tag": "0268_assistant_context_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 269,
+      "version": "7",
+      "when": 1788900000000,
+      "tag": "0269_photo_composite_weights",
+      "breakpoints": true
     }
   ]
 }

@@ -4813,8 +4813,19 @@ export const photoAestheticSettings = pgTable("photo_aesthetic_settings", {
   enabled: boolean("enabled").notNull().default(false),
   window_start: text("window_start").notNull().default("01:00"),
   window_end: text("window_end").notNull().default("06:00"),
+  /** Weights of the overall score for Q-Align photos, adopted after a replay; NULL keeps the original formula. */
+  composite: jsonb("composite").$type<CompositeSetting>(),
   updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
+
+/** The adopted weights of the overall score for Q-Align photos and the replay that justified them. */
+export interface CompositeSetting {
+  weights: { aesthetics: number; quality: number; blur: number };
+  groups: number;
+  hit_rate_before: number;
+  hit_rate_after: number;
+  adopted_at: string;
+}
 
 export type AestheticRunTrigger = "window" | "manual";
 export type AestheticRunStatus = "running" | "done" | "stopped" | "failed";

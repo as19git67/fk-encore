@@ -30,7 +30,7 @@ const HEAD: AestheticHeadReport = {
 }
 
 const BASE: AestheticOverview = {
-  settings: { enabled: true, window_start: '01:00', window_end: '06:00', updated_at: '2026-10-20T15:00:00Z' },
+  settings: { enabled: true, window_start: '01:00', window_end: '06:00', composite: null, updated_at: '2026-10-20T15:00:00Z' },
   time_zone: 'Europe/Berlin',
   in_window: false,
   model: 'qalign_v1',

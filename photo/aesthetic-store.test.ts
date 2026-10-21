@@ -19,6 +19,9 @@ import {
   startRun,
   updateRun,
   finishRun,
+  getCompositeWeights,
+  recomputeQAlignComposites,
+  saveCompositeSetting,
   trainingSamples,
   writeAestheticScore,
   writeProvisionalScore,
@@ -185,6 +188,41 @@ describe("settings", () => {
     await expect(saveAestheticSettings({ enabled: true, window_start: "25:00", window_end: "05:00" })).rejects.toBeInstanceOf(InvalidSettingsError);
     await expect(saveAestheticSettings({ enabled: true, window_start: "03:00", window_end: "03:00" })).rejects.toBeInstanceOf(InvalidSettingsError);
     await saveAestheticSettings({ enabled: false, window_start: "01:00", window_end: "06:00" });
+  });
+});
+
+describe("the overall score without CLIP", () => {
+  const parts = {
+    clip_aesthetics: 0.8,
+    clip_composition: 0.1,
+    clip_technical: 0.1,
+    qalign_quality: 0.6,
+    sharpness: 0.5,
+    contrast: 0.7,
+    exposure: 0.9,
+  };
+  const weights = { aesthetics: 0.5, quality: 0.25, blur: 0.25 };
+
+  it("stores adopted weights, rebuilds Q-Align photos only, and goes back on reset", async () => {
+    const scored = await makePhoto({ model: MODEL, details: parts, score: 0.1 });
+    const { qalign_quality: _, ...clipOnly } = parts;
+    const unscored = await makePhoto({ details: clipOnly, score: 0.1 });
+
+    await saveCompositeSetting({ weights, groups: 40, hit_rate_before: 0.5, hit_rate_after: 0.7, adopted_at: "2026-10-21T20:00:00Z" });
+    expect(await getCompositeWeights()).toEqual(weights);
+    expect((await getAestheticSettings()).composite).toMatchObject({ groups: 40 });
+    expect(await recomputeQAlignComposites(weights)).toBeGreaterThanOrEqual(1);
+    expect((await photoRow(scored)).ai_quality_score).toBeCloseTo(0.5 * 0.8 + 0.25 * 0.6 + 0.25 * 0.5, 5);
+    expect((await photoRow(unscored)).ai_quality_score).toBeCloseTo(0.1, 5);
+
+    // A new Q-Align score is written with the adopted weights.
+    await writeAestheticScore(scored, MODEL, { aesthetics: 5, quality: 5 });
+    expect((await photoRow(scored)).ai_quality_score).toBeCloseTo(0.5 + 0.25 + 0.25 * 0.5, 5);
+
+    await saveCompositeSetting(null);
+    expect(await getCompositeWeights()).toBeNull();
+    await recomputeQAlignComposites(null);
+    expect((await photoRow(scored)).ai_quality_score).toBeCloseTo(0.3 + 0.02 + 0.01 + 0.125 + 0.07 + 0.045, 5);
   });
 });
 
