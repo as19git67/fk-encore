@@ -215,6 +215,32 @@ The geo-side drop is best-effort tolerated: if the geo service fails,
 the DB row is still removed so the admin can clean up stuck entries
 manually. Re-importing a previously-dropped region is idempotent.
 
+Dropping the database frees the largest part. The rest follows on its
+own: the geo service deletes extracts whose database is gone
+(`geo/src/pbf-cache.ts`, every 6 h), and the routing container notices
+the changed set of extracts and rebuilds its Valhalla tiles without it
+(`routing/entrypoint.sh`).
+
+### Idle regions are removed automatically
+
+`osm-admin/retention.ts` runs nightly (02:30 UTC) and removes every
+region that has not been used for a configurable number of days
+(default 180, minimum 7). The switch and the period live in
+`osm_region_retention_settings` and are set on the OSM regions admin
+page, which also lists when each region would go.
+
+- **Use** is `last_used_at`, written by every region lookup
+  (`pickRegion`, `regionsIntersecting`, at most once per region and
+  hour): photo reverse geocoding, POI detection, trip-planner searches
+  and routes. A replication refresh does not count. Without a use the
+  period counts from the import.
+- **Kept regardless** is a region that a trip still needs: a leg with
+  that `region_db` whose start date is ahead or at most 60 days back,
+  or an undated leg of a plan edited within the period. Regions in
+  `importing` or `pending_approval` are never touched.
+- A trip to a removed region later asks for it again like any new
+  region; with auto-approve it is imported without anyone stepping in.
+
 ## Disk-space budget
 
 Rule of thumb the importer enforces before doing any work:

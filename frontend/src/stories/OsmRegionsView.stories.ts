@@ -102,9 +102,24 @@ const BULK_RESULT = {
 
 type Handler = (typeof defaultHandlers)[number]
 
+const RETENTION = {
+  settings: {
+    enabled: true,
+    idleDays: 180,
+    lastRunAt: '2026-10-20T02:30:00Z',
+    lastRemoved: ['europe/italy/nord-ovest'],
+  },
+  regions: [
+    { slug: 'europe/austria', idleSince: '2026-04-10T00:00:00Z', removeAfter: '2026-10-07T00:00:00Z', keptForTrip: false, due: true },
+    { slug: 'europe/germany/bayern', idleSince: '2026-09-18T10:00:00Z', removeAfter: '2027-03-17T10:00:00Z', keptForTrip: false, due: false },
+    { slug: 'europe/germany/baden-wuerttemberg', idleSince: '2026-08-30T12:00:00Z', removeAfter: null, keptForTrip: true, due: false },
+  ],
+}
+
 function osmHandlers(extra: Handler[] = []): Handler[] {
   return [
     http.get('/api/osm/regions', () => HttpResponse.json({ regions: REGIONS })),
+    http.get('/api/osm/retention', () => HttpResponse.json(RETENTION)),
     ...extra,
     ...defaultHandlers,
   ]

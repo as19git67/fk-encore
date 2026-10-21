@@ -37,6 +37,12 @@ import {
   type ReimportedRegion,
 } from "./reimport";
 import type { RegionStatus } from "./state-machine";
+import {
+  regionRetention,
+  saveRetentionSettings,
+  type RegionRetentionState,
+  type RetentionSettings,
+} from "./retention";
 
 export interface OsmRegionImport {
   slug: string;
@@ -344,6 +350,42 @@ export const regionStorage = api(
 );
 
 export type RegionStorageResponse = RegionStorageResult;
+
+export interface RegionRetentionResponse {
+  settings: RetentionSettings;
+  regions: RegionRetentionState[];
+}
+
+/**
+ * When idle regions are removed, and when each one would go
+ * (retention.ts).
+ */
+export const getRegionRetention = api(
+  { expose: true, auth: true, method: "GET", path: "/osm/retention" },
+  async (): Promise<RegionRetentionResponse> => {
+    requirePermission(getAuthData()!, "osm.admin");
+    return await regionRetention();
+  },
+);
+
+export interface UpdateRegionRetentionRequest {
+  enabled: boolean;
+  idleDays: number;
+}
+
+export const updateRegionRetention = api(
+  { expose: true, auth: true, method: "POST", path: "/osm/retention" },
+  async (req: UpdateRegionRetentionRequest): Promise<RegionRetentionResponse> => {
+    requirePermission(getAuthData()!, "osm.admin");
+    try {
+      await saveRetentionSettings({ enabled: req.enabled, idleDays: req.idleDays });
+    } catch (err) {
+      if (err instanceof RangeError) throw APIError.invalidArgument(err.message);
+      throw err;
+    }
+    return await regionRetention();
+  },
+);
 
 function validateLatLon(lat: number, lon: number): void {
   if (typeof lat !== "number" || Number.isNaN(lat) || lat < -90 || lat > 90) {

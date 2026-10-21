@@ -121,6 +121,32 @@ const cache = new Map<string, CacheEntry>();
 /** Test seam: clear the in-memory cache. */
 export function clearRouterCache(): void {
   cache.clear();
+  usedNoted.clear();
+}
+
+/**
+ * When each region was last recorded as used, by this process. A lookup
+ * that finds a region is a use of it, and `last_used_at` decides when an
+ * idle region is removed (retention.ts) — but a planner pass asks
+ * hundreds of times a minute, and the sweep counts in days. One write
+ * per region and hour is all that question needs.
+ */
+const USED_THROTTLE_MS = 60 * 60 * 1000;
+const usedNoted = new Map<string, number>();
+
+async function noteUsed(slug: string, deps: RouterDeps): Promise<void> {
+  const nowMs = (deps.now ?? (() => new Date()))().getTime();
+  const last = usedNoted.get(slug);
+  if (last !== undefined && nowMs - last < USED_THROTTLE_MS) return;
+  usedNoted.set(slug, nowMs);
+  // Best-effort: a lookup must not fail because the bookkeeping did.
+  await markUsed(slug, deps).catch((err) => {
+    usedNoted.delete(slug);
+    log.warn("could not record region use", {
+      slug,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  });
 }
 
 /**
@@ -176,6 +202,7 @@ export async function pickRegion(
 
   const cached = cache.get(hash);
   if (cached && cached.expiresAt > now().getTime()) {
+    if (cached.match) await noteUsed(cached.match.slug, deps);
     return cached.match;
   }
 
@@ -253,6 +280,7 @@ export async function pickRegion(
   }
 
   cache.set(hash, { match, expiresAt: now().getTime() + CACHE_TTL_MS });
+  if (match) await noteUsed(match.slug, deps);
   return match;
 }
 
@@ -278,7 +306,7 @@ export interface LatLonBox {
  */
 export async function regionsIntersecting(
   box: LatLonBox,
-  deps: Pick<RouterDeps, "db"> = {},
+  deps: Pick<RouterDeps, "db" | "now"> = {},
 ): Promise<RegionMatch[]> {
   const db = deps.db ?? dbDefault;
   const rows = await db
@@ -293,10 +321,14 @@ export async function regionsIntersecting(
         sql`${osmRegionImports.bbox_max_lon} >= ${box.minLon}`,
       ),
     );
-  return rows
+  const matches = rows
     .sort((a, b) => bboxArea(a) - bboxArea(b))
     .map(toMatch)
     .filter((m): m is RegionMatch => m !== null);
+  // Every one of them is searched along the corridor, so every one of
+  // them is in use — the region a journey only crosses included.
+  for (const m of matches) await noteUsed(m.slug, deps);
+  return matches;
 }
 
 /**
@@ -347,9 +379,10 @@ async function defaultCovers(postgresDb: string, lat: number, lon: number): Prom
 }
 
 /**
- * Bump `last_used_at` to the current time. Called by the proxy after a
- * successful forward — useful for diagnostics / admin UI even though
- * the idle-stop sweeper that originally consumed it has been removed.
+ * Bump `last_used_at` to the current time. `pickRegion` and
+ * `regionsIntersecting` do it for every region they hand out (throttled),
+ * and the retention sweep removes a region once it has gone unused for
+ * the configured number of days (retention.ts).
  */
 export async function markUsed(
   slug: string,

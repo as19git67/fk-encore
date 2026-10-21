@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import OsmRegionStorageDialog from './OsmRegionStorageDialog.vue'
+import OsmRegionRetention from './OsmRegionRetention.vue'
 import ScrollX from '../layout/ScrollX.vue'
 import {
   listOsmRegions, suggestOsmRegion, createOsmRegion,
@@ -564,6 +565,8 @@ usePolling(fetchOsmRegions, 5_000)
         </div>
       </div>
     </div>
+
+    <OsmRegionRetention />
 
     <!-- Region-Tabelle (Desktop) -->
     <div v-if="osmRegions.length === 0" class="osm-empty">

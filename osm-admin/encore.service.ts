@@ -10,7 +10,9 @@
  *      one `importing` row toward `ready_running`.
  *   3. Schedule replication self-healing hourly and once shortly
  *      after boot. Only registered ready regions are considered.
- *   4. Arm the local-cron scheduler (idempotent across services).
+ *   4. Schedule the retention sweep daily: regions unused for the
+ *      configured number of days are removed (retention.ts).
+ *   5. Arm the local-cron scheduler (idempotent across services).
  *
  * The geo service itself runs in its own container (see /geo); this
  * module only speaks to it over HTTP via `geo-client`.
@@ -20,7 +22,7 @@ import { Service } from "encore.dev/service";
 // Side-effect: attaches the shared secret to every outbound call to the
 // internal Python services. See lib/internal-service-auth.ts.
 import "../lib/internal-service-auth";
-import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
+import { dailyAtUtc, everyMs, schedule, startLocalCron } from "../lib/local-cron";
 
 console.log("[boot] osm-admin/encore.service.ts: begin");
 
@@ -30,6 +32,7 @@ import "./proxy";
 
 import { tickImporter } from "./importer";
 import { runReplicationHealingPass } from "./replication-healer";
+import { runRetentionPass } from "./retention";
 
 schedule({
   name: "osm-admin-importer",
@@ -80,6 +83,25 @@ if (replicationHealingEnabled) {
   }, 10_000);
   startupHealingTimer.unref?.();
 }
+
+// Idle regions go at night, when nobody is planning a trip. The period
+// and the switch live in osm_region_retention_settings, not here.
+schedule({
+  name: "osm-admin-retention",
+  description: "Remove OSM regions that have not been used for the configured period.",
+  service: "osm-admin",
+  scheduleLabel: "daily 02:30 UTC",
+  nextFire: dailyAtUtc(2, 30),
+  run: async () => {
+    const outcome = await runRetentionPass();
+    if (outcome.removed.length > 0 || outcome.failed.length > 0) {
+      console.log(
+        `[osm-admin] retention: removed=${outcome.removed.join(",") || "none"}` +
+          `${outcome.failed.length > 0 ? ` failed=${outcome.failed.map((f) => f.slug).join(",")}` : ""}`,
+      );
+    }
+  },
+});
 
 startLocalCron();
 

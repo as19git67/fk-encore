@@ -1856,6 +1856,13 @@
       "when": 1788739266210,
       "tag": "0264_drop_finance_saved_analysis",
       "breakpoints": true
+    },
+    {
+      "idx": 265,
+      "version": "7",
+      "when": 1788739326210,
+      "tag": "0265_osm_region_retention",
+      "breakpoints": true
     }
   ]
 }

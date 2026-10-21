@@ -214,6 +214,23 @@ describe("markUsed", () => {
     )[0];
     expect(row.last_used_at).toBe("2026-05-16 12:00:00+00");
   });
+
+  it("is recorded by every lookup that finds the region, at most once an hour", async () => {
+    await seed({ slug: "europe/germany/bayern", status: "ready_running" });
+    const lastUsed = async () =>
+      (await db.select().from(osmRegionImports).where(eq(osmRegionImports.slug, "europe/germany/bayern")))[0]
+        .last_used_at;
+
+    await pickRegion(48.137, 11.575, { now: () => new Date("2026-05-16T12:00:00Z") });
+    expect(await lastUsed()).toBe("2026-05-16 12:00:00+00");
+
+    // Within the hour: no second write, from the cache or not.
+    await pickRegion(48.137, 11.575, { now: () => new Date("2026-05-16T12:30:00Z") });
+    expect(await lastUsed()).toBe("2026-05-16 12:00:00+00");
+
+    await pickRegion(48.137, 11.575, { now: () => new Date("2026-05-16T13:05:00Z") });
+    expect(await lastUsed()).toBe("2026-05-16 13:05:00+00");
+  });
 });
 
 describe("geohash7", () => {

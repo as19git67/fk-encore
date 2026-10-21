@@ -75,7 +75,8 @@ export async function refreshRegion(
         replication_failure_count: 0,
         replication_next_retry_at: nextCheckAt,
         last_error: null,
-        last_used_at: succeededAt,
+        // Not `last_used_at`: keeping a region current is not using it,
+        // and the retention sweep would otherwise never find one idle.
         updated_at: succeededAt,
       })
       .where(eq(osmRegionImports.slug, slug));
