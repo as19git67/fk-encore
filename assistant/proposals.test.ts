@@ -26,6 +26,7 @@ import {
   getConversation,
 } from "./assistant";
 import { HAND_TOOLS } from "./catalog";
+import { CONSENT_NUDGE } from "./agent";
 import type { ToolContext } from "./types";
 
 const PERMS = [
@@ -111,6 +112,23 @@ describe("write tools", () => {
     const second = vi.mocked(chat).mock.calls[1][0];
     const toolMessage = second.messages.find((m) => m.role === "tool");
     expect(toolMessage?.content).toContain("NOT executed");
+  });
+
+  it("a request for confirmation in words is sent back, so the card with the button appears", async () => {
+    const conversation = await createConversation({});
+    vi.mocked(chat)
+      .mockResolvedValueOnce(text("Soll ich den Buchungen 1 und 2 den Tag „Renovierung“ hinzufügen? Bitte bestätige die Änderung."))
+      .mockResolvedValueOnce(toolCall("tag_transactions", { transaction_ids: [1, 2], add: ["Renovierung"] }))
+      .mockResolvedValueOnce(text("Vorgeschlagen: bei 2 Buchungen „Renovierung“ setzen. Bitte bestätige auf der Karte."));
+
+    const res = await ask({ id: conversation.id, message: "Ja, mach das." });
+
+    const second = vi.mocked(chat).mock.calls[1][0];
+    expect(second.messages.at(-1)).toEqual({ role: "user", content: CONSENT_NUDGE });
+    expect(res.blocks.find((b) => b.kind === "proposal")?.rows[0]).toMatchObject({ tool: "tag_transactions", status: "pending" });
+    // With the card there, asking for confirmation is the right answer and is not sent back.
+    expect(vi.mocked(chat)).toHaveBeenCalledTimes(3);
+    expect(clients.finance.batchTag).not.toHaveBeenCalled();
   });
 
   it("refuses a selection that names no photos", async () => {

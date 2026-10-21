@@ -103,7 +103,7 @@ Rules:
 - Businesses (Betriebe): a leased farm, a PV system or a trade is a business in the register with its fixed assets (Anlagegüter), their depreciation (AfA) and, for a farm, its parcels (Flurstücke) with lessee and rent. "Welche Anlagegüter hat die Landwirtschaft", "wie hoch ist die AfA 2025", "welche Flächen sind verpachtet" go to list_businesses → business_assets(business_id, year); quote the AfA and book values the tool printed, never recompute them. "EÜR", "Gewinn der Landwirtschaft", "Betriebseinnahmen und -ausgaben" go to euer_report(business_id, year), and "als PDF" to euer_pdf(business_id, year); repeat the line sums, the totals and the result the tool printed. "Ist die PV-Anlage steuerfrei" is list_businesses → business_assets(the PV business, year): repeat the status and the reason the tool printed (§ 3 Nr. 72 EStG, up to 30 kWp from 2022), never decide it yourself. "Der Pachtvertrag der Fläche", "die Rechnung zum Stall", "Unterlagen der Landwirtschaft" go to business_documents(business_id); for a document's content, get_document_summary or get_document_text on the ids it printed.
 - Tax: documents carry a tax-relevant flag, a tax year and Anlagen (tax sections); bookings carry a tax-relevant flag. "Steuer 2025" questions go to tax_documents(year) and list_transactions(tax_relevant = true, from/to = that year); "alle Unterlagen für die Steuer 2025 in eine Mappe" is tax_return_bundle(year = 2025); "hilf mir beim Ausfüllen" is tax_worksheet(year), as PDF tax_worksheet_pdf(year). Never judge tax relevance yourself, and never compute a tax figure: repeat the sums the worksheet printed (bookings, businesses, depot, and the values by form field with their Zeile and Kennzahl). A document's figure exists only as a value by form field: state it with its line and Kennzahl and say when it is still unconfirmed; for anything not listed there, point to the document.
 - When the user answers an offer you made ("Soll ich eines davon genauer ansehen?" → "ja"), act on the rows of your previous answer — their ids are in the earlier tool results — with get_document_summary(ids = …) or get_document_text; never search again for them.
-- Tools of kind "write" never change anything: they create a proposal the user confirms with a button. Call one only when the user asks for that change, then say what you proposed and that it waits for their confirmation. Never claim it is done.
+- Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
 - For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and the closing formula ("Mit freundlichen Grüßen") — the server signs it with the user's name. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result, and put everything the user asks to have mentioned into the letter text itself, not only into your reply. Write dates in letters as DD.MM.YYYY. Where the letter needs a fact you do not have, write a gap as [[what is missing]] instead of guessing; the user fills it in on the card.
 - When a table helps (a few rows compared by the same columns), write it as a Markdown table: a header row, then a separator row like |---|---:|, one row per line. The app shows it as a real table. Never draw tables with +---+, box characters or spaces, and never put a table in a code block.
 - Answer briefly in the user's language (usually German).`;
@@ -118,7 +118,8 @@ const EXAMPLES = `Examples of chained calls:
 6. After an answer listing documents of a purchase: "Schwärze den Kaufpreis und mach ein PDF daraus." → find the price first if it is not known (get_document_summary of the contract) → create_collection(name = …, from_previous_result = true, redact = [the price as printed, e.g. "450.000,00"]) → say how many pages get blacked out, name documents without word positions, and that the boxes should be checked in the Sammelmappe before passing the PDF on.
 7. "Liste alle Buchungen zur Wohnung mit Zwischensummen für Kauf, Reparatur und Mieteinnahmen und ermittle die Rendite." → list_transactions (as needed) → transaction_report(title = …, groups = [{name: "Kauf", transaction_ids: […]}, {name: "Reparatur", …}, {name: "Mieteinnahmen", tag: "Miete"}], transaction_ids = all bookings found, yield = {investment_group: "Kauf", income_groups: ["Mieteinnahmen"], cost_groups: ["Reparatur"]}) → repeat only the subtotals and the yield formula the tool printed, and name bookings whose group was doubtful.
 8. Working set of three invoices: "Schreib dem Absender, dass ich die drei Rechnungen bezahlt habe." → render_letter(recipient = the sender's address if a tool showed it, else [[Anschrift des Absenders]], subject = "Ihre Rechnungen …" with their numbers, body = salutation, one line per invoice with number, date and amount from the working set, [[Zahlungsdatum]] where the date of payment is unknown, closing) → say the letter waits on the card and name the gaps to fill.
-9. "Wie steht mein Depot, und was hat Beispiel AG dieses Jahr an Dividende gebracht?" → portfolio_overview → depot_transactions(position = the key the overview printed, kind = "dividend", from/to = this year) → repeat the figures the tools printed (never add them up yourself); for the price today, quotes(q = the name); for news, position_news(key).`;
+9. "Wie steht mein Depot, und was hat Beispiel AG dieses Jahr an Dividende gebracht?" → portfolio_overview → depot_transactions(position = the key the overview printed, kind = "dividend", from/to = this year) → repeat the figures the tools printed (never add them up yourself); for the price today, quotes(q = the name); for news, position_news(key).
+10. "Füge den Buchungen vom Baumarkt im September den Tag Renovierung hinzu." → list_transactions(q = "Baumarkt", from/to = September) → tag_transactions(from_previous_result = true, add = ["Renovierung"]) → say how many bookings get the tag and that it waits for "Ausführen" on the card; never ask first whether you should.`;
 
 export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean, briefs: string[] = []): string {
   const catalog = tools.length
@@ -172,6 +173,16 @@ export function isDataQuestion(question: string): boolean {
 
 /** Sent back when the model writes a tool call, or a note about one, as text instead of calling it. */
 export const FAKE_CALL_NUDGE = "You wrote a tool call or a note about tools as text. That does nothing: nothing was looked up or proposed. Call the tool through the tool interface now, or answer in plain words without mentioning tools.";
+
+/** Sent back when the model asks in words to confirm a change instead of proposing it. */
+export const CONSENT_NUDGE = "You asked the user to confirm a change in words. Words cannot be confirmed: only a write tool creates the card with the button. If the user asked for the change, call the write tool now; the card is the confirmation. Otherwise answer without asking for confirmation.";
+
+/** An answer that waits for the user's go-ahead ("Bitte bestätige …", "please confirm"). */
+const CONSENT_RE = /bestätig|\bconfirm/i;
+
+export function asksForConsent(text: string | null): boolean {
+  return !!text && CONSENT_RE.test(text);
+}
 
 /** Sent with the forced last round when its answer was a tool call written as text. */
 export const FINAL_ANSWER_NUDGE = "No more tool calls are possible. Answer the user now in plain words, only from the tool results above; say what is missing if they were not enough.";
@@ -364,6 +375,9 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let nudge: ChatMessage[] | null = null;
   /** One more request for words after an empty reply; never twice. */
   let emptyRetried = false;
+  /** One push from "bitte bestätigen" in words to the card; never twice. */
+  let consentNudged = false;
+  const mayPropose = tools.some((t) => t.kind === "write");
   for (let round = 1; round <= maxRounds && answer === null; round++) {
     input.signal?.throwIfAborted();
     rounds = round;
@@ -402,9 +416,15 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
     const dataQuestion = !reply.tool_calls.length && !calledTools && isDataQuestion(input.question);
     const ungrounded = !reply.tool_calls.length && !calledTools && looksLikeUserData(reply.content);
-    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded)) {
+    // A request for confirmation in words leaves the user nothing to press:
+    // only a write tool makes the card. Once a card exists, "wartet auf
+    // deine Bestätigung" is the right answer.
+    const asksConsent = !reply.tool_calls.length && !consentNudged && mayPropose
+      && !blocks.some((b) => b.kind === "proposal") && asksForConsent(reply.content);
+    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded || asksConsent)) {
       // Not kept in the transcript: the draft was never the answer.
-      const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : DATA_QUESTION_NUDGE;
+      const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE : DATA_QUESTION_NUDGE;
+      if (text === CONSENT_NUDGE) consentNudged = true;
       nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: text }];
       emit({ type: "retract" });
       continue;
