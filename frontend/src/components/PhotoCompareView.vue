@@ -172,6 +172,7 @@ const detailLabels: Record<string, string> = {
   clip_aesthetics: 'Ästhetik',
   clip_composition: 'Komposition',
   clip_technical: 'Technik',
+  qalign_quality: 'Technik (Q-Align)',
   face_sharpness: 'Gesichtsschärfe',
   eyes_open: 'Augen offen',
   face_composition: 'Gesichtsposition',

@@ -29,6 +29,9 @@ import {
   startAestheticRun,
   stopAestheticRun,
   trainAestheticHead,
+  replayAutoPick,
+  adoptAutoPickReplay,
+  type ReplayReport,
   type AestheticHeadJob,
   type AestheticOverview,
   type AestheticRun,
@@ -43,7 +46,8 @@ const overview = ref<AestheticOverview | null>(null)
 const loaded = ref(false)
 const error = ref<string | null>(null)
 const info = ref<string | null>(null)
-const busy = ref<'save' | 'start' | 'stop' | 'backfill' | 'train' | 'clear' | number | null>(null)
+const busy = ref<'save' | 'start' | 'stop' | 'backfill' | 'train' | 'clear' | 'replay' | 'adopt' | number | null>(null)
+const replay = ref<ReplayReport | null>(null)
 
 const enabled = ref(false)
 const windowStart = ref('01:00')
@@ -231,6 +235,55 @@ async function train() {
   } finally {
     busy.value = null
   }
+}
+
+function percent(rate: number): string {
+  return `${Math.round(rate * 100)} %`
+}
+
+async function runReplay() {
+  busy.value = 'replay'
+  error.value = null
+  info.value = null
+  try {
+    replay.value = await replayAutoPick()
+  } catch (e) {
+    error.value = message(e, 'Das Nachspielen ist fehlgeschlagen')
+  } finally {
+    busy.value = null
+  }
+}
+
+const recommendedVariant = computed(() =>
+  replay.value?.variants.find((v) => v.key === replay.value?.recommended) ?? null,
+)
+
+function adoptReplay() {
+  const r = replay.value
+  const best = recommendedVariant.value
+  const today = r?.variants.find((v) => v.key === 'current')
+  if (!r || !best || !today) return
+  confirm.require({
+    message:
+      `Die Gewichte „${best.label}“ für deinen Auto-Pick übernehmen? Sie treffen deine Wahl in ${percent(best.hit_rate)} ` +
+      `statt ${percent(today.hit_rate)} der Gruppen. Die offenen Gruppen werden danach neu bewertet.`,
+    header: 'Gewichte übernehmen',
+    icon: 'pi pi-check',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Übernehmen',
+    accept: async () => {
+      busy.value = 'adopt'
+      try {
+        await adoptAutoPickReplay()
+        info.value = 'Übernommen. Die offenen Gruppen werden im Hintergrund neu bewertet.'
+        replay.value = await replayAutoPick()
+      } catch (e) {
+        error.value = message(e, 'Die Gewichte konnten nicht übernommen werden')
+      } finally {
+        busy.value = null
+      }
+    },
+  })
 }
 
 function deleteRun(r: AestheticRun) {
@@ -431,6 +484,60 @@ function rescoreAll() {
             :loading="busy === 'train' || headBusy"
             :disabled="overview.scored === 0 || headBusy"
             @click="train"
+          />
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="ae-replay">
+        <h2 id="ae-replay" class="card-title">Auto-Pick nachspielen</h2>
+        <p class="muted">
+          Spielt deine bereits geprüften Fotogruppen noch einmal durch: Wie oft hätte der Auto-Pick das Foto vorne, das du
+          behalten hast? Neu gelernte Gewichte werden an Gruppen gemessen, aus denen sie nicht gelernt haben. Übernehmen
+          lässt sich nur, was spürbar öfter trifft als heute.
+        </p>
+        <template v-if="replay">
+          <p class="muted">
+            {{ count(replay.qalign_groups) }} von {{ count(replay.decided_groups) }} entschiedenen Gruppen haben durchgehend
+            Q-Align-Werte und zählen.
+          </p>
+          <ScrollX v-if="replay.qalign_groups > 0">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Gewichte</th>
+                  <th scope="col" class="num">Trifft deine Wahl</th>
+                  <th scope="col" class="num">Gruppen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="v in replay.variants" :key="v.key">
+                  <td>
+                    {{ v.label }}
+                    <Tag v-if="v.key === replay.recommended" value="Empfohlen" severity="success" />
+                  </td>
+                  <td class="num">{{ percent(v.hit_rate) }}</td>
+                  <td class="num">{{ count(v.hits) }} / {{ count(v.groups) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+          <p v-if="replay.reason" class="muted">{{ replay.reason }}</p>
+        </template>
+        <div class="buttons">
+          <Button
+            label="Nachspielen"
+            icon="pi pi-replay"
+            severity="secondary"
+            outlined
+            :loading="busy === 'replay'"
+            @click="runReplay"
+          />
+          <Button
+            v-if="recommendedVariant"
+            label="Gewichte übernehmen"
+            icon="pi pi-check"
+            :loading="busy === 'adopt'"
+            @click="adoptReplay"
           />
         </div>
       </section>

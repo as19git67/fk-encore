@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_WEIGHTS,
+  MIN_REPLAY_GROUPS,
   faceFeatures,
   fitPairwiseWeights,
   nonFaceFeatures,
+  replayOnGroups,
+  topOneHits,
+  type TrainingGroup,
 } from "./group-auto-pick.calibration";
-import type { PhotoSignals } from "./group-auto-pick";
+import { scorePhoto, type PhotoSignals } from "./group-auto-pick";
 
 function signals(overrides: Partial<PhotoSignals> = {}): PhotoSignals {
   return {
@@ -119,5 +123,94 @@ describe("fitPairwiseWeights", () => {
       sum += w;
     }
     expect(sum).toBeCloseTo(1, 5);
+  });
+});
+
+describe("technical slot from Q-Align", () => {
+  it("takes qalign_quality where the photo has one, the CLIP prompt elsewhere", () => {
+    expect(nonFaceFeatures(signals({ clip_technical: 0.2, qalign_quality: 0.9 }), "qalign")[3]).toBe(0.9);
+    expect(nonFaceFeatures(signals({ clip_technical: 0.2 }), "qalign")[3]).toBe(0.2);
+    expect(nonFaceFeatures(signals({ clip_technical: 0.2, qalign_quality: 0.9 }))[3]).toBe(0.2);
+  });
+
+  it("scores with the same choice the features make", () => {
+    const s = signals({ clip_technical: 0.2, qalign_quality: 0.9 });
+    const clip = scorePhoto(s);
+    const qalign = scorePhoto(s, { ...DEFAULT_WEIGHTS, technical: "qalign" });
+    expect(qalign.score - clip.score).toBeCloseTo(DEFAULT_WEIGHTS.non_face[3] * 0.7, 6);
+    expect(qalign.signals.qalign_quality).toBe(0.9);
+    expect(qalign.signals.clip_technical).toBeUndefined();
+  });
+});
+
+describe("replay", () => {
+  /**
+   * A burst the user decided against the blur signal: the kept photo is a
+   * touch softer but technically better by Q-Align. Its id is the higher
+   * one, so a tie counts as a miss.
+   */
+  function group(id: number, opts: { qalign?: boolean; keptQuality?: number } = {}): TrainingGroup {
+    const qalign = opts.qalign ?? true;
+    return {
+      group_id: id,
+      photos: [
+        {
+          photo_id: id * 10 + 1,
+          user_kept: false,
+          has_face: false,
+          qalign,
+          signals: signals({ photo_id: id * 10 + 1, blur_score: 0.6, qalign_quality: 0.2 }),
+        },
+        {
+          photo_id: id * 10 + 2,
+          user_kept: true,
+          has_face: false,
+          qalign,
+          signals: signals({ photo_id: id * 10 + 2, blur_score: 0.5, qalign_quality: opts.keptQuality ?? 0.9 }),
+        },
+      ],
+    };
+  }
+
+  it("counts a group as hit when the top-ranked photo is a kept one", () => {
+    expect(topOneHits([group(1)], DEFAULT_WEIGHTS)).toEqual({ groups: 1, hits: 0 });
+    expect(topOneHits([group(1)], { ...DEFAULT_WEIGHTS, technical: "qalign" })).toEqual({ groups: 1, hits: 1 });
+  });
+
+  it("recommends Q-Align for the technical slot when that is what the reviews show", () => {
+    const groups = Array.from({ length: MIN_REPLAY_GROUPS + 10 }, (_, i) => group(i + 1));
+    const report = replayOnGroups(groups, DEFAULT_WEIGHTS);
+    const rate = (key: string) => report.variants.find((v) => v.key === key)!.hit_rate;
+    expect(rate("current")).toBe(0);
+    expect(rate("fitted_qalign")).toBeGreaterThan(0.9);
+    expect(report.recommended).toBe("fitted_qalign");
+    expect(report.reason).toBeNull();
+  });
+
+  it("replays only groups whose photos all have a Q-Align score", () => {
+    const groups = [
+      ...Array.from({ length: 5 }, (_, i) => group(i + 1)),
+      ...Array.from({ length: 50 }, (_, i) => group(i + 100, { qalign: false })),
+    ];
+    const report = replayOnGroups(groups, DEFAULT_WEIGHTS);
+    expect(report.decided_groups).toBe(55);
+    expect(report.qalign_groups).toBe(5);
+    expect(report.recommended).toBeNull();
+    expect(report.reason).toContain("Erst 5");
+  });
+
+  it("recommends nothing when fitted weights do not beat today's", () => {
+    // Today's weights already put Q-Align in the technical slot and hit every group.
+    const groups = Array.from({ length: MIN_REPLAY_GROUPS + 10 }, (_, i) => group(i + 1));
+    const report = replayOnGroups(groups, { ...DEFAULT_WEIGHTS, technical: "qalign" });
+    expect(report.variants.find((v) => v.key === "current")!.hit_rate).toBe(1);
+    expect(report.recommended).toBeNull();
+    expect(report.reason).toMatch(/nicht spürbar/);
+  });
+
+  it("ignores groups without both a kept and a hidden photo", () => {
+    const allKept = group(1);
+    allKept.photos.forEach((p) => (p.user_kept = true));
+    expect(replayOnGroups([allKept], DEFAULT_WEIGHTS).decided_groups).toBe(0);
   });
 });

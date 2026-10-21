@@ -401,6 +401,8 @@ export interface AiPickPhotoScore {
     clip_aesthetics?: number;
     clip_composition?: number;
     clip_technical?: number;
+    /** Q-Align quality, when the user's weights put it in the technical slot. */
+    qalign_quality?: number;
   };
 }
 
@@ -515,6 +517,8 @@ export interface AiPickWeights {
                       //  exposure_contrast_avg]
   non_face: number[]; // [blur, clip_aesthetics, clip_composition,
                       //  clip_technical, exposure_contrast_avg]
+  /** Technical slot of the non-face branch; see ScoringWeights in group-auto-pick.ts. */
+  technical?: "clip" | "qalign";
 }
 
 export interface AiPickWeightsMetadata {
@@ -527,6 +531,13 @@ export interface AiPickWeightsMetadata {
   // Top-1 agreement of the *defaults* on the same data, for reference.
   top1_accuracy_face_baseline: number;
   top1_accuracy_non_face_baseline: number;
+  /** Set when the weights were adopted from a replay (foto-aesthetik.md, stage 5). */
+  replay?: {
+    variant: string;
+    groups: number;
+    hit_rate_before: number;
+    hit_rate_after: number;
+  };
 }
 
 export const aiPickUserWeights = pgTable("ai_pick_user_weights", {
