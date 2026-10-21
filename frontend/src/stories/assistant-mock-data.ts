@@ -99,6 +99,7 @@ function proposal(status: 'pending' | 'executed' | 'discarded', extra: Record<st
       result_download: null,
       error: null,
       letter: null,
+      text_document: null,
       ...extra,
     }],
   }

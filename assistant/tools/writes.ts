@@ -13,6 +13,7 @@ import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
 import type { JsonSchema, RefType, ToolContext } from "../types";
 import { renderLetter } from "./letters";
+import { createTextDocument } from "./text-documents";
 import { euerPdf, taxWorksheetPdf } from "./tax";
 import { findInDocuments, pageCount, type Box } from "./text-boxes";
 import { CRITERIA_PROPERTIES, GROUP_PROPERTIES, criteriaFromArgs, groupByFromArgs, totalsText } from "./finance";
@@ -693,6 +694,7 @@ export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   transactionReport,
   createTransactionFolder,
   renderLetter,
+  createTextDocument,
 ];
 
 export const WRITE_TOOLS = WRITE_TOOL_DEFINITIONS.map(writeTool);

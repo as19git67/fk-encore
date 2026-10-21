@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { insertBlock, prefixLines, safeHref, wrapSelection } from './markdown'
+import { draftTitleOf, insertBlock, insertParagraphs, prefixLines, safeHref, wrapSelection } from './markdown'
 
 describe('safeHref', () => {
   it('lets web and mail links through', () => {
@@ -55,5 +55,31 @@ describe('insertBlock', () => {
   it('puts the block on lines of its own', () => {
     expect(insertBlock({ text: 'Absatz', start: 6, end: 6 }, '---').text).toBe('Absatz\n\n---\n')
     expect(insertBlock({ text: '', start: 0, end: 0 }, '---').text).toBe('---\n')
+  })
+})
+
+describe('insertParagraphs', () => {
+  it('replaces the selection with paragraphs of their own', () => {
+    expect(insertParagraphs({ text: 'eins zwei drei', start: 5, end: 9 }, 'NEU', 'cursor')).toEqual({
+      text: 'eins \n\nNEU\n\n drei',
+      start: 7,
+      end: 10,
+    })
+  })
+
+  it('appends after the end', () => {
+    expect(insertParagraphs({ text: 'Absatz\n', start: 0, end: 0 }, 'NEU', 'append').text).toBe('Absatz\n\nNEU')
+  })
+
+  it('replaces everything', () => {
+    expect(insertParagraphs({ text: 'alt', start: 1, end: 1 }, 'neu', 'replace')).toEqual({ text: 'neu', start: 0, end: 3 })
+  })
+})
+
+describe('draftTitleOf', () => {
+  it('takes the first heading, else the first line without Markdown', () => {
+    expect(draftTitleOf('Vorab\n\n## Stromverbrauch 2025\n\nText', '21.10.2026')).toBe('Stromverbrauch 2025')
+    expect(draftTitleOf('**Der Zähler** zeigt 3.412 kWh.', '21.10.2026')).toBe('Der Zähler zeigt 3.412 kWh.')
+    expect(draftTitleOf('   ', '21.10.2026')).toBe('Notiz vom 21.10.2026')
   })
 })

@@ -40,6 +40,7 @@ import {
 import { parseContextQuery } from '../utils/assistantContext'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { draftTitleOf, TEXT_DRAFT_STATE_KEY, type TextDraft } from '../utils/markdown'
 import { useAtLeast } from '../composables/useBreakpoint'
 import { applyEvent, emptyTurn, suggestedQuestions, type LiveTurn } from '../utils/assistantTurn'
 
@@ -49,6 +50,13 @@ const TITLE_RELOAD_MS = 8000
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+// An answer worth keeping opens as a new text document, ready to edit and save.
+const mayKeep = computed(() => auth.hasPermission('module.documents') && auth.hasPermission('documents.upload'))
+function keepAsDocument(content: string) {
+  const draft: TextDraft = { title: draftTitleOf(content, new Date().toLocaleDateString('de-DE')), markdown: content }
+  void router.push({ name: 'dokumente-text-neu', state: { [TEXT_DRAFT_STATE_KEY]: { ...draft } } })
+}
 const confirm = useConfirm()
 const wide = useAtLeast('lg')
 
@@ -346,6 +354,8 @@ function remove(conversation: ConversationSummary) {
             :content="m.content"
             :blocks="m.blocks"
             :message-id="m.id > 0 ? m.id : undefined"
+            :keepable="mayKeep"
+            @keep="keepAsDocument"
           />
           <AssistantMessage
             v-if="live && liveFor === activeId"

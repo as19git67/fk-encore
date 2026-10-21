@@ -119,7 +119,7 @@ describe("generation from the OpenAPI spec", () => {
 });
 
 describe("catalog per user", () => {
-  const everything = ["module.assistant", "module.finance", "finance.view", "module.documents", "documents.view", "module.photos", "photos.view", "albums.manage", "module.meters", "meters.view"];
+  const everything = ["module.assistant", "module.finance", "finance.view", "module.documents", "documents.view", "documents.upload", "module.photos", "photos.view", "albums.manage", "module.meters", "meters.view"];
 
   it("a user without finance.view sees no finance tool", () => {
     const names = catalogFor({ userID: "1", permissions: everything.filter((p) => p !== "finance.view") }).map((t) => t.name);

@@ -31,6 +31,30 @@ export function decodeEntities(text: string): string {
     .replace(/&amp;/g, '&')
 }
 
+/**
+ * A text handed to the editor at `/dokumente/neu` through the router's history
+ * state (`router.push({ name: 'dokumente-text-neu', state: { [TEXT_DRAFT_STATE_KEY]: draft } })`),
+ * e.g. an assistant answer the user wants to keep as a document.
+ */
+export const TEXT_DRAFT_STATE_KEY = 'textDraft'
+
+export interface TextDraft {
+  title: string
+  markdown: string
+}
+
+/**
+ * A title for a text taken from elsewhere: its first heading, else its first
+ * line without Markdown, cut to a few words; a dated fallback when it has none.
+ */
+export function draftTitleOf(markdown: string, today: string): string {
+  const lines = markdown.split('\n').map((l) => l.trim()).filter(Boolean)
+  const line = lines.find((l) => /^#{1,6}\s/.test(l)) ?? lines[0] ?? ''
+  const plain = line.replace(/^#{1,6}\s+|^[-*+>]\s+|^\d+\.\s+/, '').replace(/[*_`~[\]]/g, '').replace(/\(https?:[^)]*\)/g, '').trim()
+  if (!plain) return `Notiz vom ${today}`
+  return plain.length > 80 ? `${plain.slice(0, 79).trimEnd()}…` : plain
+}
+
 // ─── Editing helpers for the toolbar ─────────────────────────────────────────
 
 /** Text with a selection, as a textarea reports it. */
@@ -90,4 +114,27 @@ export function insertBlock(edit: TextEdit, block: string): TextEdit {
   const insert = `${lead}${block}\n`
   const at = end + lead.length
   return { text: before + insert + text.slice(end), start: at, end: at + block.length }
+}
+
+/** Where text from outside (the assistant) goes. */
+export type InsertPlace = 'cursor' | 'replace' | 'append'
+
+/**
+ * Puts text in as paragraphs of its own: in place of the selection, in place
+ * of everything, or after the end. What was inserted is selected afterwards,
+ * so it is easy to see and to take back with one delete.
+ */
+export function insertParagraphs(edit: TextEdit, text: string, where: InsertPlace): TextEdit {
+  if (where === 'replace') return { text, start: 0, end: text.length }
+  const start = where === 'append' ? edit.text.length : edit.start
+  const end = where === 'append' ? edit.text.length : edit.end
+  const head = edit.text.slice(0, start)
+  const tail = edit.text.slice(end)
+  const lead = head.length === 0 || head.endsWith('\n\n') ? '' : head.endsWith('\n') ? '\n' : '\n\n'
+  const trail = tail.length === 0 || tail.startsWith('\n\n') ? '' : tail.startsWith('\n') ? '\n' : '\n\n'
+  return {
+    text: head + lead + text + trail + tail,
+    start: start + lead.length,
+    end: start + lead.length + text.length,
+  }
 }

@@ -48,6 +48,14 @@ export interface WriteToolDefinition {
   draft?(args: Record<string, unknown>): LetterDraft;
   /** The stored arguments with the user's changes from the card applied. */
   edit?(args: Record<string, unknown>, edits: ProposalEdits): Record<string, unknown>;
+  /** The text document the card shows, for a tool that files one. */
+  preview?(args: Record<string, unknown>): TextDocumentPreview;
+}
+
+/** A text document as the card shows it before it is filed. */
+export interface TextDocumentPreview {
+  title: string;
+  markdown: string;
 }
 
 /** Where a confirmed letter goes besides the download. */
@@ -100,6 +108,8 @@ export interface ProposalRow {
   error: string | null;
   /** Set for a letter: the fields the card lets the user change. */
   letter: LetterDraft | null;
+  /** Set for a text document: what will be filed. */
+  text_document: TextDocumentPreview | null;
 }
 
 /** Per tool, how its stored arguments become the card's editable letter. */
@@ -108,6 +118,14 @@ const drafters = new Map<string, (args: Record<string, unknown>) => LetterDraft>
 function letterOf(tool: string, args: Record<string, unknown>): LetterDraft | null {
   const draft = drafters.get(tool);
   return draft ? draft(args) : null;
+}
+
+/** Per tool, the text document its stored arguments would file. */
+const previewers = new Map<string, (args: Record<string, unknown>) => TextDocumentPreview>();
+
+function textDocumentOf(tool: string, args: Record<string, unknown>): TextDocumentPreview | null {
+  const preview = previewers.get(tool);
+  return preview ? preview(args) : null;
 }
 
 function proposalBlock(row: ProposalRow): ResultBlock {
@@ -120,6 +138,7 @@ function proposalBlock(row: ProposalRow): ResultBlock {
  */
 export function writeTool(def: WriteToolDefinition): ToolSpec {
   if (def.draft) drafters.set(def.name, def.draft.bind(def));
+  if (def.preview) previewers.set(def.name, def.preview.bind(def));
   return {
     name: def.name,
     kind: "write",
@@ -150,6 +169,7 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
         result_download: null,
         error: null,
         letter: letterOf(def.name, prepared.arguments),
+        text_document: textDocumentOf(def.name, prepared.arguments),
       };
       return {
         text: [
@@ -267,6 +287,7 @@ export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {
     result_download: row.status === "executed" ? result.download ?? null : null,
     error: row.status === "pending" ? result.error ?? null : null,
     letter: letterOf(row.tool, row.arguments),
+    text_document: textDocumentOf(row.tool, row.arguments),
   };
 }
 

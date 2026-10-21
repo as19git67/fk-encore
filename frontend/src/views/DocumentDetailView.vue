@@ -943,7 +943,7 @@ onBeforeUnmount(() => {
             :dossier-seed="dossierRuleSeed"
           />
           <Button
-            v-if="doc && auth.hasPermission('module.assistant')"
+            v-if="doc && auth.hasPermission('module.assistant') && !isTextDocument"
             icon="pi pi-sparkles"
             text
             rounded
