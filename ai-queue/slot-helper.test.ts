@@ -246,11 +246,15 @@ describe("assistant priority", () => {
   it("goes before a queue of batch classifications and an urgent receipt", async () => {
     const held = await holdSlot();
     const order: string[] = [];
-    const batch = [1, 2, 3].map((n) =>
-      withAiSlot("llm", AI_PRIORITY.background, `test:classify-${n}`, async () => {
+    // One after the other: equal priorities go first come, first served, and
+    // three registrations started together may land in any order.
+    const batch: Promise<void>[] = [];
+    for (const n of [1, 2, 3]) {
+      batch.push(withAiSlot("llm", AI_PRIORITY.background, `test:classify-${n}`, async () => {
         order.push(`classify-${n}`);
-      }),
-    );
+      }));
+      await vi.waitFor(() => expect(waiterCount()).toBe(n), { timeout: REGISTERED_TIMEOUT_MS });
+    }
     const receipt = withAiSlot("llm", AI_PRIORITY.urgent, "test:receipt", async () => {
       order.push("receipt");
     });
