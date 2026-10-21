@@ -300,12 +300,35 @@ prerequisite for the nightly job.
    too. A provisional score stays in the backlog of the nightly run. The
    Ästhetik page shows the head's correlation next to the zero-shot one,
    how many photos it learnt from and how many still lack a value.
-5. **Calibration and weights** — replay in
-   `group-auto-pick.calibration.ts`, raise the aesthetic weight only with
-   the measured gain; consider `qalign_quality` for the technical share.
-6. **Explanation in words** — `POST /photos/:id/critique`, Gemma 4
-   through the llm-service, cached in `photo_critique`, shown behind a
-   button on the photo page and in the auto-pick review.
+5. **Calibration and weights** — *done, per user.* The global defaults
+   in `group-auto-pick.ts` stay: no replay on the household's reviews has
+   been run yet, and this plan says the formula moves only with that number.
+   Instead the replay runs where the reviews are. `replayOnGroups` in
+   `group-auto-pick.calibration.ts` takes the user's reviewed groups in
+   which they kept one photo and hid another and whose photos all have a
+   nightly Q-Align score, and counts how often the photo a weight set ranks
+   first is one the user kept, for today's weights, the defaults, freshly
+   fitted weights, and fitted weights with `qalign_quality` in the technical
+   slot of the no-face formula (`ScoringWeights.technical = "qalign"`, the
+   CLIP prompt where a photo has no Q-Align value). Fitted sets are judged
+   on groups they were not fitted on (5 folds by group). One is recommended
+   only from 30 groups on and when it hits at least 2 points and 2 groups
+   more than today's; adopting it fits it on all those groups, stores it in
+   `ai_pick_user_weights` with the replay numbers in `metadata.replay`, and
+   re-scores the open groups. Endpoints `POST /photos/aesthetic/replay` and
+   `/replay/adopt`, card "Auto-Pick nachspielen" on the Ästhetik page.
+   The AI curation vote from the composite stays as the quality job sets it.
+6. **Explanation in words** — *done.* `POST /photos/:id/critique` (and
+   `GET` for the kept one) in `photo/critique-api.ts`, logic in
+   `photo/critique.ts`. The llm-service has a generic image endpoint
+   `POST /vision/json-prompt`; the prompt stays in the app. Gemma 4 gets
+   the photo at 896 px and the aesthetic and quality scores as words
+   ("gut", "eher schwach"), and answers with a summary, strengths and
+   weaknesses; a line that grades anyway ("8/10", "85 %") is dropped. The
+   call queues at `urgent`, is refused while the GPU is lent, and the
+   answer is kept in `photo_critique` until someone asks again. Shown as
+   "Bildwirkung" in the photo sidebar and as "Bilder erklären" in the
+   auto-pick review, pick first.
 
 ## Sources
 

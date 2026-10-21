@@ -273,6 +273,7 @@ function toPhotoSignals(row: PhotoSignalRow): PhotoSignals {
     clip_aesthetics: pick("clip_aesthetics"),
     clip_composition: pick("clip_composition"),
     clip_technical: pick("clip_technical"),
+    qalign_quality: pick("qalign_quality"),
     face_sharpness: pick("face_sharpness"),
     eyes_open_score: pick("eyes_open", "eyes_open_score"),
     face_composition: pick("face_composition"),

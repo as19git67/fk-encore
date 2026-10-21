@@ -25,11 +25,20 @@ import {
 import { activeRun, stopActiveRun, tryStart, type ScorerStatus } from "./aesthetic-nightly";
 import { headStatus, realHeadDeps, realNightDeps, scorerStatus } from "./aesthetic-deps";
 import { headJob, startHeadJob, type HeadJob, type HeadReport } from "./aesthetic-head";
+import { adoptReplay, replayAutoPick, type ReplayReport } from "./group-auto-pick.calibration";
+import { recomputeAiPicksForUser } from "./group-auto-pick.service";
+import type { AiPickWeights } from "../db/schema";
 
 function requireAdmin(): void {
+  adminUserId();
+}
+
+/** The replay works on the caller's own reviews. */
+function adminUserId(): number {
   const auth = getAuthData();
   if (!auth) throw APIError.unauthenticated("Unauthorized");
   requirePermission(auth, "data.manage");
+  return parseInt(auth.userID);
 }
 
 export interface AestheticOverview {
@@ -203,5 +212,34 @@ export const deleteAestheticRun = api(
     const deleted = await deleteRuns([id]);
     if (deleted === 0) throw APIError.failedPrecondition("Der Lauf ist nicht beendet oder schon gelöscht");
     return { deleted };
+  },
+);
+
+/**
+ * Stage 5: replays the user's reviewed auto-pick groups with today's weights,
+ * the defaults and freshly fitted ones (judged on groups they were not fitted
+ * on), over the groups whose photos all have a Q-Align score.
+ */
+export const replayAutoPickWeights = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/replay", auth: true },
+  async (): Promise<ReplayReport> => {
+    const userId = adminUserId();
+    return await replayAutoPick(userId);
+  },
+);
+
+/**
+ * Adopts the replay's recommendation as the user's weights and re-scores the
+ * open groups. Refused when the replay recommends nothing: the weights move
+ * only with a measured gain.
+ */
+export const adoptAutoPickReplay = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/replay/adopt", auth: true },
+  async (): Promise<{ report: ReplayReport; weights: AiPickWeights }> => {
+    const userId = adminUserId();
+    const { report, adopted } = await adoptReplay(userId);
+    if (!adopted) throw APIError.failedPrecondition(report.reason ?? "Das Nachspielen empfiehlt keine neuen Gewichte");
+    recomputeAiPicksForUser(userId).catch((err) => log.error(err, "aesthetic: re-scoring after adopting replay weights failed"));
+    return { report, weights: adopted.weights };
   },
 );

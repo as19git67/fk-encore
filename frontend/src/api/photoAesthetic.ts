@@ -129,3 +129,36 @@ export function clearAestheticRuns(): Promise<{ deleted: number }> {
 export function deleteAestheticRun(id: number): Promise<{ deleted: number }> {
   return apiFetch(`/photos/aesthetic/runs/${id}`, { method: 'DELETE' })
 }
+
+// ─── Stage 5: replay the auto-pick with the Q-Align signal ─────────────────
+
+export type ReplayVariantKey = 'current' | 'default' | 'fitted' | 'fitted_qalign'
+
+export interface ReplayVariant {
+  key: ReplayVariantKey
+  label: string
+  groups: number
+  hits: number
+  /** Share of groups whose top-ranked photo is one the user kept. */
+  hit_rate: number
+}
+
+export interface ReplayReport {
+  reviewed_groups: number
+  decided_groups: number
+  /** Decided groups whose photos all have a Q-Align score; the replay runs on these. */
+  qalign_groups: number
+  variants: ReplayVariant[]
+  recommended: 'fitted' | 'fitted_qalign' | null
+  /** Why nothing is recommended; null when something is. */
+  reason: string | null
+  min_groups: number
+}
+
+export function replayAutoPick(): Promise<ReplayReport> {
+  return apiFetch('/photos/aesthetic/replay', { method: 'POST' })
+}
+
+export function adoptAutoPickReplay(): Promise<{ report: ReplayReport }> {
+  return apiFetch('/photos/aesthetic/replay/adopt', { method: 'POST' })
+}
