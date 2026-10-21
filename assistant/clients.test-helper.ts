@@ -48,6 +48,10 @@ export const clients = {
   photo: {
     listPhotos: vi.fn(),
     getPhotoDetailsBatch: vi.fn(),
+    getPhotoFaces: vi.fn(),
+    getPhotoPoiMatches: vi.fn(),
+    getPhotoOcr: vi.fn(),
+    getPhotoCritique: vi.fn(),
     searchPhotosNatural: vi.fn(),
     listRecaps: vi.fn(),
     listAlbums: vi.fn(),

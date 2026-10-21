@@ -11,14 +11,17 @@ import {
   photoGroups,
   photoGroupMembers,
   albums,
+  photoOcr,
+  photoPoiMatches,
 } from "../db/schema";
 import type { VariantMode } from "../db/types";
-import { orientationVariantSuppressedSql } from "./orientation-variants";
+import { LANDSCAPE_MIN_RATIO, PORTRAIT_MAX_RATIO, orientationVariantSuppressedSql } from "./orientation-variants";
 
 export type { VariantMode };
 export type HiddenMode = "exclude" | "include" | "only";
 export type MembershipMode = "include" | "exclude";
 export type MediaType = "photo" | "video" | "raw";
+export type PhotoShape = "portrait" | "landscape" | "square";
 
 export interface PhotoFilterParams {
   hiddenMode?: HiddenMode;
@@ -54,6 +57,23 @@ export interface PhotoFilterParams {
    * (#1528): a name is what the user has, not a coordinate.
    */
   locationText?: string;
+  /**
+   * Set by `resolveLocationFilter`, never from a query string: the place's
+   * other spellings (the native name beside the German one), matched like `locationText`,
+   * and the photos whose coordinates lie in it — either one is enough.
+   */
+  locationNames?: string[];
+  locationPhotoIds?: number[];
+  /** With (true) or without (false) a description. */
+  hasDescription?: boolean;
+  /** Substring of the description, a keyword, the file name or the text recognised in the photo. */
+  text?: string;
+  /** Substring of one of the keywords (IPTC/XMP tags). */
+  keyword?: string;
+  /** Substring of a sight recognised near the photo (`photo_poi_matches`), in either name. */
+  sight?: string;
+  /** Shape from width and height; photos without dimensions never match. */
+  orientation?: PhotoShape;
   ownerIds?: number[];
   // AI auto-pick filter (Track I, see migration 0075):
   //   "exclude" (default) — hide non-picked members of high-confidence
@@ -115,6 +135,11 @@ export interface PhotoFilterQuery {
   nearLon?: number;
   nearRadiusKm?: number;
   locationText?: string;
+  hasDescription?: boolean;
+  text?: string;
+  keyword?: string;
+  sight?: string;
+  orientation?: string;
   showAiHidden?: boolean;
   aiHiddenMode?: string;
   ownerIds?: string;
@@ -122,6 +147,14 @@ export interface PhotoFilterQuery {
   /** Only the photos in this collection (#1548), readable by the caller. */
   collectionId?: number;
   variantMode?: string;
+}
+
+/**
+ * `%term%` for ILIKE. `%` and `_` in the term would be wildcards; a place
+ * name or a word has neither on purpose, so they are escaped.
+ */
+function likePattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
 function parseIntArray(s: string): number[] {
@@ -180,6 +213,12 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
   if (typeof q.locationText === "string" && q.locationText.trim()) {
     f.locationText = q.locationText.trim().slice(0, 100);
   }
+  if (q.hasDescription !== undefined) f.hasDescription = Boolean(q.hasDescription);
+  for (const key of ["text", "keyword", "sight"] as const) {
+    const v = q[key];
+    if (typeof v === "string" && v.trim()) f[key] = v.trim().slice(0, 100);
+  }
+  if (q.orientation === "portrait" || q.orientation === "landscape" || q.orientation === "square") f.orientation = q.orientation;
   if (q.ownerIds) f.ownerIds = parseIntArray(q.ownerIds);
   if (q.aiHiddenMode === "exclude" || q.aiHiddenMode === "include" || q.aiHiddenMode === "only") {
     f.aiHiddenMode = q.aiHiddenMode;
@@ -346,6 +385,35 @@ export function buildPhotoFilterConditions(
     conds.push(sql`(${photos.latitude} IS NULL OR ${photos.longitude} IS NULL)`);
   }
 
+  if (filter.hasDescription === true) {
+    conds.push(sql`btrim(coalesce(${photos.description}, '')) <> ''`);
+  } else if (filter.hasDescription === false) {
+    conds.push(sql`btrim(coalesce(${photos.description}, '')) = ''`);
+  }
+  if (filter.text) {
+    const pattern = likePattern(filter.text);
+    conds.push(sql`(
+      ${photos.description} ILIKE ${pattern}
+      OR ${photos.original_name} ILIKE ${pattern}
+      OR EXISTS (SELECT 1 FROM unnest(${photos.keywords}) k WHERE k ILIKE ${pattern})
+      OR EXISTS (SELECT 1 FROM ${photoOcr} o WHERE o.photo_id = ${photos.id} AND o.full_text ILIKE ${pattern})
+    )`);
+  }
+  if (filter.keyword) {
+    conds.push(sql`EXISTS (SELECT 1 FROM unnest(${photos.keywords}) k WHERE k ILIKE ${likePattern(filter.keyword)})`);
+  }
+  if (filter.sight) {
+    const pattern = likePattern(filter.sight);
+    conds.push(sql`EXISTS (SELECT 1 FROM ${photoPoiMatches} pm WHERE pm.photo_id = ${photos.id} AND (pm.name ILIKE ${pattern} OR pm.name_de ILIKE ${pattern}))`);
+  }
+  if (filter.orientation) {
+    // The same thresholds as `photoOrientation`.
+    const ratio = sql`(${photos.width}::float8 / NULLIF(${photos.height}, 0))`;
+    conds.push(filter.orientation === "portrait" ? sql`${ratio} < ${PORTRAIT_MAX_RATIO}`
+      : filter.orientation === "landscape" ? sql`${ratio} > ${LANDSCAPE_MIN_RATIO}`
+      : sql`${ratio} BETWEEN ${PORTRAIT_MAX_RATIO} AND ${LANDSCAPE_MIN_RATIO}`);
+  }
+
   if (filter.hasFaces !== undefined) {
     const existsFaces = sql`EXISTS (SELECT 1 FROM ${faces} f WHERE f.photo_id = ${photos.id})`;
     conds.push(filter.hasFaces ? existsFaces : sql`NOT (${existsFaces})`);
@@ -388,15 +456,18 @@ export function buildPhotoFilterConditions(
   }
 
   if (filter.locationText) {
-    // `%` and `_` in the term would be wildcards; a place name has neither
-    // on purpose, so they are escaped.
-    const pattern = `%${filter.locationText.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    conds.push(sql`(
-      ${photos.location_name} ILIKE ${pattern}
+    const matches = [filter.locationText, ...(filter.locationNames ?? [])].map((term) => {
+      const pattern = likePattern(term);
+      return sql`${photos.location_name} ILIKE ${pattern}
       OR ${photos.location_city} ILIKE ${pattern}
       OR ${photos.location_country} ILIKE ${pattern}
-      OR ${photos.location_short} ILIKE ${pattern}
-    )`);
+      OR ${photos.location_short} ILIKE ${pattern}`;
+    });
+    if (filter.locationPhotoIds?.length) {
+      const ids = sql.join(filter.locationPhotoIds.map((id) => sql`${id}`), sql`, `);
+      matches.push(sql`${photos.id} = ANY(ARRAY[${ids}]::int[])`);
+    }
+    conds.push(sql`(${sql.join(matches, sql` OR `)})`);
   }
 
   if (filter.nearLat !== undefined && filter.nearLon !== undefined) {

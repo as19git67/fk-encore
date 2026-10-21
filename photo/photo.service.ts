@@ -153,6 +153,7 @@ import { resizeImageInPool, type ImagePoolPriority } from "./image-pool";
 import { writeCacheFileAtomically } from "./cache-file";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
 import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS, MlRpcTimeoutError } from "./rpc-timeout";
+import { nominatimSearch } from "./place-resolve";
 import { computeOrientationVariants, photoOrientation } from "./orientation-variants";
 import { accessiblePhotoCondition, accessiblePhotoConditionFor, assertPhotoAccess, coViewerIds } from "./photo-file-access";
 import {
@@ -2953,6 +2954,8 @@ export async function uploadPhotoLogic(
 export interface ListPhotosOptions {
   /** Date order of the rows; newest first by default. */
   order?: "asc" | "desc";
+  /** `quality`: highest composite quality score first (unscored last), the date order breaking ties. */
+  sortBy?: "date" | "quality";
   limit?: number;
   offset?: number;
 }
@@ -3000,7 +3003,7 @@ export async function listPhotosLogic(
         and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
       )
       .where(whereClause)
-      .orderBy(dateOrder, photos.id)
+      .orderBy(...(options.sortBy === "quality" ? [sql`${photos.ai_quality_score} DESC NULLS LAST`] : []), dateOrder, photos.id)
       .$dynamic();
   if (options.limit !== undefined) query = query.limit(options.limit);
   if (options.offset) query = query.offset(options.offset);
@@ -7788,13 +7791,12 @@ export interface LocationSuggestion {
 }
 
 const locationSearchCache = new Map<string, { expiresAt: number; results: LocationSuggestion[] }>();
-let locationSearchTail: Promise<void> = Promise.resolve();
-let lastLocationSearchAt = 0;
 
 /**
  * Forward-geocode a place name for the gallery's proximity filter. Requests
  * are cached and serialized to stay within the public Nominatim 1 req/s
- * policy; the browser never talks to that service directly.
+ * policy (`nominatimSearch`, shared with the place filter); the browser
+ * never talks to that service directly.
  */
 export async function autocompleteLocationLogic(query: string): Promise<LocationSuggestion[]> {
   const normalized = query.trim().replace(/\s+/g, " ");
@@ -7804,56 +7806,37 @@ export async function autocompleteLocationLogic(query: string): Promise<Location
   const cached = locationSearchCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.results;
 
-  const previous = locationSearchTail;
-  let release!: () => void;
-  locationSearchTail = new Promise<void>((resolve) => { release = resolve; });
-  await previous;
-  try {
-    const waitMs = Math.max(0, 1_000 - (Date.now() - lastLocationSearchAt));
-    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
-    lastLocationSearchAt = Date.now();
+  const data = await nominatimSearch({
+    q: normalized,
+    format: "jsonv2",
+    limit: "5",
+    addressdetails: "1",
+    "accept-language": "de,en",
+  }) as Array<{ display_name?: string; lat?: string; lon?: string }> | null;
+  if (!data) return [];
 
-    const params = new URLSearchParams({
-      q: normalized,
-      format: "jsonv2",
-      limit: "5",
-      addressdetails: "1",
-      "accept-language": "de,en",
+  const seen = new Set<string>();
+  const results = data
+    .map((item) => ({
+      label: item.display_name?.trim() ?? "",
+      latitude: Number(item.lat),
+      longitude: Number(item.lon),
+    }))
+    .filter((item) => item.label.length > 0
+      && Number.isFinite(item.latitude) && item.latitude >= -90 && item.latitude <= 90
+      && Number.isFinite(item.longitude) && item.longitude >= -180 && item.longitude <= 180)
+    // Nominatim can return several feature types for the same point. Show
+    // one unambiguous choice instead of visually identical duplicates.
+    .filter((item) => {
+      const key = `${item.latitude.toFixed(5)},${item.longitude.toFixed(5)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-      headers: { "User-Agent": "fk-encore-photo-app/1.0" },
-    });
-    if (!response.ok) return [];
 
-    const data = await response.json() as Array<{ display_name?: string; lat?: string; lon?: string }>;
-    const seen = new Set<string>();
-    const results = data
-      .map((item) => ({
-        label: item.display_name?.trim() ?? "",
-        latitude: Number(item.lat),
-        longitude: Number(item.lon),
-      }))
-      .filter((item) => item.label.length > 0
-        && Number.isFinite(item.latitude) && item.latitude >= -90 && item.latitude <= 90
-        && Number.isFinite(item.longitude) && item.longitude >= -180 && item.longitude <= 180)
-      // Nominatim can return several feature types for the same point. Show
-      // one unambiguous choice instead of visually identical duplicates.
-      .filter((item) => {
-        const key = `${item.latitude.toFixed(5)},${item.longitude.toFixed(5)}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-
-    if (locationSearchCache.size >= 100) locationSearchCache.delete(locationSearchCache.keys().next().value!);
-    locationSearchCache.set(cacheKey, { expiresAt: Date.now() + 10 * 60_000, results });
-    return results;
-  } catch (err) {
-    console.warn("Location autocomplete failed:", (err as Error).message ?? err);
-    return [];
-  } finally {
-    release();
-  }
+  if (locationSearchCache.size >= 100) locationSearchCache.delete(locationSearchCache.keys().next().value!);
+  locationSearchCache.set(cacheKey, { expiresAt: Date.now() + 10 * 60_000, results });
+  return results;
 }
 
 export async function searchByLocationLogic(

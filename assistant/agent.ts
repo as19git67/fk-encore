@@ -84,14 +84,14 @@ export function budgetForWindow(window: number): number {
 /**
  * Up to this size every schema goes along with every request; past it the
  * model gets the one-line catalog and fetches schemas with describe_tools.
- * The full catalog of a user with every module is about 6100 tokens (38
- * tools, the depot and tax tools included); the budget leaves room for a
+ * The full catalog of a user with every module is about 8150 tokens (45
+ * tools, the photo metadata tools included); the budget leaves room for a
  * few more before a round goes to fetching. A deployment with a small
  * context window lowers it through the environment — and raises
  * ASSISTANT_CONTEXT_TOKENS along with the model's window, since the
  * schemas count against that budget on every round.
  */
-const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "8000", 10);
+const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "9000", 10);
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -130,6 +130,7 @@ Rules:
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
 - Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
+- Photos (list_photos, search_photos) appear as a grid of pictures right below your answer. Never list them in your text — no ids, no table, no list of dates or places; say in a sentence or two how many there are and what they show (period, place), and leave the pictures to the grid.
 - If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
 - If a tool finds nothing, say so plainly and suggest how to search differently.
 - Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
@@ -153,7 +154,9 @@ const EXAMPLES = `Examples of chained calls:
 7. "Liste alle Buchungen zur Wohnung mit Zwischensummen für Kauf, Reparatur und Mieteinnahmen und ermittle die Rendite." → list_transactions (as needed) → transaction_report(title = …, groups = [{name: "Kauf", transaction_ids: […]}, {name: "Reparatur", …}, {name: "Mieteinnahmen", tag: "Miete"}], transaction_ids = all bookings found, yield = {investment_group: "Kauf", income_groups: ["Mieteinnahmen"], cost_groups: ["Reparatur"]}) → repeat only the subtotals and the yield formula the tool printed, and name bookings whose group was doubtful.
 8. Working set of three invoices: "Schreib dem Absender, dass ich die drei Rechnungen bezahlt habe." → render_letter(recipient = the sender's address if a tool showed it, else [[Anschrift des Absenders]], subject = "Ihre Rechnungen …" with their numbers, body = salutation, one line per invoice with number, date and amount from the working set, [[Zahlungsdatum]] where the date of payment is unknown, closing) → say the letter waits on the card and name the gaps to fill.
 9. "Wie steht mein Depot, und was hat Beispiel AG dieses Jahr an Dividende gebracht?" → portfolio_overview → depot_transactions(position = the key the overview printed, kind = "dividend", from/to = this year) → repeat the figures the tools printed (never add them up yourself); for the price today, quotes(q = the name); for news, position_news(key).
-10. "Füge den Buchungen vom Baumarkt im September den Tag Renovierung hinzu." → list_transactions(q = "Baumarkt", from/to = September) → tag_transactions(from_previous_result = true, add = ["Renovierung"]) → say how many bookings get the tag and that it waits for "Ausführen" on the card; never ask first whether you should.`;
+10. "Füge den Buchungen vom Baumarkt im September den Tag Renovierung hinzu." → list_transactions(q = "Baumarkt", from/to = September) → tag_transactions(from_previous_result = true, add = ["Renovierung"]) → say how many bookings get the tag and that it waits for "Ausführen" on the card; never ask first whether you should.
+11. "Zeige mir die 20 besten Fotos aus Beispielland." → list_photos(place = "Beispielland", order = "best", limit = 20) → say how many photos from there are and that the best are shown; "die besten" is the quality order, not favorite = true, and a place is list_photos(place), never search_photos.
+12. "Zeige mir 50 Fotos, bei denen die Beschreibung einen Inhalt hat." → list_photos(has_description = true, limit = 50); questions about a photo's metadata (where, when, who, which keywords, how good) → photo_details(ids) on the ids an earlier result printed.`;
 
 export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean, briefs: string[] = []): string {
   const catalog = tools.length

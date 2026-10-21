@@ -159,6 +159,60 @@ describe("list_photos", () => {
     await tool("list_photos").run({ favorite: true }, ctx());
     expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortDir: "desc", locationText: undefined }));
   });
+
+  it("asks the server for the best first, and links the gallery in the same order", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 2, taken_at: "2024-04-02T10:00:00Z" }] });
+    const out = await tool("list_photos").run({ order: "best", limit: 20 }, ctx());
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortBy: "quality", sortDir: "desc" }));
+    expect(out.text).toContain("best first by quality score");
+    expect(out.block?.route).toBe("/fotos/galerie?sortBy=ai_quality_score&sortDir=desc");
+  });
+
+  it("narrows the previous result by place on the server, which knows the place's other names", async () => {
+    clients.photo.listPhotos.mockResolvedValueOnce({ photos: [{ id: 1 }, { id: 2 }, { id: 3 }] });
+    const first = await tool("list_photos").run({}, ctx());
+    clients.photo.listPhotos.mockResolvedValueOnce({ photos: [{ id: 2, location_country: "Pays d'exemple" }, { id: 9 }] });
+    const c = { ...ctx(), previous: () => first.ref!.ids };
+    const out = await tool("list_photos").run({ place: "Beispielland", from_previous_result: true }, c);
+    expect(clients.photo.listPhotos).toHaveBeenLastCalledWith(expect.objectContaining({ locationText: "Beispielland" }));
+    expect(out.ref?.ids).toEqual([2]);
+  });
+});
+
+describe("photo metadata", () => {
+  it("list_photos passes the metadata filters and prints description, keywords and quality", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 4, taken_at: "2022-08-14T10:00:00Z", description: "Sommerfest im Garten", keywords: ["Fest", "Garten"], ai_quality_score: 0.734 }] });
+    const out = await tool("list_photos").run({ has_description: true, keyword: "Fest", sight: "Turm", orientation: "portrait", media_type: "photo", quality_min: 60, limit: 50 }, ctx());
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({
+      hasDescription: true, keyword: "Fest", sight: "Turm", orientation: "portrait", mediaTypes: "photo", qualityMin: 60,
+    }));
+    expect(out.text).toContain("4 | 2022-08-14 | - | Sommerfest im Garten | Fest, Garten | 73");
+    expect(out.block?.route).toBeUndefined();
+  });
+
+  it("photo_details gathers what each service knows and leaves out what it may not see", async () => {
+    clients.photo.getPhotoDetailsBatch.mockResolvedValue({ photos: [{
+      id: 7, filename: "a.jpg", original_name: "IMG_0001.JPG", mime_type: "image/jpeg", size: 2_400_000, taken_at: "2023-04-02T09:15:00Z",
+      location_name: "Beispielstadt, Beispielland", latitude: 1.5, longitude: 2.25, orientation: "portrait", curation_status: "favorite",
+      description: "Am Hafen", keywords: ["Hafen"], ai_quality_score: 0.81, ai_quality_details: { clip_aesthetics: 0.7 },
+    }] });
+    clients.photo.getPhotoFaces.mockRejectedValue(new Error("permission denied"));
+    clients.photo.getPhotoPoiMatches.mockResolvedValue({ matches: [{ name: "Example Tower", nameDe: "Beispielturm", distanceM: 120.4, ambiguous: false }] });
+    clients.photo.getPhotoOcr.mockResolvedValue({ ocr: null });
+    clients.photo.getPhotoCritique.mockResolvedValue({ critique: null });
+    const out = await tool("photo_details").run({ ids: [7, 8] }, ctx());
+    expect(clients.photo.getPhotoDetailsBatch).toHaveBeenCalledWith({ ids: "7,8" });
+    expect(out.text).toContain("- place: Beispielstadt, Beispielland");
+    expect(out.text).toContain("- gps: 1.50000, 2.25000");
+    expect(out.text).toContain("- orientation: Hochformat");
+    expect(out.text).toContain("- status: favorite");
+    expect(out.text).toContain("- quality: 81");
+    expect(out.text).toContain("- aesthetics: 70");
+    expect(out.text).toContain("- sights: Beispielturm (120 m)");
+    expect(out.text).toContain("- text in photo: not scanned yet");
+    expect(out.text).not.toContain("- persons:");
+    expect(out.text).toContain("Not found or not visible: 8");
+  });
 });
 
 describe("depot tools", () => {

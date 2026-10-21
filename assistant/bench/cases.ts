@@ -221,6 +221,27 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_photos: { rows: [{ id: 901, taken: "2019-05-01", place: "Musterstadt, Deutschland" }], total: 1 } },
   },
   {
+    id: "best-photos-in-country",
+    title: "Beste Fotos eines Landes",
+    question: "Zeige mir die 20 besten Fotos aus Beispielland.",
+    expect: [{ tool: "list_photos", args: { place: { $contains: "beispielland" }, order: "best" } }],
+    results: { list_photos: { rows: [{ id: 902, taken: "2023-04-02", place: "Beispielstadt, Beispielland" }], total: 312 } },
+  },
+  {
+    id: "photos-with-description",
+    title: "Fotos nach Metadaten",
+    question: "Zeige mir 50 Fotos, bei denen die Beschreibung einen Inhalt hat.",
+    expect: [{ tool: "list_photos", args: { has_description: true, limit: 50 } }],
+    results: { list_photos: { rows: [{ id: 903, taken: "2022-08-14", place: "Musterstadt, Deutschland", description: "Sommerfest im Garten" }], total: 84 } },
+  },
+  {
+    id: "photo-metadata",
+    title: "Alles über ein Foto",
+    question: "Was weißt du über das Foto 904?",
+    expect: [{ tool: "photo_details", args: { ids: [904] } }],
+    results: { photo_details: { rows: [{ id: 904, taken: "2021-05-03", place: "Beispielstadt", keywords: "Hafen" }], total: 1 } },
+  },
+  {
     id: "oldest-photo",
     title: "Ältestes Foto",
     question: "Was ist das älteste Foto in meiner Bibliothek?",
