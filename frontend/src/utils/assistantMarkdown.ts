@@ -1,7 +1,8 @@
 /**
  * The little Markdown an answer uses (#1528): bold, italics, code, bullet
- * and numbered lists, paragraphs, tables and code blocks. Nothing else is
- * interpreted — no HTML, no links, no headings — and the result is a tree
+ * and numbered lists, paragraphs, tables and code blocks, and links to the
+ * items the answer names by id (`assistantLinks.ts`). Nothing else is
+ * interpreted — no HTML, no outside links, no headings — and the result is a tree
  * the template renders, never a string handed to v-html. A model writes
  * "**Titel** (06.07.2026)" and "* erster Punkt"; the reader should see bold
  * text and a list, not the asterisks.
@@ -11,11 +12,15 @@
  * real table: in a proportional font the drawn columns never line up.
  */
 
+import { linkEntities } from './assistantLinks'
+
 export interface Inline {
   text: string
   bold?: boolean
   italic?: boolean
   code?: boolean
+  /** The app page this run opens: an item the answer names by id. */
+  to?: string
 }
 
 export type Align = 'left' | 'center' | 'right'
@@ -38,8 +43,15 @@ export type Block =
 const BULLET = /^\s*[*\-•]\s+(.*)$/
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/
 
-/** Splits one line into runs of plain, bold, italic and code text. */
+/** Splits one line into runs of plain, bold, italic, code and linked text. */
 export function parseInline(line: string): Inline[] {
+  const runs = parseStyled(line).flatMap((run) => (run.code
+    ? [run]
+    : linkEntities(run.text).map((part) => ({ ...run, ...part }))))
+  return runs.length ? runs : [{ text: '' }]
+}
+
+function parseStyled(line: string): Inline[] {
   const out: Inline[] = []
   // `code` first, so asterisks inside it stay; then ** and *.
   const re = /(`[^`]+`)|(\*\*[^*]+?\*\*)|(\*[^*\s][^*]*?\*)/g

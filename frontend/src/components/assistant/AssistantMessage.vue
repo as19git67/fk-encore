@@ -10,6 +10,7 @@ import type { TurnStep } from '../../utils/assistantTurn'
 import { parseBlocks } from '../../utils/assistantMarkdown'
 import ScrollX from '../layout/ScrollX.vue'
 import AssistantBlock from './AssistantBlock.vue'
+import AssistantInlines from './AssistantInlines.vue'
 import ProposalCard from './ProposalCard.vue'
 
 const props = withDefaults(defineProps<{
@@ -107,12 +108,7 @@ function isFolded(i: number): boolean {
           <p v-if="b.type === 'p'">
             <template v-for="(line, j) in b.lines" :key="j">
               <br v-if="j > 0" />
-              <template v-for="(run, k) in line" :key="k">
-                <strong v-if="run.bold">{{ run.text }}</strong>
-                <em v-else-if="run.italic">{{ run.text }}</em>
-                <code v-else-if="run.code">{{ run.text }}</code>
-                <template v-else>{{ run.text }}</template>
-              </template>
+              <AssistantInlines :runs="line" />
             </template>
           </p>
           <pre v-else-if="b.type === 'pre'">{{ b.text }}</pre>
@@ -121,24 +117,14 @@ function isFolded(i: number): boolean {
               <thead v-if="b.head.length">
                 <tr>
                   <th v-for="(cell, j) in b.head" :key="j" scope="col" :class="b.align[j] && `align-${b.align[j]}`">
-                    <template v-for="(run, k) in cell" :key="k">
-                      <strong v-if="run.bold">{{ run.text }}</strong>
-                      <em v-else-if="run.italic">{{ run.text }}</em>
-                      <code v-else-if="run.code">{{ run.text }}</code>
-                      <template v-else>{{ run.text }}</template>
-                    </template>
+                    <AssistantInlines :runs="cell" />
                   </th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(row, r) in b.rows" :key="r">
                   <td v-for="(cell, j) in row" :key="j" :class="b.align[j] && `align-${b.align[j]}`">
-                    <template v-for="(run, k) in cell" :key="k">
-                      <strong v-if="run.bold">{{ run.text }}</strong>
-                      <em v-else-if="run.italic">{{ run.text }}</em>
-                      <code v-else-if="run.code">{{ run.text }}</code>
-                      <template v-else>{{ run.text }}</template>
-                    </template>
+                    <AssistantInlines :runs="cell" />
                   </td>
                 </tr>
               </tbody>
@@ -146,12 +132,7 @@ function isFolded(i: number): boolean {
           </ScrollX>
           <component :is="b.type" v-else>
             <li v-for="(item, j) in b.items" :key="j">
-              <template v-for="(run, k) in item" :key="k">
-                <strong v-if="run.bold">{{ run.text }}</strong>
-                <em v-else-if="run.italic">{{ run.text }}</em>
-                <code v-else-if="run.code">{{ run.text }}</code>
-                <template v-else>{{ run.text }}</template>
-              </template>
+              <AssistantInlines :runs="item" />
             </li>
           </component>
         </template>
