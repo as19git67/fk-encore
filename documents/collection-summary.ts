@@ -15,6 +15,8 @@
  * The membership change only sets `summary_stale`; the job coalesces.
  */
 
+import { llmBudgetMs } from "../lib/llm-lease";
+
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.LLM_SERVICE_TIMEOUT_MS ?? "120000", 10);
 
@@ -121,7 +123,7 @@ export async function generateCollectionSummary(
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), await llmBudgetMs(timeoutMs));
   let resp: Response;
   try {
     resp = await fetch(`${LLM_SERVICE_URL}/json-prompt`, {

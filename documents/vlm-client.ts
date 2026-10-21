@@ -8,6 +8,8 @@
  * vision timeout inheriting a classification's minutes-long budget.
  */
 
+import { isGpuLent } from "../lib/llm-lease";
+
 console.log("[boot] documents/vlm-client.ts: all imports resolved");
 
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
@@ -53,6 +55,18 @@ export class VlmUnavailableError extends Error {
 }
 
 /**
+ * While the GPU is lent to the nightly aesthetic run, the llm-service answers
+ * from its CPU twin. A vision call there takes minutes, far beyond the budget
+ * this client must keep, and a call it gives up on keeps the service's one
+ * inference slot busy for every classification after it. So it does not ask:
+ * the caller gets the same "no second opinion" it gets from a service without
+ * a projector.
+ */
+async function refuseOnCpuTwin(url: string): Promise<void> {
+  if (await isGpuLent()) throw new VlmUnavailableError(`POST ${url} skipped: GPU lent, llm-service on its CPU twin`);
+}
+
+/**
  * Transcribe one crop.
  *
  * `hint` is the OCR reading. Passing it helps the model on genuinely ambiguous
@@ -65,6 +79,7 @@ export async function transcribeCrop(
   options: { hint?: string; expectedType?: VlmExpectedType; timeoutMs?: number } = {},
 ): Promise<VlmTranscription> {
   const url = `${LLM_SERVICE_URL}/vision/transcribe`;
+  await refuseOnCpuTwin(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? VLM_TIMEOUT_MS);
 
@@ -129,6 +144,7 @@ export async function assignFields(
   options: { timeoutMs?: number } = {},
 ): Promise<VlmFieldAssignment> {
   const url = `${LLM_SERVICE_URL}/vision/fields`;
+  await refuseOnCpuTwin(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? FIELDS_TIMEOUT_MS);
 
@@ -188,6 +204,7 @@ export async function readLetterhead(
   options: { timeoutMs?: number } = {},
 ): Promise<VlmLetterhead> {
   const url = `${LLM_SERVICE_URL}/vision/letterhead`;
+  await refuseOnCpuTwin(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? FIELDS_TIMEOUT_MS);
 
