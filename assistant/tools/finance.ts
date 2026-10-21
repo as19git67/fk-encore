@@ -194,7 +194,7 @@ export const GROUP_PROPERTIES: Record<string, Record<string, unknown>> = {
   group_tags: {
     type: "array",
     items: { type: "string" },
-    description: "with group_by tag: only these tags get a subtotal of their own, every other booking lands in 'Sonstige'",
+    description: "with group_by tag: only these tags make groups, every other booking lands in 'Sonstige'. A booking with several tags counts once, in the group of its tag combination; the tags filtered by are no group",
   },
 };
 
@@ -248,7 +248,7 @@ export function totalsText(t: TransactionTotals): string {
       `subtotals by ${t.group_by}:`,
       table(["group", "sum", "count"], t.groups.map((g) => [g.label, centsText(g.sum), g.count]), { cap: 40 }),
     );
-    if (t.overlapping) lines.push("Some bookings carry several of these tags and count in each group, so the subtotals add up to more than the total.");
+    if (t.group_by === "tag") lines.push("Each booking counts in exactly one group (a booking with several tags in the group of that combination), so the subtotals add up to the total.");
   }
   for (const o of t.other_currencies) {
     lines.push(`not in the total: ${o.count} bookings in ${o.currency}, ${centsText(o.total)} ${o.currency}`);
@@ -283,7 +283,6 @@ export const transactionTotals: ToolSpec = {
           sum: res.total / 100,
           count: res.count,
           currency: res.currency,
-          overlapping: res.overlapping,
           groups: res.groups.map((g) => ({ label: g.label, sum: g.sum / 100, count: g.count })),
         }],
       },

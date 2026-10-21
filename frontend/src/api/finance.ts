@@ -1764,9 +1764,8 @@ export interface TransactionTotals {
   count: number
   /** Cents. */
   total: number
+  /** Each booking in exactly one group: the sums add up to `total`. */
   groups: TotalsGroup[]
-  /** By tag: some bookings count in more than one group. */
-  overlapping: boolean
   first_date: string | null
   last_date: string | null
   other_currencies: { currency: string; count: number; total: number }[]

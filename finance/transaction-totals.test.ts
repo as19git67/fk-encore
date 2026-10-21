@@ -18,7 +18,7 @@ import {
   financeTagTransaction,
   financeTransaction,
 } from "../db/schema";
-import { computeTotals, NO_TAG, OTHER_TAGS, type TotalsBooking } from "./transaction-totals";
+import { computeTotals, NO_OTHER_TAG, NO_TAG, OTHER_TAGS, type TotalsBooking } from "./transaction-totals";
 import { transactionTotals } from "./transaction-totals-api";
 import { createRuleCollection, setCollectionRule } from "../collections/collections";
 
@@ -65,15 +65,35 @@ describe("computeTotals", () => {
     ]);
   });
 
-  it("groups by tag, counts a booking in each of its tags and says so", () => {
+  const sumOfGroups = (t: { groups: { sum: number; count: number }[] }) =>
+    t.groups.reduce((s, g) => ({ sum: s.sum + g.sum, count: s.count + g.count }), { sum: 0, count: 0 });
+
+  it("groups by tag, a booking with several tags once under their combination", () => {
     const t = computeTotals(bookings, { group_by: "tag" });
     expect(t.groups.map((g) => [g.label, g.count, g.sum])).toEqual([
-      ["Handwerk", 2, -10030],
-      ["Garten", 2, -5020],
+      ["Handwerk", 1, -10010],
+      ["Garten", 1, -5000],
+      ["Garten, Handwerk", 1, -20],
       [NO_TAG, 1, 20000],
     ]);
-    expect(t.overlapping).toBe(true);
     expect(t.total).toBe(4970);
+    expect(sumOfGroups(t)).toEqual({ sum: t.total, count: t.count });
+  });
+
+  it("leaves the tags filtered by out of the groups, and the subtotals add up to the total", () => {
+    const filtered = [
+      b(1, "2026-01-15", "-300.00", ["Ort", "Steuer", "Grundsteuer"]),
+      b(2, "2026-04-15", "-300.00", ["Grundsteuer", "Ort", "Steuer"]),
+      b(3, "2026-02-01", "-45.50", ["Ort", "Versicherung"]),
+      b(4, "2026-03-01", "-12.00", ["Ort"]),
+    ];
+    const t = computeTotals(filtered, { group_by: "tag" }, { filterTags: ["Ort"] });
+    expect(t.groups.map((g) => [g.label, g.count, g.sum])).toEqual([
+      ["Grundsteuer, Steuer", 2, -60000],
+      ["Versicherung", 1, -4550],
+      [NO_OTHER_TAG, 1, -1200],
+    ]);
+    expect(sumOfGroups(t)).toEqual({ sum: t.total, count: t.count });
   });
 
   it("limits tag groups to the named tags, the rest under Sonstige", () => {
@@ -83,7 +103,7 @@ describe("computeTotals", () => {
       [OTHER_TAGS, 1, -5000],
       [NO_TAG, 1, 20000],
     ]);
-    expect(t.overlapping).toBe(false);
+    expect(sumOfGroups(t)).toEqual({ sum: t.total, count: t.count });
   });
 });
 
@@ -146,6 +166,12 @@ describe("transaction totals endpoint", () => {
     expect(t.count).toBe(2);
     expect(t.total).toBe(-20050);
     expect(t.groups.map((g) => [g.label, g.sum])).toEqual([["Q1 2026", -12050], ["Q2 2026", -8000]]);
+  });
+
+  it("groups a tag filter's bookings once each, without the filter tag", async () => {
+    const t = await transactionTotals({ criteria: { tags: [TAGS[0]] }, group_by: "tag" });
+    expect(t.groups.map((g) => [g.label, g.count, g.sum])).toEqual([[TAGS[1], 1, -8000], [NO_OTHER_TAG, 1, -12050]]);
+    expect(t.groups.reduce((s, g) => s + g.sum, 0)).toBe(t.total);
   });
 
   it("refuses a request that names no bookings", async () => {

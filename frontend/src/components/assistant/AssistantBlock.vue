@@ -189,7 +189,7 @@ const analysis = computed(() => {
     : Array.isArray(row.by_tag)
       ? (row.by_tag as Row[]).map((t) => ({ label: t.tag, sum: t.sum, count: t.count }))
       : []
-  return { sum: row.sum, count: row.count, groups, overlapping: row.overlapping === true }
+  return { sum: row.sum, count: row.count, groups }
 })
 const analysisOpen = ref(false)
 const analysisGroups = computed(() =>
@@ -319,9 +319,6 @@ const analysisGroups = computed(() =>
         size="small"
         @click="analysisOpen = !analysisOpen"
       />
-      <p v-if="analysis.overlapping" class="row-sub">
-        Manche Buchungen tragen mehrere dieser Tags und zählen in jeder Gruppe.
-      </p>
     </div>
 
     <!-- Recaps, albums, meters: name, detail and their own page -->

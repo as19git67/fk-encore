@@ -9,11 +9,14 @@
  * Free of endpoints so the collections service can import it; the endpoint
  * is in transaction-totals-api.ts.
  *
- * Amounts are summed in cents. By tag, a booking with two of the user's tags
- * counts in both groups, so the subtotals can add up to more than the total;
- * `overlapping` says when that happened. A booking with none of them lands in
- * "Ohne Tag". Bookings in another currency than the main one are never folded
- * in: they are counted under `other_currencies`.
+ * Amounts are summed in cents. By tag, every booking lands in exactly one
+ * group, so the subtotals always add up to the total: a booking with several
+ * of the user's tags gets the group of that combination ("Grundsteuer,
+ * Steuer"), never one group per tag. Tags the set was filtered by say nothing
+ * about the booking within it and are left out of the key. A booking with no
+ * tag lands in "Ohne Tag", one with only filter tags in "Ohne weiteren Tag".
+ * Bookings in another currency than the main one are never folded in: they
+ * are counted under `other_currencies`.
  */
 
 import { parseAmountBound, parseDirection, type TransactionCriteria } from "./transaction-conditions";
@@ -31,6 +34,9 @@ export interface TotalsSpec {
 
 export const NO_TAG = "Ohne Tag";
 export const OTHER_TAGS = "Sonstige";
+export const NO_OTHER_TAG = "Ohne weiteren Tag";
+/** Between the tags of a combination group. */
+export const TAG_JOINER = ", ";
 
 export interface TotalsBooking {
   id: number;
@@ -65,9 +71,8 @@ export interface TransactionTotals {
   count: number;
   /** Cents, main currency. */
   total: number;
+  /** Each booking in exactly one group: the sums add up to `total`. */
   groups: TotalsGroup[];
-  /** By tag: at least one booking counts in more than one group. */
-  overlapping: boolean;
   /** First and last booking date of the set, YYYY-MM-DD. */
   first_date: string | null;
   last_date: string | null;
@@ -110,8 +115,27 @@ function periodOf(date: string, by: "month" | "quarter" | "year"): { key: string
   return { key: `${year}-${String(month).padStart(2, "0")}`, label: `${MONTHS[month - 1]} ${year}` };
 }
 
+/**
+ * The one group a booking counts in by tag. `filterTags` are the tags the set
+ * was selected by: every booking carries them, so they are no group — unless
+ * the spec names them as group tags itself.
+ */
+export function tagGroupOf(tags: string[], spec: TotalsSpec, filterTags: readonly string[] = []): string {
+  const only = spec.tags?.length ? new Set(spec.tags) : null;
+  const filter = new Set(filterTags.filter((t) => !only?.has(t)));
+  const rest = [...new Set(tags)].filter((t) => !filter.has(t));
+  const own = only ? rest.filter((t) => only.has(t)) : rest;
+  if (own.length) return own.sort((a, b) => a.localeCompare(b, "de")).join(TAG_JOINER);
+  if (rest.length) return OTHER_TAGS;
+  return tags.length ? NO_OTHER_TAG : NO_TAG;
+}
+
 /** The numbers, from bookings already loaded. */
-export function computeTotals(bookings: TotalsBooking[], spec: TotalsSpec): TransactionTotals {
+export function computeTotals(
+  bookings: TotalsBooking[],
+  spec: TotalsSpec,
+  opts: { filterTags?: readonly string[] } = {},
+): TransactionTotals {
   const byCurrency = new Map<string, TotalsBooking[]>();
   for (const b of bookings) {
     const list = byCurrency.get(b.currency_code) ?? [];
@@ -137,16 +161,11 @@ export function computeTotals(bookings: TotalsBooking[], spec: TotalsSpec): Tran
     g.sum += amount;
     groups.set(key, g);
   };
-  let overlapping = false;
-  const only = spec.group_by === "tag" && spec.tags?.length ? new Set(spec.tags) : null;
   for (const b of main) {
     const amount = cents(b.amount);
     if (spec.group_by === "tag") {
-      const tags = [...new Set(b.tags)];
-      const own = only ? tags.filter((t) => only.has(t)) : tags;
-      if (own.length > 1) overlapping = true;
-      if (own.length) for (const t of own) add(t, t, amount);
-      else add(only && tags.length ? OTHER_TAGS : NO_TAG, only && tags.length ? OTHER_TAGS : NO_TAG, amount);
+      const key = tagGroupOf(b.tags, spec, opts.filterTags);
+      add(key, key, amount);
     } else if (spec.group_by !== "none") {
       const p = periodOf(b.booking_date.slice(0, 10), spec.group_by);
       add(p.key, p.label, amount);
@@ -156,7 +175,7 @@ export function computeTotals(bookings: TotalsBooking[], spec: TotalsSpec): Tran
   const sorted = [...groups.values()];
   if (spec.group_by === "tag") {
     // Biggest movement first; then the other tags, then the untagged.
-    const tail = (g: TotalsGroup) => (g.key === NO_TAG ? 2 : g.key === OTHER_TAGS ? 1 : 0);
+    const tail = (g: TotalsGroup) => (g.key === NO_TAG || g.key === NO_OTHER_TAG ? 2 : g.key === OTHER_TAGS ? 1 : 0);
     sorted.sort((a, b) => tail(a) - tail(b) || Math.abs(b.sum) - Math.abs(a.sum) || a.key.localeCompare(b.key));
   } else {
     sorted.sort((a, b) => a.key.localeCompare(b.key));
@@ -168,7 +187,6 @@ export function computeTotals(bookings: TotalsBooking[], spec: TotalsSpec): Tran
     count: main.length,
     total: main.reduce((s, b) => s + cents(b.amount), 0),
     groups: sorted,
-    overlapping,
     first_date: dates[0] ?? null,
     last_date: dates[dates.length - 1] ?? null,
     other_currencies,

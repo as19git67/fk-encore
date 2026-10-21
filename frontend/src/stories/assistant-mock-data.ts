@@ -64,7 +64,6 @@ export const ANALYSIS_BLOCK: ResultBlock = {
     sum: -412.37,
     count: 23,
     currency: 'EUR',
-    overlapping: false,
     groups: [{ label: 'Lebensmittel', sum: -380.1, count: 20 }, { label: 'Drogerie', sum: -32.27, count: 3 }],
   }],
 }

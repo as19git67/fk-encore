@@ -19,7 +19,6 @@ const BY_TAG: TransactionTotals = {
     { key: 'Garten', label: 'Garten', count: 3, sum: -24540 },
     { key: 'Ohne Tag', label: 'Ohne Tag', count: 1, sum: -2500 },
   ],
-  overlapping: false,
   first_date: '2026-01-12',
   last_date: '2026-09-30',
   other_currencies: [],
