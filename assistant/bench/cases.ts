@@ -84,6 +84,20 @@ const PHOTO_HISTORY = earlierTurn(
   "Du hast 3 Favoriten aus 2025.",
 );
 
+const BOOKINGS_HISTORY = earlierTurn(
+  "Zeig mir die Buchungen vom Baumarkt im September.",
+  "list_transactions", { q: "Baumarkt", from: "2026-09-01", to: "2026-09-30" },
+  "[earlier result of list_transactions: 3 rows, ids 9401,9402,9403]",
+  "Im September gab es drei Buchungen beim Baumarkt.",
+);
+
+/** The same rows, but the answer asked in words whether to tag them — no card was made. */
+const ASKED_IN_WORDS_HISTORY = [
+  ...BOOKINGS_HISTORY,
+  { role: "user" as const, content: "Gib denen den Tag Renovierung." },
+  { role: "assistant" as const, content: "Soll ich den drei Buchungen den Tag „Renovierung“ hinzufügen? Bitte bestätige die Änderung." },
+];
+
 const METER_HISTORY = earlierTurn(
   "Wie viel Strom haben wir 2025 verbraucht?",
   "consumption_report", { meter_id: 3, from: "2025-01-01", to: "2025-12-31" },
@@ -484,6 +498,25 @@ export const BENCH_CASES: BenchCase[] = [
       list_photos: { ids: [1201, 1202, 1203], total: 143, note: "143 photos; ids truncated" },
       create_album: PROPOSAL("Album „Favoriten 2025“ anlegen und 143 Fotos hinzufügen"),
     },
+  },
+
+  {
+    id: "tag-bookings",
+    title: "Tag an Buchungen vorschlagen, ohne in Worten nachzufragen",
+    question: "Gib denen den Tag Renovierung.",
+    history: BOOKINGS_HISTORY,
+    previous: { transaction: [9401, 9402, 9403] },
+    expect: [{ tool: "tag_transactions", args: { from_previous_result: true, add: { $contains: "renovierung" } } }],
+    results: { tag_transactions: PROPOSAL("Bei 3 Buchungen „Renovierung“ setzen") },
+  },
+  {
+    id: "tag-bookings-after-yes",
+    title: "„Ja“ auf eine Frage in Worten legt die Karte an",
+    question: "Ja.",
+    history: ASKED_IN_WORDS_HISTORY,
+    previous: { transaction: [9401, 9402, 9403] },
+    expect: [{ tool: "tag_transactions", args: { add: { $contains: "renovierung" } } }],
+    results: { tag_transactions: PROPOSAL("Bei 3 Buchungen „Renovierung“ setzen") },
   },
 
   // ── follow-ups (stage 5) ────────────────────────────────────────────────

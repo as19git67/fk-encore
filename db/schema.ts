@@ -401,6 +401,8 @@ export interface AiPickPhotoScore {
     clip_aesthetics?: number;
     clip_composition?: number;
     clip_technical?: number;
+    /** Q-Align quality, when the user's weights put it in the technical slot. */
+    qalign_quality?: number;
   };
 }
 
@@ -515,6 +517,8 @@ export interface AiPickWeights {
                       //  exposure_contrast_avg]
   non_face: number[]; // [blur, clip_aesthetics, clip_composition,
                       //  clip_technical, exposure_contrast_avg]
+  /** Technical slot of the non-face branch; see ScoringWeights in group-auto-pick.ts. */
+  technical?: "clip" | "qalign";
 }
 
 export interface AiPickWeightsMetadata {
@@ -527,6 +531,13 @@ export interface AiPickWeightsMetadata {
   // Top-1 agreement of the *defaults* on the same data, for reference.
   top1_accuracy_face_baseline: number;
   top1_accuracy_non_face_baseline: number;
+  /** Set when the weights were adopted from a replay (foto-aesthetik.md, stage 5). */
+  replay?: {
+    variant: string;
+    groups: number;
+    hit_rate_before: number;
+    hit_rate_after: number;
+  };
 }
 
 export const aiPickUserWeights = pgTable("ai_pick_user_weights", {
@@ -4829,6 +4840,22 @@ export const photoAestheticRun = pgTable(
   },
   (table) => [index("photo_aesthetic_run_by_start").on(table.started_at)],
 );
+
+/**
+ * Gemma's critique of one photo in words (stage 6 of foto-aesthetik.md).
+ * Asked for on request only, kept until someone asks again. It describes the
+ * picture, never grades it: the score stays with the aesthetic scorer.
+ */
+export const photoCritique = pgTable("photo_critique", {
+  photo_id: integer("photo_id")
+    .primaryKey()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  summary: text("summary").notNull(),
+  strengths: jsonb("strengths").$type<string[]>().notNull().default([]),
+  weaknesses: jsonb("weaknesses").$type<string[]>().notNull().default([]),
+  model: text("model").notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
 
 // ========== Businesses (documentation/plans/betriebe-euer.md) ==========
 

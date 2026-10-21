@@ -34,8 +34,11 @@ import {
 import {
   classifyOrientation,
   computeFaceProminence,
+  scorePhoto,
   type PhotoSignals,
+  type ScoringWeights,
 } from "./group-auto-pick";
+import { AESTHETIC_MODEL } from "./aesthetic-score";
 
 // Canonical default weights — must match the formula in scorePhoto().
 // Stored here so the regression can initialise from them and the
@@ -90,13 +93,18 @@ export function faceFeatures(s: PhotoSignals): number[] {
   ];
 }
 
-/** Build the non-face-branch feature vector from a PhotoSignals row. */
-export function nonFaceFeatures(s: PhotoSignals): number[] {
+/**
+ * Build the non-face-branch feature vector from a PhotoSignals row.
+ * `technical` picks the signal of the technical slot the way scorePhoto()
+ * does: Q-Align's quality where the photo has one, else the CLIP prompt.
+ */
+export function nonFaceFeatures(s: PhotoSignals, technical: "clip" | "qalign" = "clip"): number[] {
+  const tech = technical === "qalign" && s.qalign_quality != null ? s.qalign_quality : s.clip_technical;
   return [
     clamp01(s.blur_score),
     clamp01(s.clip_aesthetics),
     clamp01(s.clip_composition),
-    clamp01(s.clip_technical),
+    clamp01(tech),
     0.5 * (clamp01(s.exposure_score) + clamp01(s.contrast_score)),
   ];
 }
@@ -168,14 +176,16 @@ export function fitPairwiseWeights(
   return { weights: w, trainAcc: accuracy(w), baselineAcc };
 }
 
-interface TrainingPhoto {
+export interface TrainingPhoto {
   photo_id: number;
   user_kept: boolean;
   signals: PhotoSignals;
   has_face: boolean;
+  /** The aesthetic score is the nightly Q-Align one, not the zero-shot or provisional one. */
+  qalign: boolean;
 }
 
-interface TrainingGroup {
+export interface TrainingGroup {
   group_id: number;
   photos: TrainingPhoto[];
 }
@@ -220,10 +230,12 @@ async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
     face_coverage: number;
     width: number | null;
     height: number | null;
+    aesthetic_model: string | null;
   }>(
     db.select({
       photo_id: photos.id,
       ai_quality_details: photos.ai_quality_details,
+      aesthetic_model: photos.aesthetic_model,
       face_count: sql<number>`COUNT(${faces.id})::int`,
       face_coverage: sql<number>`
         COALESCE(SUM(
@@ -241,7 +253,9 @@ async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
       .groupBy(photos.id),
   );
   const signalsByPhoto = new Map<number, PhotoSignals>();
+  const qalignIds = new Set<number>();
   for (const row of signalRows) {
+    if (row.aesthetic_model === AESTHETIC_MODEL) qalignIds.add(row.photo_id);
     const d = row.ai_quality_details ?? {};
     const pick = (...keys: string[]): number | null => {
       for (const k of keys) {
@@ -258,6 +272,7 @@ async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
       clip_aesthetics: pick("clip_aesthetics"),
       clip_composition: pick("clip_composition"),
       clip_technical: pick("clip_technical"),
+      qalign_quality: pick("qalign_quality"),
       face_sharpness: pick("face_sharpness"),
       eyes_open_score: pick("eyes_open", "eyes_open_score"),
       face_composition: pick("face_composition"),
@@ -347,6 +362,7 @@ async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
         user_kept: !hiddenIds.has(pid),
         signals: s,
         has_face: (s.face_prominence ?? 0) > 0,
+        qalign: qalignIds.has(pid),
       });
     }
     if (trainPhotos.length >= 2) {
@@ -435,20 +451,28 @@ export async function calibrateAndPersist(userId: number): Promise<CalibrationRe
     non_face: enoughNonFace ? result.weights.non_face : [...DEFAULT_WEIGHTS.non_face],
   };
 
+  await persistWeights(userId, persisted, result.metadata);
+  return { ...result, weights: persisted };
+}
+
+async function persistWeights(
+  userId: number,
+  weights: AiPickWeights,
+  metadata: AiPickWeightsMetadata,
+): Promise<void> {
   await db.execute(sql`
     INSERT INTO ai_pick_user_weights (user_id, weights, fitted_at, metadata)
     VALUES (
       ${userId},
-      ${JSON.stringify(persisted)}::jsonb,
+      ${JSON.stringify(weights)}::jsonb,
       NOW(),
-      ${JSON.stringify(result.metadata)}::jsonb
+      ${JSON.stringify(metadata)}::jsonb
     )
     ON CONFLICT (user_id) DO UPDATE SET
       weights   = EXCLUDED.weights,
       fitted_at = EXCLUDED.fitted_at,
       metadata  = EXCLUDED.metadata
   `);
-  return { ...result, weights: persisted };
 }
 
 /**
@@ -462,4 +486,215 @@ export async function loadUserWeights(userId: number): Promise<AiPickWeights | n
       .where(eq(aiPickUserWeights.user_id, userId)),
   );
   return row?.weights ?? null;
+}
+
+// ─── Replay with the Q-Align signal (foto-aesthetik.md, stage 5) ─────────────
+//
+// The nightly run puts Q-Align's aesthetics under `clip_aesthetics` and adds
+// `qalign_quality`. Whether the auto-pick should lean on them more is not a
+// guess: the user's reviewed groups say which photo they kept, and a weight
+// set either ranks that photo first or it does not. Weights fitted here are
+// judged on groups they were not fitted on (k-fold by group), and they are
+// offered only when they beat what the user has today by a margin.
+
+/** Fewer decided groups than this, and a few lucky hits would decide. */
+export const MIN_REPLAY_GROUPS = 30;
+/** Gain in top-1 hit rate a new weight set needs over today's. */
+export const MIN_REPLAY_GAIN = 0.02;
+/** ...and in whole groups, so a small sample cannot pass on one hit. */
+export const MIN_REPLAY_EXTRA_HITS = 2;
+const REPLAY_FOLDS = 5;
+
+/** The fitted sets a replay may recommend. Spelled out: Encore's schema parser cannot read `Exclude<>`. */
+export type ReplayRecommendation = "fitted" | "fitted_qalign";
+export type ReplayVariantKey = "current" | "default" | ReplayRecommendation;
+
+export interface ReplayVariant {
+  key: ReplayVariantKey;
+  label: string;
+  groups: number;
+  hits: number;
+  /** Share of groups whose top-ranked photo is one the user kept. */
+  hit_rate: number;
+}
+
+export interface ReplayReport {
+  /** Reviewed groups with at least two photos that still have signals. */
+  reviewed_groups: number;
+  /** ...in which the user kept at least one photo and hid at least one. */
+  decided_groups: number;
+  /** ...in which every photo has a nightly Q-Align score. The replay runs on these. */
+  qalign_groups: number;
+  variants: ReplayVariant[];
+  recommended: ReplayRecommendation | null;
+  /** Why nothing is recommended, in the user's words; null when something is. */
+  reason: string | null;
+  min_groups: number;
+}
+
+const VARIANT_LABELS: Record<ReplayVariantKey, string> = {
+  current: "Heute",
+  default: "Standardgewichte",
+  fitted: "Neu gelernt",
+  fitted_qalign: "Neu gelernt, Technik aus Q-Align",
+};
+
+/** Has a kept and a hidden photo: only such a group can be hit or missed. */
+export function isDecided(group: TrainingGroup): boolean {
+  return group.photos.some((p) => p.user_kept) && group.photos.some((p) => !p.user_kept);
+}
+
+/** Top-1 agreement: the photo `weights` rank first is one the user kept. Ties go to the lower id, as in computeGroupPick. */
+export function topOneHits(groups: TrainingGroup[], weights: ScoringWeights): { groups: number; hits: number } {
+  let hits = 0;
+  for (const group of groups) {
+    let best: { score: number; photo: TrainingPhoto } | null = null;
+    for (const photo of group.photos) {
+      const score = scorePhoto(photo.signals, weights).score;
+      if (!best || score > best.score || (score === best.score && photo.photo_id < best.photo.photo_id)) {
+        best = { score, photo };
+      }
+    }
+    if (best?.photo.user_kept) hits++;
+  }
+  return { groups: groups.length, hits };
+}
+
+function pairDiffs(groups: TrainingGroup[], technical: "clip" | "qalign") {
+  const face: number[][] = [];
+  const nonFace: number[][] = [];
+  let mixed = 0;
+  for (const group of groups) {
+    for (const a of group.photos) {
+      if (!a.user_kept) continue;
+      for (const b of group.photos) {
+        if (b.user_kept) continue;
+        if (a.has_face !== b.has_face) {
+          mixed++;
+          continue;
+        }
+        const fa = a.has_face ? faceFeatures(a.signals) : nonFaceFeatures(a.signals, technical);
+        const fb = a.has_face ? faceFeatures(b.signals) : nonFaceFeatures(b.signals, technical);
+        (a.has_face ? face : nonFace).push(fa.map((v, k) => v - fb[k]));
+      }
+    }
+  }
+  return { face, nonFace, mixed };
+}
+
+/** Fits both branches on `groups`; a branch with too few pairs keeps the defaults. */
+export function fitWeights(
+  groups: TrainingGroup[],
+  technical: "clip" | "qalign",
+): CalibrationResult {
+  const pairs = pairDiffs(groups, technical);
+  const faceFit = fitPairwiseWeights(pairs.face, [...DEFAULT_WEIGHTS.face]);
+  const nonFaceFit = fitPairwiseWeights(pairs.nonFace, [...DEFAULT_WEIGHTS.non_face]);
+  return {
+    weights: {
+      face: pairs.face.length >= MIN_PAIRS_FOR_FIT ? faceFit.weights : [...DEFAULT_WEIGHTS.face],
+      non_face: pairs.nonFace.length >= MIN_PAIRS_FOR_FIT ? nonFaceFit.weights : [...DEFAULT_WEIGHTS.non_face],
+      ...(technical === "qalign" ? { technical } : {}),
+    },
+    metadata: {
+      pair_count_face: pairs.face.length,
+      pair_count_non_face: pairs.nonFace.length,
+      pair_count_skipped_mixed: pairs.mixed,
+      top1_accuracy_face: faceFit.trainAcc,
+      top1_accuracy_non_face: nonFaceFit.trainAcc,
+      top1_accuracy_face_baseline: faceFit.baselineAcc,
+      top1_accuracy_non_face_baseline: nonFaceFit.baselineAcc,
+    },
+  };
+}
+
+/** Hits of weights fitted without the group they are judged on: k folds by group. */
+export function crossValidatedHits(
+  groups: TrainingGroup[],
+  technical: "clip" | "qalign",
+  folds = REPLAY_FOLDS,
+): { groups: number; hits: number } {
+  const sorted = [...groups].sort((a, b) => a.group_id - b.group_id);
+  const k = Math.min(folds, sorted.length);
+  let hits = 0;
+  for (let f = 0; f < k; f++) {
+    const held = sorted.filter((_, i) => i % k === f);
+    const train = sorted.filter((_, i) => i % k !== f);
+    hits += topOneHits(held, fitWeights(train, technical).weights).hits;
+  }
+  return { groups: sorted.length, hits };
+}
+
+function variant(key: ReplayVariantKey, r: { groups: number; hits: number }): ReplayVariant {
+  return { key, label: VARIANT_LABELS[key], groups: r.groups, hits: r.hits, hit_rate: r.groups > 0 ? r.hits / r.groups : 0 };
+}
+
+/** The replay over already loaded groups; `current` is what the user's picks use today. */
+export function replayOnGroups(all: TrainingGroup[], current: ScoringWeights): ReplayReport {
+  const decided = all.filter(isDecided);
+  const scored = decided.filter((g) => g.photos.every((p) => p.qalign));
+  const today = variant("current", topOneHits(scored, current));
+  const variants = [
+    today,
+    variant("default", topOneHits(scored, DEFAULT_WEIGHTS)),
+    variant("fitted", crossValidatedHits(scored, "clip")),
+    variant("fitted_qalign", crossValidatedHits(scored, "qalign")),
+  ];
+
+  let recommended: ReplayReport["recommended"] = null;
+  let reason: string | null = null;
+  if (scored.length < MIN_REPLAY_GROUPS) {
+    reason =
+      `Erst ${scored.length} entschiedene Gruppen haben durchgehend Q-Align-Werte; ` +
+      `für eine belastbare Aussage braucht es ${MIN_REPLAY_GROUPS}.`;
+  } else {
+    const best = variants
+      .filter((v) => v.key === "fitted" || v.key === "fitted_qalign")
+      .sort((a, b) => b.hits - a.hits)[0];
+    if (best.hit_rate - today.hit_rate >= MIN_REPLAY_GAIN && best.hits - today.hits >= MIN_REPLAY_EXTRA_HITS) {
+      recommended = best.key as ReplayRecommendation;
+    } else {
+      reason = "Neu gelernte Gewichte treffen deine Wahl nicht spürbar öfter als die heutigen.";
+    }
+  }
+  return {
+    reviewed_groups: all.length,
+    decided_groups: decided.length,
+    qalign_groups: scored.length,
+    variants,
+    recommended,
+    reason,
+    min_groups: MIN_REPLAY_GROUPS,
+  };
+}
+
+export async function replayAutoPick(userId: number): Promise<ReplayReport> {
+  const groups = await loadTrainingData(userId);
+  return replayOnGroups(groups, (await loadUserWeights(userId)) ?? DEFAULT_WEIGHTS);
+}
+
+/**
+ * Runs the replay again and, only if it recommends a weight set, fits that
+ * set on all Q-Align groups and stores it as the user's weights.
+ */
+export async function adoptReplay(userId: number): Promise<{ report: ReplayReport; adopted: CalibrationResult | null }> {
+  const groups = await loadTrainingData(userId);
+  const report = replayOnGroups(groups, (await loadUserWeights(userId)) ?? DEFAULT_WEIGHTS);
+  if (!report.recommended) return { report, adopted: null };
+
+  const scored = groups.filter((g) => isDecided(g) && g.photos.every((p) => p.qalign));
+  const fit = fitWeights(scored, report.recommended === "fitted_qalign" ? "qalign" : "clip");
+  const before = report.variants.find((v) => v.key === "current")!;
+  const after = report.variants.find((v) => v.key === report.recommended)!;
+  const metadata: AiPickWeightsMetadata = {
+    ...fit.metadata,
+    replay: {
+      variant: report.recommended,
+      groups: report.qalign_groups,
+      hit_rate_before: before.hit_rate,
+      hit_rate_after: after.hit_rate,
+    },
+  };
+  await persistWeights(userId, fit.weights, metadata);
+  return { report, adopted: { weights: fit.weights, metadata } };
 }

@@ -602,7 +602,7 @@ behind it.
      results shrink to their digest, then the oldest turns go — so as much of
      the conversation stays as fits the window. How full it got, and how many
      earlier questions the model still saw, is stored per answer
-     (`assistant_message.context_usage`, migration 0267) and shown under
+     (`assistant_message.context_usage`, migration 0268) and shown under
      the question field. Titles come from a short `/chat` call
      (`assistant/titles.ts`) rather than `/json-prompt`, run in the
      background in a low-priority llm slot after the first answer, and
