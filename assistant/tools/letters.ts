@@ -214,7 +214,9 @@ export const renderLetter: WriteToolDefinition = {
       })) as unknown as { id: number };
       collectionId = created.id;
       route = `/dokumente/mappen/${collectionId}`;
-      parts.push(`mit ${plural(letter.attachments.length, "Anlage", "Anlagen")} in einer Sammelmappe`);
+      parts.push(letter.attachments.length
+        ? `mit ${plural(letter.attachments.length, "Anlage", "Anlagen")} in einer Sammelmappe`
+        : "in einer Sammelmappe");
     }
     if (documentId !== null || collectionId !== null) {
       await db

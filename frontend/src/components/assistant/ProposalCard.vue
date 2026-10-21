@@ -119,7 +119,8 @@ async function decide(action: 'execute' | 'discard') {
     </header>
 
     <div class="proposal-body">
-      <p class="proposal-summary">{{ current.summary }}</p>
+      <!-- Once it ran, the result says what became of it; the proposal's own line may name gaps that are filled by now. -->
+      <p v-if="!(current.status === 'executed' && current.result_summary)" class="proposal-summary">{{ current.summary }}</p>
       <LetterEditor
         ref="letterEditor"
         v-if="letterForm && current.letter && current.status === 'pending'"
@@ -139,22 +140,42 @@ async function decide(action: 'execute' | 'discard') {
       <p v-if="current.status === 'executed' && current.result_summary" class="proposal-result">
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
-        <RouterLink v-if="current.result_route" :to="current.result_route" class="proposal-link">Ansehen</RouterLink>
       </p>
-      <div v-if="current.status === 'executed' && current.result_download" class="proposal-download">
+      <!-- One row, one look: links stay links (navigation, mailto), the download stays a button. -->
+      <div
+        v-if="current.status === 'executed' && (current.result_route || current.result_download)"
+        class="proposal-actions"
+      >
         <Button
-          label="PDF herunterladen"
-          icon="pi pi-download"
-          size="small"
+          v-if="current.result_route"
+          as="router-link"
+          :to="current.result_route"
+          label="Ansehen"
+          icon="pi pi-arrow-right"
           severity="secondary"
           outlined
+          class="proposal-action"
+        />
+        <Button
+          v-if="current.result_download"
+          label="PDF herunterladen"
+          icon="pi pi-download"
+          severity="secondary"
+          outlined
+          class="proposal-action"
           :loading="downloading"
           @click="download"
         />
-        <a v-if="mailto" :href="mailto" class="proposal-mail">
-          <i class="pi pi-envelope" aria-hidden="true" />
-          Als E-Mail-Entwurf öffnen
-        </a>
+        <Button
+          v-if="mailto"
+          as="a"
+          :href="mailto"
+          label="Als E-Mail-Entwurf"
+          icon="pi pi-envelope"
+          severity="secondary"
+          outlined
+          class="proposal-action"
+        />
       </div>
       <p v-if="requestError && current.status === 'executed'" class="proposal-error" role="alert">
         <i class="pi pi-exclamation-circle" aria-hidden="true" />
@@ -297,27 +318,20 @@ async function decide(action: 'execute' | 'discard') {
   color: var(--p-green-600);
 }
 
-.proposal-link {
-  margin-left: var(--space-2);
-  color: var(--p-primary-color);
-}
 
 .proposal-error {
   color: var(--p-red-600);
 }
 
-.proposal-download {
+.proposal-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
-.proposal-mail {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--text-sm);
-  color: var(--p-primary-color);
+/* A thumb-sized target (44px), the same for link and button. */
+.proposal-action {
+  min-height: 44px;
+  text-decoration: none;
 }
 </style>
