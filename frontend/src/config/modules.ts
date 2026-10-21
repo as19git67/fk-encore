@@ -188,6 +188,18 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.upload' },
       },
       {
+        path: 'neu',
+        name: 'dokumente-text-neu',
+        component: () => import('../views/TextDocumentEditView.vue'),
+        meta: { permission: 'documents.upload' },
+      },
+      {
+        path: ':id/bearbeiten',
+        name: 'dokumente-text-bearbeiten',
+        component: () => import('../views/TextDocumentEditView.vue'),
+        meta: { permission: 'documents.edit' },
+      },
+      {
         // The tax page moved to Finanzen › Steuer; old links and remembered
         // entry paths still land there.
         path: 'steuer',

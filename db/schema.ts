@@ -1044,6 +1044,10 @@ export const documents = pgTable("documents", {
   // re-classify must not overwrite them (migration 0101). Mirrors
   // `tax_reviewed` for the tax fields.
   attributes_reviewed: boolean("attributes_reviewed").notNull().default(false),
+  // Markdown of a text document written in the app (migration 0266,
+  // documents/text-documents.ts). The PDF at `disk_path` is rendered from it
+  // on every save. NULL for uploaded and imported documents.
+  markdown_source: text("markdown_source"),
   // Provenance of the category assignment (migration 0132): 'ai' < 'cloud' <
   // 'user'. The offline Cloud-Teacher writes 'cloud'; the edit dialog writes
   // 'user'. Intended as the category-guard source that supersedes the

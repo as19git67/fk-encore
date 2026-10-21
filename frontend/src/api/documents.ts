@@ -168,6 +168,10 @@ export interface DocumentDetail extends DocumentSummary {
    * this deductible expense?" prompt — the category itself is not in doubt.
    */
   tax_review_needed: boolean
+  /** Markdown of a text document written in the app; null for an uploaded one. */
+  markdown_source: string | null
+  /** Fingerprint of the stored content, sent back with a save of the text. */
+  content_revision: string
 }
 
 export interface DocumentReceiptSuggestion {
@@ -782,6 +786,28 @@ function receiptContentType(file: File): string {
 export function updateDocument(id: number, payload: UpdateDocumentPayload) {
   return apiFetch<DocumentDetail>(`/documents/${id}`, {
     method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Files a new text document; the server renders its PDF from the Markdown. */
+export function createTextDocument(payload: { title: string; markdown: string }) {
+  return apiFetch<DocumentDetail>('/documents/text', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/**
+ * Saves a new version of a text document. With `base_revision` the server
+ * refuses (409) when somebody saved a newer version in the meantime.
+ */
+export function updateTextDocument(
+  id: number,
+  payload: { title: string; markdown: string; base_revision?: string },
+) {
+  return apiFetch<DocumentDetail>(`/documents/${id}/text`, {
+    method: 'PUT',
     body: JSON.stringify(payload),
   })
 }

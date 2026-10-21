@@ -264,7 +264,10 @@ export async function runTextExtract(documentId: number): Promise<void> {
     throw err;
   }
   const extractMs = Date.now() - extractStarted;
-  const text = result.text ?? "";
+  // A text document written in the app has its words already: the Markdown
+  // the PDF was rendered from reads better than the PDF's text layer, which
+  // puts list bullets and table cells out of reading order.
+  const text = row.markdown_source?.trim() ? row.markdown_source.trim() : result.text ?? "";
 
   // Persist (or clear) the searchable OCR sidecar so the viewer and the
   // download endpoint can serve a version with a selectable text layer.
@@ -1123,7 +1126,11 @@ export async function runClassify(documentId: number): Promise<{ classification:
             : "model";
   if (!categoryProtected) {
     patch.category_id = resolvedCategoryId;
-    patch.title = classification.title || row.title || row.original_filename;
+    // A text document written in the app keeps the title its author gave it;
+    // the rest of the attributes come from the model like for any upload.
+    patch.title = row.markdown_source != null && row.title
+      ? row.title
+      : classification.title || row.title || row.original_filename;
     // Already carried forward from the stored row when this run produced
     // nothing (steps 1b/2a above), so these write the effective value, not a
     // stray null.

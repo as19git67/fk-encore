@@ -660,6 +660,8 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
   subject_persons: [],
   teacher_requested: false,
   tax_review_needed: false,
+  markdown_source: null,
+  content_revision: '0'.repeat(64),
   retention: {
     cls: 'kurz',
     label: 'Kurzfristig / nach Bedarf',
@@ -681,6 +683,8 @@ export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
   subject_persons: [],
   teacher_requested: false,
   tax_review_needed: false,
+  markdown_source: null,
+  content_revision: '0'.repeat(64),
   retention: {
     cls: 'kurz',
     label: 'Kurzfristig / nach Bedarf',
@@ -701,6 +705,8 @@ export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
   subject_persons: [],
   teacher_requested: false,
   tax_review_needed: false,
+  markdown_source: null,
+  content_revision: '0'.repeat(64),
   retention: {
     cls: 'kurz',
     label: 'Kurzfristig / nach Bedarf',
