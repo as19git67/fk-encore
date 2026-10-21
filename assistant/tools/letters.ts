@@ -124,7 +124,7 @@ async function rememberAddress(userId: number, sender: string): Promise<void> {
 
 export const renderLetter: WriteToolDefinition = {
   name: "render_letter",
-  summary: "Propose a letter as a DIN 5008 PDF: you write salutation, text and the closing formula; the server adds the user's sender block, today's date, the signature with the user's name and the enclosures. Everything the user wants mentioned goes into body. Write [[what is missing]] for any fact you do not have. Enclosures default to the documents of the working set.",
+  summary: "Propose a letter as a DIN 5008 PDF: you write salutation, text and the closing formula; the server adds the user's sender block, today's date, the signature with the user's name and the enclosures. Everything the user wants mentioned goes into body. For any fact you do not have, write a gap naming it in double brackets, e.g. [[Mitgliedsnummer]]. Enclosures default to the documents of the working set.",
   permissions: ["module.assistant"],
   parameters: {
     type: "object",
@@ -164,7 +164,7 @@ export const renderLetter: WriteToolDefinition = {
       arguments: { sender, recipient, subject, body, attachments, destinations: ["document"] },
       count: attachments.length || undefined,
       note: draft.gaps.length
-        ? `Gaps the user fills in on the card before the letter can go: ${draft.gaps.join("; ")}.`
+        ? `The card cannot run until the user fills in these gaps on it: ${draft.gaps.join("; ")}. Name them in plain words and say so; do not tell the user to press "Ausführen" before.`
         : "The letter has no gaps; the user can still change it on the card.",
     };
   },
@@ -214,7 +214,9 @@ export const renderLetter: WriteToolDefinition = {
       })) as unknown as { id: number };
       collectionId = created.id;
       route = `/dokumente/mappen/${collectionId}`;
-      parts.push(`mit ${plural(letter.attachments.length, "Anlage", "Anlagen")} in einer Sammelmappe`);
+      parts.push(letter.attachments.length
+        ? `mit ${plural(letter.attachments.length, "Anlage", "Anlagen")} in einer Sammelmappe`
+        : "in einer Sammelmappe");
     }
     if (documentId !== null || collectionId !== null) {
       await db

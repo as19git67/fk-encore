@@ -129,14 +129,23 @@ describe('ProposalCard', () => {
       ...letter, status: 'executed', result_summary: 'Brief erstellt', result_download: '/assistant/letters/3/pdf',
     })
     const el = mountCard(letter)
-    expect(el.textContent).toContain('Noch auszufüllen: Zahlungsdatum')
+    expect(el.textContent).toContain('Noch auszufüllen:')
     expect(button(el, 'Ausführen').disabled).toBe(true)
+    // The foot says why, and leads to the gap with its brackets selected.
+    expect(el.querySelector('.proposal-wait')?.textContent).toContain('Erst die Lücke ausfüllen')
+    expect(button(el, 'Ausführen').getAttribute('aria-describedby')).toBe('proposal-9-wait')
+    button(el, 'Zur Lücke').click()
+    await flushPromises()
+    const field = el.querySelector<HTMLTextAreaElement>('#letter-9-body')!
+    expect(document.activeElement).toBe(field)
+    expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe('[[Zahlungsdatum]]')
 
     const body = el.querySelector<HTMLTextAreaElement>('#letter-9-body')!
     body.value = 'Sehr geehrte Damen und Herren,\n\nbezahlt am 20.03.2026.'
     body.dispatchEvent(new Event('input'))
     await flushPromises()
     expect(el.textContent).not.toContain('Noch auszufüllen')
+    expect(el.querySelector('.proposal-wait')).toBeNull()
     const collection = el.querySelector<HTMLInputElement>('#letter-9-dest-collection')!
     collection.click()
     await flushPromises()

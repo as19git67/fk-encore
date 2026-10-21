@@ -4,7 +4,8 @@
  * "Ausführen" runs it as the user, through the same endpoints the app's own
  * buttons use; "Verwerfen" drops it. Afterwards the card says what became of
  * it and links to the result. A letter (#1534) stays editable on the card
- * until it runs.
+ * until it runs; while a gap is left, the foot says why "Ausführen" waits
+ * and leads to the gap.
  */
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
@@ -33,6 +34,7 @@ function formOf(p: Proposal): LetterForm | null {
 }
 
 const letterForm = ref<LetterForm | null>(formOf(props.proposal))
+const letterEditor = ref<InstanceType<typeof LetterEditor> | null>(null)
 watch(() => props.proposal, (p) => { letterForm.value = formOf(p) })
 const gaps = computed(() => {
   const f = letterForm.value
@@ -117,8 +119,10 @@ async function decide(action: 'execute' | 'discard') {
     </header>
 
     <div class="proposal-body">
-      <p class="proposal-summary">{{ current.summary }}</p>
+      <!-- Once it ran, the result says what became of it; the proposal's own line may name gaps that are filled by now. -->
+      <p v-if="!(current.status === 'executed' && current.result_summary)" class="proposal-summary">{{ current.summary }}</p>
       <LetterEditor
+        ref="letterEditor"
         v-if="letterForm && current.letter && current.status === 'pending'"
         v-model="letterForm"
         :letter="current.letter"
@@ -136,22 +140,42 @@ async function decide(action: 'execute' | 'discard') {
       <p v-if="current.status === 'executed' && current.result_summary" class="proposal-result">
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
-        <RouterLink v-if="current.result_route" :to="current.result_route" class="proposal-link">Ansehen</RouterLink>
       </p>
-      <div v-if="current.status === 'executed' && current.result_download" class="proposal-download">
+      <!-- One row, one look: links stay links (navigation, mailto), the download stays a button. -->
+      <div
+        v-if="current.status === 'executed' && (current.result_route || current.result_download)"
+        class="proposal-actions"
+      >
         <Button
-          label="PDF herunterladen"
-          icon="pi pi-download"
-          size="small"
+          v-if="current.result_route"
+          as="router-link"
+          :to="current.result_route"
+          label="Ansehen"
+          icon="pi pi-arrow-right"
           severity="secondary"
           outlined
+          class="proposal-action"
+        />
+        <Button
+          v-if="current.result_download"
+          label="PDF herunterladen"
+          icon="pi pi-download"
+          severity="secondary"
+          outlined
+          class="proposal-action"
           :loading="downloading"
           @click="download"
         />
-        <a v-if="mailto" :href="mailto" class="proposal-mail">
-          <i class="pi pi-envelope" aria-hidden="true" />
-          Als E-Mail-Entwurf öffnen
-        </a>
+        <Button
+          v-if="mailto"
+          as="a"
+          :href="mailto"
+          label="Als E-Mail-Entwurf"
+          icon="pi pi-envelope"
+          severity="secondary"
+          outlined
+          class="proposal-action"
+        />
       </div>
       <p v-if="requestError && current.status === 'executed'" class="proposal-error" role="alert">
         <i class="pi pi-exclamation-circle" aria-hidden="true" />
@@ -164,6 +188,21 @@ async function decide(action: 'execute' | 'discard') {
     </div>
 
     <footer v-if="current.status === 'pending'" class="proposal-foot">
+      <p v-if="gaps.length" :id="`proposal-${current.proposal_id}-wait`" class="proposal-wait">
+        <i class="pi pi-info-circle" aria-hidden="true" />
+        <span>
+          {{ gaps.length === 1 ? 'Erst die Lücke ausfüllen' : `Erst die ${gaps.length} Lücken ausfüllen` }},
+          dann geht „Ausführen“.
+        </span>
+        <Button
+          label="Zur Lücke"
+          icon="pi pi-arrow-up"
+          size="small"
+          severity="warn"
+          text
+          @click="letterEditor?.focusGap()"
+        />
+      </p>
       <Button
         label="Verwerfen"
         severity="secondary"
@@ -179,6 +218,7 @@ async function decide(action: 'execute' | 'discard') {
         size="small"
         :loading="busy === 'execute'"
         :disabled="busy !== null || gaps.length > 0"
+        :aria-describedby="gaps.length ? `proposal-${current.proposal_id}-wait` : undefined"
         @click="decide('execute')"
       />
     </footer>
@@ -226,7 +266,19 @@ async function decide(action: 'execute' | 'discard') {
 
 .proposal-foot {
   justify-content: flex-end;
+  flex-wrap: wrap;
   border-top: 1px solid var(--p-content-border-color);
+}
+
+/* Why "Ausführen" is greyed out: a gap is left in the letter. */
+.proposal-wait {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 auto 0 0;
+  font-size: var(--text-sm);
+  color: var(--p-orange-600);
 }
 
 .proposal-title {
@@ -266,27 +318,20 @@ async function decide(action: 'execute' | 'discard') {
   color: var(--p-green-600);
 }
 
-.proposal-link {
-  margin-left: var(--space-2);
-  color: var(--p-primary-color);
-}
 
 .proposal-error {
   color: var(--p-red-600);
 }
 
-.proposal-download {
+.proposal-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
-.proposal-mail {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--text-sm);
-  color: var(--p-primary-color);
+/* A thumb-sized target (44px), the same for link and button. */
+.proposal-action {
+  min-height: 44px;
+  text-decoration: none;
 }
 </style>

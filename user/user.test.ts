@@ -7,6 +7,8 @@ import {
   listUsersLogic,
   updateUserLogic,
   deleteUserLogic,
+  getPostalAddressLogic,
+  setPostalAddressLogic,
 } from "./user.service";
 
 // Clean up tables before each test
@@ -20,6 +22,18 @@ beforeEach(async () => {
 });
 
 describe("User Service", () => {
+  it("keeps the own postal address, trimmed, and clears it when blank", async () => {
+    const u = await createUserLogic({ email: "post@example.com", name: "Post", password: "pw" });
+    expect(await getPostalAddressLogic(u.id)).toBeNull();
+
+    expect(await setPostalAddressLogic(u.id, "  Beispielweg 2 \n\n 12345 Musterstadt ")).toBe("Beispielweg 2\n12345 Musterstadt");
+    expect(await getPostalAddressLogic(u.id)).toBe("Beispielweg 2\n12345 Musterstadt");
+
+    expect(await setPostalAddressLogic(u.id, "  ")).toBeNull();
+    expect(await getPostalAddressLogic(u.id)).toBeNull();
+    await expect(setPostalAddressLogic(u.id, "x".repeat(501))).rejects.toThrow("longer");
+  });
+
   it("should create a user", async () => {
     const user = await createUserLogic({
       email: "test@example.com",
