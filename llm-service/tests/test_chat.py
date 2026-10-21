@@ -239,6 +239,8 @@ def test_inproc_stream_keeps_the_chunk_format(use_llm):
     call = first["choices"][0]["delta"]["tool_calls"][0]
     assert call["index"] == 0 and call["function"]["name"] == "create_album"
     assert last["choices"][0]["finish_reason"] == "tool_calls"
+    # The fake's own usage, and the window it ran in.
+    assert json.loads(payloads[2])["context"] == {"n_ctx": main.LLM_CTX, "prompt_tokens": 10, "completion_tokens": 5}
 
 
 # ─── server backend ────────────────────────────────────────────────────────────
@@ -322,7 +324,35 @@ def test_server_stream_relays_chunks(use_llm):
     resp = client.post("/chat", json={"messages": [QUESTION], "stream": True})
 
     assert resp.status_code == 200
-    assert _sse_payloads(resp.text) == [*chunks, "[DONE]"]
+    payloads = _sse_payloads(resp.text)
+    assert payloads[:-2] == chunks and payloads[-1] == "[DONE]"
+    # Nothing counted the tokens; the window is still named.
+    assert json.loads(payloads[-2]) == {"context": {"n_ctx": main.LLM_CTX, "prompt_tokens": None, "completion_tokens": None}}
+
+
+def test_server_stream_reports_the_context_used(use_llm):
+    chunks = [
+        '{"choices":[{"delta":{"content":"Fertig."}}]}',
+        '{"choices":[{"delta":{},"finish_reason":"stop"}],"timings":{"prompt_n":200,"cache_n":1000,"predicted_n":7}}',
+        '{"choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":8,"total_tokens":1208}}',
+    ]
+    llm = FakeServer(chunks=chunks)
+    client = use_llm(llm)
+    main._state["server_n_ctx"] = 30000
+    try:
+        resp = client.post("/chat", json={"messages": [QUESTION], "stream": True})
+    finally:
+        main._state["server_n_ctx"] = None
+
+    payloads = _sse_payloads(resp.text)
+    assert json.loads(payloads[-2]) == {"context": {"n_ctx": 30000, "prompt_tokens": 1200, "completion_tokens": 8}}
+    assert llm.payloads[0]["stream_options"] == {"include_usage": True}
+
+
+def test_stream_usage_falls_back_to_timings():
+    body = '{"choices":[],"timings":{"prompt_n":12,"cache_n":30,"predicted_n":4}}'
+    assert chat.stream_usage(body) == {"prompt_tokens": 42, "completion_tokens": 4}
+    assert chat.stream_usage('{"choices":[{"delta":{"content":"x"}}]}') is None
 
 
 def test_server_stream_failure_becomes_an_error_event(use_llm):

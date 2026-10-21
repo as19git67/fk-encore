@@ -23,6 +23,7 @@ import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import AssistantComposer from '../components/assistant/AssistantComposer.vue'
 import AssistantMessage from '../components/assistant/AssistantMessage.vue'
 import ConversationList from '../components/assistant/ConversationList.vue'
+import ContextMeter from '../components/assistant/ContextMeter.vue'
 import {
   ask,
   cancelTurn,
@@ -43,6 +44,7 @@ import { useAuthStore } from '../stores/auth'
 import { draftTitleOf, TEXT_DRAFT_STATE_KEY, type TextDraft } from '../utils/markdown'
 import { useAtLeast } from '../composables/useBreakpoint'
 import { applyEvent, emptyTurn, suggestedQuestions, type LiveTurn } from '../utils/assistantTurn'
+import { latestUsage } from '../utils/contextUsage'
 
 /** How long the server usually needs to name a new conversation. */
 const TITLE_RELOAD_MS = 8000
@@ -86,6 +88,8 @@ const activeId = computed<number | null>(() => {
 })
 
 const suggestions = computed(() => suggestedQuestions((p) => auth.hasPermission(p)))
+/** How full the window got in the newest answer of the open conversation. */
+const usage = computed(() => latestUsage(messages.value))
 
 function scrollToEnd() {
   void nextTick(() => {
@@ -241,7 +245,12 @@ async function send(question: string) {
       // stored with its own and shows when that one is opened again.
       if (activeId.value === conversationId) {
         messages.value = [...messages.value, {
-          id: res.message_id, role: 'assistant', content: res.answer, blocks: res.blocks, created_at: new Date().toISOString(),
+          id: res.message_id,
+          role: 'assistant',
+          content: res.answer,
+          blocks: res.blocks,
+          context_usage: res.context_usage ?? null,
+          created_at: new Date().toISOString(),
         }]
       }
     } finally {
@@ -404,6 +413,7 @@ function remove(conversation: ConversationSummary) {
           @send="send"
           @cancel="cancel"
         />
+        <ContextMeter v-if="usage && activeId !== null" :usage="usage" />
       </section>
     </div>
 

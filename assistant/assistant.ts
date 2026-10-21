@@ -21,7 +21,7 @@ import { runTurn } from "./agent";
 import { cleanContext, describeContext, type ContextRef } from "./briefs";
 import { renderLetterPdf } from "./letter-pdf";
 import { catalogFor } from "./catalog";
-import { chat, ContextTooLargeError, LlmServiceUnavailableError } from "./llm-client";
+import { chat, ContextTooLargeError, knownContextWindow, LlmServiceUnavailableError } from "./llm-client";
 import { cancelTurn, followTurn, openTurn, TURN_ID_RE, turnSignal } from "./live";
 import {
   discardProposal,
@@ -33,13 +33,17 @@ import {
 } from "./proposals";
 import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
 import { fallbackTitle, suggestTitle } from "./titles";
-import type { ChatMessage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
+import type { ChatMessage, ContextUsage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
 const RATE_LIMIT = { maxAttempts: 20, windowMs: 10 * 60_000 };
 const MAX_QUESTION_LENGTH = 4000;
-/** Earlier turns (question, tool calls, answer) replayed as context. */
-const HISTORY_TURNS = 6;
+/**
+ * Earlier turns (question, tool calls, answer) offered as context. A ceiling,
+ * not the rule: the agent loop drops the oldest turns first until the rest
+ * fits the model's window, so as much of the conversation stays as fits.
+ */
+const HISTORY_TURNS = 50;
 /**
  * ai-queue priority: someone is waiting for this answer, so it goes before
  * every other model job, a running batch classification included. The whole
@@ -87,6 +91,8 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   blocks: ResultBlock[];
+  /** Answers only: how full the model's window got in that turn. */
+  context_usage?: ContextUsage | null;
   created_at: string;
 }
 
@@ -159,6 +165,7 @@ export const getConversation = api(
         content: m.content ?? "",
         // Proposal cards show what became of them since, not the state they were stored in.
         blocks: await refreshProposalBlocks((m.blocks ?? []) as ResultBlock[], Number(auth.userID)),
+        context_usage: (m.context_usage as ContextUsage | null) ?? null,
         created_at: m.created_at,
       })));
     const user = { userID: auth.userID, permissions: auth.permissions };
@@ -215,17 +222,19 @@ export interface AskResponse {
   blocks: ResultBlock[];
   message_id: number;
   rounds: number;
+  context_usage: ContextUsage;
 }
 
 /**
  * Earlier turns as the model sees them again: each question, the tool calls
- * behind its answer with the one-line digest of what each found, and the
- * answer. Replayed as real tool calls rather than a note in the answer — a
- * model that saw "[tools behind this answer: …]" in earlier answers wrote
- * such notes itself instead of calling the tool. A follow-up ("nur die aus
- * München") still knows what the previous answer was based on.
+ * behind its answer with what each found, and the answer. Replayed as real
+ * tool calls rather than a note in the answer — a model that saw "[tools
+ * behind this answer: …]" in earlier answers wrote such notes itself instead
+ * of calling the tool. Results go along whole, so a follow-up can still read
+ * the rows an earlier answer was based on; `digests` holds the one-line form
+ * each shrinks to when the window runs short, the oldest first.
  */
-export async function history(conversationId: number): Promise<ChatMessage[]> {
+export async function history(conversationId: number): Promise<{ messages: ChatMessage[]; digests: Record<string, string> }> {
   const rows = (await db
     .select({
       role: assistantMessage.role,
@@ -240,6 +249,7 @@ export async function history(conversationId: number): Promise<ChatMessage[]> {
     .limit(HISTORY_TURNS * 12)).reverse();
 
   const turns: ChatMessage[][] = [];
+  const digests: Record<string, string> = {};
   let turn: ChatMessage[] | null = null;
   let open = new Set<string>();
   // Every call gets its result before the next message, even one whose row is missing.
@@ -257,7 +267,8 @@ export async function history(conversationId: number): Promise<ChatMessage[]> {
     } else if (m.role === "tool") {
       if (!m.tool_call_id || !open.has(m.tool_call_id)) continue;
       open.delete(m.tool_call_id);
-      turn.push({ role: "tool", tool_call_id: m.tool_call_id, content: m.digest ?? "[no result kept]" });
+      turn.push({ role: "tool", tool_call_id: m.tool_call_id, content: m.content ?? m.digest ?? "[no result kept]" });
+      if (m.digest) digests[m.tool_call_id] = m.digest;
     } else if (m.tool_calls) {
       closeCalls();
       turn.push({
@@ -277,7 +288,16 @@ export async function history(conversationId: number): Promise<ChatMessage[]> {
     const last = t.at(-1)!;
     return last.role === "assistant" && !("tool_calls" in last && last.tool_calls);
   });
-  return complete.slice(-HISTORY_TURNS).flat();
+  return { messages: complete.slice(-HISTORY_TURNS).flat(), digests };
+}
+
+/** Questions asked in the conversation so far, answered or not. */
+async function questionCount(conversationId: number): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(assistantMessage)
+    .where(and(eq(assistantMessage.conversation_id, conversationId), eq(assistantMessage.role, "user")));
+  return row?.n ?? 0;
 }
 
 /** The latest result set of each type in the conversation, for `from_previous_result`. */
@@ -300,6 +320,7 @@ async function persist(
   transcript: ChatMessage[],
   blocks: ResultBlock[],
   toolResults: Record<string, { digest: string; ref?: ResultRef }> = {},
+  contextUsage: ContextUsage | null = null,
 ): Promise<number> {
   let finalId = 0;
   for (let i = 0; i < transcript.length; i++) {
@@ -318,6 +339,7 @@ async function persist(
         digest: m.role === "tool" ? toolResults[m.tool_call_id]?.digest ?? null : null,
         result_ref: m.role === "tool" ? toolResults[m.tool_call_id]?.ref ?? null : null,
         blocks: isFinal && blocks.length ? blocks : null,
+        context_usage: isFinal && contextUsage ? { ...contextUsage } : null,
       })
       .returning({ id: assistantMessage.id });
     if (isFinal) finalId = row.id;
@@ -354,11 +376,15 @@ export const ask = api(
 
     const user = { userID: auth.userID, permissions: auth.permissions };
     try {
+      const earlierTurns = await questionCount(conversation.id);
+      const earlier = await history(conversation.id);
       const refs = cleanContext(conversation.context);
       const entries = refs.length ? await describeContext(refs, user) : [];
       const result = await withAiPriority(SLOT_PRIORITY, async () => runTurn({
         user,
-        history: await history(conversation.id),
+        history: earlier.messages,
+        historyDigests: earlier.digests,
+        contextWindow: knownContextWindow() ?? undefined,
         question,
         conversationId: conversation.id,
         previousRefs: await previousRefs(conversation.id),
@@ -381,15 +407,25 @@ export const ask = api(
         }),
       }));
 
-      const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults);
+      const contextUsage: ContextUsage = { ...result.context, earlierTurns };
+      const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults, contextUsage);
       const fallback = fallbackTitle(question);
       await db
         .update(assistantConversation)
         .set({ updated_at: sql`now()`, title: conversation.title ?? fallback })
         .where(eq(assistantConversation.id, conversation.id));
       if (conversation.title === null) nameConversation(conversation.id, question, fallback);
-      log.info("assistant answered", { conversation_id: conversation.id, rounds: result.rounds, blocks: result.blocks.length });
-      return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds };
+      log.info("assistant answered", {
+        conversation_id: conversation.id,
+        rounds: result.rounds,
+        blocks: result.blocks.length,
+        context_used: contextUsage.used,
+        context_window: contextUsage.window,
+        context_estimated: contextUsage.estimated,
+        kept_turns: contextUsage.keptTurns,
+        earlier_turns: earlierTurns,
+      });
+      return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds, context_usage: contextUsage };
     } catch (err) {
       if (signal?.aborted) {
         // Nothing of a stopped turn is kept, like a failed one: the next

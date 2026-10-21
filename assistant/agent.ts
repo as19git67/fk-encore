@@ -24,10 +24,11 @@ import {
   toolDefinition,
 } from "./catalog";
 import { contextSection, type ContextRef } from "./briefs";
-import { ContextTooLargeError, type ChatFn, type ChatReply } from "./llm-client";
+import { ContextTooLargeError, type ChatFn, type ChatReply, type ChatRequest } from "./llm-client";
 import type {
   AssistantUser,
   ChatMessage,
+  ContextUsage,
   RefType,
   ResultBlock,
   ResultRef,
@@ -42,12 +43,44 @@ export const OUT_OF_ROUNDS = "Ich konnte die Frage nicht in der vorgesehenen Zah
 /** What one answer may spend on generation. */
 const ANSWER_TOKENS = 1024;
 /**
- * The window the loop budgets against; the deployment's LLM_CTX, minus
- * headroom. The production model runs with a 30000-token window and the
- * tool schemas alone take about 6100 of the budget on every round, so
- * 12000 left too little for the tool results of a longer turn.
+ * The loop budgets against the model's own window, which llm-service names
+ * with every reply (n_ctx), less headroom for the answer and for the error
+ * of its estimate. ASSISTANT_CONTEXT_TOKENS pins a fixed budget instead
+ * (in estimated tokens); until the window is known — the first round after
+ * a restart — the fallback holds. The tool schemas count against it on
+ * every round (about 6100 tokens with every module).
  */
-const DEFAULT_CONTEXT_TOKENS = Number.parseInt(process.env.ASSISTANT_CONTEXT_TOKENS ?? "20000", 10);
+const FIXED_CONTEXT_TOKENS = process.env.ASSISTANT_CONTEXT_TOKENS
+  ? Number.parseInt(process.env.ASSISTANT_CONTEXT_TOKENS, 10)
+  : null;
+const FALLBACK_CONTEXT_TOKENS = 20000;
+/** Share of the window kept free for the chat template and a misjudged estimate. */
+const WINDOW_HEADROOM = 0.05;
+
+/**
+ * Real tokens per estimated token (characters / 4), learnt from what the
+ * model counted: German text and JSON rows do not tokenize alike, and a
+ * budget in estimated tokens is only as good as this ratio. Shared by all
+ * turns of the process, smoothed, and kept within reason.
+ */
+let tokensPerEstimate = 1;
+
+export function calibrateEstimate(estimated: number, counted: number): void {
+  // Small requests say more about the template than about the text.
+  if (estimated < 500 || counted <= 0) return;
+  const sample = Math.min(2, Math.max(0.5, counted / estimated));
+  tokensPerEstimate = 0.7 * tokensPerEstimate + 0.3 * sample;
+}
+
+export function __resetCalibrationForTests(): void {
+  tokensPerEstimate = 1;
+}
+
+/** What a request may take of `window` real tokens, in estimated tokens, the answer's share already off. */
+export function budgetForWindow(window: number): number {
+  return Math.floor((window * (1 - WINDOW_HEADROOM) - ANSWER_TOKENS) / tokensPerEstimate);
+}
+
 /**
  * Up to this size every schema goes along with every request; past it the
  * model gets the one-line catalog and fetches schemas with describe_tools.
@@ -230,7 +263,12 @@ export interface TurnInput {
   emit?: (event: TurnEvent) => void;
   now?: Date;
   maxRounds?: number;
+  /** A fixed budget in estimated tokens, the answer included; overrides the window. */
   contextTokens?: number;
+  /** The model's window in real tokens, when already known; a reply that names it updates it. */
+  contextWindow?: number;
+  /** Digests of the tool results in `history`, by call id: what they shrink to when room runs out. */
+  historyDigests?: Record<string, string>;
   schemaBudgetTokens?: number;
   /**
    * The user's "Abbrechen". Checked before each model round and each tool
@@ -258,6 +296,8 @@ export interface TurnResult {
   /** Per tool call id: its one-line digest and the set it found, for later turns. */
   toolResults: Record<string, { digest: string; ref?: ResultRef }>;
   rounds: number;
+  /** How full the window got, for the line under the chat. */
+  context: ContextUsage;
 }
 
 /**
@@ -330,7 +370,11 @@ function narrowingFamily(kind: string): string | null {
 export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const now = input.now ?? new Date();
   const maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS;
-  const budget = (input.contextTokens ?? DEFAULT_CONTEXT_TOKENS) - ANSWER_TOKENS;
+  const fixed = input.contextTokens ?? FIXED_CONTEXT_TOKENS;
+  let window = input.contextWindow ?? null;
+  const currentBudget = () => fixed !== null
+    ? fixed - ANSWER_TOKENS
+    : window !== null ? budgetForWindow(window) : FALLBACK_CONTEXT_TOKENS - ANSWER_TOKENS;
   const emit = input.emit ?? (() => {});
   const withSlot = input.withSlot ?? ((fn) => fn());
   const tools = input.tools.filter((t) => mayUse(t, input.user));
@@ -346,7 +390,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   ];
   let questionIndex = messages.length - 1;
   let lastRoundStart = questionIndex;
-  const digests = new Map<string, string>();
+  // Earlier turns' results go along whole; these are what they shrink to.
+  const digests = new Map<string, string>(Object.entries(input.historyDigests ?? {}));
   const blocks: ResultBlock[] = [];
   const refs = new Map<RefType, number[]>(
     Object.entries(input.previousRefs ?? {}) as Array<[RefType, number[]]>,
@@ -379,6 +424,30 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   /** One push from "bitte bestätigen" in words to the card; never twice. */
   let consentNudged = false;
   const mayPropose = tools.some((t) => t.kind === "write");
+
+  const historyTurns = input.history.filter((m) => m.role === "user").length;
+  const usage: ContextUsage = {
+    used: null, window, estimated: 0, budget: currentBudget(), historyTurns, keptTurns: historyTurns, digested: 0,
+  };
+  /** One /chat call, and what it took of the window. */
+  const send = async (request: ChatRequest): Promise<ChatReply> => {
+    const reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
+    const estimated = estimateTokens(request.messages) + estimateTokens(request.tools ?? []);
+    usage.estimated = Math.max(usage.estimated, estimated);
+    const counted = reply.usage;
+    if (counted?.n_ctx) window = usage.window = counted.n_ctx;
+    if (counted?.prompt_tokens != null) {
+      usage.used = Math.max(usage.used ?? 0, counted.prompt_tokens + (counted.completion_tokens ?? 0));
+      calibrateEstimate(estimated, counted.prompt_tokens);
+    }
+    usage.budget = currentBudget();
+    const sent = request.messages;
+    usage.keptTurns = Math.min(usage.keptTurns, sent.slice(1, questionIndex).filter((m) => m.role === "user").length);
+    usage.digested = Math.max(usage.digested, sent.slice(1).filter(
+      (m) => m.role === "tool" && digests.get(m.tool_call_id) === m.content,
+    ).length);
+    return reply;
+  };
   for (let round = 1; round <= maxRounds && answer === null; round++) {
     input.signal?.throwIfAborted();
     rounds = round;
@@ -388,6 +457,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       ...[...offered.values()].map(toolDefinition),
     ];
     // The previous round's results stay whole; older ones may shrink.
+    const budget = currentBudget();
     const shift = fitContext(messages, digests, budget, { protectFrom: lastRoundStart, questionIndex }, estimateTokens(definitions));
     questionIndex -= shift;
     lastRoundStart -= shift;
@@ -400,7 +470,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     };
     let reply: ChatReply;
     try {
-      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
+      reply = await send(request);
     } catch (err) {
       if (!(err instanceof ContextTooLargeError)) throw err;
       // The estimate was optimistic. Shrink everything that can shrink and
@@ -411,7 +481,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       questionIndex -= cut;
       lastRoundStart -= cut;
       request.messages = [...messages, ...(nudge ?? [])];
-      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
+      reply = await send(request);
     }
 
     const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
@@ -434,10 +504,10 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       // The forced last round wrote a call instead of an answer: ask once
       // more, without tools, for the answer in words.
       emit({ type: "retract" });
-      const retry = await withSlot(() => input.chat({
+      const retry = await send({
         messages: [...messages, { role: "assistant", content: reply.content }, { role: "user", content: FINAL_ANSWER_NUDGE }],
         max_tokens: ANSWER_TOKENS,
-      }, (text) => emit({ type: "token", text }), input.signal));
+      });
       rounds++;
       emptyRetried = true;
       reply = { ...retry, tool_calls: [] };
@@ -455,10 +525,10 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         // a Lastschriften turn this way): ask once more, without tools, for
         // the answer in words before giving up on the turn.
         emptyRetried = true;
-        const retry = await withSlot(() => input.chat({
+        const retry = await send({
           messages: [...messages, { role: "user", content: FINAL_ANSWER_NUDGE }],
           max_tokens: ANSWER_TOKENS,
-        }, (text) => emit({ type: "token", text }), input.signal));
+        });
         rounds++;
         noRows = wantsNoRows(retry.content);
         answer = cleanAnswer(retry.content ?? "");
@@ -547,5 +617,5 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i]!.kind !== "proposal") blocks.splice(i, 1);
   }
   emit({ type: "done", answer: final, blocks });
-  return { answer: final, blocks, transcript, rounds, toolResults };
+  return { answer: final, blocks, transcript, rounds, toolResults, context: usage };
 }

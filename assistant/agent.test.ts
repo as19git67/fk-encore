@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -219,6 +219,81 @@ describe("the loop", () => {
     expect(offered[2]).toEqual(["describe_tools", "list_meters"]);
     expect(clients.meter.listMeters).toHaveBeenCalledTimes(1);
     expect((requests[0].messages[0] as { content: string }).content).toContain("fetch a tool's argument schema with describe_tools");
+  });
+
+  it("reports the largest request's tokens, the window and the earlier questions it kept", async () => {
+    const history: ChatMessage[] = [
+      { role: "user", content: "alt ".repeat(5000) },
+      { role: "assistant", content: "antwort" },
+      { role: "user", content: "vorhin" },
+      { role: "assistant", content: "ja" },
+    ];
+    const { fn } = scripted([
+      { ...answer("Hallo."), usage: { n_ctx: 30000, prompt_tokens: 900, completion_tokens: 4 } },
+    ]);
+    const res = await runTurn({
+      user: USER, history, question: "Hallo?", tools: [], chat: fn, now: NOW, contextTokens: 6000,
+    });
+    expect(res.context).toMatchObject({ used: 904, window: 30000, historyTurns: 2, keptTurns: 1, digested: 0, budget: 6000 - 1024 });
+    expect(res.context.estimated).toBeGreaterThan(0);
+    expect(res.context.estimated).toBeLessThanOrEqual(6000 - 1024);
+  });
+
+  it("budgets against the model's window, learnt from the first reply, and forgets the oldest first", async () => {
+    __resetCalibrationForTests();
+    // Eight earlier turns, each with a whole result of ~1000 estimated tokens.
+    const history: ChatMessage[] = [];
+    const historyDigests: Record<string, string> = {};
+    for (let i = 0; i < 8; i++) {
+      history.push(
+        { role: "user", content: `Frage ${i}` },
+        { role: "assistant", content: null, tool_calls: [{ id: `h${i}`, type: "function", function: { name: "x", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: `h${i}`, content: `zeile ${i} `.repeat(400) },
+        { role: "assistant", content: `Antwort ${i}` },
+      );
+      historyDigests[`h${i}`] = `[earlier result of x: turn ${i}]`;
+    }
+    const { fn, requests } = scripted([{ ...answer("Ja."), usage: { n_ctx: 8000, prompt_tokens: 3000, completion_tokens: 2 } }]);
+    const res = await runTurn({
+      user: USER, history, historyDigests, question: "Und?", tools: [], chat: fn, now: NOW, contextWindow: 8000,
+    });
+    const sent = requests[0]!.messages;
+    // Every question stays; the oldest results shrank to their digests, the newest are whole.
+    expect(sent.filter((m) => m.role === "user")).toHaveLength(9);
+    const results = sent.filter((m) => m.role === "tool").map((m) => m.content);
+    expect(results[0]).toBe("[earlier result of x: turn 0]");
+    expect(results.at(-1)).toBe("zeile 7 ".repeat(400));
+    expect(res.context.digested).toBeGreaterThan(0);
+    expect(res.context.digested).toBeLessThan(8);
+    expect(res.context.window).toBe(8000);
+    expect(res.context.keptTurns).toBe(8);
+    __resetCalibrationForTests();
+  });
+
+  it("drops whole turns from the oldest end once every result is a digest", async () => {
+    __resetCalibrationForTests();
+    const history: ChatMessage[] = [];
+    for (let i = 0; i < 12; i++) history.push({ role: "user", content: `frage ${i} `.repeat(300) }, { role: "assistant", content: `Antwort ${i}` });
+    const { fn, requests } = scripted([answer("Ja.")]);
+    const res = await runTurn({ user: USER, history, question: "Und?", tools: [], chat: fn, now: NOW, contextWindow: 9000 });
+    const questions = requests[0]!.messages.filter((m) => m.role === "user").map((m) => m.content);
+    expect(questions.at(-1)).toBe("Und?");
+    expect(questions.length).toBeLessThan(13);
+    // What stays is the newest end of the conversation, without gaps.
+    expect(questions.at(-2)).toBe("frage 11 ".repeat(300));
+    expect(res.context.keptTurns).toBe(questions.length - 1);
+  });
+
+  it("learns how many real tokens an estimated one is, within reason", () => {
+    __resetCalibrationForTests();
+    const before = budgetForWindow(30000);
+    calibrateEstimate(10000, 13000);
+    expect(budgetForWindow(30000)).toBeLessThan(before);
+    for (let i = 0; i < 50; i++) calibrateEstimate(10000, 100000);
+    expect(budgetForWindow(30000)).toBe(Math.floor((30000 * 0.95 - 1024) / 2));
+    calibrateEstimate(100, 1000); // too small to say anything
+    __resetCalibrationForTests();
+    expect(budgetForWindow(30000)).toBe(before);
   });
 
   it("replays history and keeps the question when the context runs short", () => {
