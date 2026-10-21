@@ -505,7 +505,9 @@ export const MIN_REPLAY_GAIN = 0.02;
 export const MIN_REPLAY_EXTRA_HITS = 2;
 const REPLAY_FOLDS = 5;
 
-export type ReplayVariantKey = "current" | "default" | "fitted" | "fitted_qalign";
+/** The fitted sets a replay may recommend. Spelled out: Encore's schema parser cannot read `Exclude<>`. */
+export type ReplayRecommendation = "fitted" | "fitted_qalign";
+export type ReplayVariantKey = "current" | "default" | ReplayRecommendation;
 
 export interface ReplayVariant {
   key: ReplayVariantKey;
@@ -524,7 +526,7 @@ export interface ReplayReport {
   /** ...in which every photo has a nightly Q-Align score. The replay runs on these. */
   qalign_groups: number;
   variants: ReplayVariant[];
-  recommended: Exclude<ReplayVariantKey, "current" | "default"> | null;
+  recommended: ReplayRecommendation | null;
   /** Why nothing is recommended, in the user's words; null when something is. */
   reason: string | null;
   min_groups: number;
@@ -650,7 +652,7 @@ export function replayOnGroups(all: TrainingGroup[], current: ScoringWeights): R
       .filter((v) => v.key === "fitted" || v.key === "fitted_qalign")
       .sort((a, b) => b.hits - a.hits)[0];
     if (best.hit_rate - today.hit_rate >= MIN_REPLAY_GAIN && best.hits - today.hits >= MIN_REPLAY_EXTRA_HITS) {
-      recommended = best.key as ReplayReport["recommended"];
+      recommended = best.key as ReplayRecommendation;
     } else {
       reason = "Neu gelernte Gewichte treffen deine Wahl nicht spürbar öfter als die heutigen.";
     }
