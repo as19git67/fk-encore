@@ -5,10 +5,17 @@
 # still starts on a box without a card and reports that on /load.
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
+# gcc, libc6-dev and python3-dev are for Triton, which torch brings along:
+# when bitsandbytes is imported on a machine with a card, Triton compiles a
+# small CUDA launcher against Python.h on first use and fails with "Failed
+# to find C compiler" without them.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    gcc \
+    libc6-dev \
     python3 \
+    python3-dev \
     python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 568 apps \
