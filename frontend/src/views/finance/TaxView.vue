@@ -15,7 +15,6 @@ import TaxWorksheetDialog from '../../components/documents/TaxWorksheetDialog.vu
 import { useListToolbar } from '../../composables/useListToolbar'
 import type { FilterChip } from '../../components/layout/listToolbar'
 import {
-  backfillDocumentTax,
   backfillTaxValues,
   listSubjectPersons,
   listTaxDocuments,
@@ -84,7 +83,6 @@ const data = ref<ListTaxDocumentsResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
 const info = ref('')
-const backfilling = ref(false)
 const readingValues = ref(false)
 /** The Ausfüllhilfe dialog; it needs one year, so "Alle" cannot open it. */
 const worksheetOpen = ref(false)
@@ -182,8 +180,8 @@ const toolbar = useListToolbar({
 const emptyMessage = computed(() => {
   if (years.value.length > 0) return 'Für dieses Jahr wurden keine Steuer-Dokumente gefunden.'
   const base = 'Es wurden noch keine steuerlich relevanten Dokumente erkannt.'
-  return auth.hasPermission('documents.edit')
-    ? `${base} Falls du bereits ältere Dokumente hochgeladen hast, starte oben die „KI-Analyse nachholen“.`
+  return auth.hasPermission('data.manage')
+    ? `${base} Falls du bereits ältere Dokumente hochgeladen hast, starte die „KI-Analyse nachholen“ unter Dokumente › Einstellungen › Verarbeitung.`
     : base
 })
 
@@ -224,29 +222,6 @@ async function reload() {
   error.value = ''
   await loadYears()
   await loadData()
-}
-
-async function onBackfill() {
-  if (backfilling.value) return
-  backfilling.value = true
-  info.value = ''
-  error.value = ''
-  try {
-    const res = await backfillDocumentTax()
-    info.value =
-      res.queued === 0
-        ? 'Alle bestehenden Dokumente wurden bereits analysiert.'
-        : `${res.queued} Dokument(e) zur erneuten KI-Analyse eingereiht. Die Tabelle aktualisiert sich in Kürze.`
-    // Re-pull years (new years might appear when documents finish).
-    setTimeout(() => {
-      loadYears()
-      loadData()
-    }, 2000)
-  } catch (err: any) {
-    error.value = err.message || 'Backfill fehlgeschlagen'
-  } finally {
-    backfilling.value = false
-  }
 }
 
 async function onBackfillValues() {
@@ -352,15 +327,6 @@ onMounted(async () => {
         :disabled="selectedYear === null"
         :title="selectedYear === null ? 'Erst ein Steuerjahr wählen' : `Ausfüllhilfe für die Steuererklärung ${selectedYear}: Beträge je Anlage, Buchungen, Betriebe und Depot`"
         @click="worksheetOpen = true"
-      />
-      <Button
-        v-if="auth.hasPermission('documents.edit')"
-        icon="pi pi-sync"
-        label="KI-Analyse nachholen"
-        text
-        :loading="backfilling"
-        title="Bestehende Dokumente erneut vom Klassifier analysieren lassen, um fehlende Steuer-Daten zu ergänzen."
-        @click="onBackfill"
       />
       <Button
         v-if="auth.hasPermission('data.manage')"

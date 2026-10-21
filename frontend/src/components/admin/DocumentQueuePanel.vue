@@ -5,7 +5,7 @@ import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
 import {
   getDocumentQueueStatus, reclassifyAllDocuments, relocateAllDocuments,
-  cancelDocumentQueue, retryDocumentQueue, backfillPageWords,
+  cancelDocumentQueue, retryDocumentQueue, backfillPageWords, backfillDocumentTax,
   type DocQueueStatus,
   type PageWordsBackfillResponse,
   type ReclassifyAllMode,
@@ -21,6 +21,8 @@ const docRelocateLoading = ref(false)
 const docRelocateResult = ref<RelocateAllDocumentsResponse | null>(null)
 const pageWordsLoading = ref(false)
 const pageWordsResult = ref<PageWordsBackfillResponse | null>(null)
+const taxBackfillLoading = ref(false)
+const taxBackfillQueued = ref<number | null>(null)
 const docCancelLoading = ref(false)
 const docRetryLoading = ref(false)
 
@@ -103,6 +105,20 @@ async function handlePageWordsBackfill() {
   }
 }
 
+async function handleTaxBackfill() {
+  docReclassifyError.value = ''
+  taxBackfillQueued.value = null
+  taxBackfillLoading.value = true
+  try {
+    taxBackfillQueued.value = (await backfillDocumentTax()).queued
+    await fetchDocQueueStatus()
+  } catch (err: any) {
+    docReclassifyError.value = err.message || 'Fehler beim Einreihen'
+  } finally {
+    taxBackfillLoading.value = false
+  }
+}
+
 async function handleDocCancel() {
   docReclassifyError.value = ''
   docCancelLoading.value = true
@@ -161,6 +177,17 @@ async function handleDocRetry() {
       <Message severity="info" :closable="false">
         {{ pageWordsResult.queued }} Dokument(e) zum Nachtragen der Wortpositionen eingereiht,
         {{ pageWordsResult.remaining }} noch ohne. Die Aufträge laufen nur, solange keine neue Texterkennung wartet.
+      </Message>
+    </div>
+
+    <div v-if="taxBackfillQueued !== null" class="mb-3">
+      <Message severity="info" :closable="false">
+        <template v-if="taxBackfillQueued === 0">
+          Alle bestehenden Dokumente wurden bereits auf Steuer-Daten analysiert.
+        </template>
+        <template v-else>
+          {{ taxBackfillQueued }} Dokument(e) zur erneuten KI-Analyse der Steuer-Daten eingereiht.
+        </template>
       </Message>
     </div>
 
@@ -283,6 +310,15 @@ async function handleDocRetry() {
         :loading="pageWordsLoading"
         :disabled="pageWordsLoading || docReclassifyLoading"
         @click="handlePageWordsBackfill"
+      />
+      <Button
+        label="KI-Analyse nachholen"
+        icon="pi pi-sync"
+        severity="secondary"
+        v-tooltip.top="'Lässt bestehende Dokumente, deren Steuer-Einordnung noch nicht geprüft ist, erneut vom Klassifier analysieren, um fehlende Steuer-Daten zu ergänzen.'"
+        :loading="taxBackfillLoading"
+        :disabled="taxBackfillLoading || docReclassifyLoading || docIsActive"
+        @click="handleTaxBackfill"
       />
       <Button
         v-if="docTotalFailed > 0"
