@@ -25,6 +25,7 @@ import AssistantMessage from '../components/assistant/AssistantMessage.vue'
 import ConversationList from '../components/assistant/ConversationList.vue'
 import {
   ask,
+  cancelTurn,
   createConversation,
   deleteConversation,
   followTurn,
@@ -60,6 +61,9 @@ const live = ref<LiveTurn | null>(null)
 const liveFor = ref<number | null>(null)
 const draft = ref('')
 const busy = ref(false)
+/** The running turn, for "Abbrechen". */
+const turnId = ref<string | null>(null)
+const cancelling = ref(false)
 const loaded = ref(false)
 const loadError = ref<string | null>(null)
 const sendError = ref<string | null>(null)
@@ -178,6 +182,19 @@ function sendErrorText(e: unknown): string {
   return e instanceof Error ? e.message : 'Die Frage konnte nicht beantwortet werden.'
 }
 
+async function cancel() {
+  const id = turnId.value
+  if (!id || cancelling.value) return
+  cancelling.value = true
+  try {
+    // False only in the moment before the question reached the server.
+    if (!(await cancelTurn(id)).cancelled) cancelling.value = false
+  } catch {
+    // The answer goes on; the button is there to try again.
+    cancelling.value = false
+  }
+}
+
 async function send(question: string) {
   if (busy.value) return
   busy.value = true
@@ -202,15 +219,16 @@ async function send(question: string) {
 
     // Watch first, then ask: the stream replays what it missed, and if it
     // cannot connect the POST still brings the whole answer.
-    const turnId = newTurnId()
-    const stream = followTurn(turnId, (event) => {
+    const thisTurn = newTurnId()
+    const stream = followTurn(thisTurn, (event) => {
       if (!live.value || activeId.value !== conversationId) return
       live.value = applyEvent(live.value, event)
       scrollToEnd()
     })
     await stream.ready
+    turnId.value = thisTurn
     try {
-      const res = await ask(conversationId, question, turnId)
+      const res = await ask(conversationId, question, thisTurn)
       // Someone may have opened another conversation meanwhile; the answer is
       // stored with its own and shows when that one is opened again.
       if (activeId.value === conversationId) {
@@ -226,13 +244,16 @@ async function send(question: string) {
     // background; look again once that has had time to finish.
     if (openedBySend === conversationId) setTimeout(() => void loadConversations(), TITLE_RELOAD_MS)
   } catch (e) {
-    sendError.value = sendErrorText(e)
+    // Stopped on purpose: no error, only the question back in the field.
+    if (!(e instanceof ApiError && e.code === 'canceled')) sendError.value = sendErrorText(e)
     // The question stays in the field, so asking again is one key away.
     if (!draft.value) draft.value = question
     messages.value = messages.value.filter((m) => m.id >= 0)
   } finally {
     live.value = null
     liveFor.value = null
+    turnId.value = null
+    cancelling.value = false
     busy.value = false
     openedBySend = null
     scrollToEnd()
@@ -364,7 +385,15 @@ function remove(conversation: ConversationSummary) {
             </li>
           </ul>
         </div>
-        <AssistantComposer ref="composer" v-model="draft" :busy="busy" @send="send" />
+        <AssistantComposer
+          ref="composer"
+          v-model="draft"
+          :busy="busy"
+          :cancellable="turnId !== null"
+          :cancelling="cancelling"
+          @send="send"
+          @cancel="cancel"
+        />
       </section>
     </div>
 

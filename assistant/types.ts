@@ -141,4 +141,6 @@ export type TurnEvent =
   | { type: "tool_start"; tool: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; tool: string; rowCount: number; block?: ResultBlock; error?: string }
   | { type: "done"; answer: string; blocks: ResultBlock[] }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** The user stopped the turn; nothing of it is kept. */
+  | { type: "cancelled" };

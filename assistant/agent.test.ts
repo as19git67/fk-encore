@@ -502,3 +502,34 @@ describe("what the benchmark caught", () => {
   });
 });
 
+describe("Abbrechen", () => {
+  it("starts no further round or tool once the turn is cancelled", async () => {
+    const controller = new AbortController();
+    clients.meter.listMeters.mockImplementation(async () => {
+      controller.abort();
+      return { meters: [] };
+    });
+    const { fn } = scripted([
+      calls(["list_meters", {}], ["list_accounts", {}]),
+      answer("Keine Zähler."),
+    ]);
+    const events: TurnEvent[] = [];
+
+    await expect(runTurn({
+      user: USER, history: [], question: "Zähler und Konten?", tools: catalogFor(USER), chat: fn, now: NOW,
+      emit: (e) => events.push(e), signal: controller.signal,
+    })).rejects.toThrow();
+
+    // The running tool finishes; the next one and the next round never start.
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(clients.finance.listAccounts).not.toHaveBeenCalled();
+    expect(events.map((e) => e.type)).toEqual(["tool_start", "tool_result"]);
+  });
+
+  it("hands the signal to every model call", async () => {
+    const controller = new AbortController();
+    const { fn } = scripted([answer("Hallo.")]);
+    await runTurn({ user: USER, history: [], question: "Hallo", tools: catalogFor(USER), chat: fn, now: NOW, signal: controller.signal });
+    expect(fn.mock.calls[0]![2]).toBe(controller.signal);
+  });
+});
