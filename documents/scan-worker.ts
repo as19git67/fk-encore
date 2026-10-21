@@ -39,7 +39,7 @@ import {
   isLlmServiceHealthy,
 } from "./llm-client";
 import { ReceiptOcrUnavailableError } from "./receipt-ocr-client";
-import { withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
+import { AI_PRIORITY, withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
 import { notifyDocScanQueueChanged } from "./scan-queue-events";
 import { runTaxValues } from "./tax-values";
 
@@ -115,7 +115,8 @@ class DocumentScanWorker {
     try {
       const aiModel = AI_MODEL_MAP[this.service];
       if (aiModel) {
-        const aiPriority = Math.max(1, job.priority ?? 2);
+        // Never above the assistant's lane, however urgent the job.
+        const aiPriority = Math.max(AI_PRIORITY.urgent, job.priority ?? AI_PRIORITY.background);
         const requester = job.priority === 0
           ? `documents:${this.service}:receipt`
           : `documents:${this.service}`;

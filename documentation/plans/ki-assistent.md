@@ -487,7 +487,15 @@ behind it.
      then the oldest history goes, and a `413` from llm-service shrinks
      everything once more and retries the round. The last round sends
      `tool_choice: "none"`, so the loop always ends with an answer. Each
-     `/chat` call takes the `llm` slot of the ai-queue at priority 1. Tool
+     `/chat` call takes the `llm` slot of the ai-queue at priority 0, a
+     level reserved for the assistant (`AI_PRIORITY` in
+     `ai-queue/slot-helper.ts`): it is next whenever the slot frees, ahead of
+     a queued classification batch and of receipts. The whole turn runs in
+     that lane (`withAiPriority`), so a tool that asks the model is queued at
+     0 too. Every other llm-service client (finance, trip planner, collection
+     summaries, recap titles, document classification outside a worker) takes
+     the slot as well, so the service's single inference slot is never held
+     by a caller that skipped the line. A running job is not interrupted. Tool
      calls are logged with their arguments and row count, never row content.
 
 3. **Chat page in the web app** (`frontend/src/views/AssistantView.vue`,
@@ -861,7 +869,8 @@ from the model.
   the `--jinja` flag is already set.
 - The chat competes with classification and the OCR vision calls for the
   single inference worker and the one KV cache. A question asked while a
-  classification batch runs waits for its slot; the stream shows
+  classification batch runs waits only for the job that is running, not for
+  the queued ones; the stream shows
   `tool_start` events so the wait is explained. Decode is quick with 4B
   active parameters; the rounds' prefill is what adds up.
 - Conversations are personal data of the user; they are deleted with the

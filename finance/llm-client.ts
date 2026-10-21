@@ -11,6 +11,7 @@
  * a soft failure (log and skip) rather than propagating to the user.
  */
 
+import { AiSlotTimeoutError, withLlmSlot } from "../ai-queue/slot-helper";
 import { llmBudgetMs } from "../lib/llm-lease";
 
 console.log("[boot] finance/llm-client.ts: all imports resolved");
@@ -38,6 +39,18 @@ async function postJson<TBody, TResp>(
   body: TBody,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<TResp> {
+  // An embedding takes about a second and has its own short wait in the
+  // service; everything else is a model run and waits its turn in the queue.
+  if (path === "/embed") return send(path, body, timeoutMs);
+  try {
+    return await withLlmSlot(`finance:${path.slice(1)}`, () => send<TBody, TResp>(path, body, timeoutMs));
+  } catch (err) {
+    if (err instanceof AiSlotTimeoutError) throw new LlmServiceUnavailableError(err.message);
+    throw err;
+  }
+}
+
+async function send<TBody, TResp>(path: string, body: TBody, timeoutMs: number): Promise<TResp> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), await llmBudgetMs(timeoutMs));
   let resp: Response;

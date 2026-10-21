@@ -12,6 +12,7 @@
  * trusts the response.
  */
 
+import { AiSlotTimeoutError, withLlmSlot } from "../ai-queue/slot-helper";
 import { llmBudgetMs } from "../lib/llm-lease";
 
 const LLM_SERVICE_URL =
@@ -57,6 +58,19 @@ export async function askForJson(
   prompt: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   options: { maxTokens?: number } = {},
+): Promise<unknown> {
+  try {
+    return await withLlmSlot("trip-planner:json-prompt", () => postPrompt(prompt, timeoutMs, options));
+  } catch (err) {
+    if (err instanceof AiSlotTimeoutError) throw new LlmServiceUnavailableError(err.message);
+    throw err;
+  }
+}
+
+async function postPrompt(
+  prompt: string,
+  timeoutMs: number,
+  options: { maxTokens?: number },
 ): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), await llmBudgetMs(timeoutMs));

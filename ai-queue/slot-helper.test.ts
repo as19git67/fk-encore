@@ -30,7 +30,7 @@ vi.mock("~encore/clients", async () => {
 });
 
 // Imported after the mock so it binds to the wired client.
-import { withAiSlot, AiSlotTimeoutError } from "./slot-helper";
+import { withAiSlot, withAiPriority, AiSlotTimeoutError, AI_PRIORITY } from "./slot-helper";
 
 beforeEach(async () => {
   await db.execute(sql`DELETE FROM ai_model_slot`);
@@ -200,5 +200,84 @@ describe("withAiSlot push wakeup", () => {
     await expect(waiter).resolves.toBe("via-fallback");
     expect(waiterRan).toBe(true);
     expect(waiterCount()).toBe(0);
+  });
+});
+
+describe("assistant priority", () => {
+  async function holdSlot() {
+    const gate = deferred();
+    const started = deferred();
+    const holder = withAiSlot("llm", AI_PRIORITY.background, "test:holder", async () => {
+      started.resolve();
+      await gate.promise;
+    });
+    await started.promise;
+    return { release: async () => { gate.resolve(); await holder; } };
+  }
+
+  it("goes before a queue of batch classifications and an urgent receipt", async () => {
+    const held = await holdSlot();
+    const order: string[] = [];
+    const batch = [1, 2, 3].map((n) =>
+      withAiSlot("llm", AI_PRIORITY.background, `test:classify-${n}`, async () => {
+        order.push(`classify-${n}`);
+      }),
+    );
+    const receipt = withAiSlot("llm", AI_PRIORITY.urgent, "test:receipt", async () => {
+      order.push("receipt");
+    });
+    await vi.waitFor(() => expect(waiterCount()).toBe(4), { timeout: REGISTERED_TIMEOUT_MS });
+    const assistant = withAiSlot("llm", AI_PRIORITY.assistant, "test:assistant", async () => {
+      order.push("assistant");
+    });
+    await vi.waitFor(() => expect(waiterCount()).toBe(5), { timeout: REGISTERED_TIMEOUT_MS });
+
+    await held.release();
+    await Promise.all([...batch, receipt, assistant]);
+    expect(order).toEqual(["assistant", "receipt", "classify-1", "classify-2", "classify-3"]);
+  });
+
+  it("queues a background call made inside the assistant's lane at the assistant's priority", async () => {
+    const held = await holdSlot();
+    const order: string[] = [];
+    const batch = withAiSlot("llm", AI_PRIORITY.background, "test:classify", async () => {
+      order.push("classify");
+    });
+    await vi.waitFor(() => expect(waiterCount()).toBe(1), { timeout: REGISTERED_TIMEOUT_MS });
+    const tool = withAiPriority(AI_PRIORITY.assistant, () =>
+      withAiSlot("llm", AI_PRIORITY.background, "test:tool", async () => {
+        order.push("tool");
+      }),
+    );
+    await vi.waitFor(() => expect(waiterCount()).toBe(2), { timeout: REGISTERED_TIMEOUT_MS });
+
+    await held.release();
+    await Promise.all([batch, tool]);
+    expect(order).toEqual(["tool", "classify"]);
+  });
+
+  it("runs a nested call for a slot the chain already holds without queueing", async () => {
+    const result = await withAiSlot("llm", AI_PRIORITY.background, "test:job", () =>
+      withAiSlot("llm", AI_PRIORITY.background, "test:inner", async () => "inner", 150),
+    );
+    expect(result).toBe("inner");
+    const rows = await db.execute<{ c: number }>(sql`SELECT COUNT(*)::int AS c FROM ai_model_slot`);
+    expect(rows.rows[0].c).toBe(0);
+  });
+
+  it("queues a fire-and-forget that outlives the job's slot", async () => {
+    const later = deferred();
+    let detached!: Promise<string>;
+    await withAiSlot("llm", AI_PRIORITY.background, "test:job", async () => {
+      detached = later.promise.then(() =>
+        withAiSlot("llm", AI_PRIORITY.background, "test:detached", async () => "detached"),
+      );
+    });
+    const held = await holdSlot();
+    later.resolve();
+    // The job is gone, so the detached call must wait for the holder.
+    await vi.waitFor(() => expect(waiterCount()).toBe(1), { timeout: REGISTERED_TIMEOUT_MS });
+    await held.release();
+    await expect(detached).resolves.toBe("detached");
   });
 });

@@ -15,6 +15,7 @@
  * The membership change only sets `summary_stale`; the job coalesces.
  */
 
+import { AiSlotTimeoutError, withLlmSlot } from "../ai-queue/slot-helper";
 import { llmBudgetMs } from "../lib/llm-lease";
 
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
@@ -122,6 +123,15 @@ export async function generateCollectionSummary(
   input: CollectionSummaryInput,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<string> {
+  try {
+    return await withLlmSlot("documents:collection-summary", () => askForSummary(input, timeoutMs));
+  } catch (err) {
+    if (err instanceof AiSlotTimeoutError) throw new LlmServiceUnavailableError(err.message);
+    throw err;
+  }
+}
+
+async function askForSummary(input: CollectionSummaryInput, timeoutMs: number): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), await llmBudgetMs(timeoutMs));
   let resp: Response;

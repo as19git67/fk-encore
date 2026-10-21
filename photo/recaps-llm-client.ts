@@ -14,6 +14,7 @@
  *    responsibility (stored in `recap.seed.llm_title`).
  */
 
+import { withLlmSlot } from "../ai-queue/slot-helper";
 import { isGpuLent } from "../lib/llm-lease";
 
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
@@ -69,6 +70,13 @@ export async function generateRecapTitle(
   // The recap has its fallback title; take it until the GPU is back.
   if (await isGpuLent()) return null;
 
+  // Waits in line like every other model call, but no longer than the call
+  // itself may take: behind a classification job the fallback title is the
+  // better deal.
+  return withLlmSlot("photo:recap-title", () => askForTitle(ctx), RECAP_TITLE_TIMEOUT_MS).catch(() => null);
+}
+
+async function askForTitle(ctx: RecapTitleContext): Promise<RecapTitleResult | null> {
   const url = `${LLM_SERVICE_URL}/recap-title`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RECAP_TITLE_TIMEOUT_MS);

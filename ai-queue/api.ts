@@ -1,6 +1,7 @@
 import { api } from "encore.dev/api";
 import { sql } from "drizzle-orm";
 import db from "../db/database";
+import { llmBudgetMs } from "../lib/llm-lease";
 import { wakeWaiter } from "./waiters";
 
 export type AiModel = "insightface" | "embedding" | "landmark" | "llm";
@@ -29,8 +30,10 @@ export interface PollSlotResponse {
 export interface QueueModelStatus {
   model: string;
   activeSlot: { requester: string; since: string } | null;
+  /** Every waiting slot, whatever its priority. */
   waitingCount: number;
-  waitingByPriority: { p1: number; p2: number; p3: number };
+  /** p0 is the assistant's lane. */
+  waitingByPriority: { p0: number; p1: number; p2: number; p3: number };
 }
 
 export interface QueueStatusResponse {
@@ -248,24 +251,27 @@ export const getQueueStatus = api(
       });
     }
 
-    const waitingByModel = new Map<string, { p1: number; p2: number; p3: number }>();
+    const waitingByModel = new Map<string, { p0: number; p1: number; p2: number; p3: number }>();
+    const totalByModel = new Map<string, number>();
     for (const r of waitingRows.rows) {
+      totalByModel.set(r.model_name, (totalByModel.get(r.model_name) ?? 0) + r.cnt);
       if (!waitingByModel.has(r.model_name)) {
-        waitingByModel.set(r.model_name, { p1: 0, p2: 0, p3: 0 });
+        waitingByModel.set(r.model_name, { p0: 0, p1: 0, p2: 0, p3: 0 });
       }
       const entry = waitingByModel.get(r.model_name)!;
-      if (r.priority === 1) entry.p1 = r.cnt;
+      if (r.priority === 0) entry.p0 = r.cnt;
+      else if (r.priority === 1) entry.p1 = r.cnt;
       else if (r.priority === 2) entry.p2 = r.cnt;
       else if (r.priority === 3) entry.p3 = r.cnt;
     }
 
     const models: QueueModelStatus[] = ALL_MODELS.map((m) => {
       const active = activeByModel.get(m) ?? null;
-      const waiting = waitingByModel.get(m) ?? { p1: 0, p2: 0, p3: 0 };
+      const waiting = waitingByModel.get(m) ?? { p0: 0, p1: 0, p2: 0, p3: 0 };
       return {
         model: m,
         activeSlot: active,
-        waitingCount: waiting.p1 + waiting.p2 + waiting.p3,
+        waitingCount: totalByModel.get(m) ?? 0,
         waitingByPriority: waiting,
       };
     });
@@ -278,11 +284,17 @@ export const cleanupStaleSlots = api(
   { method: "POST", path: "/ai-queue/cleanup", expose: false },
   async (): Promise<{ cleaned: number }> => {
     const STALE_TTL_MINUTES = parseInt(process.env.AI_QUEUE_STALE_TTL_MINUTES ?? "5", 10);
+    const ttlMs = STALE_TTL_MINUTES * 60_000;
+    // On the CPU twin one model run may take as long as the server's own
+    // request limit. Freeing its slot earlier would promote the next waiter —
+    // often the assistant — straight into "inference busy".
+    const llmTtlMs = await llmBudgetMs(ttlMs);
 
     const stale = await db.execute<{ id: number; model_name: string }>(sql`
       DELETE FROM ai_model_slot
       WHERE status = 'active'
-        AND activated_at < NOW() - INTERVAL '1 minute' * ${STALE_TTL_MINUTES}
+        AND activated_at < NOW() - INTERVAL '1 millisecond' *
+          (CASE WHEN model_name = 'llm' THEN ${llmTtlMs}::bigint ELSE ${ttlMs}::bigint END)
       RETURNING id, model_name
     `);
 
