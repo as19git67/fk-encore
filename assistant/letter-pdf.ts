@@ -6,7 +6,10 @@
  * notes, then 27.3 mm for the address itself — what shows in the window of a
  * DL envelope. The information block (date) stands at 125 mm, the text runs
  * from 25 mm to 20 mm before the right edge. Fold marks at 105 and 210 mm and
- * the punch mark at 148.5 mm sit on the left edge.
+ * the punch mark at 148.5 mm sit on the left edge. Two blank lines stand
+ * between subject and salutation, one between paragraphs, three between the
+ * closing formula and the name for the signature; a following page carries
+ * its number.
  */
 
 import PDFDocument from "pdfkit";
@@ -61,6 +64,20 @@ export function lines(text: string): string[] {
   return text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 }
 
+const CLOSING_LINE_RE = /^(?:mit\s+)?(?:freundlichen|besten|herzlichen|viele[n]?|beste)?\s*(?:grüßen|grüße|gruß)[,.!]?$|^hochachtungsvoll[,.!]?$/i;
+
+/**
+ * The closing paragraph split where the handwritten signature goes:
+ * "Mit freundlichen Grüßen" above, the typed name below. Null when the
+ * last paragraph is no closing formula followed by a name.
+ */
+export function signatureSplit(paragraph: string): { closing: string; name: string } | null {
+  const ls = paragraph.split("\n").map((l) => l.trim());
+  const at = ls.findIndex((l) => CLOSING_LINE_RE.test(l));
+  if (at < 0 || at === ls.length - 1) return null;
+  return { closing: ls.slice(0, at + 1).join("\n"), name: ls.slice(at + 1).filter(Boolean).join("\n") };
+}
+
 function germanDate(iso: string): string {
   const [y, m, d] = iso.slice(0, 10).split("-");
   return `${d}.${m}.${y}`;
@@ -72,6 +89,7 @@ export function renderLetterPdf(letter: LetterContent): Promise<Buffer> {
     size: "A4",
     margins: { top: 20 * MM, bottom: 20 * MM, left: g.left * MM, right: g.right * MM },
     info: { Title: normalizePdfText(letter.subject) },
+    bufferPages: true,
   });
   const chunks: Buffer[] = [];
   pdf.on("data", (c: Buffer) => chunks.push(c));
@@ -130,17 +148,36 @@ export function renderLetterPdf(letter: LetterContent): Promise<Buffer> {
   // Subject and text.
   pdf.font("Helvetica-Bold").fontSize(11).fillColor("#000")
     .text(text(letter.subject), g.left * MM, g.subjectTop * MM, { width: textWidth });
-  pdf.moveDown(1.5).font("Helvetica").fontSize(11);
-  const paragraphs = letter.body.replace(/\r\n/g, "\n").split(/\n{2,}/);
-  for (const p of paragraphs) {
-    pdf.text(text(p.trim()), g.left * MM, pdf.y, { width: textWidth, lineGap: 2 });
-    pdf.moveDown(0.8);
-  }
+  pdf.font("Helvetica").fontSize(11).moveDown(2);
+  const paragraphs = letter.body.replace(/\r\n/g, "\n").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const body = (s: string) => pdf.text(text(s), g.left * MM, pdf.y, { width: textWidth, lineGap: 2 });
+  paragraphs.forEach((p, i) => {
+    if (i > 0) pdf.moveDown(1);
+    const signature = i === paragraphs.length - 1 ? signatureSplit(p) : null;
+    if (!signature) return body(p);
+    body(signature.closing);
+    pdf.moveDown(3);
+    body(signature.name);
+  });
 
   if (letter.attachments.length) {
-    pdf.moveDown(0.6).font("Helvetica-Bold").fontSize(10).text("Anlagen", g.left * MM, pdf.y, { width: textWidth });
+    pdf.moveDown(1).font("Helvetica-Bold").fontSize(10).text("Anlagen", g.left * MM, pdf.y, { width: textWidth });
     pdf.font("Helvetica").fontSize(10);
     for (const a of letter.attachments) pdf.text(`– ${text(a)}`, { width: textWidth });
+  }
+
+  // A following page says which one it is.
+  const { start, count } = pdf.bufferedPageRange();
+  if (count > 1) {
+    for (let i = start; i < start + count; i++) {
+      pdf.switchToPage(i);
+      // The number stands below the text area; without this pdfkit would open a page for it.
+      pdf.page.margins.bottom = 0;
+      pdf.font("Helvetica").fontSize(9).fillColor("#333")
+        .text(`Seite ${i - start + 1} von ${count}`, g.left * MM, (g.pageHeight - 12) * MM, {
+          width: textWidth, align: "right", lineBreak: false,
+        });
+    }
   }
 
   pdf.end();

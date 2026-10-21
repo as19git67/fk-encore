@@ -30,7 +30,7 @@ import {
   getConversation,
   setConversationContext,
 } from "./assistant";
-import { DIN5008_B, gapsIn, MM, renderLetterPdf } from "./letter-pdf";
+import { DIN5008_B, gapsIn, MM, renderLetterPdf, signatureSplit } from "./letter-pdf";
 import { signed } from "./tools/letters";
 import { getDocumentText } from "./tools/documents";
 import type { ProposalRow } from "./proposals";
@@ -262,6 +262,39 @@ describe("the DIN 5008 page", () => {
     expect(date.x).toBeCloseTo(g.infoLeft, 0);
     expect(at("Ihre Rechnung RE-2026-0001").y).toBeGreaterThan(g.addressBottom);
     expect(at("Anlagen")).toBeDefined();
+  });
+
+  it("leaves room for the signature and numbers a second page (DIN 5008)", async () => {
+    const letter = {
+      sender: "Erika Beispiel\nBeispielweg 2\n12345 Musterstadt",
+      recipient: "Musterfirma GmbH\nBeispielstraße 1\n12345 Musterstadt",
+      subject: "Kündigung",
+      body: "Sehr geehrte Damen und Herren,\n\nhiermit kündige ich.\n\nMit freundlichen Grüßen\nErika Beispiel",
+      date: "2026-10-21",
+      attachments: [],
+    };
+    const items = await textItems(await renderLetterPdf(letter));
+    const y = (s: string) => items.find((i) => i.str.includes(s))!.y;
+    // Two blank lines below the subject, three for the signature.
+    expect(y("Sehr geehrte") - y("Kündigung")).toBeGreaterThan(12);
+    const signature = items.filter((i) => i.str === "Erika Beispiel").map((i) => i.y).sort((a, b) => b - a)[0];
+    expect(signature - y("Mit freundlichen Grüßen")).toBeGreaterThan(15);
+    expect(items.some((i) => i.str.startsWith("Seite "))).toBe(false);
+
+    const long = { ...letter, body: Array.from({ length: 60 }, (_, i) => `Absatz ${i + 1}.`).join("\n\n") };
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await renderLetterPdf(long)), useSystemFonts: false }).promise;
+    expect(doc.numPages).toBeGreaterThan(1);
+    const last = await doc.getPage(doc.numPages);
+    const strs = (await last.getTextContent()).items.map((i) => ("str" in i ? i.str : ""));
+    expect(strs).toContain(`Seite ${doc.numPages} von ${doc.numPages}`);
+  });
+
+  it("splits the closing from the name below it", () => {
+    expect(signatureSplit("Mit freundlichen Grüßen\nErika Beispiel")).toEqual({ closing: "Mit freundlichen Grüßen", name: "Erika Beispiel" });
+    expect(signatureSplit("Viele Grüße,\nErika")).toEqual({ closing: "Viele Grüße,", name: "Erika" });
+    expect(signatureSplit("Mit freundlichen Grüßen")).toBeNull();
+    expect(signatureSplit("Bitte bestätigen Sie den Erhalt.")).toBeNull();
   });
 
   it("finds the gaps the model left", () => {

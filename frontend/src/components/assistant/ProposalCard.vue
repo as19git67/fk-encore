@@ -4,7 +4,8 @@
  * "Ausführen" runs it as the user, through the same endpoints the app's own
  * buttons use; "Verwerfen" drops it. Afterwards the card says what became of
  * it and links to the result. A letter (#1534) stays editable on the card
- * until it runs.
+ * until it runs; while a gap is left, the foot says why "Ausführen" waits
+ * and leads to the gap.
  */
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
@@ -33,6 +34,7 @@ function formOf(p: Proposal): LetterForm | null {
 }
 
 const letterForm = ref<LetterForm | null>(formOf(props.proposal))
+const letterEditor = ref<InstanceType<typeof LetterEditor> | null>(null)
 watch(() => props.proposal, (p) => { letterForm.value = formOf(p) })
 const gaps = computed(() => {
   const f = letterForm.value
@@ -119,6 +121,7 @@ async function decide(action: 'execute' | 'discard') {
     <div class="proposal-body">
       <p class="proposal-summary">{{ current.summary }}</p>
       <LetterEditor
+        ref="letterEditor"
         v-if="letterForm && current.letter && current.status === 'pending'"
         v-model="letterForm"
         :letter="current.letter"
@@ -164,6 +167,21 @@ async function decide(action: 'execute' | 'discard') {
     </div>
 
     <footer v-if="current.status === 'pending'" class="proposal-foot">
+      <p v-if="gaps.length" :id="`proposal-${current.proposal_id}-wait`" class="proposal-wait">
+        <i class="pi pi-info-circle" aria-hidden="true" />
+        <span>
+          {{ gaps.length === 1 ? 'Erst die Lücke ausfüllen' : `Erst die ${gaps.length} Lücken ausfüllen` }},
+          dann geht „Ausführen“.
+        </span>
+        <Button
+          label="Zur Lücke"
+          icon="pi pi-arrow-up"
+          size="small"
+          severity="warn"
+          text
+          @click="letterEditor?.focusGap()"
+        />
+      </p>
       <Button
         label="Verwerfen"
         severity="secondary"
@@ -179,6 +197,7 @@ async function decide(action: 'execute' | 'discard') {
         size="small"
         :loading="busy === 'execute'"
         :disabled="busy !== null || gaps.length > 0"
+        :aria-describedby="gaps.length ? `proposal-${current.proposal_id}-wait` : undefined"
         @click="decide('execute')"
       />
     </footer>
@@ -226,7 +245,19 @@ async function decide(action: 'execute' | 'discard') {
 
 .proposal-foot {
   justify-content: flex-end;
+  flex-wrap: wrap;
   border-top: 1px solid var(--p-content-border-color);
+}
+
+/* Why "Ausführen" is greyed out: a gap is left in the letter. */
+.proposal-wait {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 auto 0 0;
+  font-size: var(--text-sm);
+  color: var(--p-orange-600);
 }
 
 .proposal-title {

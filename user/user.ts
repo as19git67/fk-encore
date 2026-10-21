@@ -14,6 +14,8 @@ import {
   updateUserLogic,
   deleteUserLogic,
   changePasswordLogic,
+  getPostalAddressLogic,
+  setPostalAddressLogic,
   getUserIdsWithPermission,
 } from "./user.service";
 import { requirePermission } from "./auth-handler";
@@ -146,6 +148,32 @@ export const changePassword = api(
         throw APIError.invalidArgument(err.message);
       }
       throw err;
+    }
+  }
+);
+
+interface PostalAddressResponse {
+  postal_address: string | null;
+}
+
+/** Own postal address — the sender block of the assistant's letters. */
+export const getPostalAddress = api(
+  { expose: true, auth: true, method: "GET", path: "/auth/postal-address" },
+  async (): Promise<PostalAddressResponse> => {
+    const authData = getAuthData()!;
+    return { postal_address: await getPostalAddressLogic(Number(authData.userID)) };
+  }
+);
+
+/** Change own postal address; an empty one clears it. */
+export const setPostalAddress = api(
+  { expose: true, auth: true, method: "PUT", path: "/auth/postal-address" },
+  async (req: { postal_address: string }): Promise<PostalAddressResponse> => {
+    const authData = getAuthData()!;
+    try {
+      return { postal_address: await setPostalAddressLogic(Number(authData.userID), req.postal_address ?? "") };
+    } catch (err: any) {
+      throw APIError.invalidArgument(err.message);
     }
   }
 );

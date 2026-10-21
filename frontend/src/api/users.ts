@@ -119,6 +119,18 @@ export function changePassword(currentPassword: string, newPassword: string) {
   })
 }
 
+/** Own postal address — the sender block of the assistant's letters. */
+export function getPostalAddress() {
+  return apiFetch<{ postal_address: string | null }>('/auth/postal-address')
+}
+
+export function setPostalAddress(postalAddress: string) {
+  return apiFetch<{ postal_address: string | null }>('/auth/postal-address', {
+    method: 'PUT',
+    body: JSON.stringify({ postal_address: postalAddress }),
+  })
+}
+
 export function deleteUser(id: number) {
   return apiFetch<DeleteResponse>(`/users/${id}`, {
     method: 'DELETE',

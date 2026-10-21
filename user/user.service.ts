@@ -165,6 +165,32 @@ export async function changePasswordLogic(userId: number, currentPassword: strin
   );
 }
 
+const MAX_POSTAL_ADDRESS = 500;
+
+/** The user's own postal address, the sender block of the assistant's letters. */
+export async function getPostalAddressLogic(userId: number): Promise<string | null> {
+  const row = await dbFirst<{ postal_address: string | null }>(
+    db.select({ postal_address: users.postal_address }).from(users).where(eq(users.id, userId))
+  );
+  return row?.postal_address?.trim() || null;
+}
+
+/** Saves the user's own postal address; blank clears it. */
+export async function setPostalAddressLogic(userId: number, address: string): Promise<string | null> {
+  const clean = address
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join("\n");
+  if (clean.length > MAX_POSTAL_ADDRESS) throw new Error(`The address is longer than ${MAX_POSTAL_ADDRESS} characters`);
+  await dbExec(
+    db.update(users)
+      .set({ postal_address: clean || null, updated_at: new Date().toISOString() })
+      .where(eq(users.id, userId))
+  );
+  return clean || null;
+}
+
 export async function deleteUserLogic(id: number): Promise<DeleteResponse> {
   // Check if this user has the Admin role
   const userRolesList = await getRolesForUser(id);

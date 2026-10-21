@@ -9,6 +9,7 @@ import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
+import Textarea from 'primevue/textarea'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ScrollX from '../components/layout/ScrollX.vue'
 import { useAuthStore } from '../stores/auth'
@@ -19,7 +20,7 @@ import {
   deletePasskey,
   type PasskeyInfo,
 } from '../api/passkeys'
-import { changePassword } from '../api/users'
+import { changePassword, getPostalAddress, setPostalAddress } from '../api/users'
 import {
   getGroupReviewAdoption,
   setGroupReviewAdoption,
@@ -148,6 +149,26 @@ const pwConfirm = ref('')
 const pwLoading = ref(false)
 const pwError = ref('')
 const pwSuccess = ref(false)
+
+// ── Postal address: the sender block of the assistant's letters ─────────────
+const address = ref('')
+const addressBusy = ref(false)
+const addressError = ref('')
+const addressSaved = ref(false)
+
+async function handleSaveAddress() {
+  addressBusy.value = true
+  addressError.value = ''
+  addressSaved.value = false
+  try {
+    address.value = (await setPostalAddress(address.value)).postal_address ?? ''
+    addressSaved.value = true
+  } catch (err: any) {
+    addressError.value = err.message || 'Die Anschrift konnte nicht gespeichert werden.'
+  } finally {
+    addressBusy.value = false
+  }
+}
 
 async function handleChangePassword() {
   pwError.value = ''
@@ -349,6 +370,11 @@ onMounted(async () => {
     // toggle itself still reports its own errors.
   }
   try {
+    address.value = (await getPostalAddress()).postal_address ?? ''
+  } catch {
+    // The field stays empty; saving reports its own errors.
+  }
+  try {
     variantsEnabled.value = (await getCollapseOrientationVariants()).enabled
   } catch {
     // Same as above: the switch stays at the server default (on).
@@ -375,6 +401,35 @@ onMounted(async () => {
             <Chip v-for="role in auth.user?.roles" :key="role.id" :label="role.name" />
             <span v-if="!auth.user?.roles?.length" class="no-roles">Keine Rollen zugewiesen.</span>
           </div>
+        </div>
+      </template>
+    </Card>
+
+    <Card class="mb">
+      <template #title>Anschrift</template>
+      <template #content>
+        <p class="description">
+          Steht als Absender über den Briefen, die der Assistent entwirft.
+          Straße und Ort, je eine Zeile; der Name kommt aus dem Konto.
+        </p>
+        <Message v-if="addressError" severity="error" :closable="false" class="mb">{{ addressError }}</Message>
+        <Message v-if="addressSaved" severity="success" :closable="false" class="mb">Anschrift gespeichert.</Message>
+        <div class="address-form">
+          <label for="profile-address" class="detail-label">Postanschrift</label>
+          <Textarea
+            id="profile-address"
+            v-model="address"
+            rows="3"
+            auto-resize
+            placeholder="Straße Hausnummer&#10;PLZ Ort"
+            @input="addressSaved = false"
+          />
+          <Button
+            label="Anschrift speichern"
+            icon="pi pi-check"
+            :loading="addressBusy"
+            @click="handleSaveAddress"
+          />
         </div>
       </template>
     </Card>
@@ -671,6 +726,18 @@ onMounted(async () => {
 
 .mb {
   margin-bottom: 1rem;
+}
+
+.address-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 28rem;
+}
+
+.address-form :deep(textarea) {
+  width: 100%;
 }
 
 .roles-chips {
