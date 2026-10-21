@@ -46,7 +46,7 @@ import { triggerTagWorker } from "./tag-worker";
 import { normalizeCounterparty } from "./tag-suggester";
 import { createSuggestionsForTransaction } from "./document-match.service";
 import { hasFinanceAdmin, readableFinanceAccountIds } from "./account-acl";
-import { amountConditions, parseAmountBound, parseDirection, taxRelevantCondition } from "./transaction-conditions";
+import { amountConditions, parseAmountBound, parseDirection, searchCondition, taxRelevantCondition } from "./transaction-conditions";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -404,29 +404,9 @@ export const listTransactions = api(
       }),
     );
 
-    if (p.q && p.q.trim().length > 0) {
-      const q = p.q.trim();
-      const like = `%${q}%`;
-      const textMatch = or(
-        sql`${financeTransaction.counterparty} ILIKE ${like}`,
-        sql`${financeTransaction.purpose} ILIKE ${like}`,
-        sql`${financeTransaction.end_to_end_ref} ILIKE ${like}`,
-        sql`${financeTransaction.mandate_ref} ILIKE ${like}`,
-        sql`${financeTransaction.creditor_id} ILIKE ${like}`,
-        sql`${financeTransaction.notice} ILIKE ${like}`,
-      )!;
-      const numericQ = Number(q.replace(",", "."));
-      if (Number.isFinite(numericQ)) {
-        const abs = Math.abs(numericQ).toFixed(2);
-        conds.push(
-          or(
-            sql`ABS(${financeTransaction.amount}) = ${abs}::numeric`,
-            textMatch,
-          )!,
-        );
-      } else {
-        conds.push(textMatch);
-      }
+    if (p.q) {
+      const search = searchCondition(p.q);
+      if (search) conds.push(search);
     }
 
     if (p.tagsCsv && p.tagsCsv.trim().length > 0) {

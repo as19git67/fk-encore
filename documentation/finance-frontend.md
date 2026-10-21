@@ -111,6 +111,12 @@ on a wrong TAN `state: "tan-required"` again with a new challenge).
 
 ### 4.2 `AnalysisView`
 
+> **Removed (2026-10):** the analysis page (`AnalysisView`, `finance/analysis.ts`,
+> saved analyses and their daily suggestions) is gone. Sums with subtotals by tag
+> or period now come from rule-based Sammelmappen the assistant creates
+> (`create_transaction_folder`) and from `POST /finance/transactions/totals`.
+
+
 ```
 +--------------------------------------------------------+
 | Analysis                                               |

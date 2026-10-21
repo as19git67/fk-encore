@@ -6,7 +6,8 @@
 import { finance } from "~encore/clients";
 import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
-import { parseAmountBound, parseDirection } from "../../finance/transaction-conditions";
+import { parseAmountBound, parseDirection, type TransactionCriteria } from "../../finance/transaction-conditions";
+import { parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
 
 const FINANCE = ["module.finance", "finance.view"];
 
@@ -52,13 +53,6 @@ interface TransactionView {
   id: number; account_id: number; booking_date: string; amount: string; currency_code?: string;
   counterparty: string | null; purpose: string | null; tags?: { name: string }[]; is_tax_relevant?: boolean;
 }
-interface AnalysisResult {
-  total: { sum: number; count: number; avg: number };
-  byPeriod?: { period: string; sum: number; count: number }[];
-  byTag?: { tag: string; sum: number; count: number }[];
-  topCounterparties?: { name: string; sum: number; count: number }[];
-  ast?: { timespan?: { from?: string; to?: string } };
-}
 interface UpcomingDebit { payment_channel?: string | null;
   mandate_id: number; account_label: string; counterparty: string | null; expected_date: string;
   overdue: boolean; typical_amount: string; interval_days: number;
@@ -98,7 +92,7 @@ export const listAccounts: ToolSpec = {
 export const listTransactions: ToolSpec = {
   name: "list_transactions",
   kind: "read",
-  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first. For 'Ausgaben' (expenses, spending) set direction \"out\", for 'Einnahmen' (income) \"in\"; only 'Buchungen' without either word lists both. For sums use analyze_spending.",
+  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first. For 'Ausgaben' (expenses, spending) set direction \"out\", for 'Einnahmen' (income) \"in\"; only 'Buchungen' without either word lists both. For sums use transaction_totals.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -156,7 +150,7 @@ export const listTransactions: ToolSpec = {
           note: [
             account ? `Account: ${account.label}, balance ${balanceText(account)}.` : undefined,
             direction === "out" ? "Only money out (Ausgaben)." : direction === "in" ? "Only money in (Einnahmen)." : undefined,
-            "Amounts in EUR; negative = money out. Do not add these up yourself — use analyze_spending for sums.",
+            "Amounts in EUR; negative = money out. Do not add these up yourself — use transaction_totals for sums.",
           ].filter(Boolean).join(" "),
         },
       ),
@@ -178,45 +172,120 @@ export const listTransactions: ToolSpec = {
   },
 };
 
-export const analyzeSpending: ToolSpec = {
-  name: "analyze_spending",
+/** The list's filter and search as tool arguments: the same names list_transactions takes. */
+export const CRITERIA_PROPERTIES: Record<string, Record<string, unknown>> = {
+  q: { type: "string", description: "the list's search: text in counterparty, purpose or notice, or an amount" },
+  from: { type: "string", description: "first booking date, YYYY-MM-DD" },
+  to: { type: "string", description: "last booking date, YYYY-MM-DD" },
+  account_ids: { type: "array", items: { type: "integer" }, description: "ids from list_accounts; omit for every account" },
+  tags: { type: "array", items: { type: "string" }, description: "the user's tags, all must match" },
+  direction: { type: "string", enum: ["out", "in"], description: "\"out\" = only money out (Ausgaben), \"in\" = only money in (Einnahmen); omit for both" },
+  tax_relevant: { type: "boolean", description: "only bookings flagged tax-relevant (true) or not flagged (false)" },
+  amount_min: { type: "number", description: "smallest absolute amount, inclusive" },
+  amount_max: { type: "number", description: "largest absolute amount, inclusive" },
+};
+
+export const GROUP_PROPERTIES: Record<string, Record<string, unknown>> = {
+  group_by: {
+    type: "string",
+    enum: ["none", "tag", "month", "quarter", "year"],
+    description: "subtotals per tag of the user (Schlagwort) or per month, quarter or year; none = only the total",
+  },
+  group_tags: {
+    type: "array",
+    items: { type: "string" },
+    description: "with group_by tag: only these tags get a subtotal of their own, every other booking lands in 'Sonstige'",
+  },
+};
+
+/** Criteria in the shape a rule collection stores, from the tool arguments. */
+export function criteriaFromArgs(args: Record<string, unknown>): TransactionCriteria {
+  const tags = Array.isArray(args.tags) ? args.tags.map((t) => str(t)).filter((t): t is string => !!t) : [];
+  const accounts = Array.isArray(args.account_ids)
+    ? args.account_ids.map((v) => int(v)).filter((v): v is number => v !== undefined && v > 0)
+    : [];
+  const single = int(args.account_id);
+  if (single !== undefined && !accounts.includes(single)) accounts.push(single);
+  const c: TransactionCriteria = {};
+  if (accounts.length) c.account_ids = accounts;
+  if (tags.length) c.tags = [...new Set(tags)];
+  const q = str(args.q);
+  if (q) c.text = q;
+  const from = isoDate(args.from);
+  if (from) c.from = from;
+  const to = isoDate(args.to);
+  if (to) c.to = to;
+  const tax = bool(args.tax_relevant);
+  if (tax !== undefined) c.tax_relevant = tax;
+  const min = parseAmountBound(args.amount_min);
+  if (min !== undefined) c.amount_min = min;
+  const max = parseAmountBound(args.amount_max);
+  if (max !== undefined) c.amount_max = max;
+  const direction = parseDirection(args.direction);
+  if (direction) c.direction = direction;
+  return c;
+}
+
+export function groupByFromArgs(args: Record<string, unknown>): { group_by: TotalsGroupBy; group_tags?: string[] } {
+  const group_by = parseGroupBy(args.group_by);
+  const tags = Array.isArray(args.group_tags) ? args.group_tags.map((t) => str(t)).filter((t): t is string => !!t) : [];
+  return group_by === "tag" && tags.length ? { group_by, group_tags: [...new Set(tags)] } : { group_by };
+}
+
+const GROUP_LABEL: Record<TotalsGroupBy, string> = { none: "", tag: "Tag", month: "Monat", quarter: "Quartal", year: "Jahr" };
+
+/** Euro from cents, as the tables print amounts. */
+function centsText(c: number): string {
+  return money(c / 100);
+}
+
+/** The totals as the model reads them: every number computed by the server. */
+export function totalsText(t: TransactionTotals): string {
+  const lines = [`total: ${centsText(t.total)} ${t.currency} over ${t.count} bookings`];
+  if (t.first_date) lines.push(`bookings from ${t.first_date} to ${t.last_date}`);
+  if (t.group_by !== "none" && t.groups.length) {
+    lines.push(
+      `subtotals by ${t.group_by}:`,
+      table(["group", "sum", "count"], t.groups.map((g) => [g.label, centsText(g.sum), g.count]), { cap: 40 }),
+    );
+    if (t.overlapping) lines.push("Some bookings carry several of these tags and count in each group, so the subtotals add up to more than the total.");
+  }
+  for (const o of t.other_currencies) {
+    lines.push(`not in the total: ${o.count} bookings in ${o.currency}, ${centsText(o.total)} ${o.currency}`);
+  }
+  return lines.join("\n");
+}
+
+export const transactionTotals: ToolSpec = {
+  name: "transaction_totals",
   kind: "read",
-  summary: "Sums, counts and groupings of bookings for a question in natural language (spending per tag, month or counterparty). The server does the arithmetic.",
+  summary: "Sum of the bookings the transaction list's filter and search select, with subtotals per tag or per month, quarter or year. The server does the arithmetic. Same filter names as list_transactions.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
     type: "object",
-    properties: {
-      question: { type: "string", description: "the question in the user's words, including the period" },
-    },
-    required: ["question"],
+    properties: { ...CRITERIA_PROPERTIES, ...GROUP_PROPERTIES },
   },
   async run(args) {
-    const question = str(args.question);
-    if (!question) throw new Error("question is required");
-    const res = await (finance.query({ question })) as unknown as AnalysisResult;
-    const lines = [
-      `total: sum ${money(res.total.sum)} EUR over ${res.total.count} bookings (avg ${money(res.total.avg)})`,
-    ];
-    const span = res.ast?.timespan;
-    if (span?.from || span?.to) lines.push(`period: ${span.from ?? "…"} to ${span.to ?? "…"}`);
-    if (res.byTag?.length) {
-      lines.push("by tag:", table(["tag", "sum", "count"], res.byTag.map((t) => [t.tag, money(t.sum), t.count]), { cap: 12 }));
-    }
-    if (res.byPeriod?.length) {
-      lines.push("by period:", table(["period", "sum", "count"], res.byPeriod.map((p) => [p.period, money(p.sum), p.count]), { cap: 24 }));
-    }
-    if (res.topCounterparties?.length) {
-      lines.push("top counterparties:", table(["name", "sum", "count"], res.topCounterparties.map((c) => [c.name, money(c.sum), c.count]), { cap: 8 }));
-    }
+    const criteria = criteriaFromArgs(args);
+    if (Object.keys(criteria).length === 0) throw new Error("say which bookings: a search, a period, tags, an account or a direction");
+    const grouping = groupByFromArgs(args);
+    const res = (await finance.transactionTotals({ criteria, ...grouping })) as unknown as TransactionTotals;
     return {
-      text: lines.join("\n"),
-      digest: `[earlier result of analyze_spending: sum ${money(res.total.sum)} over ${res.total.count} bookings]`,
-      rowCount: res.total.count,
+      text: totalsText(res),
+      digest: `[earlier result of transaction_totals: sum ${centsText(res.total)} ${res.currency} over ${res.count} bookings]`,
+      rowCount: res.count,
       block: {
         kind: "analysis",
-        tool: "analyze_spending",
-        rows: [{ question, sum: res.total.sum, count: res.total.count, avg: res.total.avg, by_tag: res.byTag ?? [], by_period: res.byPeriod ?? [] }],
+        tool: "transaction_totals",
+        subtitle: grouping.group_by === "none" ? undefined : `Zwischensummen nach ${GROUP_LABEL[grouping.group_by]}`,
+        rows: [{
+          sum: res.total / 100,
+          count: res.count,
+          currency: res.currency,
+          overlapping: res.overlapping,
+          groups: res.groups.map((g) => ({ label: g.label, sum: g.sum / 100, count: g.count })),
+        }],
       },
     };
   },
@@ -262,4 +331,4 @@ export const upcomingPayments: ToolSpec = {
   },
 };
 
-export const FINANCE_TOOLS = [listAccounts, listTransactions, analyzeSpending, upcomingPayments];
+export const FINANCE_TOOLS = [listAccounts, listTransactions, transactionTotals, upcomingPayments];

@@ -54,9 +54,9 @@ behind it.
   the E5 embedder together. The usable context window is whatever is
   left after those, and the active `LLM_CTX` is the budget the agent loop
   has to live in; `llm-service/README.md` has the arithmetic.
-- Natural language already drives one domain: `POST
-  /finance/analysis/query` (`finance/analysis.ts`) parses a question into
-  an AST via `/json-prompt`, then runs SQL. `POST /photos/search/natural`
+- Natural language already drove one domain: `POST
+  /finance/analysis/query` (`finance/analysis.ts`, removed since) parsed a
+  question into an AST via `/json-prompt`, then ran SQL. `POST /photos/search/natural`
   parses German photo queries into CLIP text, place and date.
 - Permission is enforced in the services, not at the edge:
   `requirePermission`, `readableAccountIds()`, `visibleDocumentsWhere()`,
@@ -320,8 +320,9 @@ behind it.
    - Read tools of this stage:
      - finance: `list_transactions` (the `/finance/transactions` filters;
        a list for one account carries the account and its balance as the
-       block's subtitle, as the list page has), `analyze_spending` (the
-       analysis AST path), `list_accounts` (the accounts as arranged on
+       block's subtitle, as the list page has), `transaction_totals`
+       (sums with subtotals by tag or period; it replaced `analyze_spending`
+       when the analysis page was removed), `list_accounts` (the accounts as arranged on
        the Übersicht page, `GET /finance/overview`, with section and
        latest statement balance — "meine Konten" are the ones the user
        placed there, not the account table; a cash account has no balance
@@ -811,7 +812,7 @@ behind it.
 | Protokolle Eigentümerversammlung München | documents | `list_categories` → `search_documents(q, category=kapitalanlage-immobilie-*)` | Document rows; route `/dokumente?q=…&category=…` |
 | Urlaubsreisen letztes Jahr | photos (+ trip planner) | `list_recaps(kind=trip, year)`, `list_trip_plans(year)`, `list_albums(hasEvent, year)` | One line per trip with dates and place; photo cells |
 | Album mit Favoriten 2025 | photos | `list_photos(favorite, 2025)` → proposal `create_album` + `add_photos_to_album(from_previous_result)` | Proposal card, album link after "Ausführen" |
-| Alles zum Kauf der Immobilie München | documents + finance | `search_documents(q, category=kapitalanlage-immobilie-*)`, `list_transactions(q=…)` or `analyze_spending(tags)` | Document rows and booking rows, both kept as the working set |
+| Alles zum Kauf der Immobilie München | documents + finance | `search_documents(q, category=kapitalanlage-immobilie-*)`, `list_transactions(q=…)` or `transaction_totals(tags)` | Document rows and booking rows, both kept as the working set |
 | Kaufpreis schwärzen, zwei PDFs, Rendite | documents + finance (stage 6) | `find_text_in_document(each doc, purchase price)` → proposal `create_collection` + `build_collection_pdf`; grouping by the model → proposal `transaction_report(groups, yield)` | Two proposal cards; after "Ausführen" two PDF links, the Sammelmappe and the saved analysis |
 | Anschreiben an den Verwalter zu drei Rechnungen | documents (stage 7) | context briefs of the three documents → draft in the answer → proposal `render_letter(body, recipient=correspondent, attachments)` | Editable draft card; after "Ausführen" the PDF, the new document, or the Sammelmappe with the letter as cover |
 

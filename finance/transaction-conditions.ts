@@ -4,7 +4,7 @@
  * Free of endpoints so other services can import them.
  */
 
-import { eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { eq, gte, inArray, lte, not, or, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import {
   financeTag,
@@ -73,4 +73,64 @@ export function parseAmountBound(raw: unknown): number | undefined {
 
 export function parseDirection(raw: unknown): TransactionDirection | undefined {
   return raw === "in" || raw === "out" ? raw : undefined;
+}
+
+/**
+ * The list's search box: text in counterparty, purpose, notice or one of the
+ * SEPA references, or — when the text reads as a number — a booking of that
+ * absolute amount. Rule collections search the same way, so a folder saved
+ * from a search holds what the search showed.
+ */
+export function searchCondition(raw: string): SQL | undefined {
+  const q = raw.trim();
+  if (!q) return undefined;
+  const like = `%${q}%`;
+  const textMatch = or(
+    sql`${financeTransaction.counterparty} ILIKE ${like}`,
+    sql`${financeTransaction.purpose} ILIKE ${like}`,
+    sql`${financeTransaction.end_to_end_ref} ILIKE ${like}`,
+    sql`${financeTransaction.mandate_ref} ILIKE ${like}`,
+    sql`${financeTransaction.creditor_id} ILIKE ${like}`,
+    sql`${financeTransaction.notice} ILIKE ${like}`,
+  )!;
+  const numericQ = Number(q.replace(",", "."));
+  if (!Number.isFinite(numericQ)) return textMatch;
+  const abs = Math.abs(numericQ).toFixed(2);
+  return or(sql`ABS(${financeTransaction.amount}) = ${abs}::numeric`, textMatch)!;
+}
+
+/** The transaction list's filter and search, as a rule collection stores them. */
+export interface TransactionCriteria {
+  account_ids?: number[];
+  /** Every one of these tags (as the list's tag filter). */
+  tags?: string[];
+  /** The list's search: text in counterparty, purpose, notice or references, or an amount. */
+  text?: string;
+  /** Booking date range, YYYY-MM-DD. */
+  from?: string;
+  to?: string;
+  tax_relevant?: boolean;
+  /** Absolute amount range, inclusive (as the list's amount filter). */
+  amount_min?: number;
+  amount_max?: number;
+  direction?: TransactionDirection;
+}
+
+/** The criteria as conditions; the caller adds which accounts may be read. */
+export function criteriaConditions(c: TransactionCriteria): SQL[] {
+  const conds: SQL[] = [];
+  if (c.account_ids?.length) conds.push(inArray(financeTransaction.account_id, c.account_ids));
+  if (c.from) conds.push(gte(financeTransaction.booking_date, c.from));
+  if (c.to) conds.push(lte(financeTransaction.booking_date, c.to));
+  if (c.text) {
+    const search = searchCondition(c.text);
+    if (search) conds.push(search);
+  }
+  if (c.tax_relevant !== undefined) {
+    const flagged = taxRelevantCondition();
+    conds.push(c.tax_relevant ? flagged : not(flagged));
+  }
+  conds.push(...amountConditions({ min: c.amount_min, max: c.amount_max, direction: c.direction }));
+  for (const tag of c.tags ?? []) conds.push(taggedWithCondition(tag));
+  return conds;
 }

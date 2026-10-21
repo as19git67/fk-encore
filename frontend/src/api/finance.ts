@@ -1745,172 +1745,46 @@ export async function importFinanceData(
 }
 
 // ----------------------------------------------------------------------
-// Analysis (Etappe 9)
+// Totals: subtotals by tag or period and a grand total
 // ----------------------------------------------------------------------
 
-export interface RelativeTimespan {
-  type: 'this_year' | 'last_year' | 'last_n_years' | 'last_n_months' | 'this_month' | 'last_month'
-  n?: number
-}
+export type TotalsGroupBy = 'none' | 'tag' | 'month' | 'quarter' | 'year'
 
-export interface TagGroup {
-  tags: string[]
-  op: 'AND' | 'OR'
-}
-
-export interface AnalysisAst {
-  tags: string[]
-  op: 'AND' | 'OR'
-  timespan?: { from: string; to: string }
-  amountRange?: { min?: number; max?: number }
-  /** "event" = bounded one-off (a trip); "ongoing" = recurring spending. */
-  kind?: 'event' | 'ongoing'
-  /** Aggregation granularity for ongoing analyses. */
-  interval?: 'month' | 'year'
-  /** Relative time reference for saved queries that auto-adjust over time. */
-  relativeTimespan?: RelativeTimespan
-  /**
-   * Grouped tag expressions for complex filters (e.g. "Restaurant AND
-   * (TagA OR TagB)"). When present and non-empty, takes precedence over
-   * flat `tags`/`op`. UI-driven — the LLM continues producing flat format.
-   */
-  tagGroups?: TagGroup[]
-  /** Logical operator joining the tag groups. Defaults to 'AND'. */
-  groupOp?: 'AND' | 'OR'
-}
-
-export interface AnalysisResult {
-  ast: AnalysisAst
-  total: { sum: string; count: number; avg: string }
-  byPeriod: Array<{ period: string; sum: string; count: number }>
-  byTag: Array<{ tag: string; sum: string; count: number }>
-  topCounterparties: Array<{ name: string; sum: string; count: number }>
-}
-
-export async function analysisQuery(params: {
-  question: string
-  timespanHint?: string
-  accountIds?: number[]
-}): Promise<AnalysisResult> {
-  return apiFetch('/finance/analysis/query', {
-    method: 'POST',
-    body: JSON.stringify(params),
-    // LLM parse can take a few seconds; keep the default timeout
-    // (2 min) but extend to 3 to be safe.
-    timeoutMs: 3 * 60_000,
-  })
-}
-
-export async function analysisAggregate(params: {
-  ast: AnalysisAst
-  accountIds?: number[]
-}): Promise<AnalysisResult> {
-  return apiFetch('/finance/analysis/aggregate', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  })
-}
-
-export interface AnalysisTransaction {
-  id: number
-  bookingDate: string
-  amount: string
-  currency: string
-  counterparty: string | null
-  purpose: string | null
-}
-
-export async function analysisTransactions(params: {
-  ast: AnalysisAst
-  tag: string
-  accountIds?: number[]
-  limit?: number
-}): Promise<{ transactions: AnalysisTransaction[] }> {
-  return apiFetch('/finance/analysis/transactions', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  })
-}
-
-export async function analysisPeriodTransactions(params: {
-  ast: AnalysisAst
-  period: string
-  accountIds?: number[]
-  limit?: number
-}): Promise<{ transactions: AnalysisTransaction[] }> {
-  return apiFetch('/finance/analysis/period-transactions', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  })
-}
-
-// ----------------------------------------------------------------------
-// Saved Analysis
-// ----------------------------------------------------------------------
-
-export interface SavedAnalysisSummary {
-  sum: string
+export interface TotalsGroup {
+  key: string
+  label: string
   count: number
-  avg: string
+  /** Cents. */
+  sum: number
 }
 
-export interface SavedAnalysisItem {
-  id: number
-  name: string
-  question: string | null
-  ast: AnalysisAst
-  source: 'user' | 'ai'
-  summary: SavedAnalysisSummary | null
-  seenAt: string | null
-  createdAt: string
-  updatedAt: string
+export interface TransactionTotals {
+  group_by: TotalsGroupBy
+  currency: string
+  count: number
+  /** Cents. */
+  total: number
+  groups: TotalsGroup[]
+  /** By tag: some bookings count in more than one group. */
+  overlapping: boolean
+  first_date: string | null
+  last_date: string | null
+  other_currencies: { currency: string; count: number; total: number }[]
 }
 
-export async function listSavedAnalyses(params?: {
-  limit?: number
-  before?: string
-  source?: 'user' | 'ai' | 'all'
-}): Promise<{ items: SavedAnalysisItem[]; hasMore: boolean }> {
-  return apiFetch('/finance/saved-analysis/list', {
+/** Sums of the bookings of a transaction Sammelmappe the caller may read. */
+export async function collectionTransactionTotals(params: {
+  collectionId: number
+  groupBy: TotalsGroupBy
+  groupTags?: string[]
+}): Promise<TransactionTotals> {
+  return apiFetch('/finance/transactions/totals', {
     method: 'POST',
-    body: JSON.stringify(params ?? {}),
-  })
-}
-
-export async function saveAnalysis(params: {
-  name: string
-  question?: string
-  ast: AnalysisAst
-  summary?: SavedAnalysisSummary
-}): Promise<SavedAnalysisItem> {
-  return apiFetch('/finance/saved-analysis', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  })
-}
-
-export async function updateSavedAnalysis(params: {
-  id: number
-  name?: string
-  ast?: AnalysisAst
-  summary?: SavedAnalysisSummary
-}): Promise<SavedAnalysisItem> {
-  return apiFetch(`/finance/saved-analysis/${params.id}`, {
-    method: 'PUT',
-    body: JSON.stringify(params),
-  })
-}
-
-export async function deleteSavedAnalysis(id: number): Promise<void> {
-  return apiFetch(`/finance/saved-analysis/${id}`, {
-    method: 'DELETE',
-  })
-}
-
-export async function markSavedAnalysesSeen(ids: number[]): Promise<void> {
-  return apiFetch('/finance/saved-analysis/mark-seen', {
-    method: 'POST',
-    body: JSON.stringify({ ids }),
+    body: JSON.stringify({
+      collection_id: params.collectionId,
+      group_by: params.groupBy,
+      group_tags: params.groupTags?.length ? params.groupTags : undefined,
+    }),
   })
 }
 

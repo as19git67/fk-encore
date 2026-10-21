@@ -3,8 +3,7 @@
  * user tags. Once a user has manually tagged a transaction the AI
  * suggestions are no longer needed and would only clutter the UI.
  *
- * Runs daily at 05:00 UTC — after the analysis-suggestions cron
- * (04:00) and well outside the FinTS sync window.
+ * Runs daily at 05:00 UTC, well outside the FinTS sync window.
  */
 
 import log from "encore.dev/log";

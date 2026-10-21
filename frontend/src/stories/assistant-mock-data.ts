@@ -58,14 +58,14 @@ export const RECAPS_BLOCK: ResultBlock = {
 
 export const ANALYSIS_BLOCK: ResultBlock = {
   kind: 'analysis',
-  tool: 'analyze_spending',
+  tool: 'transaction_totals',
+  subtitle: 'Zwischensummen nach Tag',
   rows: [{
-    question: 'Lebensmittel im September',
     sum: -412.37,
     count: 23,
-    avg: -17.93,
-    by_tag: [{ tag: 'Lebensmittel', sum: -380.1, count: 20 }, { tag: 'Drogerie', sum: -32.27, count: 3 }],
-    by_period: [],
+    currency: 'EUR',
+    overlapping: false,
+    groups: [{ label: 'Lebensmittel', sum: -380.1, count: 20 }, { label: 'Drogerie', sum: -32.27, count: 3 }],
   }],
 }
 

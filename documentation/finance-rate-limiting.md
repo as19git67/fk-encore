@@ -45,7 +45,6 @@ and the ACL).
 | `/finance/bankcontacts/:id/credentials` | POST | 10 / 15 min | `bank-creds:<userId>:<bankcontactId>` | Curb the credential-set rate — prevents a compromised user account from trying an arbitrary number of credential changes (noise in the log + CPU for crypto). |
 | `/finance/statements` | POST | 20 / 15 min | `sync-trigger:<userId>:<bankcontactId>` | Manual sync trigger: limited per user×bank contact so that nobody accidentally (or maliciously) floods the bank with HBCI dialogs. The cron runs on its own anyway. |
 | `/finance/admin/import` | POST | 3 / 60 min | `finance-import:<userId>` | The import is expensive (minutes, large DB transactions). Three attempts per hour are more than the admin actually needs. |
-| `/finance/analysis/query` | POST | 30 / 10 min | `analysis-query:<userId>` | The LLM call during parsing costs compute time of the `llm-service`. Edit-based re-aggregates (`/finance/analysis/aggregate`) do **not** count, because they do not call an LLM. |
 | `/finance/tags/suggest` | POST | 5 / 60 min | `tag-suggest-batch:<userId>` | The batch endpoint runs over many transactions → many LLM calls. Limit strictly. |
 
 Not limited (but documenting why):
@@ -55,7 +54,6 @@ Not limited (but documenting why):
 | `GET /finance/accounts`, `/finance/transactions`, `/finance/tags` | Pure reads, ACL-filtered, no incentive for abuse. |
 | `POST /finance/transactions` (manual transaction) | Writes exactly one row; abuse would at most be DB noise, not DoS. |
 | `POST /finance/transactions/:id/tags/promote` | Cheap operation, only within the user's own ACL. |
-| `POST /finance/analysis/aggregate` | Pure SQL aggregation, no LLM call. |
 
 ---
 

@@ -15,7 +15,7 @@
  * owner may not see, and readers still see only what they may open.
  */
 
-import { and, eq, gte, ilike, inArray, lte, not, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, ilike, inArray, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec } from "../db/adapter";
 import {
@@ -34,30 +34,15 @@ import { parsePhotoFilterQuery, type PhotoFilterQuery } from "../photo/photo.fil
 import { listGalleryIdsLogic } from "../photo/gallery-grid.service";
 import { visibleMetersWhere } from "../meter/meter.service";
 import {
-  amountConditions,
+  criteriaConditions,
   parseAmountBound,
   parseDirection,
-  taggedWithCondition,
-  taxRelevantCondition,
-  type TransactionDirection,
+  type TransactionCriteria,
 } from "../finance/transaction-conditions";
 import type { SecurityStatus } from "../finance/depot-securities";
+import { normalizeTotalsSpec, type TotalsSpec } from "../finance/transaction-totals";
 
-export interface TransactionCriteria {
-  account_ids?: number[];
-  /** Every one of these tags (as the list's tag filter). */
-  tags?: string[];
-  /** Text in counterparty, purpose or notice. */
-  text?: string;
-  /** Booking date range, YYYY-MM-DD. */
-  from?: string;
-  to?: string;
-  tax_relevant?: boolean;
-  /** Absolute amount range, inclusive (as the list's amount filter). */
-  amount_min?: number;
-  amount_max?: number;
-  direction?: TransactionDirection;
-}
+export type { TransactionCriteria };
 
 export interface SecurityCriteria {
   /** Depots (finance accounts of kind depot); absent: every readable one. */
@@ -74,7 +59,13 @@ export interface MeterCriteria {
 
 export type MemberRule =
   | { type: "photo"; filter: PhotoFilterQuery; excluded_ids?: number[] }
-  | { type: "transaction"; criteria: TransactionCriteria; excluded_ids?: number[] }
+  | {
+      type: "transaction";
+      criteria: TransactionCriteria;
+      /** Subtotals by tag or period and a total, shown on the folder's page. */
+      totals?: TotalsSpec;
+      excluded_ids?: number[];
+    }
   | { type: "security"; criteria: SecurityCriteria; excluded_ids?: number[] }
   | { type: "meter"; criteria: MeterCriteria; excluded_ids?: number[] };
 
@@ -132,7 +123,8 @@ export function normalizeMemberRule(input: unknown, keepExcluded: number[] = [])
       const direction = parseDirection(c.direction);
       if (direction) criteria.direction = direction;
       if (Object.keys(criteria).length === 0) return null;
-      return { type: "transaction", criteria, ...excluded };
+      const totals = normalizeTotalsSpec(raw.totals);
+      return { type: "transaction", criteria, ...(totals ? { totals } : {}), ...excluded };
     }
     case "security": {
       const c = (raw.criteria ?? {}) as Record<string, unknown>;
@@ -225,25 +217,8 @@ export async function matchingIds(rule: MemberRule, ownerId: number): Promise<nu
       const c = rule.criteria;
       const accounts = within(await ownerAccountIds(ownerId), c.account_ids);
       if (accounts.length === 0) return [];
-      const conds: SQL[] = [inArray(financeTransaction.account_id, accounts)];
-      if (c.from) conds.push(gte(financeTransaction.booking_date, c.from));
-      if (c.to) conds.push(lte(financeTransaction.booking_date, c.to));
-      if (c.text) {
-        const like = `%${c.text}%`;
-        conds.push(
-          or(
-            ilike(financeTransaction.counterparty, like),
-            ilike(financeTransaction.purpose, like),
-            ilike(financeTransaction.notice, like),
-          )!,
-        );
-      }
-      if (c.tax_relevant !== undefined) {
-        const flagged = taxRelevantCondition();
-        conds.push(c.tax_relevant ? flagged : not(flagged));
-      }
-      conds.push(...amountConditions({ min: c.amount_min, max: c.amount_max, direction: c.direction }));
-      for (const tag of c.tags ?? []) conds.push(taggedWithCondition(tag));
+      const { account_ids: _accounts, ...rest } = c;
+      const conds: SQL[] = [inArray(financeTransaction.account_id, accounts), ...criteriaConditions(rest)];
       const rows = await dbAll<{ id: number }>(
         db.select({ id: financeTransaction.id }).from(financeTransaction).where(and(...conds)),
       );

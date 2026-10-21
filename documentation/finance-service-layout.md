@@ -39,8 +39,6 @@ finance/
 ├── overview.test.ts
 ├── tags.ts                    # tag CRUD + confirm AI suggestions
 ├── tags.test.ts
-├── analysis.ts                # natural-language query → AST + aggregate
-├── analysis.test.ts
 ├── statements-cron.ts         # CronJobs: sync + tan-cleanup
 ├── statements-cron.test.ts
 ├── sync-schedule.ts           # sync time management
@@ -90,7 +88,7 @@ export default new Service("finance");
 |---|---|---|---|
 | `encryption.ts` | AES-256-GCM, `encryptCredentials` / `decryptCredentials` | — | (internal) |
 | `fints-client.ts` | `runSynchronize(bankcontactId, opts)`; state enum + `clientFactory`/`sleep` test seams | — | (internal) |
-| `llm-client.ts` | `embed(text)`, `suggestTags(...)`, `parseAnalysisQuery(...)` | — | (internal) |
+| `llm-client.ts` | `embed(text)`, `suggestTags(...)` | — | (internal) |
 | `bankcontacts.ts` | Bank contacts CRUD, set credentials | `GET/POST/PUT/DELETE /finance/bankcontacts[/:id]`, `POST /finance/bankcontacts/:id/credentials` | `finance.accounts.manage` |
 | `accounts.ts` | Read/list accounts (ACL-filtered), deactivate | `GET /finance/accounts[/:id]`, `PATCH /finance/accounts/:id` | `finance.view` |
 | `account-access.ts` | Create/remove ACL rows | `GET/PUT/DELETE /finance/admin/access/:accountId` | `finance.admin` |
@@ -98,7 +96,6 @@ export default new Service("finance");
 | `tan-sessions.ts` | Complete TAN, lifecycle | `POST /finance/tan-sessions/complete`, `DELETE /finance/tan-sessions/:ref` | `finance.accounts.manage` |
 | `transactions.ts` | List/detail, manual transaction, tag promotion | `GET /finance/transactions[/:id]`, `POST /finance/transactions`, `POST /finance/transactions/:id/tags/promote`, `POST /finance/transactions/batch-tag` | `finance.view` |
 | `tags.ts` | Tag list, suggest batch | `GET /finance/tags`, `POST /finance/tags/suggest` | `finance.view` |
-| `analysis.ts` | Question → AST → aggregate | `POST /finance/analysis/query`, `POST /finance/analysis/aggregate` | `finance.view` |
 | `statements-cron.ts` | Cron: sync + TAN cleanup | `POST /internal/finance/sync-statements`, `POST /internal/finance/tan-sessions/cleanup` | (internal, `expose: false`) |
 | `data-import.ts` | Finanzkraft JSON import | `POST /finance/admin/import` | `finance.admin` |
 | `tag-suggester.ts` | On TX insert: embed + classify, persist suggestions | — | (internal) |
@@ -140,7 +137,6 @@ graph TD
     TS[tan-sessions.ts]
     TX[transactions.ts]
     TG[tags.ts]
-    AN[analysis.ts]
     DI[data-import.ts]
     CR[statements-cron.ts]
     HO[holdings.ts]
@@ -169,7 +165,6 @@ graph TD
   TX --> SU
   SU --> LC
   TG --> SU
-  AN --> LC
   DI --> IS
   FC --> EN
   FC --> TY

@@ -32,7 +32,7 @@ export function emptyTurn(): LiveTurn {
 const TOOL_LABELS: Record<string, string> = {
   list_accounts: 'Konten ansehen',
   list_transactions: 'Buchungen durchsuchen',
-  analyze_spending: 'Ausgaben auswerten',
+  transaction_totals: 'Summen berechnen',
   upcoming_payments: 'Erwartete Zahlungen vorausberechnen',
   list_categories: 'Kategorien ansehen',
   search_documents: 'Dokumente durchsuchen',
@@ -55,6 +55,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_collection: 'Sammelmappe vorschlagen',
   build_collection_pdf: 'PDF vorschlagen',
   transaction_report: 'Bericht vorschlagen',
+  create_transaction_folder: 'Regel-Sammelmappe vorschlagen',
 }
 
 /** What the user reads while a tool runs. */

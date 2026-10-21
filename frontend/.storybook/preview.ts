@@ -62,7 +62,6 @@ const router = createRouter({
     { path: '/finanzen/bankkontakte/:id', name: 'finance-bankcontact-detail', component: { template: '<div />' } },
     { path: '/finanzen/ki-tagging', name: 'finance-tag-queue', component: { template: '<div />' } },
     { path: '/finanzen/anomalien', name: 'finance-anomalies', component: { template: '<div />' } },
-    { path: '/finanzen/analyse', name: 'finance-analysis', component: { template: '<div />' } },
     { path: '/finanzen/portfolio', name: 'finance-portfolio', component: { template: '<div />' } },
     { path: '/finanzen/portfolio/:key', name: 'finance-portfolio-position', component: { template: '<div />' } },
     { path: '/finanzen/belegabgleich', name: 'finance-receipt-enrichment', component: { template: '<div />' } },

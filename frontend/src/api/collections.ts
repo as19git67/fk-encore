@@ -495,7 +495,13 @@ export interface TransactionRuleCriteria {
 
 export type MemberRule =
   | { type: 'photo'; filter: Record<string, string | number | boolean>; excluded_ids?: number[] }
-  | { type: 'transaction'; criteria: TransactionRuleCriteria; excluded_ids?: number[] }
+  | {
+      type: 'transaction'
+      criteria: TransactionRuleCriteria
+      /** Subtotals the folder's page shows first (set by the assistant). */
+      totals?: { group_by: 'none' | 'tag' | 'month' | 'quarter' | 'year'; tags?: string[] }
+      excluded_ids?: number[]
+    }
   | { type: 'security'; criteria: { account_ids?: number[]; statuses?: Array<'confirmed' | 'proposed' | 'ignored'> }; excluded_ids?: number[] }
   | { type: 'meter'; criteria: { meter_types?: Array<'electricity' | 'water' | 'gas' | 'operating_hours'>; location?: string }; excluded_ids?: number[] }
 
