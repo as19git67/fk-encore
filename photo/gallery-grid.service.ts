@@ -32,6 +32,7 @@ import {
   photoComments,
 } from "../db/schema";
 import {
+  aestheticScoreSql,
   buildPhotoFilterConditions,
   type PhotoFilterParams,
 } from "./photo.filters";
@@ -51,6 +52,7 @@ export type GallerySortField =
   | "taken_at"
   | "created_at"
   | "ai_quality_score"
+  | "aesthetics"
   | "filename"
   | "size";
 
@@ -60,6 +62,7 @@ const VALID_SORT_FIELDS = new Set<GallerySortField>([
   "taken_at",
   "created_at",
   "ai_quality_score",
+  "aesthetics",
   "filename",
   "size",
 ]);
@@ -90,6 +93,8 @@ function sortKeyExpr(field: GallerySortField) {
       return sql`${photos.created_at}`;
     case "ai_quality_score":
       return sql`${photos.ai_quality_score}`;
+    case "aesthetics":
+      return aestheticScoreSql;
     case "filename":
       return sql`${photos.filename}`;
     case "size":

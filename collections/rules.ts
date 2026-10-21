@@ -160,7 +160,7 @@ const PHOTO_BOOLEAN_KEYS = new Set([
   "othersHidden", "notInAnyAlbum", "hasGps", "hasFaces", "hasAssignedPerson", "showAiHidden",
 ]);
 const PHOTO_NUMBER_KEYS = new Set([
-  "qualityMin", "qualityMax", "importedDaysAgo", "sizeMin", "sizeMax", "nearLat", "nearLon", "nearRadiusKm",
+  "qualityMin", "qualityMax", "aestheticMin", "aestheticMax", "importedDaysAgo", "sizeMin", "sizeMax", "nearLat", "nearLon", "nearRadiusKm",
 ]);
 const PHOTO_STRING_KEYS = new Set([
   "hiddenMode", "albumIds", "albumMode", "personIds", "personMode", "mediaTypes", "dateFrom", "dateTo",

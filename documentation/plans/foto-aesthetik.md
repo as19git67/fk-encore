@@ -170,6 +170,11 @@ Beyond that, with the aesthetic value available on its own:
 - **Sort and filter "Ästhetik"** next to "Qualität" in gallery, album and
   the iOS app, so a sharp but dull frame and a slightly soft but beautiful
   one can be told apart; the detail sidebar shows both values.
+  *Done on the web*: sort field `aesthetics` and filter `aestheticMin` /
+  `aestheticMax` on `clip_aesthetics` (`aestheticScoreSql` in
+  `photo/photo.filters.ts`), which rule collections accept too; the
+  section "Bildwirkung" in the sidebar shows both scores and who wrote the
+  aesthetic one. The iOS app is still open.
 - **Album cover suggestion**: the highest-scored photo of an album as the
   default cover, and in the album editor a "best candidates" strip.
 - **Rule collections** (`collections/rules.ts`): a rule "aesthetics above

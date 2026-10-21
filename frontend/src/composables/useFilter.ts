@@ -67,6 +67,8 @@ export function parseFilterFromQuery(q: Record<string, unknown>): PhotoFilter {
 
   const qMin = parseNum(q.qualityMin); if (qMin !== undefined) f.qualityMin = qMin
   const qMax = parseNum(q.qualityMax); if (qMax !== undefined) f.qualityMax = qMax
+  const aMin = parseNum(q.aestheticMin); if (aMin !== undefined) f.aestheticMin = aMin
+  const aMax = parseNum(q.aestheticMax); if (aMax !== undefined) f.aestheticMax = aMax
   const imp  = parseNum(q.importedDaysAgo); if (imp !== undefined) f.importedDaysAgo = imp
   const nearLat = parseNum(q.nearLat)
   const nearLon = parseNum(q.nearLon)
@@ -123,6 +125,8 @@ export function filterToQuery(f: PhotoFilter): Record<string, string> {
   put('notInAnyAlbum', f.notInAnyAlbum)
   if (f.qualityMin !== undefined) out.qualityMin = String(f.qualityMin)
   if (f.qualityMax !== undefined) out.qualityMax = String(f.qualityMax)
+  if (f.aestheticMin !== undefined) out.aestheticMin = String(f.aestheticMin)
+  if (f.aestheticMax !== undefined) out.aestheticMax = String(f.aestheticMax)
   if (f.albumIds?.length) {
     out.albumIds = f.albumIds.join(',')
     if (f.albumMode && f.albumMode !== 'include') out.albumMode = f.albumMode
@@ -165,6 +169,7 @@ export function countActiveFilters(f: PhotoFilter): number {
   if (f.othersHidden) n++
   if (f.notInAnyAlbum) n++
   if (f.qualityMin !== undefined || f.qualityMax !== undefined) n++
+  if (f.aestheticMin !== undefined || f.aestheticMax !== undefined) n++
   if (f.albumIds?.length) n++
   if (f.personIds?.length) n++
   if (f.ownerIds?.length) n++
@@ -318,6 +323,9 @@ export function usePhotoFilterChips(filter: UseFilterReturn): ComputedRef<Filter
 
     if (f.qualityMin !== undefined || f.qualityMax !== undefined) {
       add(`Qualität ${f.qualityMin ?? 0}–${f.qualityMax ?? 100}%`, ['qualityMin', 'qualityMax'])
+    }
+    if (f.aestheticMin !== undefined || f.aestheticMax !== undefined) {
+      add(`Ästhetik ${f.aestheticMin ?? 0}–${f.aestheticMax ?? 100}%`, ['aestheticMin', 'aestheticMax'])
     }
     if (f.albumIds?.length) {
       const names = f.albumIds.map((id) => albums.value.find((a) => a.id === id)?.name ?? `#${id}`)

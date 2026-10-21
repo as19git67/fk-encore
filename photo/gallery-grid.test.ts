@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import db from "../db/database";
 import {
   photos,
@@ -86,6 +87,23 @@ describe("Gallery grid – album scope", () => {
     // is baked into the scope subquery, so there is no data leak.
     const strangerGrid = await listGalleryGridLogic(stranger.id, { albumScopeId: album.id }, opts);
     expect(strangerGrid.total).toBe(0);
+  });
+
+  it("sorts and filters by the aesthetic score alone, unscored photos last", async () => {
+    const low = await makePhoto(owner.id, "low.jpg");
+    const high = await makePhoto(owner.id, "high.jpg");
+    const unscored = await makePhoto(owner.id, "unscored.jpg");
+    // The overall score says the opposite, so a pass proves the sort reads aesthetics.
+    await db.update(photos).set({ ai_quality_score: 0.9, ai_quality_details: { clip_aesthetics: 0.3 } }).where(eq(photos.id, low));
+    await db.update(photos).set({ ai_quality_score: 0.2, ai_quality_details: { clip_aesthetics: 0.8 } }).where(eq(photos.id, high));
+
+    const sorted = await listGalleryGridLogic(owner.id, {}, { ...opts, sortBy: "aesthetics", sortDir: "desc" });
+    expect(sorted.photos.map((p) => p.id)).toEqual([high, low, unscored]);
+
+    const filtered = await listGalleryGridLogic(owner.id, { aestheticMin: 50 }, opts);
+    expect(filtered.photos.map((p) => p.id)).toEqual([high]);
+    const capped = await listGalleryGridLogic(owner.id, { aestheticMax: 50 }, opts);
+    expect(capped.photos.map((p) => p.id)).toEqual([low]);
   });
 
   it("library grid (no album scope) still only returns the caller's own photos", async () => {

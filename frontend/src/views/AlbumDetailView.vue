@@ -255,12 +255,12 @@ const filterChips = usePhotoFilterChips(albumFilter)
 const filterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView. Spart /persons + /albums beim Album-Öffnen.
 const filterMenuMounted = ref(false)
-const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'nearLocation'>>(() => {
-  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'nearLocation'> = [
+const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'aestheticRange' | 'nearLocation'>>(() => {
+  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'aestheticRange' | 'nearLocation'> = [
     'hiddenMode', 'favorite', 'inGroup',
     'othersFavorited', 'othersHidden',
     'ownerIds',
-    'qualityRange', 'mediaTypes', 'hasGps',
+    'qualityRange', 'aestheticRange', 'mediaTypes', 'hasGps',
     'dateRange', 'nearLocation',
   ]
   // Group-Highlight toggle only when the album actually has enough of
@@ -300,6 +300,7 @@ const SORT_FIELDS: SortField[] = [
   { value: 'taken_at', label: 'Aufnahmedatum' },
   { value: 'created_at', label: 'Importdatum' },
   { value: 'ai_quality_score', label: 'Qualität' },
+  { value: 'aesthetics', label: 'Ästhetik' },
   { value: 'filename', label: 'Dateiname' },
   { value: 'size', label: 'Dateigröße' },
 ]
@@ -356,6 +357,11 @@ function comparePhotos(a: Photo, b: Photo): number {
     case 'ai_quality_score': {
       const qa = a.ai_quality_score ?? -Infinity
       const qb = b.ai_quality_score ?? -Infinity
+      return (qa - qb) * dir
+    }
+    case 'aesthetics': {
+      const qa = a.ai_quality_details?.clip_aesthetics ?? -Infinity
+      const qb = b.ai_quality_details?.clip_aesthetics ?? -Infinity
       return (qa - qb) * dir
     }
     case 'filename':

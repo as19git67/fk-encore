@@ -345,6 +345,8 @@ export interface Photo {
   location_short?: string;
   ai_quality_score?: number;
   ai_quality_details?: Record<string, number>;
+  /** Who wrote `clip_aesthetics`: none (CLIP prompts), `vith_head_v1`, `qalign_v1`, or `…:failed`. */
+  aesthetic_model?: string;
   auto_crop?: { x: number; y: number };
   description?: string;
   /** IPTC Keywords / XMP dc:subject — user-facing tags imported from the file. */

@@ -39,12 +39,12 @@ const props = withDefaults(defineProps<{
   /** GPS point of the photo currently selected by the surrounding view. */
   referenceLocation?: { latitude: number; longitude: number; label?: string }
   /** Criteria to show. Default: all photo-level criteria. */
-  available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange' | 'nearLocation'>
+  available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'aestheticRange' | 'sizeRange' | 'nearLocation'>
 }>(), {
   available: () => [
     'hiddenMode', 'showAiHidden', 'showVariants', 'favorite', 'albumHighlight', 'groupHighlight', 'inGroup',
     'othersFavorited', 'othersHidden', 'notInAnyAlbum',
-    'qualityRange', 'albumIds', 'personIds', 'mediaTypes',
+    'qualityRange', 'aestheticRange', 'albumIds', 'personIds', 'mediaTypes',
     'hasGps', 'hasFaces', 'hasAssignedPerson',
     'dateRange', 'importedDaysAgo', 'nearLocation', 'collectionId',
   ],
@@ -123,6 +123,7 @@ watch(() => props.visible, (v) => {
   }
   local.value = { ...props.draft }
   qualityRange.value = [props.draft.qualityMin ?? 0, props.draft.qualityMax ?? 100]
+  aestheticRange.value = [props.draft.aestheticMin ?? 0, props.draft.aestheticMax ?? 100]
   dateFrom.value = props.draft.dateFrom ? parseLocalDate(props.draft.dateFrom) : null
   dateTo.value = props.draft.dateTo ? parseLocalDate(props.draft.dateTo) : null
   selectedAlbums.value = props.draft.albumIds?.length && albums.value.length
@@ -172,6 +173,17 @@ watch(qualityRange, ([min, max]) => {
     ...local.value,
     qualityMin: min > 0 ? min : undefined,
     qualityMax: max < 100 ? max : undefined,
+  }
+})
+const aestheticRange = ref<[number, number]>([
+  props.draft.aestheticMin ?? 0,
+  props.draft.aestheticMax ?? 100,
+])
+watch(aestheticRange, ([min, max]) => {
+  local.value = {
+    ...local.value,
+    aestheticMin: min > 0 ? min : undefined,
+    aestheticMax: max < 100 ? max : undefined,
   }
 })
 
@@ -432,6 +444,7 @@ function handleApply() {
 function handleReset() {
   local.value = {}
   qualityRange.value = [0, 100]
+  aestheticRange.value = [0, 100]
   dateFrom.value = null
   dateTo.value = null
   selectedAlbums.value = []
@@ -521,6 +534,14 @@ function close() {
           Qualität: {{ qualityRange[0] }}% – {{ qualityRange[1] }}%
         </label>
         <Slider v-model="qualityRange" range :min="0" :max="100" class="filter-slider" />
+      </div>
+
+      <!-- Aesthetic score alone (foto-aesthetik.md); photos without one drop out once a bound is set -->
+      <div v-if="has('aestheticRange')" class="filter-row">
+        <label class="filter-label">
+          Ästhetik: {{ aestheticRange[0] }}% – {{ aestheticRange[1] }}%
+        </label>
+        <Slider v-model="aestheticRange" range :min="0" :max="100" class="filter-slider" />
       </div>
 
       <!-- One collection (#1548) -->

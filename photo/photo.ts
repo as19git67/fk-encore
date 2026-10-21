@@ -75,6 +75,8 @@ type PhotoFilterQueryParams = {
   othersHidden?: Query<boolean>;
   qualityMin?: Query<number>;
   qualityMax?: Query<number>;
+  aestheticMin?: Query<number>;
+  aestheticMax?: Query<number>;
   notInAnyAlbum?: Query<boolean>;
   albumIds?: Query<string>;
   albumMode?: Query<string>;
@@ -118,6 +120,8 @@ function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
     othersHidden: p.othersHidden,
     qualityMin: p.qualityMin,
     qualityMax: p.qualityMax,
+    aestheticMin: p.aestheticMin,
+    aestheticMax: p.aestheticMax,
     notInAnyAlbum: p.notInAnyAlbum,
     albumIds: p.albumIds,
     albumMode: p.albumMode,
@@ -444,6 +448,8 @@ function parsePhotoIndexQuery(url: URL): PhotoFilterQueryParams {
     othersHidden: readBool("othersHidden"),
     qualityMin: readNum("qualityMin"),
     qualityMax: readNum("qualityMax"),
+    aestheticMin: readNum("aestheticMin"),
+    aestheticMax: readNum("aestheticMax"),
     notInAnyAlbum: readBool("notInAnyAlbum"),
     albumIds: readStr("albumIds"),
     albumMode: readStr("albumMode"),
