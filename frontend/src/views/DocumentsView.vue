@@ -801,6 +801,15 @@ onMounted(async () => {
         />
         <Button
           v-if="auth.hasPermission('documents.upload')"
+          label="Schreiben"
+          icon="pi pi-pen-to-square"
+          severity="secondary"
+          outlined
+          v-tooltip.bottom="'Eigenes Textdokument mit Markdown schreiben'"
+          @click="router.push({ name: 'dokumente-text-neu' })"
+        />
+        <Button
+          v-if="auth.hasPermission('documents.upload')"
           label="Hochladen"
           icon="pi pi-upload"
           @click="router.push({ name: 'dokumente-upload' })"

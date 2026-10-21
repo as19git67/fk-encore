@@ -271,3 +271,27 @@ async function waitFor<T>(read: () => T | null | undefined, timeoutMs = 10_000):
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
 }
+
+export const Textdokument: Story = {
+  name: 'Eigenes Textdokument',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/documents/:id', () =>
+          HttpResponse.json({
+            ...MOCK_DOCUMENT_DETAIL,
+            title: 'Notizen zur Heizungswartung',
+            original_filename: 'notizen-zur-heizungswartung.pdf',
+            sender: null,
+            markdown_source:
+              '## Termin\n\nKundendienst am **Dienstag**.\n\n- [x] Filter bestellen\n- [ ] Druck prüfen\n\n| Teil | Preis |\n| --- | --: |\n| Filter | 18,00 € |\n',
+          }),
+        ),
+        http.get('/api/document-categories', () =>
+          HttpResponse.json({ items: MOCK_DOCUMENT_CATEGORIES }),
+        ),
+        ...defaultHandlers,
+      ],
+    },
+  },
+}

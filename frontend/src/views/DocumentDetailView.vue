@@ -61,6 +61,7 @@ import { assistantLocation } from '../utils/assistantContext'
 import { collectionAnchorKey, saveListAnchor } from '../utils/listAnchor'
 import PageLayout from '../components/layout/PageLayout.vue'
 import PdfViewer from '../components/PdfViewer.vue'
+import MarkdownView from '../components/documents/MarkdownView.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import FileButton from '../components/collections/FileButton.vue'
 import RelatedDocumentsCard from '../components/documents/RelatedDocumentsCard.vue'
@@ -198,6 +199,13 @@ const error = ref('')
 const info = ref('')
 const pdfData = ref<Uint8Array | null>(null)
 const pdfError = ref('')
+/** A text document written in the app opens on its formatted text; the PDF is one click away. */
+const isTextDocument = computed(() => doc.value?.markdown_source != null)
+const textPanelMode = ref<'text' | 'pdf'>('text')
+const textPanelOptions = [
+  { label: 'Text', value: 'text' },
+  { label: 'PDF', value: 'pdf' },
+]
 const helpPopover = ref<InstanceType<typeof Popover> | null>(null)
 
 function toggleHelp(event: Event) {
@@ -944,6 +952,15 @@ onBeforeUnmount(() => {
             @click="draftReply"
           />
           <Button
+            v-if="auth.hasPermission('documents.edit') && doc && isTextDocument"
+            icon="pi pi-pen-to-square"
+            label="Bearbeiten"
+            aria-label="Text bearbeiten"
+            text
+            v-tooltip.bottom="'Text bearbeiten'"
+            @click="router.push({ name: 'dokumente-text-bearbeiten', params: { id: doc.id } })"
+          />
+          <Button
             v-if="auth.hasPermission('documents.edit') && doc"
             icon="pi pi-refresh"
             label="Klassifizieren"
@@ -954,7 +971,7 @@ onBeforeUnmount(() => {
             @click="onReclassify()"
           />
           <Button
-            v-if="auth.hasPermission('documents.edit') && doc"
+            v-if="auth.hasPermission('documents.edit') && doc && !isTextDocument"
             icon="pi pi-eye"
             label="OCR"
             aria-label="OCR erzwingen"
@@ -1073,7 +1090,25 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="doc" class="detail-grid">
-      <div class="pdf-panel">
+      <div v-if="isTextDocument" class="pdf-panel text-panel">
+        <div class="text-panel__head">
+          <SelectButton
+            v-model="textPanelMode"
+            :options="textPanelOptions"
+            option-label="label"
+            option-value="value"
+            :allow-empty="false"
+            size="small"
+            aria-label="Ansicht"
+          />
+        </div>
+        <div v-if="textPanelMode === 'text'" class="text-panel__body">
+          <MarkdownView v-if="doc.markdown_source?.trim()" :source="doc.markdown_source ?? ''" />
+          <p v-else class="text-panel__empty">Dieses Textdokument ist noch leer.</p>
+        </div>
+        <PdfViewer v-else :data="pdfData" :error-message="pdfError || null" />
+      </div>
+      <div v-else class="pdf-panel">
         <PdfViewer :data="pdfData" :error-message="pdfError || null" />
       </div>
 
@@ -1887,6 +1922,27 @@ onBeforeUnmount(() => {
   overflow: hidden;
   display: flex;
   min-width: 0;
+}
+
+/* A text document: the formatted text, with a switch to its PDF. */
+.text-panel {
+  flex-direction: column;
+}
+.text-panel__head {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.text-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+.text-panel__empty {
+  margin: 0;
+  color: var(--p-text-muted-color);
 }
 
 /* ── Phone and tablet: one column, one scrollbar ────────────────────────────

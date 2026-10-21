@@ -108,6 +108,8 @@ import { queueTaxValuesIfEvidence } from "./tax-values";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { decryptPdfWithPassword } from "./text-extract";
+import { renderMarkdownPdf } from "./markdown-pdf";
+import { textDocumentFilename, validateTextDocument } from "./text-documents";
 import { searchDocuments, type SearchMode } from "./search";
 import { documentTextPreview } from "./text-preview";
 import { fetchTagsForDocuments } from "./tags";
@@ -326,6 +328,16 @@ export interface DocumentDetail extends DocumentSummary {
    * advice — see documents/retention.ts.
    */
   retention: DocumentRetentionDTO;
+  /**
+   * The Markdown of a text document written in the app, or null for an
+   * uploaded one. Present means the editor can open it.
+   */
+  markdown_source: string | null;
+  /**
+   * Fingerprint of the stored content. The editor sends it back with a save
+   * so a save over somebody else's newer version is refused, not lost.
+   */
+  content_revision: string;
 }
 
 export interface DocumentRetentionDTO {
@@ -718,6 +730,109 @@ export const storeGeneratedDocument = api(
   },
 );
 
+// ─── Text documents written in the app ──────────────────────────────────────
+
+export interface CreateTextDocumentRequest {
+  title: string;
+  markdown: string;
+}
+
+export interface UpdateTextDocumentRequest {
+  id: number;
+  title: string;
+  markdown: string;
+  /** `content_revision` the editor opened; a newer stored version refuses the save. */
+  base_revision?: string;
+}
+
+/**
+ * A text document the user writes in Markdown. The PDF rendered from it is
+ * filed like an upload — same visibility default, same pipeline — so it shows
+ * in the list, the search, collections and exports like any other document.
+ * The Markdown stays on the row for the editor.
+ */
+export const createTextDocument = api(
+  { expose: true, method: "POST", path: "/documents/text", auth: true },
+  async (req: CreateTextDocumentRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.upload");
+    const userId = getUserId();
+    const { title, markdown } = validateTextDocument(req);
+
+    const buffer = await renderMarkdownPdf({ title, markdown });
+    let stored: DocumentSummary;
+    try {
+      stored = await storeDocumentBuffer({
+        buffer,
+        originalName: textDocumentFilename(title),
+        mimeType: "application/pdf",
+        userId,
+        markdownSource: markdown,
+        title,
+      });
+    } catch (err) {
+      if ((err as Error).message === "DOCUMENT_TOO_LARGE") throw APIError.invalidArgument("the document is too large");
+      throw err;
+    }
+    return await loadDetail(userId, stored.id, isDataAdmin(authData));
+  },
+);
+
+/**
+ * Saves a new version of a text document: renders the PDF again, writes it
+ * over the stored file and runs the pipeline once more, so text, thumbnail
+ * and classification follow the content. Whoever may edit the document's
+ * attributes may edit its text.
+ */
+export const updateTextDocument = api(
+  { expose: true, method: "PUT", path: "/documents/:id/text", auth: true },
+  async (req: UpdateTextDocumentRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+    const row = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
+    if (row.markdown_source == null) {
+      throw APIError.failedPrecondition("only text documents written in the app can be edited as text");
+    }
+    const { title, markdown } = validateTextDocument(req);
+
+    const buffer = await renderMarkdownPdf({ title, markdown });
+    if (buffer.length > DOCUMENTS_MAX_BYTES) throw APIError.invalidArgument("the document is too large");
+    const digest = crypto.createHash("sha256").update(buffer).digest("hex");
+
+    await withDocumentLock(req.id, async () => {
+      const current = await dbFirst<{ sha256: string }>(
+        db.select({ sha256: documents.sha256 }).from(documents).where(eq(documents.id, req.id)),
+      );
+      if (!current) throw APIError.notFound("document not found");
+      if (req.base_revision && req.base_revision !== current.sha256) {
+        throw APIError.aborted("the document was changed in the meantime");
+      }
+      const diskPath = await freshDocumentDiskPath(req.id);
+      await ensureDir(path.dirname(diskPath));
+      await fs.promises.writeFile(diskPath, buffer);
+      await db.update(documents).set({
+        sha256: digest,
+        size_bytes: buffer.length,
+        original_filename: textDocumentFilename(title),
+        title,
+        markdown_source: markdown,
+        status: "pending",
+        last_error: null,
+      }).where(eq(documents.id, req.id));
+    });
+
+    // Like a replaced file: the cached preview and sidecar show the old text.
+    await removeOcrPdf(req.id);
+    await removeThumbnail(req.id);
+    await requeueDocument(req.id);
+    triggerWorkers();
+    return await loadDetail(userId, req.id, isDataAdmin(authData));
+  },
+);
+
 export const uploadReceiptCapture = api.raw(
   { expose: true, method: "POST", path: "/documents/receipt-capture", auth: true, bodyLimit: null },
   async (req, res) => {
@@ -1051,6 +1166,10 @@ async function storeDocumentBuffer(params: {
   receiptOcrState?: "pending" | null;
   /** Folder the file came from in a folder upload (#1477). */
   sourceFolder?: string | null;
+  /** Markdown of a text document written in the app; the buffer is its PDF. */
+  markdownSource?: string | null;
+  /** Title set in the INSERT, before the classifier can observe the row. */
+  title?: string | null;
 }): Promise<DocumentSummary> {
   const {
     buffer,
@@ -1065,6 +1184,8 @@ async function storeDocumentBuffer(params: {
     receiptTransactionId = null,
     receiptOcrState = null,
     sourceFolder = null,
+    markdownSource = null,
+    title = null,
   } = params;
   if (buffer.length > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
   const ext = guessExtension(originalName, mimeType);
@@ -1126,6 +1247,8 @@ async function storeDocumentBuffer(params: {
         receipt_transaction_id: receiptTransactionId,
         receipt_ocr_state: receiptOcrState,
         source_folder: normalizeSourceFolder(sourceFolder),
+        markdown_source: markdownSource,
+        title,
       })
       .returning(),
   );
@@ -4514,6 +4637,8 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
     subject_persons: subjectPersons,
     teacher_requested: row.teacher_requested ?? false,
     tax_review_needed: row.tax_review_needed ?? false,
+    markdown_source: row.markdown_source ?? null,
+    content_revision: row.sha256,
     retention: {
       cls: retentionInfo.cls,
       label: retentionInfo.label,
