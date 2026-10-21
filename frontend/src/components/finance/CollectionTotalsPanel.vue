@@ -130,10 +130,6 @@ const period = computed(() => {
           <span class="ctp-sum" :class="amountClass(g.sum)">{{ money(g.sum, totals.currency) }}</span>
         </li>
       </ul>
-      <p v-if="totals.overlapping" class="ctp-hint">
-        Manche Buchungen tragen mehrere Tags und zählen in jeder ihrer Gruppen, die Zwischensummen ergeben
-        zusammen also mehr als die Gesamtsumme.
-      </p>
       <div class="ctp-row ctp-total" :class="{ 'ctp-busy': loading }">
         <span class="ctp-label">Gesamtsumme<span v-if="period" class="ctp-period">{{ period }}</span></span>
         <span class="ctp-count">{{ totals.count }}</span>

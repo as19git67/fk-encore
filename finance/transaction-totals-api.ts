@@ -7,7 +7,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, eq, inArray, type SQL } from "drizzle-orm";
 import db from "../db/database";
-import { financeTag, financeTagTransaction, financeTransaction } from "../db/schema";
+import { documentCollections, financeTag, financeTagTransaction, financeTransaction } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { collectionScopeCondition, parseCollectionId } from "../collections/scope";
 import { readableFinanceAccountIds } from "./account-acl";
@@ -36,6 +36,21 @@ async function userTagsOf(ids: number[]): Promise<Map<number, string[]>> {
     }
   }
   return out;
+}
+
+/**
+ * The tags a rule Sammelmappe selects its bookings by. Like the list's own
+ * tag filter, they are on every booking and make no group of their own.
+ */
+async function ruleTagsOf(collectionId: number): Promise<string[]> {
+  const [row] = await db
+    .select({ kind: documentCollections.kind, rule: documentCollections.rule })
+    .from(documentCollections)
+    .where(eq(documentCollections.id, collectionId));
+  if (row?.kind !== "rule" || !row.rule) return [];
+  const rule = row.rule as { type?: unknown; criteria?: { tags?: unknown } };
+  const tags = rule.type === "transaction" ? rule.criteria?.tags : undefined;
+  return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === "string") : [];
 }
 
 export interface TransactionTotalsRequest {
@@ -85,10 +100,13 @@ export const transactionTotals = api(
       })
       .from(financeTransaction)
       .where(and(...conds));
-    const tags = spec.group_by === "tag" ? await userTagsOf(rows.map((r) => r.id)) : new Map<number, string[]>();
+    const byTag = spec.group_by === "tag";
+    const tags = byTag ? await userTagsOf(rows.map((r) => r.id)) : new Map<number, string[]>();
+    const filterTags = byTag ? [...(criteria.tags ?? []), ...(collectionId ? await ruleTagsOf(collectionId) : [])] : [];
     return computeTotals(
       rows.map((r) => ({ ...r, booking_date: String(r.booking_date), amount: String(r.amount), tags: tags.get(r.id) ?? [] })),
       spec,
+      { filterTags },
     );
   },
 );
