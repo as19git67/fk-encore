@@ -64,8 +64,10 @@ describe("classifyDocument — one-time prompt refresh", () => {
 
     expect(puts).toHaveLength(1); // once per process, not per classify
     expect(posts).toHaveLength(2);
-    expect(calls[0].method).toBe("PUT"); // refresh happens before the first classify
-    expect(calls[0].url.endsWith("/prompts")).toBe(true);
+    // The lease lookup for the timeout budget is a read and may come first.
+    const writes = calls.filter((c) => !c.url.endsWith("/reload/status"));
+    expect(writes[0].method).toBe("PUT"); // refresh happens before the first classify
+    expect(writes[0].url.endsWith("/prompts")).toBe(true);
   });
 
   it("still classifies when the prompt refresh fails (best-effort)", async () => {

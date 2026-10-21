@@ -4,6 +4,7 @@ import type { AestheticRun, AestheticSettings, RunPatch } from "./aesthetic-stor
 import {
   BATCH_SIZE,
   MAX_CONSECUTIVE_FAILURES,
+  SCORE_IN_FLIGHT,
   _resetNightly,
   activeRun,
   aestheticTick,
@@ -243,6 +244,25 @@ describe("a night", () => {
     expect(w.calls).toEqual(["lend", "load", "unload"]);
   });
 
+  it("keeps the next photo on its way while the scorer works on one", async () => {
+    const w = world(6);
+    let inFlight = 0;
+    let most = 0;
+    const plain = w.deps.score;
+    w.deps.score = async (id) => {
+      most = Math.max(most, ++inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      try {
+        return await plain(id);
+      } finally {
+        inFlight--;
+      }
+    };
+    const run = await runToEnd(w);
+    expect(most).toBe(SCORE_IN_FLIGHT);
+    expect(run).toMatchObject({ status: "done", scored: 6, failed: 0 });
+  });
+
   it("marks an unreadable photo once instead of retrying it every night", async () => {
     const w = world(3);
     w.outcome = (id) => (id === 2 ? { kind: "unscorable", reason: "Datei fehlt" } : { kind: "scored", scores: { aesthetics: 4, quality: 4 } });
@@ -256,7 +276,9 @@ describe("a night", () => {
     w.outcome = () => new Error("aesthetic-service /score 503: scorer is error");
     const run = await runToEnd(w);
     expect(run.status).toBe("failed");
-    expect(run.failed).toBe(MAX_CONSECUTIVE_FAILURES);
+    // The photo already on its way when the last straw failed is counted too.
+    expect(run.failed).toBeGreaterThanOrEqual(MAX_CONSECUTIVE_FAILURES);
+    expect(run.failed).toBeLessThan(MAX_CONSECUTIVE_FAILURES + SCORE_IN_FLIGHT);
     expect(run.error).toMatch(/Scorer antwortet nicht mehr/);
     expect(w.calls).toEqual(["lend", "load", "unload", "giveBack"]);
     expect(run.gpu_returned).toBe(true);
