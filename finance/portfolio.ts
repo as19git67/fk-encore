@@ -71,7 +71,12 @@ import {
   type EnrichStats,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
-import { enrichPendingStatements, readDepotStatement, type StatementStats } from "./depot-statement-enrichment";
+import {
+  enrichPendingStatements,
+  pruneStatementHoldings,
+  readDepotStatement,
+  type StatementStats,
+} from "./depot-statement-enrichment";
 import { classifyPendingPapers } from "./depot-paper-type";
 import {
   bankHolding,
@@ -2008,7 +2013,10 @@ async function runEnrichment(run: EnrichRun): Promise<void> {
       for (const k of SETTLEMENT_TOTAL_KEYS) run.totals[k] += page[k];
       before = page.next_before;
     } while (before !== null);
-    // Then the depot statements: what the depots held, as snapshots.
+    // Then the depot statements: what the depots held, as snapshots —
+    // after dropping rows read from outside a report's holdings table.
+    const pruned = await pruneStatementHoldings(run.account_ids);
+    if (pruned > 0) console.log(`[finance] dropped ${pruned} statement holdings outside their paper's holdings table`);
     before = null;
     do {
       const page = await enrichPendingStatements(run.account_ids, 200, {}, { before, budgetMs: ENRICH_REQUEST_BUDGET_MS });
