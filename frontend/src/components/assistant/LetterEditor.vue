@@ -5,12 +5,16 @@
  * destinations can be ticked off. Gaps the assistant left as `[[…]]` are
  * named above the fields, each a jump to where it stands, and the fields
  * holding one are marked; the card does not send the letter while one is left.
+ * Further documents can be searched and enclosed; the server checks on
+ * "Ausführen" that the user may see them.
  */
-import { computed, nextTick } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+import AutoComplete, { type AutoCompleteOptionSelectEvent } from 'primevue/autocomplete'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Textarea from 'primevue/textarea'
 import type { LetterDestination, LetterDraft } from '../../api/assistant'
+import { searchDocuments } from '../../api/documents'
 import { letterGaps } from '../../utils/letterGaps'
 
 export interface LetterForm {
@@ -27,10 +31,44 @@ const form = defineModel<LetterForm>({ required: true })
 
 const gaps = computed(() => letterGaps(form.value.sender, form.value.recipient, form.value.subject, form.value.body))
 
-const DESTINATIONS: { value: LetterDestination; label: string }[] = [
-  { value: 'document', label: 'Als Dokument ablegen (verknüpft mit den Anlagen)' },
-  { value: 'collection', label: 'Mit den Anlagen in eine Sammelmappe' },
-]
+type Enclosure = { id: number; title: string }
+
+/** Documents the user enclosed on the card, beside the ones the assistant proposed. */
+const added = ref<Enclosure[]>([])
+const enclosures = computed<Enclosure[]>(() => [...props.letter.attachments, ...added.value])
+const enclosed = computed(() => form.value.attachmentIds.length > 0)
+
+const DESTINATIONS = computed<{ value: LetterDestination; label: string }[]>(() => [
+  { value: 'document', label: enclosed.value ? 'Als Dokument ablegen (verknüpft mit den Anlagen)' : 'Als Dokument ablegen' },
+  { value: 'collection', label: enclosed.value ? 'Mit den Anlagen in eine Sammelmappe' : 'In eine Sammelmappe' },
+])
+
+const query = ref('')
+const suggestions = ref<Enclosure[]>([])
+
+async function searchEnclosures(event: { query: string }) {
+  const q = event.query.trim()
+  if (!q) {
+    suggestions.value = []
+    return
+  }
+  try {
+    const { items } = await searchDocuments(q, 'hybrid', 10)
+    const taken = new Set(enclosures.value.map((e) => e.id))
+    suggestions.value = items
+      .filter((d) => !taken.has(d.id))
+      .map((d) => ({ id: d.id, title: d.title || d.original_filename }))
+  } catch {
+    suggestions.value = []
+  }
+}
+
+function enclose(event: AutoCompleteOptionSelectEvent) {
+  const doc = event.value as Enclosure
+  if (!enclosures.value.some((e) => e.id === doc.id)) added.value.push(doc)
+  if (!form.value.attachmentIds.includes(doc.id)) form.value.attachmentIds = [...form.value.attachmentIds, doc.id]
+  query.value = ''
+}
 
 const id = (name: string) => `${props.idPrefix}-${name}`
 
@@ -105,12 +143,26 @@ defineExpose({ focusGap })
       <Textarea :id="id('body')" v-model="form.body" :invalid="hasGap('body')" rows="10" auto-resize :disabled="disabled" />
     </div>
 
-    <fieldset v-if="letter.attachments.length" class="letter-choices">
+    <fieldset class="letter-choices">
       <legend>Anlagen</legend>
-      <div v-for="a in letter.attachments" :key="a.id" class="letter-choice">
+      <div v-for="a in enclosures" :key="a.id" class="letter-choice">
         <Checkbox v-model="form.attachmentIds" :input-id="id(`att-${a.id}`)" :value="a.id" :disabled="disabled" />
         <label :for="id(`att-${a.id}`)">{{ a.title }}</label>
       </div>
+      <p v-if="!enclosures.length" class="letter-none">Keine Anlagen.</p>
+      <AutoComplete
+        v-model="query"
+        :suggestions="suggestions"
+        option-label="title"
+        :input-id="id('add-attachment')"
+        placeholder="Dokument als Anlage hinzufügen …"
+        aria-label="Dokument als Anlage hinzufügen"
+        :delay="300"
+        :disabled="disabled"
+        fluid
+        @complete="searchEnclosures"
+        @option-select="enclose"
+      />
     </fieldset>
 
     <fieldset class="letter-choices">
@@ -172,6 +224,12 @@ defineExpose({ focusGap })
   padding: 0;
   border: 0;
   min-width: 0;
+}
+
+.letter-none {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
 }
 
 .letter-choices legend {
