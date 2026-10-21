@@ -3,7 +3,8 @@
  * One message of the conversation (#1528): the user's question, or the
  * assistant's answer with what it looked up and the rows it found.
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import Button from 'primevue/button'
 import type { Proposal, ResultBlock } from '../../api/assistant'
 import type { TurnStep } from '../../utils/assistantTurn'
 import { parseBlocks } from '../../utils/assistantMarkdown'
@@ -27,6 +28,36 @@ const props = withDefaults(defineProps<{
 // The assistant's bold, lists and code are rendered; the user's own text is
 // shown as typed.
 const rendered = computed(() => (props.role === 'assistant' ? parseBlocks(props.content) : []))
+
+// Copy the message as it stands: the text as written (an answer's Markdown
+// reads fine as plain text) and, for an answer, the rendered HTML beside it,
+// so a table pasted into a spreadsheet or a letter arrives as a table.
+const richEl = ref<HTMLElement | null>(null)
+const copied = ref(false)
+const copyFailed = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+async function copyMessage() {
+  copyFailed.value = false
+  const html = props.role === 'assistant' ? richEl.value?.innerHTML : undefined
+  try {
+    if (html && typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([props.content], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      })])
+    } else {
+      await navigator.clipboard.writeText(props.content)
+    }
+    copied.value = true
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    copyFailed.value = true
+  }
+}
+
+onBeforeUnmount(() => { if (copiedTimer) clearTimeout(copiedTimer) })
 
 // A lookup that found nothing has its "· 0" in the steps above; an empty
 // grid under the answer said the same thing again, with nothing in it.
@@ -66,7 +97,7 @@ function isFolded(i: number): boolean {
     </ul>
 
     <div v-if="content || (pending && !steps.length)" class="bubble">
-      <div v-if="content && role === 'assistant'" class="text text--rich">
+      <div v-if="content && role === 'assistant'" ref="richEl" class="text text--rich">
         <template v-for="(b, i) in rendered" :key="i">
           <p v-if="b.type === 'p'">
             <template v-for="(line, j) in b.lines" :key="j">
@@ -127,6 +158,21 @@ function isFolded(i: number): boolean {
       </p>
     </div>
 
+    <div v-if="content && !pending" class="message-actions">
+      <Button
+        :icon="copied ? 'pi pi-check' : 'pi pi-copy'"
+        text
+        rounded
+        size="small"
+        severity="secondary"
+        class="copy-button"
+        :aria-label="copied ? 'Kopiert' : 'Beitrag kopieren'"
+        v-tooltip.bottom="copied ? 'Kopiert' : 'Kopieren'"
+        @click="copyMessage"
+      />
+      <span class="copy-status" role="status">{{ copied ? 'Kopiert' : copyFailed ? 'Kopieren ging nicht' : '' }}</span>
+    </div>
+
     <p v-if="error" class="error" role="alert">
       <i class="pi pi-exclamation-circle" aria-hidden="true" />
       {{ error }}
@@ -170,6 +216,27 @@ function isFolded(i: number): boolean {
   background: var(--p-primary-color);
   border-color: var(--p-primary-color);
   color: var(--p-primary-contrast-color);
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* Sits right under the bubble; the gap of the message is enough. */
+  margin-top: calc(-1 * var(--space-1));
+}
+
+.copy-button {
+  color: var(--p-text-muted-color);
+}
+
+.copy-status {
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+}
+
+.copy-status:empty {
+  display: none;
 }
 
 .text {
