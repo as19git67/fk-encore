@@ -54,7 +54,11 @@ export interface ChatReply {
   usage?: ChatUsage;
 }
 
-export type ChatFn = (req: ChatRequest, onToken?: (text: string) => void) => Promise<ChatReply>;
+/**
+ * `signal` is the user's cancel: it closes the request, and the llm-service
+ * stops llama-server once it notices the caller is gone.
+ */
+export type ChatFn = (req: ChatRequest, onToken?: (text: string) => void, signal?: AbortSignal) => Promise<ChatReply>;
 
 interface ChunkDelta {
   content?: string | null;
@@ -160,10 +164,13 @@ export function knownContextWindow(): number | null {
 }
 
 /** One streamed /chat call. */
-export const chat: ChatFn = async (req, onToken) => {
+export const chat: ChatFn = async (req, onToken, signal) => {
+  signal?.throwIfAborted();
   const controller = new AbortController();
   const budgetMs = await llmBudgetMs(TIMEOUT_MS);
   const timer = setTimeout(() => controller.abort(), budgetMs);
+  const stop = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", stop, { once: true });
   let resp: Response;
   try {
     resp = await fetch(`${LLM_SERVICE_URL}/chat`, {
@@ -174,6 +181,8 @@ export const chat: ChatFn = async (req, onToken) => {
     });
   } catch (err) {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+    signal?.throwIfAborted();
     throw new LlmServiceUnavailableError(`llm-service unreachable: ${(err as Error).message}`);
   }
 
@@ -198,11 +207,13 @@ export const chat: ChatFn = async (req, onToken) => {
     if (reply.usage?.n_ctx) lastWindow = reply.usage.n_ctx;
     return reply;
   } catch (err) {
+    signal?.throwIfAborted();
     if ((err as Error).name === "AbortError") {
       throw new LlmServiceUnavailableError(`llm-service /chat timed out after ${budgetMs} ms`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
   }
 };

@@ -51,6 +51,8 @@ export interface SnapshotPoint {
   as_of: string;
   /** Shares held that day; 0 when the position is absent from a snapshot of the depot. */
   amount: number;
+  /** The depot statement the figure was read from; null for the bank's sync or an absent position. */
+  document_id?: number | null;
 }
 
 export interface ReconTx {
@@ -66,6 +68,9 @@ export interface HoldingGap {
   from: string;
   /** Snapshot showing the change. */
   to: string;
+  /** The depot statements the two snapshots were read from (null: the bank's sync, or not listed). */
+  from_document_id: number | null;
+  to_document_id: number | null;
   amount_before: string;
   amount_after: string;
   /** amount_after − amount_before (scale 8, signed). */
@@ -174,6 +179,8 @@ export function reconcilePosition(
       position_key: positionKey,
       from: before.as_of,
       to: after.as_of,
+      from_document_id: before.document_id ?? null,
+      to_document_id: after.document_id ?? null,
       amount_before: fmt(before.amount),
       amount_after: fmt(after.amount),
       delta: fmt(delta),
@@ -215,6 +222,7 @@ export async function reconcileHoldings(
         name: financeAccountHolding.name,
         amount: financeAccountHolding.amount,
         source: financeAccountHolding.source,
+        document_id: financeAccountHolding.document_id,
       })
       .from(financeAccountHolding)
       .where(inArray(financeAccountHolding.account_id, accountIds))
@@ -244,11 +252,19 @@ export async function reconcileHoldings(
   // Per depot: every snapshot day, and the amount per position per day.
   const daysByAccount = new Map<number, string[]>();
   const amounts = new Map<string, Map<string, number>>(); // `${account}|${key}` → day → amount
+  const papers = new Map<string, Map<string, number>>(); // `${account}|${key}` → day → statement document
+  // A day the position is absent from: the statement that leaves it out.
+  const dayPapers = new Map<number, Map<string, number>>(); // account → day → statement document
   for (const h of holdings) {
     const d = day(h.as_of);
     const days = daysByAccount.get(h.account_id) ?? [];
     if (days[days.length - 1] !== d) days.push(d);
     daysByAccount.set(h.account_id, days);
+    if (h.document_id != null) {
+      const docs = dayPapers.get(h.account_id) ?? new Map<string, number>();
+      if (!docs.has(d)) docs.set(d, h.document_id);
+      dayPapers.set(h.account_id, docs);
+    }
     const key = keyOf(h);
     if (!key || (onlyKey !== null && key !== onlyKey)) continue;
     if (isIgnoredIn(ignored, h.account_id, h)) continue;
@@ -257,6 +273,11 @@ export async function reconcileHoldings(
     const a = h.amount === null ? 0 : Number(h.amount);
     byDay.set(d, (byDay.get(d) ?? 0) + (Number.isFinite(a) ? a : 0));
     amounts.set(id, byDay);
+    if (h.document_id != null) {
+      const docs = papers.get(id) ?? new Map<string, number>();
+      docs.set(d, h.document_id);
+      papers.set(id, docs);
+    }
   }
 
   const txsById = new Map<string, ReconTx[]>();
@@ -279,7 +300,11 @@ export async function reconcileHoldings(
     const firstSeen = [...byDay.keys()].sort()[0]!;
     const points: SnapshotPoint[] = days
       .filter((d) => d >= firstSeen)
-      .map((d) => ({ as_of: d, amount: byDay.get(d) ?? 0 }));
+      .map((d) => ({
+        as_of: d,
+        amount: byDay.get(d) ?? 0,
+        document_id: byDay.has(d) ? (papers.get(id)?.get(d) ?? null) : (dayPapers.get(accountId)?.get(d) ?? null),
+      }));
     const r = reconcilePosition(accountId, key, points, txsById.get(id) ?? []);
     result.gaps.push(...r.gaps);
     result.unverifiable += r.unverifiable;

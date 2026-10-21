@@ -28,6 +28,8 @@ interface LiveTurn {
   events: TurnEvent[];
   listeners: Set<Listener>;
   finished: boolean;
+  /** Fired by the user's "Abbrechen"; the running turn stops at its next step. */
+  controller: AbortController;
   expiry?: ReturnType<typeof setTimeout>;
 }
 
@@ -49,10 +51,14 @@ function turnFor(turnId: string, userId: string): LiveTurn {
     if (existing.userId !== userId) throw new Error("turn belongs to someone else");
     return existing;
   }
-  const turn: LiveTurn = { userId, events: [], listeners: new Set(), finished: false };
+  const turn: LiveTurn = { userId, events: [], listeners: new Set(), finished: false, controller: new AbortController() };
   turns.set(turnId, turn);
   expireIn(turnId, turn, KEEP_PENDING_MS);
   return turn;
+}
+
+function isLast(event: TurnEvent): boolean {
+  return event.type === "done" || event.type === "error" || event.type === "cancelled";
 }
 
 /** The emitter a running turn reports through. */
@@ -70,7 +76,7 @@ export function openTurn(turnId: string, userId: string): (event: TurnEvent) => 
         turn.listeners.delete(listener);
       }
     }
-    if (event.type === "done" || event.type === "error") {
+    if (isLast(event)) {
       turn.finished = true;
       expireIn(turnId, turn, KEEP_FINISHED_MS);
     }
@@ -98,13 +104,32 @@ export function followTurn(turnId: string, userId: string, listener: Listener): 
     const wrapped: Listener = (event) => {
       if (giveUp) clearTimeout(giveUp);
       listener(event);
-      if (event.type === "done" || event.type === "error") {
+      if (isLast(event)) {
         turn.listeners.delete(wrapped);
         resolve();
       }
     };
     turn.listeners.add(wrapped);
   });
+}
+
+/**
+ * What the running turn listens to for a cancel. Taken before the turn is
+ * opened, so a cancel that beat the question there still counts.
+ */
+export function turnSignal(turnId: string, userId: string): AbortSignal {
+  return turnFor(turnId, userId).controller.signal;
+}
+
+/**
+ * Stops a turn of this user's. False when there is nothing left to stop: the
+ * turn is finished, or it is not (or no longer) known here.
+ */
+export function cancelTurn(turnId: string, userId: string): boolean {
+  const turn = turns.get(turnId);
+  if (!turn || turn.userId !== userId || turn.finished) return false;
+  turn.controller.abort();
+  return true;
 }
 
 /** Reset for tests. */

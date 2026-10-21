@@ -861,6 +861,9 @@ export interface HoldingGap {
   position_key: string
   from: string
   to: string
+  /** The depot statements the two stands were read from (null: the bank's sync). */
+  from_document_id: number | null
+  to_document_id: number | null
   amount_before: string
   amount_after: string
   delta: string

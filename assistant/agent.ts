@@ -138,6 +138,7 @@ Rules:
 - When the user answers an offer you made ("Soll ich eines davon genauer ansehen?" → "ja"), act on the rows of your previous answer — their ids are in the earlier tool results — with get_document_summary(ids = …) or get_document_text; never search again for them.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button. Call one only when the user asks for that change, then say what you proposed and that it waits for their confirmation. Never claim it is done.
 - For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and the closing formula ("Mit freundlichen Grüßen") — the server signs it with the user's name. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result, and put everything the user asks to have mentioned into the letter text itself, not only into your reply. Write dates in letters as DD.MM.YYYY. Where the letter needs a fact you do not have, write a gap as [[what is missing]] instead of guessing; the user fills it in on the card.
+- To keep something as a document ("speichere das als Dokument", "mach eine Notiz daraus", "fasse das Gespräch als Dokument zusammen") call create_text_document with a title and the complete text in Markdown, written from the tool results and answers of this conversation; never invent facts for it. A text document's Markdown is read back with get_document_text.
 - When a table helps (a few rows compared by the same columns), write it as a Markdown table: a header row, then a separator row like |---|---:|, one row per line. The app shows it as a real table. Never draw tables with +---+, box characters or spaces, and never put a table in a code block.
 - Answer briefly in the user's language (usually German).`;
 
@@ -258,6 +259,12 @@ export interface TurnInput {
   /** Digests of the tool results in `history`, by call id: what they shrink to when room runs out. */
   historyDigests?: Record<string, string>;
   schemaBudgetTokens?: number;
+  /**
+   * The user's "Abbrechen". Checked before each model round and each tool
+   * call, and handed to the model call; a cancelled turn throws the signal's
+   * reason and emits nothing more.
+   */
+  signal?: AbortSignal;
   /** Wraps each /chat call, e.g. in the ai-queue's llm slot. */
   withSlot?: <T>(fn: () => Promise<T>) => Promise<T>;
   /** The conversation the turn belongs to; proposals are filed under it. */
@@ -410,7 +417,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   };
   /** One /chat call, and what it took of the window. */
   const send = async (request: ChatRequest): Promise<ChatReply> => {
-    const reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
+    const reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
     const estimated = estimateTokens(request.messages) + estimateTokens(request.tools ?? []);
     usage.estimated = Math.max(usage.estimated, estimated);
     const counted = reply.usage;
@@ -428,6 +435,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     return reply;
   };
   for (let round = 1; round <= maxRounds && answer === null; round++) {
+    input.signal?.throwIfAborted();
     rounds = round;
     const last = round === maxRounds;
     const definitions = [
@@ -514,6 +522,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     lastRoundStart = messages.length;
     messages.push({ role: "assistant", content: reply.content, tool_calls: reply.tool_calls });
     for (const call of reply.tool_calls) {
+      input.signal?.throwIfAborted();
       const name = call.function.name;
       const args = parseArguments(call.function.arguments);
       const result = (content: string) => messages.push({ role: "tool", tool_call_id: call.id, content });

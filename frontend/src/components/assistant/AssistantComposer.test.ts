@@ -10,8 +10,9 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 } as unknown as typeof ResizeObserver
 
-function mountComposer(initial = '') {
+function mountComposer(initial = '', extra: Record<string, unknown> = {}) {
   const sent: string[] = []
+  const cancels: number[] = []
   const text = ref(initial)
   const el = document.createElement('div')
   document.body.appendChild(el)
@@ -20,10 +21,12 @@ function mountComposer(initial = '') {
       modelValue: text.value,
       'onUpdate:modelValue': (v: string) => { text.value = v },
       onSend: (m: string) => sent.push(m),
+      onCancel: () => cancels.push(1),
+      ...extra,
     }),
   }).use(PrimeVue).mount(el)
   const field = el.querySelector('textarea')!
-  return { sent, text, field }
+  return { sent, cancels, text, field, el }
 }
 
 function press(field: HTMLTextAreaElement, init: KeyboardEventInit) {
@@ -53,5 +56,22 @@ describe('AssistantComposer', () => {
     const { sent, field } = mountComposer('   ')
     press(field, {})
     expect(sent).toEqual([])
+  })
+
+  it('offers Abbrechen instead of Senden while a cancellable answer runs', async () => {
+    const { sent, cancels, field, el } = mountComposer('Nächste Frage', { busy: true, cancellable: true })
+    expect(el.querySelector('[aria-label="Frage senden"]')).toBeNull()
+    const stop = el.querySelector<HTMLButtonElement>('[aria-label="Antwort abbrechen"]')!
+    stop.click()
+    expect(cancels).toHaveLength(1)
+    // Enter does not send a second question while the first is answered.
+    press(field, {})
+    expect(sent).toEqual([])
+  })
+
+  it('shows Senden while busy if the answer cannot be cancelled yet', () => {
+    const { el } = mountComposer('x', { busy: true })
+    expect(el.querySelector('[aria-label="Antwort abbrechen"]')).toBeNull()
+    expect(el.querySelector('[aria-label="Frage senden"]')).not.toBeNull()
   })
 })

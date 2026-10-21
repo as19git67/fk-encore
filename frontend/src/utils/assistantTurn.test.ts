@@ -57,6 +57,12 @@ describe('applyEvent', () => {
     const t = play([{ type: 'error', message: 'Modell beschäftigt' }])
     expect(t).toMatchObject({ finished: true, error: 'Modell beschäftigt' })
   })
+
+  it('stops quietly when the user cancels', () => {
+    const t = play([{ type: 'token', text: 'Ich ' }, { type: 'cancelled' }, { type: 'token', text: 'schau' }])
+    expect(t).toMatchObject({ finished: true, text: 'Ich ' })
+    expect(t.error).toBeUndefined()
+  })
 })
 
 describe('helpers', () => {

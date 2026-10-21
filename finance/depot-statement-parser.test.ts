@@ -136,6 +136,28 @@ describe("holdings table of a periodic report", () => {
     expect(r.positions).toEqual([]);
   });
 
+  it("keeps to the holdings table: a trade or booking the report lists elsewhere is no holding", () => {
+    // The report's own pages list a sale of a security the depot no longer
+    // holds, with its quantity nearby; only the table says what is held.
+    const r = inspectDepotStatement(`Finanzreport Nr. 3 per 01.03.2026 - Seite 2
+Umsätze
+02.02.2026 Wertpapierverkauf WKN EEE555 ISIN DE000EEE5559 Stück 7
+03.02.2026 Kontoführung 4,90
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal letzter Währung Kurswert Kaufwert Gewinn / Verlust
+AAA111 / Girosammelverwahrung 25,000 118,400 EUR 2.960,00 2.500,00 +460,00
+ALPHA INDUSTRIES AG NA O.N. +0,00
+BBB222 / Girosammelverwahrung 1O0,0OO 12,5OO EUR 1.25O,0O 1.4OO,0O -150,00
+BETA GLOBAL AG +0,00`)!;
+    expect(r.positions.map((p) => p.wkn)).toEqual(["AAA111"]);
+    // A row whose figures OCR garbled still belongs to the table.
+    expect(r.tableWkns).toEqual(["AAA111", "BBB222"]);
+  });
+
+  it("names no table on a statement without one", () => {
+    expect(inspectDepotStatement(STATEMENT_TEXT)!.tableWkns).toEqual([]);
+  });
+
   it("repairs a WKN OCR read with I or O", () => {
     expect(repairWkn("AOB2C3")).toBe("A0B2C3");
     expect(repairWkn("i23456")).toBe("123456");

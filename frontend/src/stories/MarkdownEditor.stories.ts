@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/vue3'
 import { ref } from 'vue'
 import MarkdownEditor from '../components/documents/MarkdownEditor.vue'
 import MarkdownView from '../components/documents/MarkdownView.vue'
+import ComposeDialog from '../components/documents/ComposeDialog.vue'
+import { http, HttpResponse } from 'msw'
 
 const SAMPLE = `# Heizungswartung
 
@@ -73,5 +75,26 @@ export const Anzeige: Story = {
       return { source: SAMPLE }
     },
     template: '<div style="padding: 16px; max-width: 760px"><MarkdownView :source="source" /></div>',
+  }),
+}
+
+export const AssistentDialog: StoryObj<typeof ComposeDialog> = {
+  name: 'Assistent schreiben lassen',
+  parameters: {
+    msw: {
+      handlers: [
+        http.post('/api/assistant/compose', () =>
+          HttpResponse.json({ markdown: '## Einladung\n\nWir feiern am **Samstag um 15 Uhr** im Garten.\n\n- Getränke sind da\n- Bitte Salat mitbringen' }),
+        ),
+      ],
+    },
+  },
+  render: () => ({
+    components: { ComposeDialog },
+    setup() {
+      const visible = ref(true)
+      return { visible }
+    },
+    template: '<ComposeDialog v-model:visible="visible" title="Sommerfest" current-text="Liebe Nachbarn," />',
   }),
 }

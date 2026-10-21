@@ -58,6 +58,7 @@ import {
 import { extractStatementPositions, LlmServiceUnavailableError } from "./llm-client";
 import { documentsOfPaperType, paperTypeOf } from "./depot-paper-type";
 import { enrichDocument } from "./depot-document-enrichment";
+import { securityIdentity, type SecurityIdentity } from "./security-identity";
 
 console.log("[boot] finance/depot-statement-enrichment.ts: all imports resolved");
 
@@ -254,6 +255,24 @@ async function depotsConfirmingByName(positions: MergedPosition[], accountIds: n
   return out;
 }
 
+/**
+ * Whether a position belongs to the paper's holdings table. The model
+ * reads the whole paper and may list a security the report only mentions
+ * as a trade or a booking — with a quantity from somewhere near it. The
+ * table names its rows by WKN, so a position counts when its WKN (or the
+ * one its ISIN is known by) is a row's.
+ */
+export function tableMembership(
+  tableWkns: string[],
+  identity: SecurityIdentity,
+): (p: { isin: string | null; wkn: string | null }) => boolean {
+  const wkns = new Set(tableWkns.map((w) => repairWkn(w)));
+  return (p) => {
+    const wkn = identity.complete({ isin: p.isin, wkn: p.wkn }).wkn;
+    return wkn !== null && wkns.has(repairWkn(wkn));
+  };
+}
+
 function fixed(n: number | null, scale: number): string | null {
   return n === null ? null : n.toFixed(scale);
 }
@@ -322,7 +341,8 @@ export async function readDepotStatement(
   const merged = mergeStatement(rules, reading.llm);
   result.as_of = merged.asOf ?? doc.doc_date?.slice(0, 10) ?? null;
   result.depot_number = merged.depotNumber;
-  const positions = merged.positions.filter((p) => p.isin || p.wkn);
+  const inTable = rules.tableWkns.length > 0 ? tableMembership(rules.tableWkns, await securityIdentity()) : null;
+  const positions = merged.positions.filter((p) => (p.isin || p.wkn) && (inTable === null || inTable(p)));
   result.positions_found = positions.length;
   result.identifiers = positions.map((p) => (p.isin ?? p.wkn)!).slice(0, 5);
   if (positions.length === 0 || result.as_of === null) {
@@ -513,6 +533,47 @@ export async function enrichPendingStatements(
     }
   }
   return stats;
+}
+
+/**
+ * Holdings rows a report's trade list or account pages put in before the
+ * statement reader kept to the holdings table (see tableMembership): for
+ * every paper with a holdings table, the rows it gave a security the table
+ * does not list are deleted. Returns how many went.
+ */
+export async function pruneStatementHoldings(accountIds: number[] | null): Promise<number> {
+  if (accountIds && accountIds.length === 0) return 0;
+  const conditions = [eq(financeAccountHolding.source, "document"), isNotNull(financeAccountHolding.document_id)];
+  if (accountIds) conditions.push(inArray(financeAccountHolding.account_id, accountIds));
+  const rows = await db
+    .select({
+      id: financeAccountHolding.id,
+      document_id: financeAccountHolding.document_id,
+      isin: financeAccountHolding.isin,
+      wkn: financeAccountHolding.wkn,
+    })
+    .from(financeAccountHolding)
+    .where(and(...conditions));
+  if (rows.length === 0) return 0;
+
+  const docIds = [...new Set(rows.map((r) => r.document_id!))];
+  const texts = await db
+    .select({ id: documents.id, extracted_text: documents.extracted_text })
+    .from(documents)
+    .where(inArray(documents.id, docIds));
+  const identity = await securityIdentity();
+  const membership = new Map<number, ReturnType<typeof tableMembership>>();
+  for (const d of texts) {
+    const tableWkns = inspectDepotStatement(d.extracted_text)?.tableWkns ?? [];
+    if (tableWkns.length > 0) membership.set(d.id, tableMembership(tableWkns, identity));
+  }
+  const stale = rows.filter((r) => {
+    const inTable = membership.get(r.document_id!);
+    return inTable !== undefined && !inTable(r);
+  });
+  if (stale.length === 0) return 0;
+  await db.delete(financeAccountHolding).where(inArray(financeAccountHolding.id, stale.map((r) => r.id)));
+  return stale.length;
 }
 
 /** The statements whose rows a depot carries, for the holdings views. */

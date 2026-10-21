@@ -15,6 +15,7 @@ import EmptyState from '../../components/layout/EmptyState.vue'
 import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
+import SettlementDocumentDialog from '../../components/finance/SettlementDocumentDialog.vue'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useMediaQuery } from '../../composables/useBreakpoint'
 import { compactDateLabels, fullDateLabel } from '../../utils/financeChartDates'
@@ -96,6 +97,8 @@ watch([positionKey, () => accountIds.value.join(','), () => route.query.closedDe
 const confirm = useConfirm()
 const removing = ref<number | null>(null)
 const removeNotice = ref<string | null>(null)
+/** The depot statement behind a stand in the holdings check, shown in a dialog. */
+const openStatement = ref<number | null>(null)
 
 function depotStatusText(d: PositionDepotSecurity): string {
   if (d.bank_held) return `von der Bank gemeldet (Stand ${formatIsoDate(d.bank_as_of)})`
@@ -685,7 +688,19 @@ function transactionCash(tx: PortfolioTransaction): string {
               </thead>
               <tbody>
                 <tr v-for="g in data.holding_gaps" :key="`${g.account_id}|${g.to}`">
-                  <td class="pp-date">{{ formatIsoDate(g.from) }} – {{ formatIsoDate(g.to) }}</td>
+                  <td class="pp-date">
+                    <template v-for="(stand, i) in [{ day: g.from, doc: g.from_document_id }, { day: g.to, doc: g.to_document_id }]" :key="i">
+                      <template v-if="i === 1"> – </template>
+                      <button
+                        v-if="stand.doc !== null"
+                        type="button"
+                        class="pp-stand-doc"
+                        :aria-label="`Depotauszug vom ${formatIsoDate(stand.day)} ansehen`"
+                        @click="openStatement = stand.doc"
+                      >{{ formatIsoDate(stand.day) }}</button>
+                      <template v-else>{{ formatIsoDate(stand.day) }}</template>
+                    </template>
+                  </td>
                   <td>{{ accountLabelById.get(g.account_id) ?? `#${g.account_id}` }}</td>
                   <td class="pp-col-num">{{ formatQuantity(g.amount_before) }} → {{ formatQuantity(g.amount_after) }}</td>
                   <td class="pp-col-num">{{ formatQuantity(g.explained) }}</td>
@@ -694,6 +709,11 @@ function transactionCash(tx: PortfolioTransaction): string {
               </tbody>
             </table>
           </ScrollX>
+          <SettlementDocumentDialog
+            v-if="openStatement !== null"
+            :document-id="openStatement"
+            @close="openStatement = null"
+          />
         </template>
         <p v-if="data.unverifiable_changes > 0" class="pp-muted">
           {{ data.unverifiable_changes }} Bestandsänderung{{ data.unverifiable_changes === 1 ? '' : 'en' }}
@@ -842,6 +862,15 @@ function transactionCash(tx: PortfolioTransaction): string {
 </template>
 
 <style scoped>
+/* A stand read from a depot statement: its date opens the paper. */
+.pp-stand-doc {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--p-primary-color);
+  cursor: pointer;
+}
 /* Space between the page's sections; each section spaces its own parts. */
 .pp-sections {
   display: flex;

@@ -87,7 +87,7 @@ export interface AskResponse {
 
 /** One event of a running turn, as the stream sends it. */
 export interface StreamEvent {
-  type: 'token' | 'retract' | 'tool_start' | 'tool_result' | 'done' | 'error'
+  type: 'token' | 'retract' | 'tool_start' | 'tool_result' | 'done' | 'error' | 'cancelled'
   text?: string
   tool?: string
   arguments?: Record<string, unknown>
@@ -136,6 +136,8 @@ export interface Proposal {
   error: string | null
   /** A letter the user can change before it goes out (#1534). */
   letter: LetterDraft | null
+  /** A text document the proposal would file: title and Markdown. */
+  text_document: { title: string; markdown: string } | null
 }
 
 export type LetterDestination = 'document' | 'collection'
@@ -202,6 +204,27 @@ export function ask(conversationId: number, message: string, turnId?: string): P
     body: JSON.stringify({ message, turnId }),
     timeoutMs: ASK_TIMEOUT_MS,
   })
+}
+
+/**
+ * Lets the assistant write text for the document editor: `instruction` says
+ * what, `text` (optional) is the document so far. Nothing is stored; the
+ * Markdown comes back for the editor to insert.
+ */
+export function composeText(payload: { instruction: string; title?: string; text?: string }): Promise<{ markdown: string }> {
+  return apiFetch('/assistant/compose', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    timeoutMs: ASK_TIMEOUT_MS,
+  })
+}
+
+/**
+ * Stops a running answer. The waiting `ask` then fails with `canceled`;
+ * `cancelled: false` means the answer was already finished.
+ */
+export function cancelTurn(turnId: string): Promise<{ cancelled: boolean }> {
+  return apiFetch(`/assistant/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' })
 }
 
 /** A turn id the server accepts: 8 to 64 letters, digits, '-' or '_'. */

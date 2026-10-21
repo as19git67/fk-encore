@@ -20,6 +20,7 @@ import { chat, LlmServiceUnavailableError, type ChatReply } from "./llm-client";
 import { __resetLiveTurnsForTests } from "./live";
 import {
   ask,
+  cancelAssistantTurn,
   createConversation,
   deleteConversation,
   getConversation,
@@ -200,6 +201,51 @@ describe("watching a turn", () => {
     const other = fakeStream();
     await watch({ turnId: "turn-0002" }, other.stream);
     expect(other.sent).toEqual([{ type: "error", message: "turn belongs to someone else" }]);
+  });
+
+  it("Abbrechen stops the model call, tells the stream and keeps nothing", async () => {
+    let started!: () => void;
+    const calling = new Promise<void>((resolve) => { started = resolve; });
+    vi.mocked(chat).mockImplementation(async (_req, onToken, signal) => {
+      onToken?.("Ich schau");
+      started();
+      // Like the real client: the closed request rejects with the signal's reason.
+      return new Promise<ChatReply>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason));
+      });
+    });
+    const conv = await createConversation({});
+    const { sent, stream } = fakeStream();
+
+    const watching = watch({ turnId: "turn-0004" }, stream);
+    const asking = ask({ id: conv.id, message: "Zähler?", turnId: "turn-0004" });
+    await calling;
+
+    setAuth("702");
+    expect(await cancelAssistantTurn({ turnId: "turn-0004" })).toEqual({ cancelled: false });
+    setAuth("701");
+    expect(await cancelAssistantTurn({ turnId: "turn-0004" })).toEqual({ cancelled: true });
+
+    await expect(asking).rejects.toMatchObject({ code: "canceled" });
+    await watching;
+    expect(sent.map((e) => e.type)).toEqual(["token", "cancelled"]);
+    expect(await db.select().from(assistantMessage)).toEqual([]);
+    // Finished: a second click has nothing left to stop.
+    expect(await cancelAssistantTurn({ turnId: "turn-0004" })).toEqual({ cancelled: false });
+  });
+
+  it("a cancel that beats the question still stops it", async () => {
+    vi.mocked(chat).mockResolvedValue(text("Hallo."));
+    const conv = await createConversation({});
+    const { sent, stream } = fakeStream();
+
+    const watching = watch({ turnId: "turn-0005" }, stream);
+    expect(await cancelAssistantTurn({ turnId: "turn-0005" })).toEqual({ cancelled: true });
+    await expect(ask({ id: conv.id, message: "Hallo", turnId: "turn-0005" })).rejects.toMatchObject({ code: "canceled" });
+    await watching;
+
+    expect(chat).not.toHaveBeenCalled();
+    expect(sent.map((e) => e.type)).toEqual(["cancelled"]);
   });
 
   it("a turn id cannot be posted twice", async () => {

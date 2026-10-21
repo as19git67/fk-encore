@@ -94,6 +94,8 @@ export function applyEvent(turn: LiveTurn, event: StreamEvent): LiveTurn {
       }
     case 'error':
       return { ...turn, finished: true, error: event.message ?? 'Unbekannter Fehler' }
+    case 'cancelled':
+      return { ...turn, finished: true }
     default:
       return turn
   }

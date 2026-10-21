@@ -8,6 +8,10 @@
  * widths short, and with a scrolling field that shows as a permanent
  * scrollbar on a single line. Here the border is added, and the field only
  * scrolls once it has reached its full height.
+ *
+ * While an answer is being written the send button becomes "Abbrechen"; it
+ * stops the answer wherever it is — waiting for the model, in a tool, or
+ * mid-sentence. The field stays editable for the next question.
  */
 import { nextTick, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
@@ -15,10 +19,14 @@ import Textarea from 'primevue/textarea'
 
 const props = withDefaults(defineProps<{
   busy?: boolean
+  /** Offer "Abbrechen" while busy. */
+  cancellable?: boolean
+  /** The cancel was sent and the answer is winding down. */
+  cancelling?: boolean
   placeholder?: string
-}>(), { busy: false, placeholder: 'Was möchtest du wissen?' })
+}>(), { busy: false, cancellable: false, cancelling: false, placeholder: 'Was möchtest du wissen?' })
 
-const emit = defineEmits<{ send: [message: string] }>()
+const emit = defineEmits<{ send: [message: string]; cancel: [] }>()
 
 const text = defineModel<string>({ default: '' })
 const field = ref<{ $el: HTMLTextAreaElement } | null>(null)
@@ -73,6 +81,18 @@ onMounted(resize)
       @input="resize"
     />
     <Button
+      v-if="busy && cancellable"
+      type="button"
+      icon="pi pi-stop-circle"
+      rounded
+      severity="secondary"
+      :loading="cancelling"
+      :disabled="cancelling"
+      aria-label="Antwort abbrechen"
+      @click="emit('cancel')"
+    />
+    <Button
+      v-else
       type="submit"
       icon="pi pi-send"
       rounded
