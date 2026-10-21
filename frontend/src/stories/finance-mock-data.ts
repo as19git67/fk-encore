@@ -503,7 +503,7 @@ export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
     { transaction_id: 903, account_id: 11, executed_at: '2026-02-03', quantity: '10.00000000', proceeds: '1418.95', cost: '1200.00', cost_per_unit: '120.000000', gain: '218.95' },
   ],
   holding_gaps: [
-    { account_id: 12, position_key: PF_ISIN_A, from: '2025-06-01', to: '2025-09-01', amount_before: '10.00000000', amount_after: '20.00000000', delta: '10.00000000', explained: '0.00000000', unexplained: '10.00000000', transaction_count: 0 },
+    { account_id: 12, position_key: PF_ISIN_A, from: '2025-06-01', to: '2025-09-01', amount_before: '10.00000000', amount_after: '20.00000000', delta: '10.00000000', explained: '0.00000000', unexplained: '10.00000000', transaction_count: 0, from_document_id: null, to_document_id: null },
   ],
   unverifiable_changes: 1,
   depots: [
@@ -543,7 +543,7 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
     {
       account_id: 12, account_label: 'Depot Musterbroker', position_key: PF_ISIN_A, name: 'Alpha Industries AG',
       from: '2025-06-01', to: '2025-09-01', amount_before: '10.00000000', amount_after: '20.00000000',
-      delta: '10.00000000', explained: '0.00000000', unexplained: '10.00000000', transaction_count: 0,
+      delta: '10.00000000', explained: '0.00000000', unexplained: '10.00000000', transaction_count: 0, from_document_id: null, to_document_id: null,
     },
   ],
   unverifiable_changes: 2,

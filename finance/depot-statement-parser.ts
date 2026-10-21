@@ -110,6 +110,13 @@ export interface StatementReadingValues {
 export interface StatementInspection extends StatementReadingValues {
   /** The text reads as a depot statement (see looksLikeDepotStatement). */
   statement: boolean;
+  /**
+   * The WKNs a holdings table lists, empty when the paper has none. Where a
+   * paper has one, the table is what the depot held: an identifier
+   * elsewhere — a trade in the report's list, a booking on its account
+   * pages — names a security that moved, not one the depot holds.
+   */
+  tableWkns: string[];
 }
 
 // ----------------------------------------------------------------------
@@ -305,6 +312,24 @@ function rowName(lines: string[], row: number): string | null {
   return null;
 }
 
+/**
+ * A holdings-table row as far as its WKN and custody type: looser than
+ * HOLDING_ROW_RE, so a row whose figures OCR garbled still counts as one.
+ */
+const TABLE_ROW_START_RE = /^\s*([A-Z0-9]{6})\s*[/|7]\s*\S*(?:verwahrung|rechnung)\b/i;
+
+/** The WKNs the holdings table of a paper lists, from every row that starts like one. */
+export function tableRowWkns(lines: string[]): string[] {
+  const out = new Set<string>();
+  for (const raw of lines) {
+    const m = TABLE_ROW_START_RE.exec(raw);
+    if (!m) continue;
+    const wkn = repairWkn(m[1]!);
+    if (/\d/.test(wkn)) out.add(wkn);
+  }
+  return [...out];
+}
+
 /** Every row of a holdings table, with the line it stands on. */
 export function holdingRows(lines: string[]): Array<StatementPosition & { line: number }> {
   const rows: Array<StatementPosition & { line: number }> = [];
@@ -360,8 +385,10 @@ export function inspectDepotStatement(raw: string | null | undefined): Statement
   const statement = looksLikeDepotStatement(text);
   const lines = text.split("\n");
   const rows = holdingRows(lines);
-  const inRows = new Set(rows.map((r) => r.wkn));
-  const hits = identifierHits(lines).filter((h) => !(h.wkn && inRows.has(h.wkn)) && !rows.some((r) => r.line === h.line));
+  const tableWkns = rows.length > 0 ? tableRowWkns(lines) : [];
+  // A paper with a holdings table holds what the table lists: an identifier
+  // outside it (a trade, a booking) gets no position of its own.
+  const hits = rows.length > 0 ? [] : identifierHits(lines);
   const identifierLines = [...hits.map((h) => h.line), ...rows.map((r) => r.line)];
   const tablePositions: StatementPosition[] = rows.map(({ line: _line, ...p }) => p);
   const labelledPositions: StatementPosition[] = hits.map((hit) => {
@@ -387,6 +414,7 @@ export function inspectDepotStatement(raw: string | null | undefined): Statement
     asOf: statementDate(text),
     depotNumber: depotNumberOf(text),
     positions: [...tablePositions, ...labelledPositions],
+    tableWkns,
   };
 }
 

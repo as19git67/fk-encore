@@ -47,7 +47,7 @@ import {
   financeTransaction,
   users,
 } from "../db/schema";
-import { enrichPendingStatements, readDepotStatement } from "./depot-statement-enrichment";
+import { enrichPendingStatements, pruneStatementHoldings, readDepotStatement } from "./depot-statement-enrichment";
 import { reconcileHoldings } from "./depot-holding-reconciliation";
 import { admitSecurity, listSecurities } from "./depot-securities";
 import {
@@ -356,6 +356,8 @@ Alpha Industries AG ${ISIN_A}
     const gaps = (await reconcileHoldings([depot])).gaps;
     expect(gaps).toHaveLength(1);
     expect(gaps[0]).toMatchObject({ from: "2025-12-31", to: "2026-03-01", unexplained: "5.00000000" });
+    // The stand read from the statement names it; the bank's sync names none.
+    expect(gaps[0]).toMatchObject({ from_document_id: docId, to_document_id: null });
   });
 
   it("reads pending statements in the background run and skips those stored already", async () => {
@@ -408,6 +410,53 @@ BETA GLOBAL AG +0,00`);
     expect(alpha!.wkn).toBe("AAA111");
     const proposed = await listSecurities([depot], ["proposed"]);
     expect(proposed.map((s) => s.wkn)).toEqual(["BBB222"]);
+  });
+
+  it("stores only what a report's holdings table lists, not a security its trade list names", async () => {
+    const { depot } = await setup({ depotNumber: null });
+    // Gamma was sold before the report's day: the report lists the sale, its table no longer the security.
+    const ISIN_C = "DE000EEE5559";
+    await admitSecurity(depot, { isin: ISIN_C, wkn: "EEE555", name: "Gamma Werke AG" }, "bank");
+    const text = `Finanzreport Nr. 2 per 01.02.2026
+Umsätze
+12.01.2026 Wertpapierverkauf WKN EEE555 ISIN ${ISIN_C} Stück 3
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal letzter Währung Kurswert Kaufwert Gewinn / Verlust
+AAA111 / Girosammelverwahrung 25,000 118,400 EUR 2.960,00 2.500,00 +460,00
+ALPHA INDUSTRIES AG NA O.N. +0,00`;
+    const docId = await insertDocument(text);
+    // The model lists the sold security too, with a quantity from elsewhere on the page.
+    vi.mocked(extractStatementPositions).mockResolvedValueOnce({
+      is_statement: true,
+      as_of: "2026-02-01",
+      positions: [
+        { wkn: "AAA111", name: "Alpha Industries AG", quantity: 25, price: 118.4, value: 2960, currency: "EUR" },
+        { isin: ISIN_C, name: "Gamma Werke AG", quantity: 7, currency: "EUR" },
+      ],
+    });
+
+    const r = await readDepotStatement(docId);
+    expect(r.outcome).toBe("stored");
+    expect(r.positions_stored).toBe(1);
+    const rows = (await holdingsOf(depot)).filter((h) => h.document_id === docId);
+    expect(rows.map((h) => h.wkn)).toEqual(["AAA111"]);
+
+    // A row an earlier reading wrote from the trade list goes; the table's stays.
+    await db.insert(financeAccountHolding).values({
+      account_id: depot,
+      as_of: "2026-02-01",
+      isin: ISIN_C,
+      name: "Gamma Werke AG",
+      amount: "7",
+      currency: "EUR",
+      source: "document",
+      document_id: docId,
+    });
+    expect(await pruneStatementHoldings([depot])).toBe(1);
+    const left = (await holdingsOf(depot)).filter((h) => h.document_id === docId);
+    expect(left.map((h) => h.wkn)).toEqual(["AAA111"]);
+    // Nothing more to drop the second time; other statements are untouched.
+    expect(await pruneStatementHoldings([depot])).toBe(0);
   });
 
   it("asks the model once about a paper the rules do not recognise and reads it as the kind it names", async () => {
