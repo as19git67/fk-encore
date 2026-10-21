@@ -117,6 +117,8 @@ export interface Proposal {
   error: string | null
   /** A letter the user can change before it goes out (#1534). */
   letter: LetterDraft | null
+  /** A text document the proposal would file: title and Markdown. */
+  text_document: { title: string; markdown: string } | null
 }
 
 export type LetterDestination = 'document' | 'collection'
@@ -181,6 +183,19 @@ export function ask(conversationId: number, message: string, turnId?: string): P
   return apiFetch(`/assistant/conversations/${conversationId}/ask`, {
     method: 'POST',
     body: JSON.stringify({ message, turnId }),
+    timeoutMs: ASK_TIMEOUT_MS,
+  })
+}
+
+/**
+ * Lets the assistant write text for the document editor: `instruction` says
+ * what, `text` (optional) is the document so far. Nothing is stored; the
+ * Markdown comes back for the editor to insert.
+ */
+export function composeText(payload: { instruction: string; title?: string; text?: string }): Promise<{ markdown: string }> {
+  return apiFetch('/assistant/compose', {
+    method: 'POST',
+    body: JSON.stringify(payload),
     timeoutMs: ASK_TIMEOUT_MS,
   })
 }

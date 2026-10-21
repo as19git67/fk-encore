@@ -23,7 +23,11 @@ const props = withDefaults(defineProps<{
   error?: string
   /** The stored message's id; rows of a stored answer can be returned to. */
   messageId?: number
-}>(), { blocks: () => [], steps: () => [], pending: false, error: undefined, messageId: undefined })
+  /** Offer "Als Textdokument speichern" (the user may file documents). */
+  keepable?: boolean
+}>(), { blocks: () => [], steps: () => [], pending: false, error: undefined, messageId: undefined, keepable: false })
+
+const emit = defineEmits<{ keep: [content: string] }>()
 
 // The assistant's bold, lists and code are rendered; the user's own text is
 // shown as typed.
@@ -58,6 +62,7 @@ async function copyMessage() {
 }
 
 onBeforeUnmount(() => { if (copiedTimer) clearTimeout(copiedTimer) })
+
 
 // A lookup that found nothing has its "· 0" in the steps above; an empty
 // grid under the answer said the same thing again, with nothing in it.
@@ -169,6 +174,18 @@ function isFolded(i: number): boolean {
         :aria-label="copied ? 'Kopiert' : 'Beitrag kopieren'"
         v-tooltip.bottom="copied ? 'Kopiert' : 'Kopieren'"
         @click="copyMessage"
+      />
+      <Button
+        v-if="keepable && role === 'assistant'"
+        icon="pi pi-file-edit"
+        text
+        rounded
+        size="small"
+        severity="secondary"
+        class="copy-button"
+        aria-label="Als Textdokument speichern"
+        v-tooltip.bottom="'Als Textdokument speichern'"
+        @click="emit('keep', content)"
       />
       <span class="copy-status" role="status">{{ copied ? 'Kopiert' : copyFailed ? 'Kopieren ging nicht' : '' }}</span>
     </div>

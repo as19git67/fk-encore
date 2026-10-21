@@ -23,6 +23,7 @@ const pending: Proposal = {
   result_download: null,
   error: null,
   letter: null,
+  text_document: null,
 }
 
 const letter: Proposal = {

@@ -1127,15 +1127,18 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (!categoryProtected) {
     patch.category_id = resolvedCategoryId;
     // A text document written in the app keeps the title its author gave it;
-    // the rest of the attributes come from the model like for any upload.
+    // category, type and summary come from the model like for any upload.
     patch.title = row.markdown_source != null && row.title
       ? row.title
       : classification.title || row.title || row.original_filename;
     // Already carried forward from the stored row when this run produced
     // nothing (steps 1b/2a above), so these write the effective value, not a
     // stray null.
-    patch.doc_date = classification.doc_date;
-    patch.sender = classification.sender;
+    // A text document is dated the day it was written and sent by its
+    // author; a date or name the model reads out of the text is not that.
+    const ownText = row.markdown_source != null;
+    patch.doc_date = ownText && row.doc_date ? row.doc_date : classification.doc_date;
+    patch.sender = ownText && row.sender ? row.sender : classification.sender;
     patch.document_number = classification.document_number;
     patch.summary = classification.summary;
     patch.classification_confidence = classification.confidence;

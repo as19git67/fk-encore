@@ -84,6 +84,13 @@ const PHOTO_HISTORY = earlierTurn(
   "Du hast 3 Favoriten aus 2025.",
 );
 
+const METER_HISTORY = earlierTurn(
+  "Wie viel Strom haben wir 2025 verbraucht?",
+  "consumption_report", { meter_id: 3, from: "2025-01-01", to: "2025-12-31" },
+  "[earlier result of consumption_report: meter 3, 2025-01-01..2025-12-31, total 3.412 kWh]",
+  "Der Zähler „Strom Haus“ zeigt für 2025 einen Verbrauch von 3.412 kWh.",
+);
+
 const PROPOSAL = (summary: string) => ({ proposal: { id: 1, summary, status: "pending — the user confirms on the card" } });
 
 export const BENCH_CASES: BenchCase[] = [
@@ -633,5 +640,16 @@ export const BENCH_CASES: BenchCase[] = [
     },
     expect: [{ tool: "render_letter", args: { body: { $all: [{ $contains: "850,00" }, { $contains: "september" }, { $contains: "oktober" }] } } }],
     results: { render_letter: PROPOSAL("Brief „Mietzahlungen September und Oktober“ an Max Mustermann") },
+  },
+  {
+    id: "keep-answer-as-text-document",
+    title: "Antwort als Textdokument ablegen",
+    question: "Speichere das als Dokument.",
+    history: METER_HISTORY,
+    expect: [{
+      tool: "create_text_document",
+      args: { title: { $present: true }, markdown: { $contains: "3.412" } },
+    }],
+    results: { create_text_document: PROPOSAL("Textdokument „Stromverbrauch 2025“ ablegen") },
   },
 ];
