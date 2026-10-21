@@ -11,8 +11,18 @@ const PHOTOS = ["module.photos", "photos.view"];
 
 /** Photos counted per call; past this the answer says "more than". */
 const PHOTO_COUNT_CAP = 2000;
+/** Photos read to narrow a previous result; the most the endpoint returns. */
+const NARROW_CAP = 5000;
 
-interface PhotoRow { id: number; taken_at?: string; created_at?: string; location_name?: string; location_city?: string; location_country?: string; filename?: string }
+type PhotoOrder = "newest" | "oldest" | "best";
+const ORDER_NOTE: Record<PhotoOrder, string> = { newest: "newest first", oldest: "oldest first", best: "best first by quality score" };
+
+interface PhotoRow {
+  id: number; taken_at?: string; created_at?: string; location_name?: string; location_city?: string; location_country?: string;
+  filename?: string; original_name?: string; mime_type?: string; size?: number; latitude?: number; longitude?: number;
+  ai_quality_score?: number; ai_quality_details?: Record<string, number>; description?: string; keywords?: string[];
+  curation_status?: string; orientation?: string | null;
+}
 interface NaturalResult { photoId: number; filename?: string; taken_at?: string; created_at: string; location_city?: string; location_country?: string; score: number }
 interface Recap { id: number; kind: string; title: string; subtitle: string | null; period_start: string | null; period_end: string | null; photo_count: number }
 interface Album {
@@ -35,23 +45,50 @@ function yearOf(date: string | null | undefined): number | undefined {
   return date ? Number(date.slice(0, 4)) : undefined;
 }
 
+const MEDIA_TYPES = ["photo", "video", "raw"] as const;
+const ORIENTATIONS = ["portrait", "landscape", "square"] as const;
+
+function oneOf<T extends string>(v: unknown, allowed: readonly T[]): T | undefined {
+  const s = str(v);
+  return s && (allowed as readonly string[]).includes(s) ? (s as T) : undefined;
+}
+
+/** A score in [0, 1] as a whole percent; the tools speak 0–100. */
+function percent(v: number | undefined): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? Math.round(v * 100) : undefined;
+}
+
+function excerpt(text: string | undefined, max = 60): string | undefined {
+  const t = text?.replace(/\s+/g, " ").trim();
+  if (!t) return undefined;
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: "Photos filtered by favorite flag, date range, person ids and place name, newest or oldest first; or narrows the previous photo result. Returns the count and the first ids.",
+  summary: "Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), newest, oldest or best first; or narrows the previous photo result.",
   permissions: PHOTOS,
   source: "hand",
   parameters: {
     type: "object",
     properties: {
-      favorite: { type: "boolean", description: "only favorites" },
+      favorite: { type: "boolean", description: "only when the user says Favoriten; 'die besten' is order=best" },
       date_from: { type: "string", description: "taken on or after, YYYY-MM-DD" },
       date_to: { type: "string", description: "taken on or before, YYYY-MM-DD" },
-      person_ids: { type: "array", items: { type: "integer" }, description: "ids from list_persons; photos showing these persons" },
-      place: { type: "string", description: "city, country or place name the photo was taken in, e.g. 'München'" },
-      order: { type: "string", enum: ["newest", "oldest"], description: "newest first (default) or oldest first — 'das älteste Foto' is order=oldest, limit=1" },
-      limit: { type: "integer", description: "rows to show, at most 60 (default 15); the count is reported regardless" },
-      from_previous_result: { type: "boolean", description: "narrow the photos of the previous answer instead of all photos" },
+      person_ids: { type: "array", items: { type: "integer" }, description: "ids from list_persons" },
+      place: { type: "string", description: "country, region or city, any language, e.g. 'Italien', 'Rom'" },
+      has_description: { type: "boolean", description: "with (true) or without (false) a description" },
+      text: { type: "string", description: "word in description, keywords, file name or text in the photo" },
+      keyword: { type: "string", description: "Stichwort" },
+      sight: { type: "string", description: "recognised sight, e.g. 'Eiffelturm'" },
+      orientation: { type: "string", enum: [...ORIENTATIONS] },
+      media_type: { type: "string", enum: [...MEDIA_TYPES] },
+      has_gps: { type: "boolean" },
+      quality_min: { type: "integer", description: "0–100" },
+      order: { type: "string", enum: ["newest", "oldest", "best"], description: "best = by quality and aesthetics score" },
+      limit: { type: "integer", description: "at most 60 (default 15)" },
+      from_previous_result: { type: "boolean", description: "narrow the previous answer's photos" },
     },
   },
   async run(args, ctx) {
@@ -62,12 +99,37 @@ export const listPhotos: ToolSpec = {
       ? args.person_ids.map((v) => int(v)).filter((v): v is number => v !== undefined)
       : [];
     const placeTerm = str(args.place);
-    const oldest = str(args.order) === "oldest";
+    const hasDescription = bool(args.has_description);
+    const text = str(args.text);
+    const keyword = str(args.keyword);
+    const sight = str(args.sight);
+    const orientation = oneOf(args.orientation, ORIENTATIONS);
+    const mediaType = oneOf(args.media_type, MEDIA_TYPES);
+    const hasGps = bool(args.has_gps);
+    const qualityMin = int(args.quality_min, { min: 0, max: 100 });
+    const order: PhotoOrder = str(args.order) === "oldest" ? "oldest" : str(args.order) === "best" ? "best" : "newest";
+    const oldest = order === "oldest";
     const limit = int(args.limit, { min: 1, max: 60 }) ?? 15;
     const fromPrevious = bool(args.from_previous_result) === true;
-    // A place narrows the previous result here, from the rows already
-    // known; everything else is the server's.
-    const serverFilter = Boolean(favorite || dateFrom || dateTo || personIds.length || (placeTerm && !fromPrevious));
+    const filter = {
+      favorite: favorite || undefined,
+      dateFrom,
+      dateTo,
+      personIds: personIds.length ? personIds.join(",") : undefined,
+      personMode: personIds.length ? "include" : undefined,
+      // The place is matched on the server, which knows its other names and
+      // outline: filtering the newest 2000 here missed every older photo.
+      locationText: placeTerm,
+      hasDescription,
+      text,
+      keyword,
+      sight,
+      orientation,
+      mediaTypes: mediaType,
+      hasGps,
+      qualityMin,
+    };
+    const serverFilter = Object.values(filter).some((v) => v !== undefined);
 
     const previous = fromPrevious ? ctx.previous?.("photo") : undefined;
     if (fromPrevious && !previous) throw new Error("there is no earlier photo result in this conversation");
@@ -75,17 +137,11 @@ export const listPhotos: ToolSpec = {
     let rows: PhotoRow[];
     let capped = false;
     if (!previous || serverFilter) {
-      // The place is matched on the server: filtering the newest 2000 here
-      // missed every older photo from that place.
       const res = await (photo.listPhotos({
-        favorite: favorite || undefined,
-        dateFrom,
-        dateTo,
-        personIds: personIds.length ? personIds.join(",") : undefined,
-        personMode: personIds.length ? "include" : undefined,
-        locationText: previous ? undefined : placeTerm,
+        ...filter,
+        sortBy: order === "best" ? "quality" : undefined,
         sortDir: oldest ? "asc" : "desc",
-        limit: PHOTO_COUNT_CAP + 1,
+        limit: (previous ? NARROW_CAP : PHOTO_COUNT_CAP) + 1,
       })) as unknown as { photos: PhotoRow[] };
       capped = res.photos.length > PHOTO_COUNT_CAP;
       rows = res.photos.slice(0, PHOTO_COUNT_CAP);
@@ -95,26 +151,28 @@ export const listPhotos: ToolSpec = {
         capped = false;
       }
     } else {
-      rows = await photoDetails(previous);
+      rows = await loadPhotoRows(previous);
       if (oldest) rows = [...rows].reverse();
-    }
-    if (placeTerm && previous) {
-      const needle = placeTerm.toLowerCase();
-      rows = rows.filter((p) => [p.location_name, p.location_city, p.location_country]
-        .some((v) => v?.toLowerCase().includes(needle)));
+      if (order === "best") rows = [...rows].sort((a, b) => (b.ai_quality_score ?? -1) - (a.ai_quality_score ?? -1));
     }
 
     const count = rows.length;
     const countText = capped ? `more than ${PHOTO_COUNT_CAP}` : String(count);
-    // The gallery has neither a place filter nor "the previous result".
-    const route = previous || placeTerm ? undefined : `/fotos/galerie${query({
+    // The gallery knows neither a place by name, the text filters, nor "the previous result".
+    const galleryCanShow = !previous && !placeTerm && hasDescription === undefined && !text && !keyword && !sight && !orientation;
+    const route = galleryCanShow ? `/fotos/galerie${query({
       favorite: favorite ? "true" : undefined, dateFrom, dateTo, personIds: personIds.join(",") || undefined,
-    })}`;
+      mediaTypes: mediaType, hasGps: hasGps === undefined ? undefined : String(hasGps), qualityMin,
+      sortBy: order === "best" ? "ai_quality_score" : undefined, sortDir: order === "best" ? "desc" : undefined,
+    })}` : undefined;
     return {
       text: table(
-        ["id", "taken", "place"],
-        rows.map((p) => [p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p)]),
-        { cap: limit, total: count, note: `photo count: ${countText}, ${oldest ? "oldest" : "newest"} first${previous ? " (narrowed from the previous result)" : ""}` },
+        ["id", "taken", "place", "description", "keywords", "quality"],
+        rows.map((p) => [
+          p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p), excerpt(p.description),
+          p.keywords?.length ? p.keywords.slice(0, 5).join(", ") : undefined, percent(p.ai_quality_score),
+        ]),
+        { cap: limit, total: count, note: `photo count: ${countText}, ${ORDER_NOTE[order]}${previous ? " (narrowed from the previous result)" : ""}. For everything known about a few photos call photo_details(ids).` },
       ),
       digest: digestOf("list_photos", count, rows.map((p) => p.id)),
       rowCount: count,
@@ -134,7 +192,7 @@ export const listPhotos: ToolSpec = {
 /** Ids per call of the details endpoint, which takes them in the query string. */
 const DETAILS_BATCH = 500;
 
-async function photoDetails(ids: number[]): Promise<PhotoRow[]> {
+async function loadPhotoRows(ids: number[]): Promise<PhotoRow[]> {
   const rows: PhotoRow[] = [];
   for (let i = 0; i < ids.length; i += DETAILS_BATCH) {
     const res = await (photo.getPhotoDetailsBatch({ ids: ids.slice(i, i + DETAILS_BATCH).join(",") })) as unknown as { photos: PhotoRow[] };
@@ -143,11 +201,99 @@ async function photoDetails(ids: number[]): Promise<PhotoRow[]> {
   return rows;
 }
 
+/** Photos one `photo_details` call describes — up to four service calls each. */
+const DETAILS_CAP = 10;
+
+interface FaceRow { person_id?: number; person_name?: string; ignored?: boolean }
+interface PoiRow { name: string; nameDe: string | null; distanceM: number | null; ambiguous: boolean }
+interface OcrRow { full_text: string }
+interface CritiqueRow { summary: string; strengths: string[]; weaknesses: string[] }
+
+/** One per-photo lookup; a missing right or a failing service leaves its field out. */
+async function optional<T>(load: () => Promise<T>): Promise<T | undefined> {
+  try { return await load(); } catch { return undefined; }
+}
+
+function shapeOf(p: PhotoRow): string | undefined {
+  return p.orientation === "portrait" ? "Hochformat" : p.orientation === "landscape" ? "Querformat" : p.orientation === "square" ? "quadratisch" : undefined;
+}
+
+export const photoDetails: ToolSpec = {
+  name: "photo_details",
+  kind: "read",
+  summary: `All metadata of up to ${DETAILS_CAP} photos: date, place, GPS, file, description, keywords, status, scores, persons, sights, text in the photo, critique.`,
+  permissions: PHOTOS,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      ids: { type: "array", items: { type: "integer" } },
+      from_previous_result: { type: "boolean" },
+    },
+  },
+  async run(args, ctx) {
+    let ids = Array.isArray(args.ids) ? args.ids.map((v) => int(v)).filter((v): v is number => v !== undefined) : [];
+    if (!ids.length && bool(args.from_previous_result)) ids = ctx.previous?.("photo") ?? [];
+    if (!ids.length) throw new Error("ids are required");
+    ids = [...new Set(ids)].slice(0, DETAILS_CAP);
+    const rows = await loadPhotoRows(ids);
+    const lines: string[] = [];
+    for (const p of rows) {
+      const [faces, pois, ocr, critique] = await Promise.all([
+        optional(async () => ((await photo.getPhotoFaces({ id: p.id })) as unknown as { faces: FaceRow[] }).faces),
+        optional(async () => ((await photo.getPhotoPoiMatches({ id: p.id })) as unknown as { matches: PoiRow[] }).matches),
+        optional(async () => ((await photo.getPhotoOcr({ id: p.id })) as unknown as { ocr: OcrRow | null }).ocr),
+        optional(async () => ((await photo.getPhotoCritique({ id: p.id })) as unknown as { critique: CritiqueRow | null }).critique),
+      ]);
+      const d = p.ai_quality_details ?? {};
+      const persons = faces ? [...new Set(faces.filter((f) => !f.ignored && f.person_name).map((f) => f.person_name!))] : undefined;
+      const unnamed = faces ? faces.filter((f) => !f.ignored && !f.person_name).length : 0;
+      const fields: Array<[string, string | number | undefined]> = [
+        ["taken", p.taken_at?.slice(0, 16).replace("T", " ")],
+        ["imported", p.created_at?.slice(0, 10)],
+        ["place", p.location_name || place(p)],
+        ["gps", p.latitude != null && p.longitude != null ? `${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}` : "none"],
+        ["file", p.original_name],
+        ["type", p.mime_type],
+        ["size", p.size ? `${(p.size / 1_000_000).toFixed(1)} MB` : undefined],
+        ["orientation", shapeOf(p)],
+        ["status", p.curation_status],
+        ["description", p.description?.trim() || "none"],
+        ["keywords", p.keywords?.length ? p.keywords.join(", ") : "none"],
+        ["quality", percent(p.ai_quality_score)],
+        ["aesthetics", percent(d.clip_aesthetics)],
+        ["composition", percent(d.clip_composition)],
+        ["sharpness", percent(d.sharpness)],
+        ["persons", persons ? [...persons, ...(unnamed ? [`${unnamed} unnamed face${unnamed === 1 ? "" : "s"}`] : [])].join(", ") || "none" : undefined],
+        ["sights", pois ? pois.map((m) => `${m.nameDe ?? m.name}${m.distanceM != null ? ` (${Math.round(m.distanceM)} m)` : ""}${m.ambiguous ? " (unsure)" : ""}`).join(", ") || "none" : undefined],
+        ["text in photo", ocr === undefined ? undefined : ocr === null ? "not scanned yet" : excerpt(ocr.full_text, 300) ?? "none"],
+        ["critique", critique ? [critique.summary, ...critique.strengths.map((x) => `+ ${x}`), ...critique.weaknesses.map((x) => `− ${x}`)].join(" ") : undefined],
+      ];
+      lines.push(`Photo ${p.id}:\n${fields.filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => `- ${k}: ${v}`).join("\n")}`);
+    }
+    const missing = ids.filter((id) => !rows.some((p) => p.id === id));
+    if (missing.length) lines.push(`Not found or not visible: ${missing.join(", ")}`);
+    lines.push("Scores are 0–100. Camera, lens and exposure settings are not stored.");
+    return {
+      text: lines.join("\n\n"),
+      digest: digestOf("photo_details", rows.length, rows.map((p) => p.id)),
+      rowCount: rows.length,
+      ref: { type: "photo", ids: rows.map((p) => p.id) },
+      block: {
+        kind: "photos",
+        tool: "photo_details",
+        total: rows.length,
+        rows: rows.map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
+      },
+    };
+  },
+};
+
 export const searchPhotos: ToolSpec = {
   name: "search_photos",
   kind: "read",
   refines: true,
-  summary: "Natural-language photo search over what the image shows, place and date (German works).",
+  summary: "Search over what the image shows (German works), e.g. 'Strand'. Not for places: use list_photos(place).",
   permissions: PHOTOS,
   source: "hand",
   parameters: {
@@ -473,4 +619,4 @@ export const photoActivity: ToolSpec = {
   },
 };
 
-export const PHOTO_TOOLS = [listPhotos, searchPhotos, listRecaps, listAlbums, listAlbumShares, photoComments, photoActivity];
+export const PHOTO_TOOLS = [listPhotos, photoDetails, searchPhotos, listRecaps, listAlbums, listAlbumShares, photoComments, photoActivity];

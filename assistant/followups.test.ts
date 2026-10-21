@@ -103,16 +103,17 @@ describe("follow-up questions", () => {
     const conversation = await createConversation({});
     await askFavorites(conversation.id);
 
-    clients.photo.getPhotoDetailsBatch.mockResolvedValueOnce({ photos: PHOTOS });
+    // The server knows the place's other names and outline; it answers
+    // with photos outside the previous result too.
+    clients.photo.listPhotos.mockResolvedValueOnce({ photos: [PHOTOS[0], PHOTOS[2], { id: 99, filename: "x.jpg" }] });
     vi.mocked(chat)
       .mockResolvedValueOnce(toolCall("list_photos", { from_previous_result: true, place: "münchen" }, "c-narrow"))
       .mockResolvedValueOnce(toolCall("create_album", { name: "München 2025", from_previous_result: true }, "c-album"))
       .mockResolvedValueOnce(text("Album vorgeschlagen."));
     const res = await ask({ id: conversation.id, message: "Nur die aus München, und mach daraus ein Album." });
 
-    // No new search: the previous ids, narrowed by place.
-    expect(clients.photo.listPhotos).toHaveBeenCalledTimes(1);
-    expect(clients.photo.getPhotoDetailsBatch).toHaveBeenCalledWith({ ids: "5,6,7" });
+    // The place is matched on the server, then kept to the previous ids.
+    expect(clients.photo.listPhotos).toHaveBeenLastCalledWith(expect.objectContaining({ locationText: "münchen" }));
     const narrowed = res.blocks.find((b) => b.kind === "photos");
     expect(narrowed?.rows.map((r) => r.id)).toEqual([5, 7]);
     expect(narrowed?.route).toBeUndefined();

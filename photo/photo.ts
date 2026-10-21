@@ -63,6 +63,7 @@ import type {
 } from "../db/types";
 import { Query } from "encore.dev/api";
 import { parsePhotoFilterQuery, type PhotoFilterQuery } from "./photo.filters";
+import { resolveLocationFilter } from "./place-filter";
 
 type PhotoFilterQueryParams = {
   showHidden?: Query<boolean>;
@@ -100,8 +101,20 @@ type PhotoFilterQueryParams = {
   variantMode?: Query<string>;
   /** A place by name (city, country, reverse-geocoded place), substring. */
   locationText?: Query<string>;
+  /** With (true) or without (false) a description. */
+  hasDescription?: Query<boolean>;
+  /** Substring of description, keyword, file name or recognised text. */
+  text?: Query<string>;
+  /** Substring of a keyword. */
+  keyword?: Query<string>;
+  /** Substring of a sight recognised at the photo. */
+  sight?: Query<string>;
+  /** portrait | landscape | square. */
+  orientation?: Query<string>;
   /** Date order of the rows: desc (default, newest first) or asc. */
   sortDir?: Query<string>;
+  /** `quality`: best first by the composite quality score, then by date. */
+  sortBy?: Query<string>;
   /** Maximum number of rows to return. Omit for "all". */
   limit?: Query<number>;
   /** Number of rows to skip before returning `limit` rows. */
@@ -143,6 +156,11 @@ function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
     aiHiddenMode: p.aiHiddenMode,
     variantMode: p.variantMode,
     locationText: p.locationText,
+    hasDescription: p.hasDescription,
+    text: p.text,
+    keyword: p.keyword,
+    sight: p.sight,
+    orientation: p.orientation,
   };
 }
 
@@ -385,7 +403,7 @@ export const listPhotos = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
 
-    const filter = parsePhotoFilterQuery(toFilterQuery(params));
+    const filter = await resolveLocationFilter(userId, parsePhotoFilterQuery(toFilterQuery(params)));
     // `limit` and `offset` were declared but never forwarded: every call
     // returned the whole library. The same cap as the gallery index.
     const MAX_LIMIT = 5000;
@@ -393,6 +411,7 @@ export const listPhotos = api(
     const offset = typeof params.offset === "number" && params.offset > 0 ? params.offset : undefined;
     return await service.listPhotosLogic(userId, filter, {
       order: params.sortDir === "asc" ? "asc" : "desc",
+      sortBy: params.sortBy === "quality" ? "quality" : "date",
       limit,
       offset,
     });

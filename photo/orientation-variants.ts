@@ -48,8 +48,8 @@ import type {
 export const VARIANT_TIME_WINDOW_SECONDS = 120;
 
 /** Same aspect-ratio bands as `classifyOrientation` in group-auto-pick.ts. */
-const LANDSCAPE_MIN_RATIO = 1.1;
-const PORTRAIT_MAX_RATIO = 0.9;
+export const LANDSCAPE_MIN_RATIO = 1.1;
+export const PORTRAIT_MAX_RATIO = 0.9;
 
 /**
  * Orientation from pixel dimensions, or null while the dimensions are
