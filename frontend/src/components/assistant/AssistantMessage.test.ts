@@ -96,3 +96,58 @@ describe('AssistantMessage photos', () => {
     expect(links[1]!.dataset.anchor).toBe('photos@m5-0:9')
   })
 })
+
+describe('AssistantMessage copy', () => {
+  it('copies an answer as its text and as the rendered table', async () => {
+    const written: Record<string, Blob>[] = []
+    // jsdom's Blob has no text(); FileReader reads it.
+    const read = (blob: Blob) => new Promise<string>((resolve) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result))
+      r.readAsText(blob)
+    })
+    class FakeItem {
+      constructor(public parts: Record<string, Blob>) {}
+    }
+    vi.stubGlobal('ClipboardItem', FakeItem)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        write: async (items: FakeItem[]) => {
+          written.push(...items.map((i) => i.parts))
+        },
+        writeText: vi.fn(),
+      },
+    })
+    const content = 'Stand:\n\n| Konto | Saldo |\n|---|---:|\n| Giro | 1,00 € |'
+    const el = mount([], 5, content)
+    await nextTick()
+    const button = el.querySelector<HTMLButtonElement>('button[aria-label="Beitrag kopieren"]')
+    expect(button).not.toBeNull()
+    button!.click()
+    await vi.waitFor(() => expect(written).toHaveLength(1))
+    expect(await read(written[0]!['text/plain']!)).toBe(content)
+    expect(await read(written[0]!['text/html']!)).toContain('<table')
+    await nextTick()
+    expect(el.querySelector('button[aria-label="Kopiert"]')).not.toBeNull()
+    expect(el.querySelector('[role="status"]')?.textContent).toBe('Kopiert')
+    vi.unstubAllGlobals()
+  })
+
+  it('copies the user\'s question as typed', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    createApp({ render: () => h(AssistantMessage, { role: 'user', content: 'Wie hoch war **das**?' }) }).use(PrimeVue).mount(el)
+    el.querySelector<HTMLButtonElement>('button[aria-label="Beitrag kopieren"]')!.click()
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('Wie hoch war **das**?'))
+  })
+
+  it('offers no copy while the answer is still arriving', () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    createApp({ render: () => h(AssistantMessage, { role: 'assistant', content: 'Halb', pending: true }) }).use(PrimeVue).mount(el)
+    expect(el.querySelector('button[aria-label="Beitrag kopieren"]')).toBeNull()
+  })
+})
