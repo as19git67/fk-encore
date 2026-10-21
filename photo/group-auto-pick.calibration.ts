@@ -196,7 +196,7 @@ export interface TrainingGroup {
  * everything else (visible / favorite / no curation row) counts as
  * "kept" — same convention as the calibration export.
  */
-async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
+export async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
   const groups = await dbAll<{ id: number }>(
     db.select({ id: photoGroups.id })
       .from(photoGroups)

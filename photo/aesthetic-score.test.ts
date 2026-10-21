@@ -91,6 +91,46 @@ describe("compositeFromDetails", () => {
   });
 });
 
+describe("compositeFromDetails with adopted weights", () => {
+  const qalign = {
+    clip_aesthetics: 0.6,
+    clip_composition: 0.1,
+    clip_technical: 0.1,
+    qalign_quality: 0.5,
+    sharpness: 0.8,
+    contrast: 0.7,
+    exposure: 0.9,
+    face_composition: 0.2,
+  };
+  const weights = { aesthetics: 0.5, quality: 0.25, blur: 0.25 };
+
+  it("leaves the CLIP prompts and the face composition out for a Q-Align photo", () => {
+    expect(compositeFromDetails(qalign, weights)).toBeCloseTo(0.5 * 0.6 + 0.25 * 0.5 + 0.25 * 0.8, 6);
+    expect(compositeFromDetails({ ...qalign, clip_composition: 0.9, face_composition: 0.9 }, weights)).toBeCloseTo(
+      compositeFromDetails(qalign, weights)!,
+      6,
+    );
+  });
+
+  it("still lowers the score for closed eyes and uses the face's sharpness", () => {
+    const blur = 0.35 * 0.8 + 0.65 * 0.4;
+    const expected = (0.5 * 0.6 + 0.25 * 0.5 + 0.25 * blur) * (0.75 + 0.25 * 0.2);
+    expect(compositeFromDetails({ ...qalign, face_sharpness: 0.4, eyes_open: 0.2 }, weights)).toBeCloseTo(expected, 6);
+  });
+
+  it("keeps the original formula for a photo without a Q-Align value", () => {
+    const { qalign_quality: _, ...clipOnly } = qalign;
+    expect(compositeFromDetails(clipOnly, weights)).toBeCloseTo(compositeFromDetails(clipOnly)!, 6);
+  });
+
+  it("keeps the original formula while no weights are adopted", () => {
+    expect(compositeFromDetails(qalign)).toBeCloseTo(
+      (0.18 + 0.02 + 0.01 + 0.25 * 0.8 + 0.07 + 0.045) * 0.85 + 0.2 * 0.15,
+      6,
+    );
+  });
+});
+
 describe("withAestheticScores", () => {
   it("replaces clip_aesthetics under the same key and adds qalign_quality", () => {
     expect(withAestheticScores({ sharpness: 0.8, clip_aesthetics: 0.2 }, { aesthetics: 4, quality: 2 })).toEqual({

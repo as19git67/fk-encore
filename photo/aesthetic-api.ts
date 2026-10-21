@@ -8,7 +8,7 @@ import { api, APIError } from "encore.dev/api";
 import log from "encore.dev/log";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { AESTHETIC_MODEL, inWindow, windowTimeZone } from "./aesthetic-score";
+import { AESTHETIC_MODEL, inWindow, windowTimeZone, type CompositeWeights } from "./aesthetic-score";
 import {
   InvalidSettingsError,
   countBacklog,
@@ -17,6 +17,8 @@ import {
   deleteRuns,
   getAestheticSettings,
   listRuns,
+  recomputeQAlignComposites,
+  saveCompositeSetting,
   resetAestheticScores,
   saveAestheticSettings,
   type AestheticRun,
@@ -27,6 +29,7 @@ import { headStatus, realHeadDeps, realNightDeps, scorerStatus } from "./aesthet
 import { headJob, startHeadJob, type HeadJob, type HeadReport } from "./aesthetic-head";
 import { adoptReplay, replayAutoPick, type ReplayReport } from "./group-auto-pick.calibration";
 import { recomputeAiPicksForUser } from "./group-auto-pick.service";
+import { adoptComposite, replayComposite, type CompositeReport } from "./composite-replay";
 import type { AiPickWeights } from "../db/schema";
 
 function requireAdmin(): void {
@@ -241,5 +244,49 @@ export const adoptAutoPickReplay = api(
     if (!adopted) throw APIError.failedPrecondition(report.reason ?? "Das Nachspielen empfiehlt keine neuen Gewichte");
     recomputeAiPicksForUser(userId).catch((err) => log.error(err, "aesthetic: re-scoring after adopting replay weights failed"));
     return { report, weights: adopted.weights };
+  },
+);
+
+// ─── The overall score without the CLIP prompts ──────────────────────────────
+
+/** Rebuilds the overall scores in the background; the request does not wait for a large library. */
+function rebuildComposites(weights: CompositeWeights | null): void {
+  recomputeQAlignComposites(weights)
+    .then((n) => log.info("aesthetic: overall scores rebuilt", { changed: n, weights: weights ? "qalign" : "original" }))
+    .catch((err) => log.error(err, "aesthetic: rebuilding the overall scores failed"));
+}
+
+/**
+ * Replays the overall score on everyone's reviewed groups: today's formula
+ * against one without the zero-shot CLIP prompts for photos with a Q-Align
+ * value, with starting and with learned weights.
+ */
+export const replayCompositeScore = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/composite/replay", auth: true },
+  async (): Promise<CompositeReport> => {
+    requireAdmin();
+    return replayComposite();
+  },
+);
+
+/** Adopts what the replay recommends and rebuilds the overall score of every Q-Align photo. */
+export const adoptCompositeScore = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/composite/adopt", auth: true },
+  async (): Promise<CompositeReport> => {
+    requireAdmin();
+    const { report, adopted } = await adoptComposite();
+    if (!adopted) throw APIError.failedPrecondition(report.reason ?? "Das Nachspielen empfiehlt keine neue Gesamtnote");
+    rebuildComposites(adopted.weights);
+    return report;
+  },
+);
+
+/** Back to the original formula for every photo. */
+export const resetCompositeScore = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/composite/reset", auth: true },
+  async (): Promise<void> => {
+    requireAdmin();
+    await saveCompositeSetting(null);
+    rebuildComposites(null);
   },
 );

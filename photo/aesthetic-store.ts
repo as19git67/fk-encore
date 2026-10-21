@@ -11,10 +11,18 @@ import {
   photoAestheticRun,
   photoAestheticSettings,
   photos,
+  type CompositeSetting,
   type AestheticRunStatus,
   type AestheticRunTrigger,
 } from "../db/schema";
-import { FAILED_SUFFIX, compositeFromDetails, parseHm, withAestheticScores, type AestheticScores } from "./aesthetic-score";
+import {
+  FAILED_SUFFIX,
+  compositeFromDetails,
+  parseHm,
+  withAestheticScores,
+  type AestheticScores,
+  type CompositeWeights,
+} from "./aesthetic-score";
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
@@ -24,6 +32,8 @@ export interface AestheticSettings {
   window_start: string;
   /** Local time "HH:MM" the GPU goes back. */
   window_end: string;
+  /** Adopted weights of the overall score for Q-Align photos; null keeps the original formula. */
+  composite: CompositeSetting | null;
   updated_at: string;
 }
 
@@ -31,6 +41,7 @@ const DEFAULT_SETTINGS: AestheticSettings = {
   enabled: false,
   window_start: "01:00",
   window_end: "06:00",
+  composite: null,
   updated_at: new Date(0).toISOString(),
 };
 
@@ -41,12 +52,65 @@ export async function getAestheticSettings(): Promise<AestheticSettings> {
         enabled: photoAestheticSettings.enabled,
         window_start: photoAestheticSettings.window_start,
         window_end: photoAestheticSettings.window_end,
+        composite: photoAestheticSettings.composite,
         updated_at: photoAestheticSettings.updated_at,
       })
       .from(photoAestheticSettings)
       .where(eq(photoAestheticSettings.id, 1)),
   );
   return row ?? DEFAULT_SETTINGS;
+}
+
+// ─── Weights of the overall score ────────────────────────────────────────────
+
+const COMPOSITE_CACHE_MS = 60_000;
+let compositeCache: { at: number; weights: CompositeWeights | null } | null = null;
+
+/**
+ * The adopted weights of the overall score for Q-Align photos, or null for
+ * the original formula. Cached for a minute: the quality job asks per photo.
+ */
+export async function getCompositeWeights(): Promise<CompositeWeights | null> {
+  if (compositeCache && Date.now() - compositeCache.at < COMPOSITE_CACHE_MS) return compositeCache.weights;
+  const weights = (await getAestheticSettings()).composite?.weights ?? null;
+  compositeCache = { at: Date.now(), weights };
+  return weights;
+}
+
+/** Stores the adopted weights, or null to go back to the original formula. */
+export async function saveCompositeSetting(setting: CompositeSetting | null): Promise<void> {
+  await db
+    .insert(photoAestheticSettings)
+    .values({ id: 1, composite: setting, updated_at: sql`now()` })
+    .onConflictDoUpdate({ target: photoAestheticSettings.id, set: { composite: setting, updated_at: sql`now()` } });
+  compositeCache = null;
+}
+
+/**
+ * Rebuilds the overall score of every photo with a Q-Align value from its
+ * parts with `weights` (null: the original formula), in pages by id.
+ * Returns how many scores changed.
+ */
+export async function recomputeQAlignComposites(weights: CompositeWeights | null, pageSize = 500): Promise<number> {
+  let afterId = 0;
+  let changed = 0;
+  for (;;) {
+    const rows = (await db
+      .select({ id: photos.id, details: photos.ai_quality_details, score: photos.ai_quality_score })
+      .from(photos)
+      .where(and(gt(photos.id, afterId), sql`${photos.ai_quality_details}->>'qalign_quality' IS NOT NULL`))
+      .orderBy(asc(photos.id))
+      .limit(pageSize)) as { id: number; details: Record<string, number> | null; score: number | null }[];
+    if (rows.length === 0) return changed;
+    for (const row of rows) {
+      const next = row.details ? compositeFromDetails(row.details, weights) : null;
+      if (next !== null && next !== row.score) {
+        await db.update(photos).set({ ai_quality_score: next }).where(eq(photos.id, row.id));
+        changed++;
+      }
+    }
+    afterId = rows[rows.length - 1]!.id;
+  }
 }
 
 export class InvalidSettingsError extends Error {}
@@ -126,7 +190,7 @@ export async function writeAestheticScore(photoId: number, model: string, scores
   );
   if (!row) return;
   const details = withAestheticScores(row.details, scores);
-  const composite = compositeFromDetails(details);
+  const composite = compositeFromDetails(details, await getCompositeWeights());
   await db
     .update(photos)
     .set({

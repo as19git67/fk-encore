@@ -31,6 +31,11 @@ import {
   trainAestheticHead,
   replayAutoPick,
   adoptAutoPickReplay,
+  replayCompositeScore,
+  adoptCompositeScore,
+  resetCompositeScore,
+  type CompositeReport,
+  type CompositeWeights,
   type ReplayReport,
   type AestheticHeadJob,
   type AestheticOverview,
@@ -46,8 +51,11 @@ const overview = ref<AestheticOverview | null>(null)
 const loaded = ref(false)
 const error = ref<string | null>(null)
 const info = ref<string | null>(null)
-const busy = ref<'save' | 'start' | 'stop' | 'backfill' | 'train' | 'clear' | 'replay' | 'adopt' | number | null>(null)
+const busy = ref<
+  'save' | 'start' | 'stop' | 'backfill' | 'train' | 'clear' | 'replay' | 'adopt' | 'composite' | 'composite-adopt' | 'composite-reset' | number | null
+>(null)
 const replay = ref<ReplayReport | null>(null)
+const composite = ref<CompositeReport | null>(null)
 
 const enabled = ref(false)
 const windowStart = ref('01:00')
@@ -279,6 +287,83 @@ function adoptReplay() {
         replay.value = await replayAutoPick()
       } catch (e) {
         error.value = message(e, 'Die Gewichte konnten nicht übernommen werden')
+      } finally {
+        busy.value = null
+      }
+    },
+  })
+}
+
+// ─── The overall score without the CLIP prompts ─────────────────────────────
+
+/** "45 % Ästhetik · 25 % Technik · 30 % Schärfe", or the original formula. */
+function weightsText(w: CompositeWeights | null): string {
+  if (!w) return 'bisherige Formel mit CLIP'
+  return `${percent(w.aesthetics)} Ästhetik · ${percent(w.quality)} Technik · ${percent(w.blur)} Schärfe`
+}
+
+async function runComposite() {
+  busy.value = 'composite'
+  error.value = null
+  info.value = null
+  try {
+    composite.value = await replayCompositeScore()
+  } catch (e) {
+    error.value = message(e, 'Das Nachspielen ist fehlgeschlagen')
+  } finally {
+    busy.value = null
+  }
+}
+
+const compositeRecommended = computed(() =>
+  composite.value?.variants.find((v) => v.key === composite.value?.recommended) ?? null,
+)
+
+function adoptComposite() {
+  const r = composite.value
+  const best = compositeRecommended.value
+  const today = r?.variants.find((v) => v.key === 'current')
+  if (!r || !best || !today) return
+  confirm.require({
+    message:
+      `Die Gesamtnote „${best.label}“ (${weightsText(best.weights)}) für alle Fotos mit Q-Align-Wert übernehmen? ` +
+      `Sie trifft eure Wahl in ${percent(best.hit_rate)} statt ${percent(today.hit_rate)} der Gruppen. ` +
+      `Filter und Sortierung „Qualität“ ändern sich damit.`,
+    header: 'Gesamtnote übernehmen',
+    icon: 'pi pi-check',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Übernehmen',
+    accept: async () => {
+      busy.value = 'composite-adopt'
+      try {
+        composite.value = await adoptCompositeScore()
+        info.value = 'Übernommen. Die Gesamtnoten werden im Hintergrund neu berechnet.'
+        adopt(await getAestheticOverview(), false)
+      } catch (e) {
+        error.value = message(e, 'Die Gesamtnote konnte nicht übernommen werden')
+      } finally {
+        busy.value = null
+      }
+    },
+  })
+}
+
+function resetComposite() {
+  confirm.require({
+    message: 'Zur bisherigen Formel mit den CLIP-Werten zurückkehren? Die Gesamtnoten werden neu berechnet.',
+    header: 'Bisherige Formel',
+    icon: 'pi pi-undo',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Zurücksetzen',
+    accept: async () => {
+      busy.value = 'composite-reset'
+      try {
+        await resetCompositeScore()
+        info.value = 'Zurückgesetzt. Die Gesamtnoten werden im Hintergrund neu berechnet.'
+        composite.value = null
+        adopt(await getAestheticOverview(), false)
+      } catch (e) {
+        error.value = message(e, 'Das Zurücksetzen ist fehlgeschlagen')
       } finally {
         busy.value = null
       }
@@ -538,6 +623,72 @@ function rescoreAll() {
             icon="pi pi-check"
             :loading="busy === 'adopt'"
             @click="adoptReplay"
+          />
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="ae-composite">
+        <h2 id="ae-composite" class="card-title">Gesamtnote ohne CLIP</h2>
+        <p class="muted">
+          Die „Qualität“ eines Fotos zählt bisher neben der Ästhetik auch CLIP-Schätzungen für Bildaufbau und Technik. Mit
+          Q-Align steckt der Bildaufbau schon in der Ästhetik. Gespielt wird, ob eine Note aus Q-Align-Ästhetik,
+          Q-Align-Technik und gemessener Schärfe die Fotos, die ihr behalten habt, öfter vorne hat. Fotos ohne
+          Q-Align-Wert behalten die bisherige Formel.
+        </p>
+        <p class="muted">Heute: {{ weightsText(overview.settings.composite?.weights ?? null) }}.</p>
+        <template v-if="composite">
+          <p class="muted">
+            {{ count(composite.qalign_groups) }} von {{ count(composite.decided_groups) }} entschiedenen Gruppen haben
+            durchgehend Q-Align-Werte und zählen.
+          </p>
+          <ScrollX v-if="composite.qalign_groups > 0">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Formel</th>
+                  <th scope="col" class="num">Trifft eure Wahl</th>
+                  <th scope="col" class="num">Gruppen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="v in composite.variants" :key="v.key">
+                  <td>
+                    {{ v.label }}
+                    <Tag v-if="v.key === composite.recommended" value="Empfohlen" severity="success" />
+                    <div class="muted">{{ weightsText(v.weights) }}</div>
+                  </td>
+                  <td class="num">{{ percent(v.hit_rate) }}</td>
+                  <td class="num">{{ count(v.hits) }} / {{ count(v.groups) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+          <p v-if="composite.reason" class="muted">{{ composite.reason }}</p>
+        </template>
+        <div class="buttons">
+          <Button
+            label="Nachspielen"
+            icon="pi pi-replay"
+            severity="secondary"
+            outlined
+            :loading="busy === 'composite'"
+            @click="runComposite"
+          />
+          <Button
+            v-if="compositeRecommended"
+            label="Gesamtnote übernehmen"
+            icon="pi pi-check"
+            :loading="busy === 'composite-adopt'"
+            @click="adoptComposite"
+          />
+          <Button
+            v-if="overview.settings.composite"
+            label="Bisherige Formel"
+            icon="pi pi-undo"
+            severity="secondary"
+            text
+            :loading="busy === 'composite-reset'"
+            @click="resetComposite"
           />
         </div>
       </section>

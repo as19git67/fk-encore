@@ -60,30 +60,81 @@ export function inWindow(now: Date, start: string, end: string, timeZone = windo
   return from < to ? t >= from && t < to : t >= from || t < to;
 }
 
+/** Weights of the overall score for a photo with a Q-Align value; they sum to 1. */
+export interface CompositeWeights {
+  aesthetics: number;
+  quality: number;
+  blur: number;
+}
+
 /**
- * The composite quality score from the parts kept in `ai_quality_details`,
- * the same formula as `/quality` in `embedding_service/app/api/endpoints.py`
- * plus the face-composition blend `indexPhotoQuality` adds. Null when a part
- * the formula needs is missing, i.e. the quality job has not run yet; the
- * composite then stays what it was.
+ * The starting point of the replay, not a measured set: Q-Align aesthetics
+ * first, Q-Align's technical value next, the measured sharpness for what
+ * neither punishes enough (a beautiful but shaken frame).
  */
-export function compositeFromDetails(details: Record<string, number>): number | null {
+export const DEFAULT_COMPOSITE_WEIGHTS: CompositeWeights = { aesthetics: 0.45, quality: 0.25, blur: 0.3 };
+
+/** Sharpness, the face's own where the photo has one. */
+function blurOf(details: Record<string, number>): number {
+  return typeof details.face_sharpness === "number"
+    ? 0.35 * details.sharpness + 0.65 * details.face_sharpness
+    : details.sharpness;
+}
+
+/**
+ * The parts of the overall score for a Q-Align photo, in the order of
+ * `CompositeWeights`: aesthetics, Q-Align's technical value, sharpness.
+ * Null when one is missing: no Q-Align value yet, or the quality job has
+ * not measured the sharpness.
+ */
+export function qalignCompositeParts(details: Record<string, number>): [number, number, number] | null {
+  const { clip_aesthetics: aesthetics, qalign_quality: quality, sharpness } = details;
+  if (typeof aesthetics !== "number" || typeof quality !== "number" || typeof sharpness !== "number") return null;
+  return [aesthetics, quality, blurOf(details)];
+}
+
+/** Open eyes scale the score down, never up: a closed-eye portrait is a defect. */
+function withEyes(score: number, details: Record<string, number>): number {
+  return typeof details.eyes_open === "number" ? Math.min(1, score * (0.75 + 0.25 * details.eyes_open)) : score;
+}
+
+/**
+ * The composite quality score from the parts kept in `ai_quality_details`.
+ *
+ * Without `weights`, or for a photo without a Q-Align value, the original
+ * formula: the same as `/quality` in `embedding_service/app/api/endpoints.py`
+ * plus the face-composition blend `indexPhotoQuality` adds.
+ *
+ * With `weights` (adopted after a replay) and a Q-Align value, the zero-shot
+ * CLIP prompts for composition and technique drop out: Q-Align's aesthetic
+ * score already judges the composition, and counting it again through a
+ * weaker signal only waters it down. Measured defects stay.
+ *
+ * Null when a part the formula needs is missing, i.e. the quality job has
+ * not run yet; the composite then stays what it was.
+ */
+export function compositeFromDetails(
+  details: Record<string, number>,
+  weights: CompositeWeights | null = null,
+): number | null {
+  const parts = weights ? qalignCompositeParts(details) : null;
+  if (weights && parts) {
+    const sum = weights.aesthetics + weights.quality + weights.blur;
+    if (sum > 0) {
+      const linear = (weights.aesthetics * parts[0] + weights.quality * parts[1] + weights.blur * parts[2]) / sum;
+      return withEyes(linear, details);
+    }
+  }
   const need = ["clip_aesthetics", "clip_composition", "clip_technical", "sharpness", "contrast", "exposure"];
   if (need.some((k) => typeof details[k] !== "number")) return null;
-  const blur =
-    typeof details.face_sharpness === "number"
-      ? 0.35 * details.sharpness + 0.65 * details.face_sharpness
-      : details.sharpness;
   let score =
     0.3 * details.clip_aesthetics +
     0.2 * details.clip_composition +
     0.1 * details.clip_technical +
-    0.25 * blur +
+    0.25 * blurOf(details) +
     0.1 * details.contrast +
     0.05 * details.exposure;
-  if (typeof details.eyes_open === "number") {
-    score = Math.min(1, score * (0.75 + 0.25 * details.eyes_open));
-  }
+  score = withEyes(score, details);
   if (typeof details.face_composition === "number") {
     score = score * 0.85 + details.face_composition * 0.15;
   }
