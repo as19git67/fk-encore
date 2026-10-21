@@ -482,9 +482,13 @@ behind it.
        Encore CLI.
      Schemas: up to `ASSISTANT_SCHEMA_BUDGET_TOKENS` (3500) every tool's
      schema goes along; past it the model gets the one-line catalog and
-     `describe_tools`. The context budget is `ASSISTANT_CONTEXT_TOKENS`
-     (12000) minus the answer; older tool results shrink to digests first,
-     then the oldest history goes, and a `413` from llm-service shrinks
+     `describe_tools`. The context budget follows the model's window
+     (`n_ctx`, which llm-service names in a closing `context` chunk of every
+     `/chat` stream) less 5 % and the answer, converted to the loop's
+     characters / 4 estimate with a ratio learnt from the real token counts;
+     `ASSISTANT_CONTEXT_TOKENS` pins a fixed budget instead, and 20000 holds
+     until the first reply has named the window. Older tool results shrink to
+     digests first, the oldest first, then the oldest history turns go, and a `413` from llm-service shrinks
      everything once more and retries the round. The last round sends
      `tool_choice: "none"`, so the loop always ends with an answer. Each
      `/chat` call takes the `llm` slot of the ai-queue at priority 0, a
@@ -592,7 +596,14 @@ behind it.
      favorite, persons) is intersected with the previous ids, otherwise the
      previous photos are loaded by id. The write tools take it in place of
      ids. A booking set holds only the rows fetched, so a follow-up acts on
-     what the user saw. Titles come from a short `/chat` call
+     what the user saw. Since the context meter (#1670) the history is no
+     longer cut at six turns and earlier results are replayed whole: up to
+     50 turns go along, and the loop forgets first-in-first-out — the oldest
+     results shrink to their digest, then the oldest turns go — so as much of
+     the conversation stays as fits the window. How full it got, and how many
+     earlier questions the model still saw, is stored per answer
+     (`assistant_message.context_usage`, migration 0267) and shown under
+     the question field. Titles come from a short `/chat` call
      (`assistant/titles.ts`) rather than `/json-prompt`, run in the
      background in a low-priority llm slot after the first answer, and
      only replace the fallback (the question, cut short).

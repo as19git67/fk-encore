@@ -75,7 +75,7 @@ async function askFavorites(conversationId: number) {
 }
 
 describe("follow-up questions", () => {
-  it("replay the tools behind an earlier answer, not its rows", async () => {
+  it("replay the tools behind an earlier answer with its rows while they fit", async () => {
     const conversation = await createConversation({});
     await askFavorites(conversation.id);
 
@@ -89,9 +89,13 @@ describe("follow-up questions", () => {
       name: "list_photos",
       arguments: JSON.stringify({ favorite: true, date_from: "2025-01-01", date_to: "2025-12-31" }),
     });
-    // The rows themselves are not replayed, only the digest of the result.
+    // The result goes along as the model saw it then; the digest is what it
+    // shrinks to only when the window runs short.
     const results = request.messages.filter((m) => m.role === "tool");
-    expect(results.map((m) => m.content)).toEqual(["[earlier result of list_photos: 3 rows, ids 5,6,7]"]);
+    const [stored] = await db.select().from(assistantMessage).where(eq(assistantMessage.role, "tool"));
+    expect(results.map((m) => m.content)).toEqual([stored.content]);
+    expect(stored.content).not.toBe(stored.digest);
+    expect(stored.digest).toBe("[earlier result of list_photos: 3 rows, ids 5,6,7]");
     expect(request.messages.some((m) => m.role === "assistant" && m.content?.includes("tools behind"))).toBe(false);
   });
 

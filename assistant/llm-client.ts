@@ -152,6 +152,13 @@ export async function* sseData(body: ReadableStream<Uint8Array>): AsyncGenerator
   }
 }
 
+/** The model's window as the last reply named it; null until one has. */
+let lastWindow: number | null = null;
+
+export function knownContextWindow(): number | null {
+  return lastWindow;
+}
+
 /** One streamed /chat call. */
 export const chat: ChatFn = async (req, onToken) => {
   const controller = new AbortController();
@@ -187,7 +194,9 @@ export const chat: ChatFn = async (req, onToken) => {
       }
       assembler.push(chunk);
     }
-    return assembler.reply();
+    const reply = assembler.reply();
+    if (reply.usage?.n_ctx) lastWindow = reply.usage.n_ctx;
+    return reply;
   } catch (err) {
     if ((err as Error).name === "AbortError") {
       throw new LlmServiceUnavailableError(`llm-service /chat timed out after ${budgetMs} ms`);

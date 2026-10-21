@@ -43,7 +43,10 @@ export function contextMeter(u: ContextUsage): ContextMeter {
     `Die letzte Antwort hat ${percent} % des Kontexts belegt (${parts[0]}).`,
   ]
   if (earlier > 0) {
-    sentences.push(`Das Modell sah ${u.keptTurns} von ${earlier} früheren Fragen; ältere Ergebnisse nur als Kurzfassung.`)
+    sentences.push(`Das Modell sah ${u.keptTurns} von ${earlier} früheren Fragen.`)
+  }
+  if (u.digested > 0) {
+    sentences.push(`${u.digested} ältere Ergebnis${u.digested === 1 ? '' : 'se'} nur als Kurzfassung, um Platz zu schaffen.`)
   }
   return {
     share,

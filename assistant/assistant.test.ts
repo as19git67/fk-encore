@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getAuthData } from "~encore/auth";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
 vi.mock("./titles", async (importOriginal) => ({
@@ -109,7 +109,7 @@ describe("asking", () => {
     expect(detail.messages[1].blocks[0]).toMatchObject({ kind: "meters" });
   });
 
-  it("replays earlier turns with their tool calls and the digest of each result", async () => {
+  it("replays earlier turns with their tool calls and each result whole", async () => {
     clients.meter.listMeters.mockResolvedValue({ meters: [] });
     vi.mocked(chat)
       .mockResolvedValueOnce(toolCall("list_meters", {}))
@@ -124,8 +124,10 @@ describe("asking", () => {
     expect(replayed.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant", "user"]);
     const call = replayed[1] as { tool_calls: Array<{ id: string; function: { name: string } }> };
     expect(call.tool_calls[0]!.function.name).toBe("list_meters");
-    // The result is the one-line digest, never the rows.
-    expect(replayed[2]).toEqual({ role: "tool", tool_call_id: call.tool_calls[0]!.id, content: "[earlier result of list_meters: 0 rows]" });
+    // The result as the model saw it then, not the one-line digest.
+    const [stored] = await db.select().from(assistantMessage).where(eq(assistantMessage.role, "tool"));
+    expect(stored.digest).toBe("[earlier result of list_meters: 0 rows]");
+    expect(replayed[2]).toEqual({ role: "tool", tool_call_id: call.tool_calls[0]!.id, content: stored.content });
     // The answer stays as written: no note the model could copy.
     expect(replayed[3]).toEqual({ role: "assistant", content: "Keine Zähler." });
 
