@@ -14,6 +14,7 @@
  * so the scan-worker can defer (not fail) the job and retry later.
  */
 
+import { AiSlotTimeoutError, withLlmSlot } from "../ai-queue/slot-helper";
 import { llmBudgetMs, resetLlmLeaseCache } from "../lib/llm-lease";
 import { CLASSIFY_PROMPTS } from "./classify-prompts";
 import { roleFromLegacy } from "./tax-role";
@@ -319,7 +320,25 @@ function ensurePromptsFresh(): Promise<void> {
   return promptSync;
 }
 
-export async function classifyDocument(req: ClassifyRequest): Promise<Classification> {
+/**
+ * A model run in the llm slot. Inside a scan-worker job, which already holds
+ * the slot, it runs straight away; anywhere else it waits its turn. A wait
+ * that runs out is an outage like any other, so a queue job defers.
+ */
+async function inLlmSlot<T>(requester: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await withLlmSlot(requester, fn);
+  } catch (err) {
+    if (err instanceof AiSlotTimeoutError) throw new LlmServiceUnavailableError(err.message);
+    throw err;
+  }
+}
+
+export function classifyDocument(req: ClassifyRequest): Promise<Classification> {
+  return inLlmSlot("documents:classify", () => classifyInSlot(req));
+}
+
+async function classifyInSlot(req: ClassifyRequest): Promise<Classification> {
   // Best-effort one-time refresh so this process's prompts win over whatever a
   // long-running service cached. Non-fatal on failure — fall through to the
   // classify call, whose 412 handler still configures an unconfigured service.
@@ -346,7 +365,9 @@ export async function classifyDocument(req: ClassifyRequest): Promise<Classifica
  * is `LlmServiceUnavailableError`, so a queue job defers).
  */
 export function jsonPrompt(prompt: string, system: string, maxTokens = 1200): Promise<unknown> {
-  return postJson<unknown>("/json-prompt", { prompt, system, temperature: 0, max_tokens: maxTokens });
+  return inLlmSlot("documents:json-prompt", () =>
+    postJson<unknown>("/json-prompt", { prompt, system, temperature: 0, max_tokens: maxTokens }),
+  );
 }
 
 export async function embedTexts(

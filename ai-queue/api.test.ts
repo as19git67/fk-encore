@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { sql } from "drizzle-orm";
 
 import db from "../db/database";
@@ -13,8 +13,16 @@ import {
 } from "./api";
 import { registerWaiter, unregisterWaiter, waiterCount } from "./waiters";
 
+// The GPU is home unless a test lends it.
+const lease = vi.hoisted(() => ({ lentLimitMs: null as number | null }));
+vi.mock("../lib/llm-lease", () => ({
+  llmBudgetMs: async (normalMs: number) =>
+    lease.lentLimitMs === null ? normalMs : Math.max(normalMs, lease.lentLimitMs),
+}));
+
 beforeEach(async () => {
   await db.execute(sql`DELETE FROM ai_model_slot`);
+  lease.lentLimitMs = null;
 });
 
 describe("acquireSlot", () => {
@@ -219,6 +227,8 @@ describe("getQueueStatus", () => {
     await acquireSlot({ model: "llm", priority: 1, requester: "a" });
     await acquireSlot({ model: "llm", priority: 2, requester: "b" });
     await acquireSlot({ model: "llm", priority: 3, requester: "c" });
+    await acquireSlot({ model: "llm", priority: 0, requester: "assistant" });
+    await acquireSlot({ model: "llm", priority: 5, requester: "idle" });
     await acquireSlot({ model: "embedding", priority: 2, requester: "d" });
 
     const result = await getQueueStatus();
@@ -226,7 +236,9 @@ describe("getQueueStatus", () => {
     const llm = result.models.find((m) => m.model === "llm")!;
     expect(llm.activeSlot).not.toBeNull();
     expect(llm.activeSlot!.requester).toBe("a");
-    expect(llm.waitingCount).toBe(2);
+    // Every waiting slot counts, also the levels without their own key.
+    expect(llm.waitingCount).toBe(4);
+    expect(llm.waitingByPriority.p0).toBe(1);
     expect(llm.waitingByPriority.p2).toBe(1);
     expect(llm.waitingByPriority.p3).toBe(1);
 
@@ -237,6 +249,21 @@ describe("getQueueStatus", () => {
 });
 
 describe("cleanupStaleSlots", () => {
+  it("keeps a long llm run on the CPU twin while the GPU is lent", async () => {
+    lease.lentLimitMs = 15 * 60_000;
+    const llm = await acquireSlot({ model: "llm", priority: 2, requester: "cpu-twin" });
+    const emb = await acquireSlot({ model: "embedding", priority: 2, requester: "embed" });
+    await db.execute(sql`
+      UPDATE ai_model_slot SET activated_at = NOW() - INTERVAL '10 minutes'
+      WHERE id IN (${llm.slotId}, ${emb.slotId})
+    `);
+
+    const result = await cleanupStaleSlots();
+    expect(result.cleaned).toBe(1);
+    expect((await pollSlot({ slotId: llm.slotId })).status).toBe("active");
+    expect((await pollSlot({ slotId: emb.slotId })).status).toBe("cancelled");
+  });
+
   it("cleans up slots that exceeded TTL", async () => {
     const slot = await acquireSlot({
       model: "llm",

@@ -16,7 +16,7 @@ import db from "../db/database";
 import { assistantConversation, assistantLetter, assistantMessage } from "../db/schema";
 import { checkRateLimit } from "../user/rateLimiter";
 import { requirePermission } from "../user/auth-handler";
-import { AiSlotTimeoutError, withAiSlot } from "../ai-queue/slot-helper";
+import { AI_PRIORITY, AiSlotTimeoutError, withAiPriority, withAiSlot } from "../ai-queue/slot-helper";
 import { runTurn } from "./agent";
 import { cleanContext, describeContext, type ContextRef } from "./briefs";
 import { renderLetterPdf } from "./letter-pdf";
@@ -40,10 +40,15 @@ const RATE_LIMIT = { maxAttempts: 20, windowMs: 10 * 60_000 };
 const MAX_QUESTION_LENGTH = 4000;
 /** Earlier turns (question, tool calls, answer) replayed as context. */
 const HISTORY_TURNS = 6;
-/** ai-queue priority: someone is waiting for this answer. */
-const SLOT_PRIORITY = 1;
+/**
+ * ai-queue priority: someone is waiting for this answer, so it goes before
+ * every other model job, a running batch classification included. The whole
+ * turn runs in this lane, so a tool that asks the model is not queued as
+ * background either.
+ */
+const SLOT_PRIORITY = AI_PRIORITY.assistant;
 /** Naming a conversation can wait behind other work. */
-const TITLE_SLOT_PRIORITY = 5;
+const TITLE_SLOT_PRIORITY = AI_PRIORITY.idle;
 
 function currentUser() {
   const auth = getAuthData();
@@ -349,7 +354,7 @@ export const ask = api(
     try {
       const refs = cleanContext(conversation.context);
       const entries = refs.length ? await describeContext(refs, user) : [];
-      const result = await runTurn({
+      const result = await withAiPriority(SLOT_PRIORITY, async () => runTurn({
         user,
         history: await history(conversation.id),
         question,
@@ -371,7 +376,7 @@ export const ask = api(
           ms: entry.ms,
           error: entry.error,
         }),
-      });
+      }));
 
       const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults);
       const fallback = fallbackTitle(question);
