@@ -33,7 +33,7 @@ import {
 } from "./proposals";
 import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
 import { fallbackTitle, suggestTitle } from "./titles";
-import type { ChatMessage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
+import type { ChatMessage, ContextUsage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
 const RATE_LIMIT = { maxAttempts: 20, windowMs: 10 * 60_000 };
@@ -87,6 +87,8 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   blocks: ResultBlock[];
+  /** Answers only: how full the model's window got in that turn. */
+  context_usage?: ContextUsage | null;
   created_at: string;
 }
 
@@ -159,6 +161,7 @@ export const getConversation = api(
         content: m.content ?? "",
         // Proposal cards show what became of them since, not the state they were stored in.
         blocks: await refreshProposalBlocks((m.blocks ?? []) as ResultBlock[], Number(auth.userID)),
+        context_usage: (m.context_usage as ContextUsage | null) ?? null,
         created_at: m.created_at,
       })));
     const user = { userID: auth.userID, permissions: auth.permissions };
@@ -215,6 +218,7 @@ export interface AskResponse {
   blocks: ResultBlock[];
   message_id: number;
   rounds: number;
+  context_usage: ContextUsage;
 }
 
 /**
@@ -280,6 +284,15 @@ export async function history(conversationId: number): Promise<ChatMessage[]> {
   return complete.slice(-HISTORY_TURNS).flat();
 }
 
+/** Questions asked in the conversation so far, answered or not. */
+async function questionCount(conversationId: number): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(assistantMessage)
+    .where(and(eq(assistantMessage.conversation_id, conversationId), eq(assistantMessage.role, "user")));
+  return row?.n ?? 0;
+}
+
 /** The latest result set of each type in the conversation, for `from_previous_result`. */
 async function previousRefs(conversationId: number): Promise<Partial<Record<RefType, number[]>>> {
   const rows = await db
@@ -300,6 +313,7 @@ async function persist(
   transcript: ChatMessage[],
   blocks: ResultBlock[],
   toolResults: Record<string, { digest: string; ref?: ResultRef }> = {},
+  contextUsage: ContextUsage | null = null,
 ): Promise<number> {
   let finalId = 0;
   for (let i = 0; i < transcript.length; i++) {
@@ -318,6 +332,7 @@ async function persist(
         digest: m.role === "tool" ? toolResults[m.tool_call_id]?.digest ?? null : null,
         result_ref: m.role === "tool" ? toolResults[m.tool_call_id]?.ref ?? null : null,
         blocks: isFinal && blocks.length ? blocks : null,
+        context_usage: isFinal && contextUsage ? { ...contextUsage } : null,
       })
       .returning({ id: assistantMessage.id });
     if (isFinal) finalId = row.id;
@@ -352,6 +367,7 @@ export const ask = api(
 
     const user = { userID: auth.userID, permissions: auth.permissions };
     try {
+      const earlierTurns = await questionCount(conversation.id);
       const refs = cleanContext(conversation.context);
       const entries = refs.length ? await describeContext(refs, user) : [];
       const result = await withAiPriority(SLOT_PRIORITY, async () => runTurn({
@@ -378,15 +394,25 @@ export const ask = api(
         }),
       }));
 
-      const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults);
+      const contextUsage: ContextUsage = { ...result.context, earlierTurns };
+      const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults, contextUsage);
       const fallback = fallbackTitle(question);
       await db
         .update(assistantConversation)
         .set({ updated_at: sql`now()`, title: conversation.title ?? fallback })
         .where(eq(assistantConversation.id, conversation.id));
       if (conversation.title === null) nameConversation(conversation.id, question, fallback);
-      log.info("assistant answered", { conversation_id: conversation.id, rounds: result.rounds, blocks: result.blocks.length });
-      return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds };
+      log.info("assistant answered", {
+        conversation_id: conversation.id,
+        rounds: result.rounds,
+        blocks: result.blocks.length,
+        context_used: contextUsage.used,
+        context_window: contextUsage.window,
+        context_estimated: contextUsage.estimated,
+        kept_turns: contextUsage.keptTurns,
+        earlier_turns: earlierTurns,
+      });
+      return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds, context_usage: contextUsage };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       emit({ type: "error", message });

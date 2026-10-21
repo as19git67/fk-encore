@@ -133,6 +133,29 @@ export type ChatMessage =
   | { role: "assistant"; content: string | null; tool_calls?: ChatToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
+/**
+ * How full the model's window was during a turn, shown under the chat. Real
+ * token counts come from llm-service; `estimated` and `budget` are the loop's
+ * own reckoning (characters / 4), by which it decides what to shorten.
+ */
+export interface ContextUsage {
+  /** Tokens of the turn's largest request, prompt plus answer, as the model counted them. */
+  used: number | null;
+  /** The model's context window. */
+  window: number | null;
+  /** The loop's estimate of the same request. */
+  estimated: number;
+  /** What the loop lets a request take before it shortens (estimated tokens). */
+  budget: number;
+  /** Earlier questions replayed into this turn, and how many of them were still in the request that had the fewest. */
+  historyTurns: number;
+  keptTurns: number;
+  /** Older tool results of this turn shrunk to their digests to make room. */
+  digested: number;
+  /** Earlier questions in the conversation, answered or not. Set by the service. */
+  earlierTurns?: number;
+}
+
 /** What the agent reports while it works, in order. */
 export type TurnEvent =
   | { type: "token"; text: string }

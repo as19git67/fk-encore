@@ -24,10 +24,11 @@ import {
   toolDefinition,
 } from "./catalog";
 import { contextSection, type ContextRef } from "./briefs";
-import { ContextTooLargeError, type ChatFn, type ChatReply } from "./llm-client";
+import { ContextTooLargeError, type ChatFn, type ChatReply, type ChatRequest } from "./llm-client";
 import type {
   AssistantUser,
   ChatMessage,
+  ContextUsage,
   RefType,
   ResultBlock,
   ResultRef,
@@ -240,6 +241,8 @@ export interface TurnResult {
   /** Per tool call id: its one-line digest and the set it found, for later turns. */
   toolResults: Record<string, { digest: string; ref?: ResultRef }>;
   rounds: number;
+  /** How full the window got, for the line under the chat. */
+  context: ContextUsage;
 }
 
 /**
@@ -358,6 +361,27 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let nudge: ChatMessage[] | null = null;
   /** One more request for words after an empty reply; never twice. */
   let emptyRetried = false;
+
+  const historyTurns = input.history.filter((m) => m.role === "user").length;
+  const usage: ContextUsage = {
+    used: null, window: null, estimated: 0, budget, historyTurns, keptTurns: historyTurns, digested: 0,
+  };
+  /** One /chat call, and what it took of the window. */
+  const send = async (request: ChatRequest): Promise<ChatReply> => {
+    const reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
+    usage.estimated = Math.max(usage.estimated, estimateTokens(request.messages) + estimateTokens(request.tools ?? []));
+    const counted = reply.usage;
+    if (counted?.n_ctx) usage.window = counted.n_ctx;
+    if (counted?.prompt_tokens != null) {
+      usage.used = Math.max(usage.used ?? 0, counted.prompt_tokens + (counted.completion_tokens ?? 0));
+    }
+    const sent = request.messages;
+    usage.keptTurns = Math.min(usage.keptTurns, sent.slice(1, questionIndex).filter((m) => m.role === "user").length);
+    usage.digested = Math.max(usage.digested, sent.slice(questionIndex).filter(
+      (m) => m.role === "tool" && digests.get(m.tool_call_id) === m.content,
+    ).length);
+    return reply;
+  };
   for (let round = 1; round <= maxRounds && answer === null; round++) {
     rounds = round;
     const last = round === maxRounds;
@@ -378,7 +402,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     };
     let reply: ChatReply;
     try {
-      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
+      reply = await send(request);
     } catch (err) {
       if (!(err instanceof ContextTooLargeError)) throw err;
       // The estimate was optimistic. Shrink everything that can shrink and
@@ -389,7 +413,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       questionIndex -= cut;
       lastRoundStart -= cut;
       request.messages = [...messages, ...(nudge ?? [])];
-      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
+      reply = await send(request);
     }
 
     const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
@@ -406,10 +430,10 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       // The forced last round wrote a call instead of an answer: ask once
       // more, without tools, for the answer in words.
       emit({ type: "retract" });
-      const retry = await withSlot(() => input.chat({
+      const retry = await send({
         messages: [...messages, { role: "assistant", content: reply.content }, { role: "user", content: FINAL_ANSWER_NUDGE }],
         max_tokens: ANSWER_TOKENS,
-      }, (text) => emit({ type: "token", text })));
+      });
       rounds++;
       emptyRetried = true;
       reply = { ...retry, tool_calls: [] };
@@ -427,10 +451,10 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         // a Lastschriften turn this way): ask once more, without tools, for
         // the answer in words before giving up on the turn.
         emptyRetried = true;
-        const retry = await withSlot(() => input.chat({
+        const retry = await send({
           messages: [...messages, { role: "user", content: FINAL_ANSWER_NUDGE }],
           max_tokens: ANSWER_TOKENS,
-        }, (text) => emit({ type: "token", text })));
+        });
         rounds++;
         noRows = wantsNoRows(retry.content);
         answer = cleanAnswer(retry.content ?? "");
@@ -518,5 +542,5 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i]!.kind !== "proposal") blocks.splice(i, 1);
   }
   emit({ type: "done", answer: final, blocks });
-  return { answer: final, blocks, transcript, rounds, toolResults };
+  return { answer: final, blocks, transcript, rounds, toolResults, context: usage };
 }

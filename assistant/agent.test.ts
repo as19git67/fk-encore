@@ -221,6 +221,24 @@ describe("the loop", () => {
     expect((requests[0].messages[0] as { content: string }).content).toContain("fetch a tool's argument schema with describe_tools");
   });
 
+  it("reports the largest request's tokens, the window and the earlier questions it kept", async () => {
+    const history: ChatMessage[] = [
+      { role: "user", content: "alt ".repeat(5000) },
+      { role: "assistant", content: "antwort" },
+      { role: "user", content: "vorhin" },
+      { role: "assistant", content: "ja" },
+    ];
+    const { fn } = scripted([
+      { ...answer("Hallo."), usage: { n_ctx: 30000, prompt_tokens: 900, completion_tokens: 4 } },
+    ]);
+    const res = await runTurn({
+      user: USER, history, question: "Hallo?", tools: [], chat: fn, now: NOW, contextTokens: 6000,
+    });
+    expect(res.context).toMatchObject({ used: 904, window: 30000, historyTurns: 2, keptTurns: 1, digested: 0, budget: 6000 - 1024 });
+    expect(res.context.estimated).toBeGreaterThan(0);
+    expect(res.context.estimated).toBeLessThanOrEqual(6000 - 1024);
+  });
+
   it("replays history and keeps the question when the context runs short", () => {
     const messages: ChatMessage[] = [
       { role: "system", content: "s" },

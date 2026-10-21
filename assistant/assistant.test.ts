@@ -128,6 +128,12 @@ describe("asking", () => {
     expect(replayed[2]).toEqual({ role: "tool", tool_call_id: call.tool_calls[0]!.id, content: "[earlier result of list_meters: 0 rows]" });
     // The answer stays as written: no note the model could copy.
     expect(replayed[3]).toEqual({ role: "assistant", content: "Keine Zähler." });
+
+    // The second answer records how full the window got and what it still saw.
+    const detail = await getConversation({ id: conv.id });
+    expect(detail.messages[1].context_usage).toMatchObject({ historyTurns: 0, earlierTurns: 0 });
+    expect(detail.messages[3].context_usage).toMatchObject({ historyTurns: 1, keptTurns: 1, earlierTurns: 1, used: null });
+    expect(detail.messages[0].context_usage).toBeNull();
   });
 
   it("a busy model is 'unavailable', and nothing is stored", async () => {

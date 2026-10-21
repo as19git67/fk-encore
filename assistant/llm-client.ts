@@ -39,10 +39,19 @@ export interface ChatRequest {
   temperature?: number;
 }
 
+/** The model's window and what one request took of it, as llm-service counted. */
+export interface ChatUsage {
+  n_ctx: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+}
+
 export interface ChatReply {
   content: string | null;
   tool_calls: ChatToolCall[];
   finish_reason: string | null;
+  /** Absent from a service that predates the `context` chunk. */
+  usage?: ChatUsage;
 }
 
 export type ChatFn = (req: ChatRequest, onToken?: (text: string) => void) => Promise<ChatReply>;
@@ -60,6 +69,7 @@ export class ReplyAssembler {
   private content = "";
   private calls = new Map<number, { id: string; name: string; arguments: string }>();
   private finish: string | null = null;
+  private usage: ChatUsage | undefined;
 
   constructor(private readonly onToken?: (text: string) => void) {}
 
@@ -70,6 +80,16 @@ export class ReplyAssembler {
       const message = error.message ?? "llm-service error";
       if (error.status === 413) throw new ContextTooLargeError(message);
       throw new LlmServiceUnavailableError(message);
+    }
+    const context = (chunk as { context?: Partial<ChatUsage> }).context;
+    if (context && typeof context === "object") {
+      const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+      this.usage = {
+        n_ctx: count(context.n_ctx),
+        prompt_tokens: count(context.prompt_tokens),
+        completion_tokens: count(context.completion_tokens),
+      };
+      return;
     }
     const choice = (chunk as { choices?: Array<{ delta?: ChunkDelta; finish_reason?: string | null }> }).choices?.[0];
     if (!choice) return;
@@ -99,7 +119,9 @@ export class ReplyAssembler {
         function: { name: c.name, arguments: c.arguments || "{}" },
       }));
     const content = this.content.trim() ? this.content.trim() : null;
-    return { content, tool_calls, finish_reason: tool_calls.length ? "tool_calls" : this.finish };
+    const reply: ChatReply = { content, tool_calls, finish_reason: tool_calls.length ? "tool_calls" : this.finish };
+    if (this.usage) reply.usage = this.usage;
+    return reply;
   }
 }
 

@@ -510,6 +510,7 @@ def _load_inproc_llm() -> None:
         n_gpu_layers=LLM_GPU_LAYERS,
         verbose=False,
     )
+    _state["server_n_ctx"] = None
     try:
         _state["llm"] = Llama(**base_kwargs, **tuning)
     except Exception:
@@ -615,6 +616,7 @@ def _load_server_llm() -> None:
     # LLM_CTX if the sidecar clamped it — and LLM_CTX is what /classify budgets
     # its prompt against, so a mismatch is worth seeing in the log.
     server_ctx = props.get("default_generation_settings", {}).get("n_ctx") if isinstance(props, dict) else None
+    _state["server_n_ctx"] = server_ctx if isinstance(server_ctx, int) and server_ctx > 0 else None
     if isinstance(server_ctx, int) and server_ctx < LLM_CTX:
         log.warning(
             "llama-server reports n_ctx=%d but LLM_CTX=%d: /classify will budget prompts "
@@ -3227,6 +3229,13 @@ def _chat_server_turn(llm: Any, req: chat.ChatRequest) -> dict[str, Any]:
     return reply
 
 
+def _context_window() -> int:
+    """The window a /chat request runs in: what llama-server reported, else LLM_CTX."""
+
+    n = _state.get("server_n_ctx")
+    return n if isinstance(n, int) and n > 0 else LLM_CTX
+
+
 def _is_server_llm(llm: Any) -> bool:
     # Duck-typed rather than LLM_BACKEND: the loaded object is what answers,
     # and during a reload the two can disagree for a moment.
@@ -3241,13 +3250,14 @@ async def chat_turn(req: chat.ChatRequest) -> Any:
     """One assistant turn: a text answer, or the tool calls the model wants.
 
     ``stream=false`` returns ``{message, finish_reason, usage, model, backend,
-    processing_ms}``. ``stream=true`` answers ``text/event-stream`` with
+    n_ctx, processing_ms}``. ``stream=true`` answers ``text/event-stream`` with
     OpenAI chunk objects as ``data:`` lines and a final ``data: [DONE]``; on
     the server backend these are llama-server's own chunks, relayed as they
     come, so tool-call arguments arrive as deltas the caller assembles. A
     failure after the stream has started arrives as ``data: {"error":
     {"status", "message"}}`` before ``[DONE]``, because the status line has
-    already been sent.
+    already been sent. A stream that completes ends with one ``context`` chunk:
+    the window and the tokens this request took of it (chat.context_chunk).
     """
 
     llm = _state["llm"]
@@ -3273,7 +3283,10 @@ async def chat_turn(req: chat.ChatRequest) -> Any:
             log.warning("/chat: %s", detail)
         raise HTTPException(status_code=status, detail=detail) from exc
 
-    reply.update(model=model, backend=backend, processing_ms=int((time.monotonic() - t0) * 1000))
+    reply.update(
+        model=model, backend=backend, n_ctx=_context_window(),
+        processing_ms=int((time.monotonic() - t0) * 1000),
+    )
     calls = reply["message"].get("tool_calls") or []
     log.info(
         "/chat: %s turn in %d ms, %d message(s), %d tool(s) offered -> %s",
@@ -3301,13 +3314,18 @@ async def _chat_stream(llm: Any, req: chat.ChatRequest, *, server: bool, model: 
 
     def produce() -> None:
         try:
+            usage: dict[str, int] | None = None
             if server:
-                for chunk in llm.stream_chat_completion(chat.server_payload(req), should_stop=stop.is_set):
+                payload = {**chat.server_payload(req), "stream_options": {"include_usage": True}}
+                for chunk in llm.stream_chat_completion(payload, should_stop=stop.is_set):
+                    usage = chat.stream_usage(chunk) or usage
                     put(chunk)
             else:
                 reply = _chat_inproc_turn(llm, req)
+                usage = chat.usage_counts(reply.get("usage"))
                 for chunk in chat.reply_as_chunks(reply, model):
                     put(json.dumps(chunk, ensure_ascii=False))
+            put(json.dumps(chat.context_chunk(_context_window(), usage)))
         except Exception as exc:  # noqa: BLE001 — every failure becomes an event
             status, detail = _chat_error_status(exc)
             log.warning("/chat stream: %s", detail)

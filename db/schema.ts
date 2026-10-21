@@ -4594,6 +4594,8 @@ export const assistantMessage = pgTable(
     digest: text("digest"),
     /** Tool rows: the ids the result held, for `from_previous_result`. */
     result_ref: jsonb("result_ref").$type<{ type: "photo" | "document" | "transaction"; ids: number[] }>(),
+    /** Answer rows: how full the model's window got in this turn (assistant/types.ts ContextUsage). */
+    context_usage: jsonb("context_usage").$type<Record<string, unknown>>(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("assistant_message_by_conversation").on(table.conversation_id, table.id)],

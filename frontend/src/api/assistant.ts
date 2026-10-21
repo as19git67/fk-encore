@@ -34,11 +34,29 @@ export interface ConversationSummary {
   updated_at: string
 }
 
+/**
+ * How full the model's window got in one turn (assistant/types.ts).
+ * `used`/`window` are the model's own count; `estimated`/`budget` the
+ * loop's reckoning, by which it decides what to shorten.
+ */
+export interface ContextUsage {
+  used: number | null
+  window: number | null
+  estimated: number
+  budget: number
+  historyTurns: number
+  keptTurns: number
+  digested: number
+  earlierTurns?: number
+}
+
 export interface ConversationMessage {
   id: number
   role: 'user' | 'assistant'
   content: string
   blocks: ResultBlock[]
+  /** Answers only; null for answers from before it was recorded. */
+  context_usage?: ContextUsage | null
   created_at: string
 }
 
@@ -64,6 +82,7 @@ export interface AskResponse {
   blocks: ResultBlock[]
   message_id: number
   rounds: number
+  context_usage?: ContextUsage
 }
 
 /** One event of a running turn, as the stream sends it. */

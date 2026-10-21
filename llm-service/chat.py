@@ -429,3 +429,55 @@ def reply_as_chunks(reply: dict[str, Any], model: str) -> list[dict[str, Any]]:
         {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
         {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": reply["finish_reason"]}]},
     ]
+
+
+# ─── Context usage ─────────────────────────────────────────────────────────────
+#
+# The assistant shows how full the model's window was. llama-server says how
+# many tokens a request took — in `usage` when asked for it
+# (`stream_options.include_usage`), and in `timings` on its last chunk anyway,
+# where the prompt is split into the part it computed and the part it found
+# in its cache. After the stream, /chat adds one chunk of its own:
+# `{"context": {"n_ctx", "prompt_tokens", "completion_tokens"}}`.
+
+
+def stream_usage(body: str) -> dict[str, int] | None:
+    """The token counts one streamed chunk carries, or None."""
+
+    if '"usage"' not in body and '"timings"' not in body:
+        return None
+    try:
+        chunk = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(chunk, dict):
+        return None
+    return usage_counts(chunk.get("usage"), chunk.get("timings"))
+
+
+def usage_counts(usage: Any, timings: Any = None) -> dict[str, int] | None:
+    """Prompt and completion tokens from an OpenAI `usage` or llama.cpp `timings`."""
+
+    if isinstance(usage, dict) and isinstance(usage.get("prompt_tokens"), int):
+        return {
+            "prompt_tokens": usage["prompt_tokens"],
+            "completion_tokens": int(usage.get("completion_tokens") or 0),
+        }
+    if isinstance(timings, dict) and isinstance(timings.get("prompt_n"), int):
+        return {
+            "prompt_tokens": timings["prompt_n"] + int(timings.get("cache_n") or 0),
+            "completion_tokens": int(timings.get("predicted_n") or 0),
+        }
+    return None
+
+
+def context_chunk(n_ctx: int | None, usage: dict[str, int] | None) -> dict[str, Any]:
+    """The chunk /chat ends a stream with: the window and what this request took of it."""
+
+    return {
+        "context": {
+            "n_ctx": n_ctx,
+            "prompt_tokens": usage["prompt_tokens"] if usage else None,
+            "completion_tokens": usage["completion_tokens"] if usage else None,
+        }
+    }

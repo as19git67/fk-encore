@@ -54,6 +54,13 @@ describe("ReplyAssembler", () => {
     expect(a.reply().tool_calls[0].function.name).toBe("list_meters");
   });
 
+  it("takes the window and token counts from the closing context chunk", () => {
+    const a = new ReplyAssembler();
+    a.push({ choices: [{ delta: { content: "Ja." }, finish_reason: "stop" }] });
+    a.push({ context: { n_ctx: 30000, prompt_tokens: 1200, completion_tokens: 8 } });
+    expect(a.reply().usage).toEqual({ n_ctx: 30000, prompt_tokens: 1200, completion_tokens: 8 });
+  });
+
   it("maps error events", () => {
     expect(() => new ReplyAssembler().push({ error: { status: 413, message: "too long" } })).toThrow(ContextTooLargeError);
     expect(() => new ReplyAssembler().push({ error: { status: 502, message: "boom" } })).toThrow(LlmServiceUnavailableError);
