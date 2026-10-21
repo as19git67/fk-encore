@@ -165,6 +165,34 @@ describe("withAiSlot push wakeup", () => {
     await holder;
   });
 
+  it("leaves the line at once when the caller aborts", async () => {
+    const holderGate = deferred();
+    const holderStarted = deferred();
+    const holder = withAiSlot("llm", 2, "test:holder", async () => {
+      holderStarted.resolve();
+      await holderGate.promise;
+    });
+    await holderStarted.promise;
+
+    const controller = new AbortController();
+    let waiterRan = false;
+    const waiter = withAiSlot("llm", AI_PRIORITY.assistant, "test:cancelled", async () => {
+      waiterRan = true;
+    }, undefined, controller.signal);
+    await vi.waitFor(() => expect(waiterCount()).toBe(1), { timeout: REGISTERED_TIMEOUT_MS });
+
+    controller.abort();
+    await expect(waiter).rejects.toMatchObject({ name: "AbortError" });
+    expect(waiterRan).toBe(false);
+    const rows = await db.execute<{ c: number }>(
+      sql`SELECT COUNT(*)::int AS c FROM ai_model_slot WHERE model_name = 'llm'`,
+    );
+    expect(rows.rows[0].c).toBe(1);
+
+    holderGate.resolve();
+    await holder;
+  });
+
   it("makes progress via the fallback poll when the wakeup is lost", async () => {
     // Shrink the fallback interval, then promote the waiter directly in the DB
     // WITHOUT going through releaseSlot's wakeWaiter. The registry is never

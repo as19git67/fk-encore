@@ -22,7 +22,7 @@ import { cleanContext, describeContext, type ContextRef } from "./briefs";
 import { renderLetterPdf } from "./letter-pdf";
 import { catalogFor } from "./catalog";
 import { chat, ContextTooLargeError, LlmServiceUnavailableError } from "./llm-client";
-import { followTurn, openTurn, TURN_ID_RE } from "./live";
+import { cancelTurn, followTurn, openTurn, TURN_ID_RE, turnSignal } from "./live";
 import {
   discardProposal,
   executeProposal,
@@ -342,8 +342,10 @@ export const ask = api(
     checkRateLimit(`assistant:${auth.userID}`, { ...RATE_LIMIT, message: "Too many questions to the assistant." });
 
     let emit: (event: TurnEvent) => void = () => {};
+    let signal: AbortSignal | undefined;
     if (req.turnId) {
       try {
+        signal = turnSignal(req.turnId, auth.userID);
         emit = openTurn(req.turnId, auth.userID);
       } catch (err) {
         throw APIError.alreadyExists((err as Error).message);
@@ -366,7 +368,8 @@ export const ask = api(
         tools: catalogFor(user),
         chat,
         emit,
-        withSlot: (fn) => withAiSlot("llm", SLOT_PRIORITY, "assistant", fn),
+        signal,
+        withSlot: (fn) => withAiSlot("llm", SLOT_PRIORITY, "assistant", fn, undefined, signal),
         log: (entry) => log.info("assistant tool call", {
           conversation_id: conversation.id,
           tool: entry.tool,
@@ -388,6 +391,13 @@ export const ask = api(
       log.info("assistant answered", { conversation_id: conversation.id, rounds: result.rounds, blocks: result.blocks.length });
       return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds };
     } catch (err) {
+      if (signal?.aborted) {
+        // Nothing of a stopped turn is kept, like a failed one: the next
+        // question starts from the last answer.
+        emit({ type: "cancelled" });
+        log.info("assistant turn cancelled", { conversation_id: conversation.id });
+        throw APIError.canceled("the answer was cancelled");
+      }
       const message = err instanceof Error ? err.message : String(err);
       emit({ type: "error", message });
       if (err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError) {
@@ -400,6 +410,30 @@ export const ask = api(
       if (err instanceof APIError) throw err;
       throw APIError.internal("the assistant could not answer");
     }
+  },
+);
+
+interface CancelTurnRequest {
+  turnId: string;
+}
+
+interface CancelTurnResponse {
+  /** False when the turn had already finished (or was never known here). */
+  cancelled: boolean;
+}
+
+/**
+ * The "Abbrechen" under a running answer. The turn stops where it is: a wait
+ * in the ai-queue is left, a model call is closed (the llm-service then stops
+ * llama-server, so the slot is free for the next caller), and a tool that is
+ * running finishes but no further one starts. `ask` then answers `canceled`.
+ */
+export const cancelAssistantTurn = api(
+  { expose: true, method: "POST", path: "/assistant/turns/:turnId/cancel", auth: true },
+  async ({ turnId }: CancelTurnRequest): Promise<CancelTurnResponse> => {
+    const auth = assistantUser();
+    if (!TURN_ID_RE.test(turnId)) throw APIError.invalidArgument("invalid turn id");
+    return { cancelled: cancelTurn(turnId, auth.userID) };
   },
 );
 
@@ -534,7 +568,7 @@ export const letterPdf = api.raw(
  * `tool_start`. `done` carries the final answer either way.
  */
 export interface StreamEvent {
-  type: "token" | "retract" | "tool_start" | "tool_result" | "done" | "error";
+  type: "token" | "retract" | "tool_start" | "tool_result" | "done" | "error" | "cancelled";
   text?: string;
   tool?: string;
   arguments?: Record<string, unknown>;
@@ -560,6 +594,8 @@ export function toStreamEvent(event: TurnEvent): StreamEvent {
       return { type: "done", answer: event.answer, blocks: event.blocks };
     case "error":
       return { type: "error", message: event.message };
+    case "cancelled":
+      return { type: "cancelled" };
   }
 }
 

@@ -100,8 +100,15 @@ async function waitForActiveSlot(
   slotId: number,
   model: AiModel,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  // The caller gave up (the assistant's "Abbrechen"): leave the line at once,
+  // the same way a timeout does.
+  const aborted = new Promise<void>((resolve) => {
+    if (signal?.aborted) resolve();
+    else signal?.addEventListener("abort", () => resolve(), { once: true });
+  });
   while (true) {
     // Register first, then re-check — this closes the window between the
     // acquireSlot response (or a previous iteration) and registration.
@@ -111,6 +118,11 @@ async function waitForActiveSlot(
       if (poll.status === "active") return;
       if (poll.status === "cancelled") {
         throw new AiSlotTimeoutError(model, timeoutMs);
+      }
+
+      if (signal?.aborted) {
+        await aiqueue.cancelSlot({ slotId }).catch(() => {});
+        signal.throwIfAborted();
       }
 
       const remaining = deadline - Date.now();
@@ -126,7 +138,7 @@ async function waitForActiveSlot(
 
       const timer = sleep(Math.min(remaining, fallbackPollMs()));
       try {
-        await Promise.race([wakeup, timer.promise]);
+        await Promise.race([wakeup, timer.promise, aborted]);
       } finally {
         timer.cancel();
       }
@@ -142,6 +154,9 @@ async function waitForActiveSlot(
  * Inside a call chain that already holds this slot it runs `fn` directly. A
  * fire-and-forget started inside a job and still going after the job let go
  * of its slot queues like anyone else.
+ *
+ * An aborted `signal` takes the caller out of the line and throws its reason;
+ * once `fn` runs, stopping it is `fn`'s business.
  */
 export async function withAiSlot<T>(
   model: AiModel,
@@ -149,7 +164,9 @@ export async function withAiSlot<T>(
   requester: string,
   fn: () => Promise<T>,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<T> {
+  signal?.throwIfAborted();
   const current = context.getStore();
   const owned = current?.held.get(model);
   if (owned && !owned.released) return fn();
@@ -174,7 +191,7 @@ export async function withAiSlot<T>(
         `[ai-queue] ${requester} waiting for ${model} slot ${slotId} ` +
           `position=${slot.position}`,
       );
-      await waitForActiveSlot(slotId, model, timeoutMs);
+      await waitForActiveSlot(slotId, model, timeoutMs, signal);
       console.log(
         `[ai-queue] ${requester} ${model} slot ${slotId} became active ` +
           `after ${Date.now() - acquiredAt}ms`,

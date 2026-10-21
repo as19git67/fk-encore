@@ -220,6 +220,12 @@ export interface TurnInput {
   maxRounds?: number;
   contextTokens?: number;
   schemaBudgetTokens?: number;
+  /**
+   * The user's "Abbrechen". Checked before each model round and each tool
+   * call, and handed to the model call; a cancelled turn throws the signal's
+   * reason and emits nothing more.
+   */
+  signal?: AbortSignal;
   /** Wraps each /chat call, e.g. in the ai-queue's llm slot. */
   withSlot?: <T>(fn: () => Promise<T>) => Promise<T>;
   /** The conversation the turn belongs to; proposals are filed under it. */
@@ -359,6 +365,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   /** One more request for words after an empty reply; never twice. */
   let emptyRetried = false;
   for (let round = 1; round <= maxRounds && answer === null; round++) {
+    input.signal?.throwIfAborted();
     rounds = round;
     const last = round === maxRounds;
     const definitions = [
@@ -378,7 +385,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     };
     let reply: ChatReply;
     try {
-      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
+      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
     } catch (err) {
       if (!(err instanceof ContextTooLargeError)) throw err;
       // The estimate was optimistic. Shrink everything that can shrink and
@@ -389,7 +396,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       questionIndex -= cut;
       lastRoundStart -= cut;
       request.messages = [...messages, ...(nudge ?? [])];
-      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
+      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
     }
 
     const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
@@ -409,7 +416,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       const retry = await withSlot(() => input.chat({
         messages: [...messages, { role: "assistant", content: reply.content }, { role: "user", content: FINAL_ANSWER_NUDGE }],
         max_tokens: ANSWER_TOKENS,
-      }, (text) => emit({ type: "token", text })));
+      }, (text) => emit({ type: "token", text }), input.signal));
       rounds++;
       emptyRetried = true;
       reply = { ...retry, tool_calls: [] };
@@ -430,7 +437,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         const retry = await withSlot(() => input.chat({
           messages: [...messages, { role: "user", content: FINAL_ANSWER_NUDGE }],
           max_tokens: ANSWER_TOKENS,
-        }, (text) => emit({ type: "token", text })));
+        }, (text) => emit({ type: "token", text }), input.signal));
         rounds++;
         noRows = wantsNoRows(retry.content);
         answer = cleanAnswer(retry.content ?? "");
@@ -444,6 +451,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     lastRoundStart = messages.length;
     messages.push({ role: "assistant", content: reply.content, tool_calls: reply.tool_calls });
     for (const call of reply.tool_calls) {
+      input.signal?.throwIfAborted();
       const name = call.function.name;
       const args = parseArguments(call.function.arguments);
       const result = (content: string) => messages.push({ role: "tool", tool_call_id: call.id, content });
