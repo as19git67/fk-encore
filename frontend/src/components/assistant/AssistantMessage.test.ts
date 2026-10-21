@@ -37,6 +37,16 @@ beforeEach(() => {
 })
 
 describe('AssistantMessage', () => {
+  it('links an item the answer names by id to its page', () => {
+    const el = mount([], undefined, 'Aus dem Dokument mit der ID 123, siehe auch **Buchung 4711**.')
+    const links = [...el.querySelectorAll<HTMLAnchorElement>('.text--rich a.entity-link')]
+    expect(links.map((a) => [a.textContent, a.dataset.to])).toEqual([
+      ['Dokument mit der ID 123', '/dokumente/123'],
+      ['Buchung 4711', '/finanzen/umsaetze/4711'],
+    ])
+    expect(links[1]!.querySelector('strong')).not.toBeNull()
+  })
+
   it('renders a table in the answer as a real table, its cells as text', async () => {
     const el = mount([], undefined, 'Stand:\n\n| Konto | Saldo |\n|---|---:|\n| Giro | 1.234,56 € |\n| <img src=x onerror=alert(1)> | 2 |')
     await nextTick()
