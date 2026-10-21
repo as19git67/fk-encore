@@ -766,13 +766,15 @@ services:
       # image matters most; by default Watchtower skips it.
       WATCHTOWER_INCLUDE_RESTARTING: "true"
     # Only the containers named here are updated. A new service has to be
-    # added to this list as well, or its image is never pulled again.
+    # added to this list as well, or its image is never pulled again
+    # (scripts/compose-watchtower.test.ts checks it).
     command: >
       --http-api-periodic-polls
       fk-encore-app${DEPLOY_NAME_SUFFIX:-}
       fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
       fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
       fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-aesthetic${DEPLOY_NAME_SUFFIX:-}
       fk-encore-receipt-ocr${DEPLOY_NAME_SUFFIX:-}
       fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
       fk-encore-routing${DEPLOY_NAME_SUFFIX:-}
