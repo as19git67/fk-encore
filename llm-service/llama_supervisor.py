@@ -91,6 +91,26 @@ def build_args(cfg: LlmConfig) -> list[str]:
     return args
 
 
+def server_env(cfg: LlmConfig) -> dict[str, str] | None:
+    """Environment for the llama-server process, or None to inherit ours.
+
+    A configuration with nothing on the card (the CPU twin the nightly
+    aesthetic run swaps in) hides the GPU from the process. The image is a
+    CUDA build, and with the card visible llama.cpp offloads the large
+    matrix products of prompt processing to it even at `--n-gpu-layers 0`,
+    copying the weights over PCIe for every batch. While Q-Align holds the
+    card that left the CPU threads waiting, at about a quarter load, and put
+    a CUDA context next to the scorer's memory. Hidden, the twin computes
+    on its own cores.
+    """
+
+    if cfg.gpu_layers != 0 or cfg.accelerator != "cpu":
+        return None
+    env = dict(os.environ)
+    env["CUDA_VISIBLE_DEVICES"] = ""
+    return env
+
+
 class LlamaServerProcess:
     """Start/stop a llama-server, and notice when it dies on its own."""
 
@@ -147,13 +167,18 @@ class LlamaServerProcess:
             raise FileNotFoundError(f"{self._binary} is not an executable file")
 
         args = [self._binary, *build_args(cfg)]
-        log.info("Starting llama-server: %s", " ".join(args))
+        env = server_env(cfg)
+        log.info(
+            "Starting llama-server%s: %s",
+            " (GPU hidden)" if env is not None else "",
+            " ".join(args),
+        )
         with self._lock:
             self._stopping = False
             self._last_status = None
             # stdout/stderr are inherited so llama.cpp's own logging lands in
             # the container log, exactly as it did under entrypoint.sh.
-            self._proc = subprocess.Popen(args)
+            self._proc = subprocess.Popen(args, env=env)
             self._watcher = threading.Thread(
                 target=self._watch, args=(self._proc,), name="llama-server-watch", daemon=True
             )

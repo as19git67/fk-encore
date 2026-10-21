@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from llama_supervisor import LlamaServerProcess, build_args, server_port
+from llama_supervisor import LlamaServerProcess, build_args, server_env, server_port
 from llm_config import LlmConfig
 
 
@@ -98,6 +98,20 @@ def test_the_port_comes_from_the_url_the_app_will_call():
 def test_a_url_without_a_port_is_an_error():
     with pytest.raises(ValueError):
         server_port("http://127.0.0.1")
+
+
+def test_a_configuration_on_the_card_inherits_the_environment():
+    assert server_env(_cfg(accelerator="cuda", gpu_layers=99)) is None
+
+
+def test_the_cpu_twin_does_not_see_the_gpu():
+    # A CUDA build offloads prompt processing to a visible card even at
+    # --n-gpu-layers 0; the twin must compute on its cores while Q-Align
+    # has the card.
+    env = server_env(_cfg(accelerator="cpu", gpu_layers=0))
+    assert env is not None
+    assert env["CUDA_VISIBLE_DEVICES"] == ""
+    assert "PATH" in env  # the rest of the environment is kept
 
 
 # ─── Process ownership ─────────────────────────────────────────────────────────
