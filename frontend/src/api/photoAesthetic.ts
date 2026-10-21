@@ -120,3 +120,12 @@ export function backfillAesthetic(model?: string): Promise<{ marked: number }> {
 export function trainAestheticHead(): Promise<{ started: boolean }> {
   return apiFetch('/photos/aesthetic/head/train', { method: 'POST' })
 }
+
+/** Deletes every finished run from the history; running or stranded ones stay. */
+export function clearAestheticRuns(): Promise<{ deleted: number }> {
+  return apiFetch('/photos/aesthetic/runs', { method: 'DELETE' })
+}
+
+export function deleteAestheticRun(id: number): Promise<{ deleted: number }> {
+  return apiFetch(`/photos/aesthetic/runs/${id}`, { method: 'DELETE' })
+}

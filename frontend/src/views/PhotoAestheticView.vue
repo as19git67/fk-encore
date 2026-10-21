@@ -22,6 +22,8 @@ import EmptyState from '../components/layout/EmptyState.vue'
 import ScrollX from '../components/layout/ScrollX.vue'
 import {
   backfillAesthetic,
+  clearAestheticRuns,
+  deleteAestheticRun,
   getAestheticOverview,
   saveAestheticSettings,
   startAestheticRun,
@@ -41,7 +43,7 @@ const overview = ref<AestheticOverview | null>(null)
 const loaded = ref(false)
 const error = ref<string | null>(null)
 const info = ref<string | null>(null)
-const busy = ref<'save' | 'start' | 'stop' | 'backfill' | 'train' | null>(null)
+const busy = ref<'save' | 'start' | 'stop' | 'backfill' | 'train' | 'clear' | number | null>(null)
 
 const enabled = ref(false)
 const windowStart = ref('01:00')
@@ -56,6 +58,9 @@ const dirty = computed(() => {
   const s = overview.value?.settings
   return !!s && (s.enabled !== enabled.value || s.window_start !== windowStart.value || s.window_end !== windowEnd.value)
 })
+/** Finished runs that owe nothing; only these can be deleted (a stranded run is still recovered). */
+const deletable = (r: AestheticRun) => r.status !== 'running' && r.gpu_returned
+const anyDeletable = computed(() => !!overview.value?.runs.some(deletable))
 const total = computed(() => (overview.value ? overview.value.scored + overview.value.backlog : 0))
 const share = computed(() => (total.value ? Math.round((overview.value!.scored / total.value) * 100) : 0))
 
@@ -226,6 +231,50 @@ async function train() {
   } finally {
     busy.value = null
   }
+}
+
+function deleteRun(r: AestheticRun) {
+  confirm.require({
+    message: `Den Lauf vom ${when(r.started_at)} aus dem Verlauf löschen? Die Bewertungen der Fotos bleiben.`,
+    header: 'Lauf löschen',
+    icon: 'pi pi-trash',
+    rejectLabel: 'Abbrechen',
+    acceptProps: { label: 'Löschen', severity: 'danger' },
+    accept: async () => {
+      busy.value = r.id
+      try {
+        await deleteAestheticRun(r.id)
+        await refresh()
+      } catch (e) {
+        error.value = message(e, 'Der Lauf konnte nicht gelöscht werden')
+      } finally {
+        busy.value = null
+      }
+    },
+  })
+}
+
+function clearRuns() {
+  confirm.require({
+    message:
+      'Alle beendeten Läufe aus dem Verlauf löschen? Die Bewertungen der Fotos bleiben; ein laufender Lauf und einer, der die GPU noch nicht zurückgegeben hat, bleiben stehen.',
+    header: 'Verlauf leeren',
+    icon: 'pi pi-trash',
+    rejectLabel: 'Abbrechen',
+    acceptProps: { label: 'Alle löschen', severity: 'danger' },
+    accept: async () => {
+      busy.value = 'clear'
+      try {
+        const { deleted } = await clearAestheticRuns()
+        info.value = deleted === 1 ? 'Ein Lauf gelöscht.' : `${count(deleted)} Läufe gelöscht.`
+        await refresh()
+      } catch (e) {
+        error.value = message(e, 'Der Verlauf konnte nicht geleert werden')
+      } finally {
+        busy.value = null
+      }
+    },
+  })
 }
 
 function rescoreAll() {
@@ -410,7 +459,20 @@ function rescoreAll() {
       </section>
 
       <section class="card" aria-labelledby="ae-history">
-        <h2 id="ae-history" class="card-title">Verlauf</h2>
+        <div class="card-head">
+          <h2 id="ae-history" class="card-title">Verlauf</h2>
+          <Button
+            v-if="anyDeletable"
+            label="Verlauf leeren"
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            size="small"
+            :loading="busy === 'clear'"
+            :disabled="busy !== null"
+            @click="clearRuns"
+          />
+        </div>
         <EmptyState
           v-if="!overview.runs.length"
           icon="pi pi-moon"
@@ -429,6 +491,7 @@ function rescoreAll() {
                 <th scope="col" class="num">Nicht lesbar</th>
                 <th scope="col" class="num">Danach offen</th>
                 <th scope="col">Ende</th>
+                <th scope="col"><span class="sr-only">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
@@ -448,6 +511,20 @@ function rescoreAll() {
                 <td class="reason">
                   <span v-if="r.error" class="failure">{{ r.error }}</span>
                   <span v-else>{{ r.ended_reason ?? '' }}</span>
+                </td>
+                <td class="row-actions">
+                  <Button
+                    v-if="deletable(r)"
+                    icon="pi pi-trash"
+                    text
+                    rounded
+                    size="small"
+                    severity="secondary"
+                    aria-label="Lauf löschen"
+                    :loading="busy === r.id"
+                    :disabled="busy !== null"
+                    @click="deleteRun(r)"
+                  />
                 </td>
               </tr>
             </tbody>
@@ -474,6 +551,14 @@ function rescoreAll() {
   border-radius: 0.5rem;
   background: var(--p-content-background);
   min-width: 0;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .card-title {
@@ -603,5 +688,19 @@ function rescoreAll() {
 
 .reason {
   min-width: 12rem;
+}
+
+.table td.row-actions {
+  vertical-align: middle;
+  text-align: right;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 </style>

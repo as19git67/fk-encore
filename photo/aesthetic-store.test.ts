@@ -8,6 +8,7 @@ import {
   countBacklog,
   countProvisionalTargets,
   countScored,
+  deleteRuns,
   getAestheticSettings,
   markUnscorable,
   nextBatch,
@@ -198,5 +199,21 @@ describe("runs", () => {
     expect((await runsToRecover(running)).map((r) => r.id)).toEqual([stranded]);
     await updateRun(stranded, { gpu_returned: true });
     expect((await runsToRecover(running)).map((r) => r.id)).toEqual([]);
+  });
+
+  it("are deleted only once they owe nothing", async () => {
+    const running = await startRun("window", 10);
+    const clean = await startRun("manual", 3);
+    await finishRun(clean, { status: "done", scored: 3, gpu_returned: true });
+    const other = await startRun("manual", 2);
+    await finishRun(other, { status: "stopped", gpu_returned: true });
+    const stranded = await startRun("window", 5);
+    await finishRun(stranded, { status: "failed", error: "x", gpu_returned: false });
+
+    expect(await deleteRuns([clean, running, stranded])).toBe(1);
+    expect(await deleteRuns([])).toBe(0);
+    expect(await deleteRuns()).toBe(1);
+    const left = await db.select({ id: photoAestheticRun.id }).from(photoAestheticRun);
+    expect(left.map((r) => r.id).sort()).toEqual([running, stranded].sort());
   });
 });
