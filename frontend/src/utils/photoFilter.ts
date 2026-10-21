@@ -58,6 +58,13 @@ export function matchesPhotoFilter(
   if (filter.qualityMax !== undefined) {
     if ((photo.ai_quality_score ?? 1) * 100 > filter.qualityMax) return false
   }
+  if (filter.aestheticMin !== undefined || filter.aestheticMax !== undefined) {
+    // Like the server: a photo without an aesthetic score matches no bound.
+    const a = photo.ai_quality_details?.clip_aesthetics
+    if (typeof a !== 'number') return false
+    if (filter.aestheticMin !== undefined && a * 100 < filter.aestheticMin) return false
+    if (filter.aestheticMax !== undefined && a * 100 > filter.aestheticMax) return false
+  }
 
   if (filter.mediaTypes?.length) {
     const mt = photo.mime_type || ''

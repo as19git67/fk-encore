@@ -22,6 +22,8 @@ export interface Photo {
   location_short?: string
   ai_quality_score?: number
   ai_quality_details?: Record<string, number>
+  /** Who wrote `clip_aesthetics`: none (CLIP prompts), `vith_head_v1`, `qalign_v1`, or `…:failed`. */
+  aesthetic_model?: string
   auto_crop?: { x: number; y: number }
   description?: string
   /** IPTC Keywords / XMP dc:subject — tags imported from the file. Read-only in the UI. */
@@ -136,6 +138,9 @@ export interface PhotoFilter {
   othersHidden?: boolean
   qualityMin?: number
   qualityMax?: number
+  /** Bounds on the aesthetic score alone, 0–100. */
+  aestheticMin?: number
+  aestheticMax?: number
   notInAnyAlbum?: boolean
   albumIds?: number[]
   albumMode?: MembershipMode
@@ -194,6 +199,8 @@ function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): strin
   if (f.othersHidden) add('othersHidden', true)
   if (f.qualityMin !== undefined) add('qualityMin', f.qualityMin)
   if (f.qualityMax !== undefined) add('qualityMax', f.qualityMax)
+  if (f.aestheticMin !== undefined) add('aestheticMin', f.aestheticMin)
+  if (f.aestheticMax !== undefined) add('aestheticMax', f.aestheticMax)
   if (f.notInAnyAlbum) add('notInAnyAlbum', true)
   if (f.albumIds && f.albumIds.length) add('albumIds', f.albumIds.join(','))
   if (f.albumMode) add('albumMode', f.albumMode)

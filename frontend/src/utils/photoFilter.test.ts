@@ -43,6 +43,14 @@ describe('matchesPhotoFilter shared album/person criteria', () => {
     expect(matchesPhotoFilter(candidate, { sizeMax: 1_000 })).toBe(false)
   })
 
+  it('matches the aesthetic score alone and drops photos without one', () => {
+    const scored = photo({ ai_quality_score: 0.2, ai_quality_details: { clip_aesthetics: 0.7 } })
+    expect(matchesPhotoFilter(scored, { aestheticMin: 60 })).toBe(true)
+    expect(matchesPhotoFilter(scored, { aestheticMax: 60 })).toBe(false)
+    expect(matchesPhotoFilter(photo(), { aestheticMin: 10 })).toBe(false)
+    expect(matchesPhotoFilter(photo(), {})).toBe(true)
+  })
+
   it('matches date and nearby-location filters', () => {
     const candidate = photo()
     expect(matchesPhotoFilter(candidate, {

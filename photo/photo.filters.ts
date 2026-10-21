@@ -16,6 +16,13 @@ import type { VariantMode } from "../db/types";
 import { orientationVariantSuppressedSql } from "./orientation-variants";
 
 export type { VariantMode };
+
+/**
+ * The aesthetic score on its own (0–1): Q-Align after the nightly run, the
+ * head or the zero-shot CLIP prompts before (documentation/plans/foto-aesthetik.md).
+ * NULL for a photo the quality job has not reached.
+ */
+export const aestheticScoreSql = sql<number | null>`(${photos.ai_quality_details}->>'clip_aesthetics')::real`;
 export type HiddenMode = "exclude" | "include" | "only";
 export type MembershipMode = "include" | "exclude";
 export type MediaType = "photo" | "video" | "raw";
@@ -30,6 +37,9 @@ export interface PhotoFilterParams {
   othersHidden?: boolean;
   qualityMin?: number;
   qualityMax?: number;
+  /** Bounds on the aesthetic score alone (`clip_aesthetics`), 0–100. */
+  aestheticMin?: number;
+  aestheticMax?: number;
   notInAnyAlbum?: boolean;
   albumIds?: number[];
   albumMode?: MembershipMode;
@@ -97,6 +107,9 @@ export interface PhotoFilterQuery {
   othersHidden?: boolean;
   qualityMin?: number;
   qualityMax?: number;
+  /** Bounds on the aesthetic score alone (`clip_aesthetics`), 0–100. */
+  aestheticMin?: number;
+  aestheticMax?: number;
   notInAnyAlbum?: boolean;
   albumIds?: string;
   albumMode?: string;
@@ -154,6 +167,8 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
   if (q.othersHidden !== undefined) f.othersHidden = Boolean(q.othersHidden);
   if (q.qualityMin !== undefined) f.qualityMin = Number(q.qualityMin);
   if (q.qualityMax !== undefined) f.qualityMax = Number(q.qualityMax);
+  if (q.aestheticMin !== undefined) f.aestheticMin = Number(q.aestheticMin);
+  if (q.aestheticMax !== undefined) f.aestheticMax = Number(q.aestheticMax);
   if (q.notInAnyAlbum !== undefined) f.notInAnyAlbum = Boolean(q.notInAnyAlbum);
   if (q.albumIds) f.albumIds = parseIntArray(q.albumIds);
   if (q.albumMode === "include" || q.albumMode === "exclude") f.albumMode = q.albumMode;
@@ -279,6 +294,12 @@ export function buildPhotoFilterConditions(
   }
   if (filter.qualityMax !== undefined) {
     conds.push(sql`${photos.ai_quality_score} <= ${filter.qualityMax / 100}`);
+  }
+  if (filter.aestheticMin !== undefined) {
+    conds.push(sql`${aestheticScoreSql} >= ${filter.aestheticMin / 100}`);
+  }
+  if (filter.aestheticMax !== undefined) {
+    conds.push(sql`${aestheticScoreSql} <= ${filter.aestheticMax / 100}`);
   }
 
   if (filter.notInAnyAlbum) {

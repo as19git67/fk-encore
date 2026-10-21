@@ -108,6 +108,19 @@ const showCritique = computed(() =>
   auth.hasPermission('module.photos') && (props.selectedPhotoIds?.length ?? 0) < 2,
 )
 
+// The scores beside the critique: the overall AI rating and the aesthetic
+// score alone, with who wrote the latter (documentation/plans/foto-aesthetik.md).
+const aestheticScore = computed(() => {
+  const v = props.photo.ai_quality_details?.clip_aesthetics
+  return typeof v === 'number' ? v : null
+})
+const aestheticSource = computed(() => {
+  const m = props.photo.aesthetic_model
+  if (m?.startsWith('qalign') && !m.endsWith(':failed')) return 'Q-Align'
+  if (m?.startsWith('vith_head')) return 'vorläufig'
+  return 'vorläufig, CLIP'
+})
+
 const { albums, albumsLoaded, fetchAlbums, users, fetchUsers } = useReferenceData()
 const ownerName = computed(() => users.value.find(u => u.id === props.photo.user_id)?.name)
 fetchUsers()
@@ -610,6 +623,23 @@ watch(() => props.readOnly, (ro) => {
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div class="section-label"><i class="pi pi-sparkles" /> Bildwirkung</div>
+          <div v-if="photo.ai_quality_score != null || aestheticScore !== null" class="curation-opinion-bars score-bars">
+            <div v-if="photo.ai_quality_score != null" class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-star-fill opinion-icon opinion-icon--ai" /> KI-Qualität</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--ai" :style="{ width: `${photo.ai_quality_score * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ (photo.ai_quality_score * 100).toFixed(0) }}%</span>
+            </div>
+            <div v-if="aestheticScore !== null" class="opinion-row">
+              <span class="opinion-label"><i class="pi pi-palette opinion-icon opinion-icon--ai" /> Ästhetik</span>
+              <div class="opinion-bar-track">
+                <div class="opinion-bar-fill opinion-bar-fill--ai" :style="{ width: `${aestheticScore * 100}%` }" />
+              </div>
+              <span class="opinion-count">{{ (aestheticScore * 100).toFixed(0) }}%</span>
+            </div>
+            <div v-if="aestheticScore !== null" class="score-source">Ästhetik bewertet von {{ aestheticSource }}</div>
+          </div>
           <PhotoCritique :photo-id="photo.id" />
         </div>
       </template>
@@ -1297,6 +1327,14 @@ watch(() => props.readOnly, (ro) => {
 .opinion-bar-fill--fav { background: var(--p-orange-400); }
 .opinion-bar-fill--hide { background: var(--p-red-400); }
 .opinion-bar-fill--ai { background: var(--p-yellow-500); }
+
+.score-bars {
+  margin-bottom: var(--space-2);
+}
+.score-source {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-xs);
+}
 
 .opinion-count {
   font-size: var(--text-sm);

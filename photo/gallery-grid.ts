@@ -37,6 +37,8 @@ type GalleryGridQueryParams = {
   othersHidden?: Query<boolean>;
   qualityMin?: Query<number>;
   qualityMax?: Query<number>;
+  aestheticMin?: Query<number>;
+  aestheticMax?: Query<number>;
   notInAnyAlbum?: Query<boolean>;
   albumIds?: Query<string>;
   albumMode?: Query<string>;
@@ -115,6 +117,8 @@ function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
     othersHidden: p.othersHidden,
     qualityMin: p.qualityMin,
     qualityMax: p.qualityMax,
+    aestheticMin: p.aestheticMin,
+    aestheticMax: p.aestheticMax,
     notInAnyAlbum: p.notInAnyAlbum,
     albumIds: p.albumIds,
     albumMode: p.albumMode,
@@ -227,6 +231,8 @@ type GalleryIdsQueryParams = {
   othersHidden?: Query<boolean>;
   qualityMin?: Query<number>;
   qualityMax?: Query<number>;
+  aestheticMin?: Query<number>;
+  aestheticMax?: Query<number>;
   notInAnyAlbum?: Query<boolean>;
   albumIds?: Query<string>;
   albumMode?: Query<string>;

@@ -229,6 +229,7 @@ const SORT_FIELDS: SortField[] = [
   { value: 'taken_at', label: 'Aufnahmedatum' },
   { value: 'created_at', label: 'Importdatum' },
   { value: 'ai_quality_score', label: 'Qualität' },
+  { value: 'aesthetics', label: 'Ästhetik' },
   { value: 'filename', label: 'Dateiname' },
   { value: 'size', label: 'Dateigröße' },
 ]

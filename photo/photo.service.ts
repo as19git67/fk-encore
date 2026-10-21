@@ -2986,6 +2986,7 @@ export async function listPhotosLogic(
         location_short: photos.location_short,
         ai_quality_score: photos.ai_quality_score,
         ai_quality_details: photos.ai_quality_details,
+        aesthetic_model: photos.aesthetic_model,
         auto_crop: photos.auto_crop,
         description: photos.description,
         keywords: photos.keywords,
@@ -3014,6 +3015,7 @@ export async function listPhotosLogic(
     location_short: string | null;
     ai_quality_score: number | null;
     ai_quality_details: Record<string, number> | null;
+    aesthetic_model: string | null;
     auto_crop: { x: number; y: number } | null;
     description: string | null;
     keywords: string[] | null;
@@ -3043,6 +3045,7 @@ export async function listPhotosLogic(
       location_short: r.location_short ?? undefined,
       ai_quality_score: r.ai_quality_score ?? undefined,
       ai_quality_details: r.ai_quality_details ?? undefined,
+      aesthetic_model: r.aesthetic_model ?? undefined,
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
       keywords: r.keywords ?? [],
@@ -3248,6 +3251,7 @@ export async function getPhotoDetailsBatchLogic(
     location_short: string | null;
     ai_quality_score: number | null;
     ai_quality_details: Record<string, number> | null;
+    aesthetic_model: string | null;
     auto_crop: { x: number; y: number } | null;
     description: string | null;
     keywords: string[] | null;
@@ -3276,6 +3280,7 @@ export async function getPhotoDetailsBatchLogic(
         location_short: photos.location_short,
         ai_quality_score: photos.ai_quality_score,
         ai_quality_details: photos.ai_quality_details,
+        aesthetic_model: photos.aesthetic_model,
         auto_crop: photos.auto_crop,
         description: photos.description,
         keywords: photos.keywords,
@@ -3331,6 +3336,7 @@ export async function getPhotoDetailsBatchLogic(
       location_short: r.location_short ?? undefined,
       ai_quality_score: r.ai_quality_score ?? undefined,
       ai_quality_details: r.ai_quality_details ?? undefined,
+      aesthetic_model: r.aesthetic_model ?? undefined,
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
       keywords: r.keywords ?? [],
@@ -4702,6 +4708,7 @@ export async function getAlbumLogic(
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash, p.image_data_hash,
       p.taken_at, p.created_at, p.updated_at,
       p.ai_quality_score, p.auto_crop, p.description, p.link_visibility,
+      (p.ai_quality_details->>'clip_aesthetics')::real AS clip_aesthetics,
       ${knownFaceExistsSql("p", participantIds)} AS has_known_face,
       p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country, p.location_short,
@@ -4781,6 +4788,9 @@ export async function getAlbumLogic(
       added_by_user_id: r.added_by_user_id ?? undefined,
       added_at: r.added_at ?? "",
       auto_crop: r.auto_crop ?? undefined,
+      // Score and aesthetics only, so the album's own sort and filter can read them.
+      ai_quality_score: finiteOrNull(r.ai_quality_score) ?? undefined,
+      ai_quality_details: finiteOrNull(r.clip_aesthetics) !== null ? { clip_aesthetics: r.clip_aesthetics } : undefined,
       latitude: finiteOrNull(r.latitude) ?? undefined,
       longitude: finiteOrNull(r.longitude) ?? undefined,
       location_name: r.location_name ?? undefined,

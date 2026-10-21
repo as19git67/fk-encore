@@ -14,6 +14,7 @@ export type GallerySortField =
   | 'taken_at'
   | 'created_at'
   | 'ai_quality_score'
+  | 'aesthetics'
   | 'filename'
   | 'size'
 
@@ -125,6 +126,8 @@ function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams)
   if (filter.othersHidden) add('othersHidden', true)
   if (filter.qualityMin !== undefined) add('qualityMin', filter.qualityMin)
   if (filter.qualityMax !== undefined) add('qualityMax', filter.qualityMax)
+  if (filter.aestheticMin !== undefined) add('aestheticMin', filter.aestheticMin)
+  if (filter.aestheticMax !== undefined) add('aestheticMax', filter.aestheticMax)
   if (filter.notInAnyAlbum) add('notInAnyAlbum', true)
   if (filter.albumIds && filter.albumIds.length) add('albumIds', filter.albumIds.join(','))
   if (filter.albumMode) add('albumMode', filter.albumMode)
