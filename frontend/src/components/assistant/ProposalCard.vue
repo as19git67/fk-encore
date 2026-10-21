@@ -12,6 +12,7 @@ import Tag from 'primevue/tag'
 import { discardProposal, downloadResult, executeProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
 import { letterGaps } from '../../utils/letterGaps'
 import LetterEditor, { type LetterForm } from './LetterEditor.vue'
+import MarkdownView from '../documents/MarkdownView.vue'
 
 const props = defineProps<{ proposal: Proposal }>()
 
@@ -124,6 +125,14 @@ async function decide(action: 'execute' | 'discard') {
         :disabled="busy !== null"
         :id-prefix="`letter-${current.proposal_id}`"
       />
+      <div
+        v-if="current.text_document && current.status === 'pending'"
+        class="proposal-text"
+        tabindex="0"
+        :aria-label="`Text von „${current.text_document.title}“`"
+      >
+        <MarkdownView :source="current.text_document.markdown" />
+      </div>
       <p v-if="current.status === 'executed' && current.result_summary" class="proposal-result">
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
@@ -177,6 +186,19 @@ async function decide(action: 'execute' | 'discard') {
 </template>
 
 <style scoped>
+/* The text a proposed document would get, readable before "Ausführen". */
+.proposal-text {
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  outline-offset: var(--focus-ring-offset-inset);
+}
+.proposal-text:focus-visible {
+  outline: var(--focus-ring);
+}
+
 .proposal {
   border: 1px solid var(--p-primary-color);
   border-radius: 0.5rem;

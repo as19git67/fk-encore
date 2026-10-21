@@ -21,6 +21,8 @@ import { createTextDocument, updateTextDocument } from "./documents";
 import { textDocumentFilename, validateTextDocument } from "./text-documents";
 import { markdownTokens, renderMarkdownPdf } from "./markdown-pdf";
 import { extractPdfText } from "./text-extract";
+import { todayIsoDate } from "./follow-ups";
+import { bylineOf } from "./markdown-pdf";
 
 const USER_ID = 991701;
 const OTHER_ID = 991702;
@@ -109,6 +111,17 @@ describe("renderMarkdownPdf", () => {
     }
   });
 
+  it("prints date and author under the title", async () => {
+    expect(bylineOf("2026-10-21", "Erika Beispiel")).toBe("21.10.2026 \u00b7 Erika Beispiel");
+    expect(bylineOf(null, null)).toBeNull();
+    const pdf = await renderMarkdownPdf({ title: "Notiz", markdown: "Ein Absatz mit genug Text, damit die Textebene als brauchbar gilt und nicht per OCR gelesen wird.", author: "Erika Beispiel", date: "2026-10-21" });
+    const file = `${tmpRoot}/byline.pdf`;
+    fs.writeFileSync(file, pdf);
+    const { text } = await extractPdfText(file, {});
+    expect(text).toContain("21.10.2026");
+    expect(text).toContain("Erika Beispiel");
+  });
+
   it("parses GitHub-flavoured Markdown", () => {
     const types = markdownTokens(markdown).map((t) => t.type).filter((t) => t !== "space");
     expect(types).toEqual(["heading", "paragraph", "list", "blockquote", "code", "table", "html"]);
@@ -122,6 +135,9 @@ describe("text document endpoints", () => {
     expect(doc.markdown_source).toBe("## Beete\n\n- Tomaten\n");
     expect(doc.mime_type).toBe("application/pdf");
     expect(doc.original_filename).toBe("gartenplan.pdf");
+    // Dated today, sent by its author.
+    expect(doc.doc_date).toBe(todayIsoDate());
+    expect(doc.sender).toBe(`User${USER_ID}`);
 
     const [row] = await db.select().from(documents).where(eq(documents.id, doc.id));
     expect(fs.readFileSync(row!.disk_path).subarray(0, 5).toString("latin1")).toBe("%PDF-");

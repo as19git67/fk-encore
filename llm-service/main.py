@@ -3129,6 +3129,90 @@ async def vision_letterhead(req: VisionLetterheadRequest) -> VisionLetterheadRes
     )
 
 
+class VisionJsonPromptRequest(BaseModel):
+    """One image and a caller-written prompt, answered as a JSON object.
+
+    The generic sibling of /json-prompt for callers that need the model to
+    look at a picture (the photo critique). The prompt lives with the caller
+    for the reason _VISION_PROMPTS explains: wording is iterated on, and the
+    service image takes the better part of an hour to rebuild. ``schema``
+    constrains the answer where the backend supports it; the caller validates
+    what comes back either way.
+    """
+
+    image_b64: str = Field(..., min_length=1)
+    image_mime: str = Field(default="image/jpeg")
+    prompt: str = Field(..., min_length=1)
+    system: str | None = None
+    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
+    max_tokens: int = Field(default=768, gt=0, le=4096)
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+
+
+@app.post("/vision/json-prompt")
+async def vision_json_prompt(req: VisionJsonPromptRequest) -> dict[str, Any]:
+    llm = _state["llm"]
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not loaded")
+    if not _state["config"].resolve_mmproj():
+        raise HTTPException(status_code=503, detail="no multimodal projector loaded")
+
+    t0 = time.monotonic()
+    messages: list[dict[str, Any]] = []
+    if req.system:
+        messages.append({"role": "system", "content": req.system})
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{req.image_mime};base64,{req.image_b64}"},
+                },
+                {"type": "text", "text": req.prompt},
+            ],
+        }
+    )
+    response_format: dict[str, Any] = {"type": "json_object"}
+    if req.schema_ is not None:
+        response_format["schema"] = req.schema_
+
+    try:
+        completion = await _run_blocking(
+            llm.create_chat_completion,
+            messages=messages,
+            response_format=response_format,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+            acquire_timeout=60.0,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("/vision/json-prompt: llm.create_chat_completion failed")
+        raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
+
+    raw = completion["choices"][0]["message"]["content"].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("/vision/json-prompt: model returned non-JSON: %r", raw[:200])
+        raise HTTPException(status_code=502, detail=f"model returned invalid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="model returned no object")
+
+    # Same shallow mojibake repair as /json-prompt.
+    for k, v in list(data.items()):
+        if isinstance(v, str):
+            data[k] = _repair_mojibake(v)
+        elif isinstance(v, list):
+            data[k] = [_repair_mojibake(x) if isinstance(x, str) else x for x in v]
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    log.info("vision json-prompt: keys=%s time=%dms", ",".join(sorted(data)), elapsed_ms)
+    return {"result": data, "model": LLM_MODEL_PATH.name, "processing_ms": elapsed_ms}
+
+
 @app.post("/json-prompt")
 async def json_prompt(req: JsonPromptRequest) -> dict[str, Any]:
     llm = _state["llm"]

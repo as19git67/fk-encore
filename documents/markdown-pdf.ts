@@ -42,6 +42,17 @@ interface Box {
 export interface MarkdownPdfInput {
   title: string;
   markdown: string;
+  /** Who wrote it — the user's name — shown under the title. */
+  author?: string | null;
+  /** The document date (YYYY-MM-DD), shown under the title as DD.MM.YYYY. */
+  date?: string | null;
+}
+
+/** "21.10.2026 · Max Mustermann", or null when neither is known. */
+export function bylineOf(date: string | null | undefined, author: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date ?? "");
+  const parts = [m ? `${m[3]}.${m[2]}.${m[1]}` : null, author?.trim() || null].filter(Boolean);
+  return parts.length ? parts.join(" \u00b7 ") : null;
 }
 
 /** Parses the Markdown the same way the editor preview does. */
@@ -163,6 +174,12 @@ class Renderer {
   title(text: string, box: Box): void {
     this.segments([{ text }], box, HEADING_SIZES[0], { bold: true });
     this.gap(0.35);
+  }
+
+  /** Date and author under the title, small and grey. */
+  byline(text: string, box: Box): void {
+    this.segments([{ text }], { ...box, color: MUTED }, BODY_SIZE - 1);
+    this.gap(0.8);
   }
 
   blocks(tokens: readonly Token[], box: Box): void {
@@ -328,7 +345,7 @@ class Renderer {
  * Renders the document. The title opens the first page, unless the Markdown
  * starts with a top-level heading saying the same thing.
  */
-export function renderMarkdownPdf({ title, markdown }: MarkdownPdfInput): Promise<Buffer> {
+export function renderMarkdownPdf({ title, markdown, author, date }: MarkdownPdfInput): Promise<Buffer> {
   const cleanTitle = title.trim();
   const pdf = new PDFDocument({
     size: "A4",
@@ -352,6 +369,8 @@ export function renderMarkdownPdf({ title, markdown }: MarkdownPdfInput): Promis
   if (cleanTitle && !repeatsTitle) {
     renderer.title(cleanTitle.replace(/\s+/g, " "), box);
   }
+  const byline = bylineOf(date, author);
+  if (byline) renderer.byline(byline, box);
   renderer.blocks(tokens, box);
   if (tokens.every((t) => t.type === "space") && !cleanTitle) pdf.text(" ");
   pdf.end();

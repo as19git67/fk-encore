@@ -152,6 +152,8 @@ export interface PhotoSignals {
   clip_aesthetics?: number | null;
   clip_composition?: number | null;
   clip_technical?: number | null;
+  /** Q-Align's technical quality, 0–1; only the nightly aesthetic run writes it. */
+  qalign_quality?: number | null;
   face_sharpness?: number | null;
   eyes_open_score?: number | null;
   face_composition?: number | null;
@@ -238,6 +240,13 @@ export interface ScoringWeights {
                       //  exposure_contrast_avg]
   non_face: number[]; // [blur, clip_aesthetics, clip_composition,
                       //  clip_technical, exposure_contrast_avg]
+  /**
+   * Which signal fills the technical slot of the non-face branch. "qalign"
+   * takes Q-Align's quality where the photo has one and the zero-shot CLIP
+   * prompt elsewhere; only a replay that measured a gain sets it
+   * (foto-aesthetik.md, stage 5). Absent means "clip".
+   */
+  technical?: "clip" | "qalign";
 }
 
 /**
@@ -296,7 +305,8 @@ export function scorePhoto(
   const exposure = clamp01(signals.exposure_score);
   const aesthetics = clamp01(signals.clip_aesthetics);
   const composition = clamp01(signals.clip_composition);
-  const technical = clamp01(signals.clip_technical);
+  const qalignTechnical = weights.technical === "qalign" && signals.qalign_quality != null;
+  const technical = clamp01(qalignTechnical ? signals.qalign_quality : signals.clip_technical);
   const exposureContrast = 0.5 * (exposure + contrast);
 
   const used: AiPickPhotoScore["signals"] = {};
@@ -338,14 +348,16 @@ export function scorePhoto(
     used.exposure = exposure;
     if (blend < 1) {
       used.clip_composition = composition;
-      used.clip_technical = technical;
+      if (qalignTechnical) used.qalign_quality = technical;
+      else used.clip_technical = technical;
     }
   } else {
     score = nonFaceScore;
     used.blur = blur;
     used.clip_aesthetics = aesthetics;
     used.clip_composition = composition;
-    used.clip_technical = technical;
+    if (qalignTechnical) used.qalign_quality = technical;
+    else used.clip_technical = technical;
     used.contrast = contrast;
     used.exposure = exposure;
   }

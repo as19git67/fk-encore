@@ -26,6 +26,7 @@ import ToggleButton from 'primevue/togglebutton'
 import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
+import PhotoCritique from '../components/PhotoCritique.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
@@ -111,6 +112,17 @@ const pairOffIds = ref<Set<number>>(new Set())
 
 const bulkBusy = ref(false)
 const bulkConfirmOpen = ref(false)
+
+// Critique dialog (foto-aesthetik.md, stage 6).
+const critiqueGroup = ref<ReviewQueueGroup | null>(null)
+const critiquePhotos = computed(() =>
+  critiqueGroup.value
+    ? [...critiqueGroup.value.photos].sort((a, b) => Number(b.ai_picked) - Number(a.ai_picked))
+    : [],
+)
+function openCritique(group: ReviewQueueGroup) {
+  critiqueGroup.value = group
+}
 const bulkResult = ref<{ groups_accepted: number; hidden_count: number } | null>(null)
 const pendingAcceptIds = ref<Set<number>>(new Set())
 const duplicateDeleteResult = ref<{ deleted: number; freedBytes: number } | null>(null)
@@ -946,6 +958,14 @@ onMounted(() => {
             label="Manuell prüfen"
             @click="openManual(group)"
           />
+          <Button
+            icon="pi pi-sparkles"
+            text
+            severity="secondary"
+            label="Bilder erklären"
+            v-tooltip.top="'Die KI beschreibt, was an den Fotos gelingt und was nicht'"
+            @click="openCritique(group)"
+          />
         </div>
       </li>
     </ul>
@@ -968,6 +988,26 @@ onMounted(() => {
       @reviewed="onCompareReviewed"
       @next="onCompareNext"
     />
+
+    <!-- Critique in words (foto-aesthetik.md, stage 6): the AI pick
+         first, every photo asked for on its own button. -->
+    <Dialog
+      class="dialog-lg"
+      :visible="critiqueGroup != null"
+      modal
+      header="Was die KI an den Fotos sieht"
+      @update:visible="(v: boolean) => { if (!v) critiqueGroup = null }"
+    >
+      <ul v-if="critiqueGroup" class="rq-critique-list">
+        <li v-for="photo in critiquePhotos" :key="photo.id" class="rq-critique-item">
+          <div class="rq-critique-thumb">
+            <img :src="thumb(photo.filename, 400)" :alt="''" loading="lazy" decoding="async" />
+            <span v-if="photo.ai_picked" class="rq-critique-pick"><i class="pi pi-check" /> KI-Pick</span>
+          </div>
+          <PhotoCritique :photo-id="photo.id" />
+        </li>
+      </ul>
+    </Dialog>
 
     <!-- Bulk-Accept disclaimer (Stufe D). Shows the user's actual
          agreement rate on already-reviewed groups so they know the
@@ -1499,5 +1539,43 @@ onMounted(() => {
   color: #fff; /* audit-ok: badge on the solid green pill in the lightbox */
   font-weight: 600;
   font-size: var(--text-base);
+}
+
+.rq-critique-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.rq-critique-item {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+.rq-critique-thumb {
+  position: relative;
+}
+.rq-critique-thumb img {
+  width: 100%;
+  border-radius: 6px;
+  display: block;
+}
+.rq-critique-pick {
+  position: absolute;
+  left: var(--space-1);
+  top: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--p-tag-success-background);
+  color: var(--p-tag-success-color);
+  font-size: var(--text-xs);
+}
+@media (max-width: 639px) {
+  .rq-critique-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

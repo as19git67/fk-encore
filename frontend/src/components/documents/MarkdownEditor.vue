@@ -10,7 +10,7 @@ import Button from 'primevue/button'
 import SelectButton from 'primevue/selectbutton'
 import MarkdownView from './MarkdownView.vue'
 import { useAtLeast } from '../../composables/useBreakpoint'
-import { insertBlock, prefixLines, wrapSelection, type TextEdit } from '../../utils/markdown'
+import { insertBlock, insertParagraphs, prefixLines, wrapSelection, type InsertPlace, type TextEdit } from '../../utils/markdown'
 
 const model = defineModel<string>({ required: true })
 const props = defineProps<{ placeholder?: string; ariaLabel?: string }>()
@@ -76,6 +76,17 @@ function insertLink() {
     return { text: before + inserted + e.text.slice(e.end), start: urlStart, end: urlStart + 8 }
   })
 }
+
+/**
+ * Puts text from outside (the assistant) into the document: at the cursor,
+ * in place of the whole text, or after it. What was inserted ends up
+ * selected, so it is easy to see and to take back with one delete.
+ */
+function insertText(text: string, where: InsertPlace) {
+  apply((e) => insertParagraphs(e, text, where))
+}
+
+defineExpose({ insertText })
 
 function onKeydown(ev: KeyboardEvent) {
   if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return

@@ -111,7 +111,7 @@ describe("the cases", () => {
 
   it("cover every write tool of the later stages", () => {
     const expected = new Set(BENCH_CASES.flatMap((c) => c.expect.map((e) => e.tool)));
-    for (const name of ["create_album", "find_text_in_document", "create_collection", "build_collection_pdf", "transaction_report", "get_document_text", "render_letter", "tax_return_bundle", "tax_worksheet_pdf", "euer_pdf"]) {
+    for (const name of ["create_album", "find_text_in_document", "create_collection", "build_collection_pdf", "transaction_report", "get_document_text", "render_letter", "tax_return_bundle", "tax_worksheet_pdf", "euer_pdf", "create_text_document"]) {
       expect(expected.has(name), name).toBe(true);
     }
   });

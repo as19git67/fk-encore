@@ -110,6 +110,7 @@ import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { decryptPdfWithPassword } from "./text-extract";
 import { renderMarkdownPdf } from "./markdown-pdf";
 import { textDocumentFilename, validateTextDocument } from "./text-documents";
+import { todayIsoDate } from "./follow-ups";
 import { searchDocuments, type SearchMode } from "./search";
 import { documentTextPreview } from "./text-preview";
 import { fetchTagsForDocuments } from "./tags";
@@ -759,8 +760,15 @@ export const createTextDocument = api(
     requirePermission(authData, "documents.upload");
     const userId = getUserId();
     const { title, markdown } = validateTextDocument(req);
+    // Written today by whoever is signed in: the date and the sender a
+    // letter of theirs would carry. Both stay editable in the attribute form.
+    const docDate = todayIsoDate();
+    const author = await dbFirst<{ name: string | null }>(
+      db.select({ name: users.name }).from(users).where(eq(users.id, userId)),
+    );
+    const sender = author?.name?.trim() || null;
 
-    const buffer = await renderMarkdownPdf({ title, markdown });
+    const buffer = await renderMarkdownPdf({ title, markdown, author: sender, date: docDate });
     let stored: DocumentSummary;
     try {
       stored = await storeDocumentBuffer({
@@ -770,6 +778,8 @@ export const createTextDocument = api(
         userId,
         markdownSource: markdown,
         title,
+        docDate,
+        sender,
       });
     } catch (err) {
       if ((err as Error).message === "DOCUMENT_TOO_LARGE") throw APIError.invalidArgument("the document is too large");
@@ -798,7 +808,7 @@ export const updateTextDocument = api(
     }
     const { title, markdown } = validateTextDocument(req);
 
-    const buffer = await renderMarkdownPdf({ title, markdown });
+    const buffer = await renderMarkdownPdf({ title, markdown, author: row.sender, date: row.doc_date });
     if (buffer.length > DOCUMENTS_MAX_BYTES) throw APIError.invalidArgument("the document is too large");
     const digest = crypto.createHash("sha256").update(buffer).digest("hex");
 
@@ -1170,6 +1180,9 @@ async function storeDocumentBuffer(params: {
   markdownSource?: string | null;
   /** Title set in the INSERT, before the classifier can observe the row. */
   title?: string | null;
+  /** Document date (YYYY-MM-DD) and sender set in the INSERT, likewise. */
+  docDate?: string | null;
+  sender?: string | null;
 }): Promise<DocumentSummary> {
   const {
     buffer,
@@ -1186,6 +1199,8 @@ async function storeDocumentBuffer(params: {
     sourceFolder = null,
     markdownSource = null,
     title = null,
+    docDate = null,
+    sender = null,
   } = params;
   if (buffer.length > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
   const ext = guessExtension(originalName, mimeType);
@@ -1249,6 +1264,8 @@ async function storeDocumentBuffer(params: {
         source_folder: normalizeSourceFolder(sourceFolder),
         markdown_source: markdownSource,
         title,
+        doc_date: docDate,
+        sender,
       })
       .returning(),
   );
@@ -1574,7 +1591,9 @@ export const getDocumentText = api(
     const userId = getUserId();
 
     const row = await loadVisibleDocument(userId, id, isDataAdmin(authData));
-    const text = (row.extracted_text ?? "").trim();
+    // A text document's own words are there from the first save on, before
+    // text_extract has run.
+    const text = (row.markdown_source ?? row.extracted_text ?? "").trim();
     return { text: text.length > 0 ? text : null };
   },
 );

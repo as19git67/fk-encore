@@ -461,3 +461,58 @@ def test_prompts_can_be_replaced_without_rebuilding_the_image(vision_llm):
     finally:
         main._VISION_PROMPTS.clear()
         main._VISION_PROMPTS.update(original)
+
+
+# ─── /vision/json-prompt ─────────────────────────────────────────────────────
+#
+# The generic image call: the caller writes the prompt (the photo critique),
+# the service only packages the picture and insists on a JSON object.
+
+
+def _post_json_prompt(body: dict) -> "object":
+    return TestClient(main.app).post("/vision/json-prompt", json=body)
+
+
+def test_json_prompt_returns_the_object_with_its_model(vision_llm):
+    vision_llm.payload = {"summary": "Ruhiges Licht.", "strengths": ["Licht"], "weaknesses": []}
+    res = _post_json_prompt({"image_b64": PIXEL_B64, "prompt": "Beschreibe das Bild."})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["result"]["summary"] == "Ruhiges Licht."
+    assert body["result"]["strengths"] == ["Licht"]
+    assert "model" in body and "processing_ms" in body
+
+
+def test_json_prompt_sends_image_then_the_callers_prompt(vision_llm):
+    _post_json_prompt({
+        "image_b64": PIXEL_B64,
+        "image_mime": "image/jpeg",
+        "system": "Du bist Fotograf.",
+        "prompt": "Was gelingt?",
+    })
+    messages = vision_llm.calls[0]["messages"]
+    assert messages[0] == {"role": "system", "content": "Du bist Fotograf."}
+    content = messages[1]["content"]
+    assert content[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert content[1] == {"type": "text", "text": "Was gelingt?"}
+
+
+def test_json_prompt_passes_the_schema_on(vision_llm):
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    _post_json_prompt({"image_b64": PIXEL_B64, "prompt": "x", "schema": schema})
+    assert vision_llm.calls[0]["response_format"] == {"type": "json_object", "schema": schema}
+
+
+def test_json_prompt_rejects_an_answer_that_is_not_an_object(vision_llm):
+    vision_llm.payload = "not json"
+    assert _post_json_prompt({"image_b64": PIXEL_B64, "prompt": "x"}).status_code == 502
+
+
+def test_json_prompt_needs_a_projector():
+    llm = _RecordingLlm()
+    main._state["llm"] = llm
+    try:
+        res = _post_json_prompt({"image_b64": PIXEL_B64, "prompt": "x"})
+    finally:
+        main._state["llm"] = None
+    assert res.status_code == 503

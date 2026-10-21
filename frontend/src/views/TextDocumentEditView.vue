@@ -15,6 +15,10 @@ import PageLayout from '../components/layout/PageLayout.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import MarkdownEditor from '../components/documents/MarkdownEditor.vue'
+import ComposeDialog from '../components/documents/ComposeDialog.vue'
+import { useAuthStore } from '../stores/auth'
+import { TEXT_DRAFT_STATE_KEY, type TextDraft } from '../utils/markdown'
+import type { InsertPlace } from '../utils/markdown'
 import { useModuleBack } from '../composables/useModuleBack'
 import { ApiError } from '../api/client'
 import { createTextDocument, getDocument, updateTextDocument } from '../api/documents'
@@ -22,6 +26,21 @@ import { createTextDocument, getDocument, updateTextDocument } from '../api/docu
 const route = useRoute()
 const router = useRouter()
 const confirm = useConfirm()
+const auth = useAuthStore()
+const editor = ref<InstanceType<typeof MarkdownEditor> | null>(null)
+const composeOpen = ref(false)
+
+function onComposed(text: string, where: InsertPlace) {
+  editor.value?.insertText(text, where)
+}
+
+/** A text handed over from elsewhere ("Als Dokument speichern" in the chat) opens as the draft. */
+function takeDraft() {
+  const draft = (window.history.state as Record<string, unknown> | null)?.[TEXT_DRAFT_STATE_KEY] as TextDraft | undefined
+  if (!draft) return
+  title.value = draft.title ?? ''
+  markdown.value = draft.markdown ?? ''
+}
 const { goBack } = useModuleBack('/dokumente', 'dokumente-list')
 
 const docId = computed(() => (route.params.id ? Number(route.params.id) : null))
@@ -105,6 +124,7 @@ function onBeforeUnload(ev: BeforeUnloadEvent) {
 
 onMounted(() => {
   window.addEventListener('beforeunload', onBeforeUnload)
+  if (isNew.value) takeDraft()
   void load()
 })
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
@@ -120,11 +140,21 @@ Ein Absatz mit **fettem** und *kursivem* Text.
 <template>
   <PageLayout
     :title="isNew ? 'Neues Textdokument' : 'Text bearbeiten'"
-    hint="Formatiert wird mit Markdown. Beim Speichern entsteht daraus ein PDF, das wie jedes andere Dokument eingeordnet wird."
+    hint="Formatiert wird mit Markdown. Beim Speichern entsteht daraus ein PDF mit dem heutigen Datum und dir als Absender, das wie jedes andere Dokument eingeordnet wird."
     :ready="!loading"
   >
     <template #actions>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
+      <Button
+        v-if="auth.hasPermission('module.assistant')"
+        icon="pi pi-sparkles"
+        label="Assistent"
+        text
+        :disabled="loading || !!loadError"
+        aria-label="Assistent schreiben lassen"
+        v-tooltip.bottom="'Text vom Assistenten schreiben lassen'"
+        @click="composeOpen = true"
+      />
       <Button label="Abbrechen" severity="secondary" text @click="goBack" />
       <Button
         label="Speichern"
@@ -147,12 +177,21 @@ Ein Absatz mit **fettem** und *kursivem* Text.
         <InputText v-model="title" maxlength="200" placeholder="z. B. Notizen zur Heizungswartung" fluid />
       </label>
       <MarkdownEditor
+        ref="editor"
         v-model="markdown"
         :placeholder="PLACEHOLDER"
         aria-label="Text des Dokuments in Markdown"
         @save="save"
       />
     </div>
+
+    <ComposeDialog
+      v-if="auth.hasPermission('module.assistant')"
+      v-model:visible="composeOpen"
+      :title="title"
+      :current-text="markdown"
+      @insert="onComposed"
+    />
   </PageLayout>
 </template>
 
