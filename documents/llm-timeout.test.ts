@@ -8,7 +8,7 @@
  * timeouts.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 import db from "../db/database";
@@ -39,7 +39,19 @@ beforeEach(async () => {
 afterEach(async () => {
   await db.delete(llmModelConfig);
   resetTimeoutCache();
+  vi.restoreAllMocks();
 });
+
+/** The llm-service as /reload/status reports it: GPU lent or not. */
+function llmServiceLease(active: boolean) {
+  const real = globalThis.fetch;
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/reload/status")) {
+      return new Response(JSON.stringify({ lease: { active } }), { status: 200 });
+    }
+    return real(input, init);
+  });
+}
 
 describe("resolveTimeoutMs", () => {
   it("falls back to the environment when nothing is activated", async () => {
@@ -86,5 +98,24 @@ describe("resolveTimeoutMs", () => {
     } finally {
       (db as unknown as { select: unknown }).select = original;
     }
+  });
+
+  it("waits as long as the server works while the GPU is lent to the aesthetic run", async () => {
+    // The CPU twin needs minutes per document; giving up after the GPU budget
+    // left llama-server busy with an abandoned request and everyone else 503.
+    await insertConfig({ is_active: true, app_timeout_ms: 120_000, request_timeout_s: 1800 });
+    llmServiceLease(true);
+    expect(await resolveTimeoutMs()).toBe(1_800_000);
+  });
+
+  it("keeps the configured budget while the GPU is home", async () => {
+    await insertConfig({ is_active: true, app_timeout_ms: 120_000, request_timeout_s: 1800 });
+    llmServiceLease(false);
+    expect(await resolveTimeoutMs()).toBe(120_000);
+  });
+
+  it("uses the server's default limit when lent without an activated configuration", async () => {
+    llmServiceLease(true);
+    expect(await resolveTimeoutMs()).toBe(900_000);
   });
 });

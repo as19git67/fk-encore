@@ -92,6 +92,9 @@ def _get_scorer() -> Scorer:
 # separate so a status poll during a load is never queued behind it.
 _lifecycle_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aesthetic-lifecycle")
 _inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aesthetic-inference")
+# Decoding and downscaling run beside inference, not on the event loop and
+# not in front of the card: while one photo is scored, the next is prepared.
+_prepare_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="aesthetic-prepare")
 
 
 @asynccontextmanager
@@ -202,6 +205,9 @@ async def unload_model() -> dict[str, Any]:
 def _prepare(content: bytes) -> Image.Image:
     try:
         image = Image.open(io.BytesIO(content))
+        # A JPEG decodes straight at 1/2, 1/4 or 1/8 of its size when that
+        # is still at least MAX_EDGE; the resize below takes the rest.
+        image.draft("RGB", (MAX_EDGE, MAX_EDGE))
         image.load()
     except Exception as exc:
         raise HTTPException(
@@ -245,8 +251,8 @@ async def score(file: UploadFile = File(...)) -> dict[str, Any]:
             detail=f"scorer is {current}; POST /load first",
         )
     content = await file.read()
-    image = _prepare(content)
     loop = asyncio.get_running_loop()
+    image = await loop.run_in_executor(_prepare_executor, functools.partial(_prepare, content))
     try:
         return await loop.run_in_executor(
             _inference_executor, functools.partial(_score_sync, image)

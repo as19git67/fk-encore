@@ -183,3 +183,14 @@ def test_large_images_are_downscaled_before_scoring(client, fake, monkeypatch):
     _wait_for(client, "loaded")
     client.post("/score", files={"file": ("p.png", _png(400, 200), "image/png")})
     assert fake.seen_sizes == [(100, 50)]
+
+
+def test_a_large_jpeg_is_decoded_reduced_and_still_lands_on_max_edge(client, fake, monkeypatch):
+    monkeypatch.setattr(main, "MAX_EDGE", 100)
+    buf = io.BytesIO()
+    Image.new("RGB", (900, 450), (120, 80, 40)).save(buf, format="JPEG")
+    client.post("/load")
+    _wait_for(client, "loaded")
+    resp = client.post("/score", files={"file": ("p.jpg", buf.getvalue(), "image/jpeg")})
+    assert resp.status_code == 200
+    assert fake.seen_sizes == [(100, 50)]

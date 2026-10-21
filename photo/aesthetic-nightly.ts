@@ -21,6 +21,12 @@ import type { AestheticRun, AestheticSettings, RunPatch } from "./aesthetic-stor
 
 /** Photos per batch; the window, stop and lease are checked between batches. */
 export const BATCH_SIZE = 200;
+/**
+ * Photos on their way to the scorer at once. The service scores one at a
+ * time on the card; the second one is read, converted, uploaded and decoded
+ * meanwhile, so the GPU does not wait for the CPU between photos.
+ */
+export const SCORE_IN_FLIGHT = 2;
 /** Transient scorer failures in a row before the run gives up for the night. */
 export const MAX_CONSECUTIVE_FAILURES = 5;
 export const POLL_MS = 2_000;
@@ -237,30 +243,37 @@ async function execute(runId: number, trigger: AestheticRunTrigger, deps: NightD
         endedReason = "Alle Fotos bewertet";
         break;
       }
-      for (const photoId of batch) {
-        if (signal.aborted) break;
-        try {
-          const outcome = await deps.score(photoId);
-          if (outcome.kind === "scored") {
-            await store.writeScore(photoId, model, outcome.scores);
-            scored++;
-          } else {
-            await store.markUnscorable(photoId, model);
+      let next = 0;
+      let gaveUp: RunError | null = null;
+      const worker = async () => {
+        while (next < batch.length && !signal.aborted && !gaveUp) {
+          const photoId = batch[next++]!;
+          try {
+            const outcome = await deps.score(photoId);
+            if (outcome.kind === "scored") {
+              await store.writeScore(photoId, model, outcome.scores);
+              scored++;
+            } else {
+              await store.markUnscorable(photoId, model);
+              failed++;
+              log.info("aesthetic: photo not scorable", { photoId, reason: outcome.reason });
+            }
+            failuresInARow = 0;
+          } catch (err) {
             failed++;
-            log.info("aesthetic: photo not scorable", { photoId, reason: outcome.reason });
-          }
-          failuresInARow = 0;
-        } catch (err) {
-          failed++;
-          failuresInARow++;
-          skip.push(photoId);
-          log.warn("aesthetic: scoring failed", { photoId, error: (err as Error).message });
-          if (failuresInARow >= MAX_CONSECUTIVE_FAILURES) {
-            throw new RunError(`Der Scorer antwortet nicht mehr: ${(err as Error).message}`);
+            failuresInARow++;
+            skip.push(photoId);
+            log.warn("aesthetic: scoring failed", { photoId, error: (err as Error).message });
+            if (failuresInARow >= MAX_CONSECUTIVE_FAILURES) {
+              gaveUp = new RunError(`Der Scorer antwortet nicht mehr: ${(err as Error).message}`);
+            }
           }
         }
-      }
+      };
+      // Both workers finish the photo they are on before the run moves on.
+      await Promise.all(Array.from({ length: Math.min(SCORE_IN_FLIGHT, batch.length) }, worker));
       await store.updateRun(runId, { scored, failed });
+      if (gaveUp) throw gaveUp;
     }
   } catch (err) {
     if (!(err instanceof StoppedError)) {
