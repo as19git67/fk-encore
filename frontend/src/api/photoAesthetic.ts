@@ -84,6 +84,8 @@ export interface AestheticOverview {
   scored: number
   backlog: number
   active_run_id: number | null
+  /** The last five-minute check since the app started: what it did, or why nothing started. */
+  last_tick: { at: string; result: string } | null
   runs: AestheticRun[]
   scorer: ScorerStatus | null
   scorer_error: string | null

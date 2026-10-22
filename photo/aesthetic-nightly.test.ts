@@ -2,15 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AestheticRunStatus, AestheticRunTrigger } from "../db/schema";
 import type { AestheticRun, AestheticSettings, RunPatch } from "./aesthetic-store";
 import {
+  BACKGROUND_PATIENCE_MS,
   BATCH_SIZE,
   MAX_CONSECUTIVE_FAILURES,
   SCORE_IN_FLIGHT,
   _resetNightly,
   activeRun,
   aestheticTick,
+  lastTick,
   recover,
   stopActiveRun,
   tryStart,
+  type LlmLoad,
   type NightDeps,
   type ScoreOutcome,
   type ScorerState,
@@ -28,9 +31,9 @@ interface World {
   photos: Map<number, string | null>;
   settings: AestheticSettings;
   clock: { t: number };
-  lease: { active: boolean; swapPolls: number; state: string; detail: string | null };
+  lease: { active: boolean; swapPolls: number; state: string; detail: string | null; loaded: boolean };
   scorer: { state: ScorerState };
-  llmBusy: boolean;
+  llmLoad: LlmLoad;
   /** Per photo id: what the scorer answers, or an error it throws. */
   outcome: (id: number) => ScoreOutcome | Error;
   /** Minutes each scored photo takes on the fake clock. */
@@ -45,9 +48,9 @@ function world(photoCount: number, opts: Partial<Pick<World, "settings">> = {}):
   w.photos = new Map(Array.from({ length: photoCount }, (_, i) => [i + 1, null] as [number, string | null]));
   w.settings = opts.settings ?? { enabled: true, window_start: "01:00", window_end: "06:00", updated_at: "" };
   w.clock = { t: NIGHT };
-  w.lease = { active: false, swapPolls: 0, state: "ready", detail: null };
+  w.lease = { active: false, swapPolls: 0, state: "ready", detail: null, loaded: true };
   w.scorer = { state: "unloaded" };
-  w.llmBusy = false;
+  w.llmLoad = "idle";
   w.outcome = () => ({ kind: "scored", scores: { aesthetics: 4, quality: 3 } });
   w.minutesPerPhoto = 0;
   w.failGiveBack = false;
@@ -70,7 +73,7 @@ function world(photoCount: number, opts: Partial<Pick<World, "settings">> = {}):
     lease: async () => {
       if (w.lease.swapPolls > 0) w.lease.swapPolls--;
       else if (w.lease.state === "loading") w.lease.state = "ready";
-      return { active: w.lease.active, reloadState: w.lease.state, reloadDetail: w.lease.detail };
+      return { active: w.lease.active, reloadState: w.lease.state, reloadDetail: w.lease.detail, llmLoaded: w.lease.loaded };
     },
     lend: async () => {
       w.calls.push("lend");
@@ -81,7 +84,7 @@ function world(photoCount: number, opts: Partial<Pick<World, "settings">> = {}):
       if (w.failGiveBack) throw new Error("scorer still holds the card");
       swap(false);
     },
-    llmBusy: async () => w.llmBusy,
+    llmLoad: async () => w.llmLoad,
     scorerStatus: async () => {
       if (w.scorer.state === "loading") w.scorer.state = "loaded";
       else if (w.scorer.state === "unloading") w.scorer.state = "unloaded";
@@ -171,12 +174,67 @@ describe("starting", () => {
 
   it("waits for an idle LLM in the window, but a manual start does not", async () => {
     const w = world(2);
-    w.llmBusy = true;
+    w.llmLoad = "interactive";
     expect(await aestheticTick(w.deps)).toBe("Das KI-Modell beantwortet gerade eine Anfrage");
     expect(w.calls).toEqual([]);
     const run = await runToEnd(w, "manual");
     expect(run.status).toBe("done");
     expect(run.scored).toBe(2);
+  });
+
+  it("never waits out somebody waiting for an answer", async () => {
+    const w = world(2);
+    w.llmLoad = "interactive";
+    for (let i = 0; i < 24; i++) {
+      expect(await aestheticTick(w.deps)).toBe("Das KI-Modell beantwortet gerade eine Anfrage");
+      w.clock.t += 5 * MINUTE;
+    }
+    expect(w.calls).toEqual([]);
+  });
+
+  it("starts after a while even though background work keeps the LLM busy", async () => {
+    const w = world(2);
+    w.llmLoad = "background";
+    expect(await aestheticTick(w.deps)).toBe("Das KI-Modell arbeitet gerade Hintergrundaufgaben ab");
+    w.clock.t += BACKGROUND_PATIENCE_MS - MINUTE;
+    expect(await aestheticTick(w.deps)).toBe("Das KI-Modell arbeitet gerade Hintergrundaufgaben ab");
+    w.clock.t += MINUTE;
+    expect(await aestheticTick(w.deps)).toBe("Lauf 1 beendet");
+    expect(w.runs.get(1)!.scored).toBe(2);
+  });
+
+  it("gives background work its patience again on the next night", async () => {
+    const w = world(2);
+    w.llmLoad = "background";
+    await aestheticTick(w.deps);
+    w.clock.t = NOON;
+    expect(await aestheticTick(w.deps)).toBe("Außerhalb des Zeitfensters");
+    w.clock.t = NIGHT + 24 * 60 * MINUTE;
+    expect(await aestheticTick(w.deps)).toBe("Das KI-Modell arbeitet gerade Hintergrundaufgaben ab");
+  });
+
+  it("is not held up by a failed reload the llm-service has recovered from", async () => {
+    const w = world(2);
+    w.lease.state = "error";
+    w.lease.detail = "RuntimeError: not enough RAM for the CPU twin";
+    expect(await aestheticTick(w.deps)).toBe("Lauf 1 beendet");
+  });
+
+  it("waits while the llm-service is down after a failed reload", async () => {
+    const w = world(2);
+    w.lease.state = "error";
+    w.lease.detail = "RuntimeError: boom";
+    w.lease.loaded = false;
+    expect(await aestheticTick(w.deps)).toBe("Das KI-Modell meldet einen Fehler: RuntimeError: boom");
+    expect(w.calls).toEqual([]);
+  });
+
+  it("remembers what the last tick did for the page", async () => {
+    const w = world(2);
+    w.clock.t = NOON;
+    expect(lastTick()).toBeNull();
+    await aestheticTick(w.deps);
+    expect(lastTick()).toEqual({ at: new Date(NOON).toISOString(), result: "Außerhalb des Zeitfensters" });
   });
 
   it("leaves a GPU alone that is already lent, e.g. to a benchmark run", async () => {

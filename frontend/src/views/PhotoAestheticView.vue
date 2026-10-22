@@ -714,6 +714,9 @@ function rescoreAll() {
           Im Fenster startet der Lauf, sobald das KI-Modell gerade nichts zu tun hat, und gibt die GPU spätestens zum Ende
           zurück. Uhrzeiten in {{ overview.time_zone }}; jetzt {{ overview.in_window ? 'im Fenster' : 'außerhalb' }}.
         </p>
+        <p v-if="overview.last_tick" class="muted">
+          Letzte Prüfung {{ when(overview.last_tick.at) }}: {{ overview.last_tick.result }}
+        </p>
       </section>
 
       <section class="card" aria-labelledby="ae-history">

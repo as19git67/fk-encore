@@ -29,7 +29,7 @@ export interface PollSlotResponse {
 
 export interface QueueModelStatus {
   model: string;
-  activeSlot: { requester: string; since: string } | null;
+  activeSlot: { requester: string; since: string; priority: number } | null;
   /** Every waiting slot, whatever its priority. */
   waitingCount: number;
   /** p0 is the assistant's lane. */
@@ -226,8 +226,9 @@ export const getQueueStatus = api(
       model_name: string;
       requester: string;
       activated_at: string;
+      priority: number;
     }>(sql`
-      SELECT model_name, requester, activated_at
+      SELECT model_name, requester, activated_at, priority
       FROM ai_model_slot
       WHERE status = 'active'
     `);
@@ -243,11 +244,12 @@ export const getQueueStatus = api(
       GROUP BY model_name, priority
     `);
 
-    const activeByModel = new Map<string, { requester: string; since: string }>();
+    const activeByModel = new Map<string, { requester: string; since: string; priority: number }>();
     for (const r of activeRows.rows) {
       activeByModel.set(r.model_name, {
         requester: r.requester,
         since: r.activated_at,
+        priority: r.priority,
       });
     }
 

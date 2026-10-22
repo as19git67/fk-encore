@@ -24,7 +24,7 @@ import {
   type AestheticRun,
   type AestheticSettings,
 } from "./aesthetic-store";
-import { activeRun, stopActiveRun, tryStart, type ScorerStatus } from "./aesthetic-nightly";
+import { activeRun, lastTick, stopActiveRun, tryStart, type ScorerStatus, type TickResult } from "./aesthetic-nightly";
 import { headStatus, realHeadDeps, realNightDeps, scorerStatus } from "./aesthetic-deps";
 import { headJob, startHeadJob, type HeadJob, type HeadReport } from "./aesthetic-head";
 import { adoptReplay, replayAutoPick, type ReplayReport } from "./group-auto-pick.calibration";
@@ -57,6 +57,8 @@ export interface AestheticOverview {
   backlog: number;
   /** The run in progress in this app, if any. */
   active_run_id: number | null;
+  /** The last five-minute check since the app started: what it did, or why nothing started. */
+  last_tick: TickResult | null;
   runs: AestheticRun[];
   /** The aesthetic-service's own state; null when it did not answer. */
   scorer: ScorerStatus | null;
@@ -105,6 +107,7 @@ export const getAestheticOverview = api(
       scored,
       backlog,
       active_run_id: activeRun()?.runId ?? null,
+      last_tick: lastTick(),
       runs,
       scorer,
       scorer_error: scorerError,
