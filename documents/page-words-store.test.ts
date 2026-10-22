@@ -188,12 +188,20 @@ describe("the backfill queue", () => {
         eq(documentScanQueue.status, "pending"),
       ))).map((r) => r.id);
 
+    // Nothing of a running batch waits (never started, or cancelled while a
+    // job was processing): the job on its way out starts nothing.
     await topUpPageWordsBackfill();
-    expect(await pendingIds()).toEqual([DOC_IDS[0]]);
+    expect(await pendingIds()).toEqual([]);
+
+    // One job of the running batch still waits: the next batch follows.
+    await insertDoc(DOC_IDS[3], { confidence: 90 });
+    await db.insert(documentScanQueue).values({ document_id: DOC_IDS[3], service: "page_words", priority: 9, status: "pending" });
+    await topUpPageWordsBackfill();
+    expect((await pendingIds()).sort()).toEqual([DOC_IDS[0], DOC_IDS[3]].sort());
 
     // A click retries the tried ones too.
     await queuePageWordsBackfill(5000);
-    expect((await pendingIds()).sort()).toEqual([DOC_IDS[0], DOC_IDS[1], DOC_IDS[2]].sort());
+    expect((await pendingIds()).sort()).toEqual([DOC_IDS[0], DOC_IDS[1], DOC_IDS[2], DOC_IDS[3]].sort());
   });
 });
 
