@@ -377,6 +377,7 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
     :hint="detail ? describeCounts(detail.counts) || 'leer' : undefined"
     width="normal"
     :ready="!loading"
+    sticky-header
   >
     <template #actions>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />

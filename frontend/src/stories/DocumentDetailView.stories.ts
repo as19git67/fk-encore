@@ -192,8 +192,8 @@ export const Telefonbreite: Story = {
       Array.from(panel.querySelectorAll('canvas')).find((c) => c.getBoundingClientRect().height > 50),
     )
 
-    // The pages stand in the page's own scroller, so nothing inside the
-    // viewer scrolls vertically on its own.
+    // The pages scroll with the document, so nothing inside the viewer
+    // scrolls vertically on its own.
     const nested = wrapper.scrollHeight - wrapper.clientHeight
     if (nested > 4) {
       throw new Error(`the page stack scrolls inside the panel as well (${nested}px of it)`)
@@ -231,26 +231,24 @@ export const Telefonbreite: Story = {
       throw new Error(`the head takes ${rows.size} rows at 360px`)
     }
 
-    // And it stays put when the pagination jumps: the jump moves the page's
-    // scroller, which used to carry the head away with it — the controls
-    // left the screen on the way to the page they were used to reach.
-    const scroller = await waitFor(() => document.querySelector<HTMLElement>('.page-content'))
+    // And it stays put when the pagination jumps: the jump scrolls the
+    // document (issue #1674), and the head stays pinned right under the app's
+    // sticky stack — the controls never leave the screen on the way to the
+    // page they were used to reach. Storybook has no app shell, so the stack
+    // is zero pixels tall here and the head pins to the top edge.
+    document.documentElement.style.setProperty('--app-stack-height', '0px')
     const input = await waitFor(() => head.querySelector<HTMLInputElement>('.page-input'))
     input.value = '5'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     input.dispatchEvent(new Event('change', { bubbles: true }))
     await new Promise((resolve) => setTimeout(resolve, 600))
 
-    const pinned = head.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-    if (pinned > 8) {
-      throw new Error(`after the jump the head sits ${Math.round(pinned)}px into the scroller`)
+    if (window.scrollY <= 0) {
+      throw new Error('the jump did not scroll the document')
     }
-    // And nothing of the document shows above it: the skeleton's gap under
-    // the title used to let the pages slide past in an 8px slot.
-    const header = await waitFor(() => document.querySelector<HTMLElement>('.page-header'))
-    const sliver = head.getBoundingClientRect().top - header.getBoundingClientRect().bottom
-    if (sliver > 1) {
-      throw new Error(`${Math.round(sliver)}px of the document shows above the pinned head`)
+    const pinned = head.getBoundingClientRect().top
+    if (Math.abs(pinned) > 1) {
+      throw new Error(`after the jump the head sits ${Math.round(pinned)}px below the stack`)
     }
 
     const target = document.querySelector<HTMLElement>('[data-page-number="5"]')

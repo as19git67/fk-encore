@@ -507,8 +507,10 @@ behind it.
    - A module entry `assistent` in `config/modules.ts` (permission
      `module.assistant`, seeded for every role that has any module), route
      `/assistent`, plus a chat icon in the app header that opens the same
-     page. `PageLayout` with `scroll="self"`; the conversation list in a
-     side panel above `lg`, a sheet below.
+     page. The conversation scrolls with the document (issue #1674; was
+     `scroll="self"`), the question field stays at the bottom
+     (`.page-dock`); the conversation list in a pinned side panel
+     (`.page-aside`) above `lg`, a sheet below.
    - The stream client wraps the Encore stream like `useRealtime.ts`
      does; tokens append to the current assistant message, blocks render
      through the existing row components (`TransactionRow`, document and

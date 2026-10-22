@@ -215,6 +215,9 @@ const isFullscreen = ref(false)
 
 // ── VirtualGallery grid + cursor state (#304) ───────────────────────────────
 const galleryRef = ref<InstanceType<typeof VirtualGallery> | null>(null)
+// The grid puts itself back on the photo the user left, so PageLayout must
+// not also restore the document's old offset over it.
+const placesItself = () => true
 const cursorIndex = ref<number | null>(null)
 // Photo to center on when VirtualGallery mounts (passed as aroundPhotoId).
 // Set by map stop selection and map fullscreen close so that switching from
@@ -2586,9 +2589,11 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   <PageLayout
     :title="album ? album.name : 'Album'"
     :hint="headerHint"
-    scroll="self"
+    :scroll="viewMode === 'map' ? 'fill' : 'page'"
     width="full"
     :ready="!loading"
+    :resolve-anchor="placesItself"
+    sticky-header
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -2691,6 +2696,24 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           <i class="pi pi-list" /> Details anzeigen
         </button>
       </ErrorBanner>
+      <!-- Upload progress: in the sticky stack, so it stays in view while
+           the photos scroll underneath (issue #1674). -->
+      <div v-if="uploading" class="upload-progress-bar">
+        <div class="upload-progress-bar__info">
+          <i class="pi pi-upload" />
+          <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
+          <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
+        </div>
+        <div class="upload-progress-bar__track">
+          <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
+        </div>
+      </div>
+
+      <!-- Upload success message -->
+      <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
+        <i class="pi pi-check-circle" />
+        <span>{{ uploadResultMessage }}</span>
+      </div>
     </template>
 
     <!-- Drag overlay -->
@@ -2732,28 +2755,9 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       </div>
     </div>
 
-    <!-- In-flow body: progress bars, map or grid row and the floating
-         selection tray. The wrapper is the positioned box the tray is
+    <!-- In-flow body: map or grid row and the floating selection tray. The wrapper is the positioned box the tray is
          anchored to. -->
     <div class="album-body">
-      <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
-      <div v-if="uploading" class="upload-progress-bar">
-        <div class="upload-progress-bar__info">
-          <i class="pi pi-upload" />
-          <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
-          <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
-        </div>
-        <div class="upload-progress-bar__track">
-          <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
-        </div>
-      </div>
-
-      <!-- Upload success message -->
-      <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
-        <i class="pi pi-check-circle" />
-        <span>{{ uploadResultMessage }}</span>
-      </div>
-
       <PageSkeleton v-if="loading && !album" variant="grid" :count="12" />
 
       <!-- An album with no photos at all — the filter cannot be the cause,
@@ -2824,7 +2828,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
         <div
           ref="sidebarSheet"
-          class="sidebar-sheet"
+          class="sidebar-sheet page-aside"
           :class="{ 'is-open': mobileSidebarOpen }"
           :role="sheetIsModal ? 'dialog' : undefined"
           :aria-modal="sheetIsModal ? 'true' : undefined"
@@ -3357,10 +3361,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   padding: 0.5rem 1rem;
   background: var(--p-blue-50);
   border-bottom: 1px solid var(--p-blue-200);
-  /* Sticky so the bar remains visible when the album is scrolled on iOS */
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 .upload-progress-bar__info {
   display: flex;
@@ -3520,22 +3520,20 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 }
 
 /* ── Two-column layout ──────────────────────────────────────────────────── */
+/* The grid is as tall as its rows and the document scrolls (issue #1674);
+   the details stay pinned beside it (`.page-aside`). */
 .gallery-layout {
   display: flex;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .grid-area {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
 }
 
 
 /* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
-.sidebar-sheet { display: contents; }
+.sidebar-sheet { flex-shrink: 0; }
 .sidebar-sheet-header { display: none; }
 .sidebar-sheet-close { display: none; }
 
@@ -3561,6 +3559,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   .sidebar-sheet {
     display: block;
     position: fixed;
+    top: auto;
     bottom: 0;
     left: 0;
     right: 0;

@@ -761,7 +761,7 @@ watch(meterId, () => loadDetail())
 </script>
 
 <template>
-  <PageLayout :title="detail?.name ?? 'Zähler'" width="normal" :ready="!loading">
+  <PageLayout :title="detail?.name ?? 'Zähler'" width="normal" :ready="!loading" sticky-header>
     <template #actions>
       <Button class="back-button" icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
       <template v-if="!loading && detail">

@@ -510,7 +510,7 @@ watch(appliedAlbumFilter, () => persistState(), { deep: true })
 watch(appliedAlbumSort, () => persistState(), { deep: true })
 
 // Whenever the filter / sort / search-query changes, the visible album
-// set changes. `useVirtualizer` keeps its scroll offset in absolute
+// set changes. The document keeps its scroll offset in absolute
 // pixels, so a shrunk-then-restored list (user types into the filter and
 // then clears it) leaves the user clamped at the top with the
 // previously-selected album well out of view. Hand control back to the
@@ -594,7 +594,6 @@ onMounted(async () => {
 <template>
   <PageLayout
     title="Meine Alben"
-    scroll="self"
     width="full"
     :ready="!loading"
     :anchor-key="ANCHOR_KEY"
@@ -750,8 +749,8 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-/* Page frame and title: PageLayout (issue #1272). The VirtualAlbumGrid is
-   the scroll container inside PageLayout's `.page-content`. */
+/* Page frame and title: PageLayout (issue #1272). The VirtualAlbumGrid
+   scrolls with the document (issue #1674). */
 
 .album-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
 .afm-row { display: flex; flex-direction: column; gap: 0.5rem; }

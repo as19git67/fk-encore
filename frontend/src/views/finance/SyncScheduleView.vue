@@ -100,7 +100,7 @@ async function save() {
 </script>
 
 <template>
-  <PageLayout :title="'Sync-Zeiten' + (bankcontact ? ' — ' + bankcontact.name : '')" width="normal">
+  <PageLayout :title="'Sync-Zeiten' + (bankcontact ? ' — ' + bankcontact.name : '')" width="normal" sticky-header>
     <template #actions>
       <Button
         label="Zurück"

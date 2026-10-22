@@ -50,7 +50,7 @@ vi.mock('../api/collections', async (importOriginal) => ({
 
 import DocumentCollectionsView from './DocumentCollectionsView.vue'
 import { saveListAnchor } from '../utils/listAnchor'
-import { markNavigation, setPageScroller } from '../utils/scrollMemory'
+import { markNavigation } from '../utils/scrollMemory'
 import { STACK_TARGET_ID } from '../components/layout/pageLayout'
 
 function makeRouter(): Router {
@@ -71,7 +71,6 @@ beforeEach(() => {
   document.body.appendChild(stack)
   sessionStorage.clear()
   localStorage.clear()
-  setPageScroller(null)
   markNavigation(false)
   Element.prototype.scrollIntoView = vi.fn()
   window.scrollTo = vi.fn() as unknown as typeof window.scrollTo

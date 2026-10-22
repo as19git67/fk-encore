@@ -79,7 +79,6 @@ const loadError = ref<string | null>(null)
 const sendError = ref<string | null>(null)
 const drawerOpen = ref(false)
 
-const messagesEl = ref<HTMLElement | null>(null)
 const composer = ref<InstanceType<typeof AssistantComposer> | null>(null)
 
 const activeId = computed<number | null>(() => {
@@ -91,10 +90,10 @@ const suggestions = computed(() => suggestedQuestions((p) => auth.hasPermission(
 /** How full the window got in the newest answer of the open conversation. */
 const usage = computed(() => latestUsage(messages.value))
 
+/** The document scrolls (issue #1674); the newest message is at its end. */
 function scrollToEnd() {
   void nextTick(() => {
-    const el = messagesEl.value
-    if (el) el.scrollTop = el.scrollHeight
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
   })
 }
 
@@ -302,10 +301,8 @@ function remove(conversation: ConversationSummary) {
 <template>
   <PageLayout
     title="Assistent"
-    scroll="self"
     width="wide"
     :ready="loaded"
-    :scroller="messagesEl"
   >
     <template #actions>
       <Button
@@ -331,7 +328,7 @@ function remove(conversation: ConversationSummary) {
     </template>
 
     <div class="assistant">
-      <aside v-if="wide" class="side">
+      <aside v-if="wide" class="side page-aside">
         <ConversationList
           :conversations="conversations"
           :active-id="activeId"
@@ -342,7 +339,7 @@ function remove(conversation: ConversationSummary) {
       </aside>
 
       <section class="chat" aria-label="Unterhaltung">
-        <div ref="messagesEl" class="messages" aria-live="polite">
+        <div class="messages" aria-live="polite">
           <div v-if="!messages.length && !live" class="intro">
             <i class="pi pi-comments intro-icon" aria-hidden="true" />
             <p class="intro-text">
@@ -377,43 +374,47 @@ function remove(conversation: ConversationSummary) {
           />
         </div>
 
-        <p v-if="sendError" class="send-error" role="alert">
-          <i class="pi pi-exclamation-circle" aria-hidden="true" />
-          {{ sendError }}
-        </p>
-        <div v-if="context.length" class="context" aria-label="Arbeitskontext">
-          <span class="context-label">Kontext</span>
-          <ul class="context-items">
-            <li
-              v-for="c in context"
-              :key="`${c.type}:${c.id}`"
-              class="context-item"
-              :class="{ 'context-item--hidden': !c.visible }"
-            >
-              <i :class="CONTEXT_ICONS[c.type]" aria-hidden="true" />
-              <span class="context-text">{{ c.label }}</span>
-              <Button
-                icon="pi pi-times"
-                text
-                rounded
-                size="small"
-                :aria-label="`${c.label} aus dem Kontext entfernen`"
-                :disabled="busy"
-                @click="removeFromContext(c)"
-              />
-            </li>
-          </ul>
+        <!-- The question field stays at the bottom of the screen while the
+             conversation scrolls with the document above it. -->
+        <div class="dock page-dock">
+          <p v-if="sendError" class="send-error" role="alert">
+            <i class="pi pi-exclamation-circle" aria-hidden="true" />
+            {{ sendError }}
+          </p>
+          <div v-if="context.length" class="context" aria-label="Arbeitskontext">
+            <span class="context-label">Kontext</span>
+            <ul class="context-items">
+              <li
+                v-for="c in context"
+                :key="`${c.type}:${c.id}`"
+                class="context-item"
+                :class="{ 'context-item--hidden': !c.visible }"
+              >
+                <i :class="CONTEXT_ICONS[c.type]" aria-hidden="true" />
+                <span class="context-text">{{ c.label }}</span>
+                <Button
+                  icon="pi pi-times"
+                  text
+                  rounded
+                  size="small"
+                  :aria-label="`${c.label} aus dem Kontext entfernen`"
+                  :disabled="busy"
+                  @click="removeFromContext(c)"
+                />
+              </li>
+            </ul>
+          </div>
+          <AssistantComposer
+            ref="composer"
+            v-model="draft"
+            :busy="busy"
+            :cancellable="turnId !== null"
+            :cancelling="cancelling"
+            @send="send"
+            @cancel="cancel"
+          />
+          <ContextMeter v-if="usage && activeId !== null" :usage="usage" />
         </div>
-        <AssistantComposer
-          ref="composer"
-          v-model="draft"
-          :busy="busy"
-          :cancellable="turnId !== null"
-          :cancelling="cancelling"
-          @send="send"
-          @cancel="cancel"
-        />
-        <ContextMeter v-if="usage && activeId !== null" :usage="usage" />
       </section>
     </div>
 
@@ -430,17 +431,15 @@ function remove(conversation: ConversationSummary) {
 </template>
 
 <style scoped>
-/* Page frame and title: PageLayout (issue #1272). The page itself does not
-   scroll; the messages do, and the question field stays at the bottom. */
-/* Fills the page content and never outgrows it: the messages scroll, not
-   the page, so the app's menu stays put while an answer streams in. */
+/* Page frame and title: PageLayout (issue #1272). The conversation scrolls
+   with the document (issue #1674), so a tap on the iOS status bar goes back
+   to its first message; the menu stays put in the sticky stack and the
+   question field at the bottom (`.page-dock`). */
 .assistant {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  align-items: start;
   gap: var(--space-4);
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 @media (min-width: 1024px) {
@@ -450,8 +449,6 @@ function remove(conversation: ConversationSummary) {
 }
 
 .side {
-  min-height: 0;
-  overflow-y: auto;
   overscroll-behavior: contain;
   border-right: 1px solid var(--p-content-border-color);
   padding-right: var(--space-2);
@@ -460,21 +457,12 @@ function remove(conversation: ConversationSummary) {
 .chat {
   display: flex;
   flex-direction: column;
-  min-height: 0;
   min-width: 0;
 }
 
 .messages {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  /* At either end a swipe stops here instead of moving the whole page —
-     on a phone that dragged the app's menu along with the chat. */
-  overscroll-behavior: contain;
-  /* The containing block of the visually hidden headings inside: without
-     it they are placed against <main>, outside this scroller, and every
-     message made the whole document taller — the page scrolled and took
-     the app's menu with it. */
+  /* The containing block of the visually hidden headings inside, so they
+     stay beside their message instead of being placed against <main>. */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -483,8 +471,13 @@ function remove(conversation: ConversationSummary) {
   padding: var(--focus-ring-reach);
 }
 
+.dock {
+  padding-block: var(--space-2);
+  background: var(--p-content-hover-background);
+}
+
 .intro {
-  margin: auto 0;
+  margin: var(--space-5) 0;
   display: flex;
   flex-direction: column;
   align-items: center;

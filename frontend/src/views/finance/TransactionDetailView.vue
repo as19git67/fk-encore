@@ -707,7 +707,7 @@ const extractedFields = computed(() => {
 </script>
 
 <template>
-  <PageLayout :title="tx?.counterparty || 'Buchung'" width="normal" :ready="!!tx">
+  <PageLayout :title="tx?.counterparty || 'Buchung'" width="normal" :ready="!!tx" sticky-header>
     <template #actions>
       <Button
         v-if="isDirty"

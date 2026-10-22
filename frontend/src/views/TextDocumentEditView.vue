@@ -142,6 +142,7 @@ Ein Absatz mit **fettem** und *kursivem* Text.
     :title="isNew ? 'Neues Textdokument' : 'Text bearbeiten'"
     hint="Formatiert wird mit Markdown. Beim Speichern entsteht daraus ein PDF mit dem heutigen Datum und dir als Absender, das wie jedes andere Dokument eingeordnet wird."
     :ready="!loading"
+    sticky-header
   >
     <template #actions>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />

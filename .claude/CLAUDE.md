@@ -1128,16 +1128,31 @@ Jede View unter `frontend/src/views/` baut ihre Seite mit
 `components/layout/PageLayout.vue` (Issue #1272, Konzept in
 `documentation/plans/web-ui-vereinheitlichung.md`). Die View liefert `title` (wird
 einziger `<h1>` und `document.title` im Format `Seite · Modul · F4mil`),
-optional `hint`, `scroll="page|self"`, `width="normal|wide|full"` und
-`ready`, und füllt die Slots `actions`, `toolbar`, `notice`, `selection` und
-den Inhalt. `toolbar`, `notice` und `selection` hebt `PageLayout` in den
-einen Sticky-Stack der App (`#module-subheaders` in `App.vue`).
+optional `hint`, `scroll="page|fill"`, `width="normal|wide|full"`,
+`sticky-header` und `ready`, und füllt die Slots `actions`, `toolbar`,
+`notice`, `selection` und den Inhalt. `toolbar`, `notice` und `selection`
+hebt `PageLayout` in den einen Sticky-Stack der App (`#module-subheaders` in
+`App.vue`), mit `sticky-header` auch die Titelzeile samt `#actions`.
 
 Regeln:
 
+- Das Dokument ist der einzige Scroller der Seite (Issue #1674): iOS scrollt
+  beim Tippen auf die Statusleiste nur dann nach oben. Keine View legt einen
+  eigenen Scroller um ihren Hauptinhalt. Virtuelle Raster nehmen
+  `usePageVirtualizer` (Fenster-Virtualizer, `scrollMargin` und
+  Stack-Höhe eingerechnet). `scroll="fill"` ist nur für Inhalte ohne Länge
+  (Karte): genau ein Viewport unter dem Stack, nichts scrollt darin.
+- Eine Spalte neben der Liste, die stehen bleibt (Fotodetails neben dem
+  Raster, Vorschau neben der Dokumentliste, PDF neben den Attributen),
+  trägt die globale Klasse `.page-aside` (`.page-aside--fill` für volle
+  Höhe, Abstand über `--page-aside-inset`); eine Leiste am unteren Rand
+  (Eingabe des Assistenten) `.page-dock`. Beide stehen in `style.css`.
+- Detailseiten setzen `sticky-header`, damit Menü und Zeile mit dem
+  Zurück-Knopf beim Scrollen stehen bleiben.
 - Keine View definiert eigenes Header-/Toolbar-Layout, `position: sticky`
   oder `top:`-Offsets. Die Stack-Höhe liefert `--app-stack-height`
-  (von `App.vue` gemessen). `--menubar-height` gibt es nicht mehr.
+  (von `App.vue` gemessen, auch auf `<html>`, dessen `scroll-padding-top`
+  sie freihält). `--menubar-height` gibt es nicht mehr.
 - Die Seite scrollt nie horizontal (`overflow-x: clip` auf `body`). Breite
   Inhalte (Tabellen, Streifen) gehören in `components/layout/ScrollX.vue`.
 - Abstände aus `--space-1` … `--space-6`, Seitenränder aus `--page-gutter`.
@@ -1222,7 +1237,9 @@ wenn die vorige Seite im selben Modul lag oder eine Seite war, die Objekte
 aller Module öffnet (der Assistent, die Sammelmappen; Liste
 `CROSS_MODULE_ORIGINS` im Composable), sonst die Liste des Moduls.
 Danach kommen Vor/Zurück durch den Basket (wo es einen gibt) und erst dann
-die Aktionen der Seite.
+die Aktionen der Seite. Die Seite setzt `sticky-header` an `PageLayout`, so
+bleibt diese Zeile im Sticky-Stack stehen, während der Inhalt scrollt
+(Issue #1674).
 
 ## Zurück-Navigation im Frontend (`listAnchor`, `scrollMemory`)
 

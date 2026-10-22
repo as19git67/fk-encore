@@ -1,11 +1,7 @@
-import type { InjectionKey, Ref } from 'vue'
 import { detectModule } from '../../config/modules'
 
 /** Where PageLayout lifts its sticky part to; rendered once by App.vue. */
 export const STACK_TARGET_ID = 'module-subheaders'
-
-/** The element whose scrollTop is the page's position (scroll="self"). */
-export const PAGE_SCROLLER_KEY: InjectionKey<Ref<HTMLElement | null>> = Symbol('pageScroller')
 
 /**
  * What a view's `resolveAnchor` reports back to `PageLayout` (stage 4):

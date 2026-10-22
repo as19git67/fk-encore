@@ -262,7 +262,7 @@ async function save() {
 </script>
 
 <template>
-  <PageLayout title="Bargeldbuchung erfassen" width="normal">
+  <PageLayout title="Bargeldbuchung erfassen" width="normal" sticky-header>
     <template #notice>
       <Message v-if="cashAccounts.length === 0" severity="warn" :closable="false">
         Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.

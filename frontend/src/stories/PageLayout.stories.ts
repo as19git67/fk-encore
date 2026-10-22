@@ -14,7 +14,7 @@ const meta: Meta<typeof PageLayout> = {
   title: 'Layout/PageLayout',
   component: PageLayout,
   argTypes: {
-    scroll: { control: 'radio', options: ['page', 'self'] },
+    scroll: { control: 'radio', options: ['page', 'fill'] },
     width: { control: 'radio', options: ['normal', 'wide', 'full'] },
   },
 }
@@ -70,9 +70,15 @@ export const MitToolbar: Story = {
   ),
 }
 
-export const EigenerScroller: Story = {
-  name: 'scroll="self" (Inhalt scrollt selbst)',
-  render: render({ title: 'Galerie', scroll: 'self', width: 'full' }, TOOLBAR),
+export const Detailseite: Story = {
+  name: 'sticky-header (Titelzeile mit Zurück bleibt stehen)',
+  render: render({ title: 'Buchung', stickyHeader: true }),
+}
+
+export const DetailseiteSchmal: Story = {
+  name: 'sticky-header auf Telefonbreite',
+  parameters: { testViewport: { width: 360, height: 740 } },
+  render: render({ title: 'Ein längerer Titel einer Buchung', hint: 'Girokonto', stickyHeader: true }),
 }
 
 export const VolleBreite: Story = {

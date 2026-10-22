@@ -64,6 +64,7 @@ import PdfViewer from '../components/PdfViewer.vue'
 import MarkdownView from '../components/documents/MarkdownView.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import FileButton from '../components/collections/FileButton.vue'
+import { useMediaQuery } from '../composables/useBreakpoint'
 import RelatedDocumentsCard from '../components/documents/RelatedDocumentsCard.vue'
 import { listDuplicatesForDocument, REFERENCE_KIND_LABELS, type ReferenceKind, type ReferenceNumber } from '../api/documents'
 import {
@@ -201,6 +202,13 @@ const pdfData = ref<Uint8Array | null>(null)
 const pdfError = ref('')
 /** A text document written in the app opens on its formatted text; the PDF is one click away. */
 const isTextDocument = computed(() => doc.value?.markdown_source != null)
+
+// On a wide screen the PDF stands beside the attributes as a column pinned
+// under the sticky stack, scrolling its own pages while the attributes scroll
+// with the document (issue #1674). Below that it is one column with the rest.
+// 1000px is this page's own threshold, not one of the app's breakpoints.
+const wideLayout = useMediaQuery('(min-width: 1000px)')
+const pinnedPanel = computed(() => (wideLayout.value ? 'page-aside page-aside--fill' : undefined))
 const textPanelMode = ref<'text' | 'pdf'>('text')
 const textPanelOptions = [
   { label: 'Text', value: 'text' },
@@ -879,9 +887,9 @@ onBeforeUnmount(() => {
 <template>
   <PageLayout
     :title="doc ? (doc.title || doc.original_filename) : 'Dokument'"
-    scroll="self"
     width="full"
     :ready="!loading"
+    sticky-header
   >
     <template #actions>
       <div class="detail-actions">
@@ -1090,7 +1098,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="doc" class="detail-grid">
-      <div v-if="isTextDocument" class="pdf-panel text-panel">
+      <div v-if="isTextDocument" class="pdf-panel text-panel" :class="pinnedPanel">
         <div class="text-panel__head">
           <SelectButton
             v-model="textPanelMode"
@@ -1108,7 +1116,7 @@ onBeforeUnmount(() => {
         </div>
         <PdfViewer v-else :data="pdfData" :error-message="pdfError || null" />
       </div>
-      <div v-else class="pdf-panel">
+      <div v-else class="pdf-panel" :class="pinnedPanel">
         <PdfViewer :data="pdfData" :error-message="pdfError || null" />
       </div>
 
@@ -1887,22 +1895,18 @@ onBeforeUnmount(() => {
      past the container's width. */
   grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
-  /* Fills PageLayout's `.page-content` (scroll="self"); `min-height: 0`
-     lets the panels below shrink to the viewport instead of growing it. */
-  flex: 1 1 auto;
   min-width: 0;
-  min-height: 0;
 }
 
-/* ── Desktop: die Seite selbst scrollt nicht ────────────────────────────────
-   Auf breiten Viewports füllt die Detailansicht exakt die Höhe unter dem
-   Sticky-Stack (PageLayout, scroll="self"). Gescrollt wird ausschließlich
-   *innerhalb* der beiden Panels: links Seite für Seite durch das PDF, rechts
-   durch die Attribute. Kopfzeile und Menü bleiben dabei stehen. (#919) */
+/* ── Desktop: PDF pinned, attributes scroll with the page ───────────────────
+   Auf breiten Viewports steht das PDF als feste Spalte unter dem Sticky-Stack
+   (`.page-aside`, issue #1674) und blättert in sich selbst Seite für Seite;
+   die Attribute rechts scrollen mit dem Dokument, damit ein Tippen auf die
+   iOS-Statusleiste nach oben führt. Kopfzeile und Menü bleiben stehen. */
 @media (min-width: 1000px) {
   .detail-grid {
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-    min-height: 0;
+    align-items: start;
   }
   .pdf-panel {
     min-height: 0;
@@ -1958,27 +1962,12 @@ onBeforeUnmount(() => {
    the column; unlike `hidden` it does not make the panel a scroll container,
    which would pin the head to the panel instead of to the page. */
 @media (max-width: 999px) {
-  /* The head pins itself right under the app's stack, so anything the
-     skeleton leaves between the title row and the scroller is a slot the
-     PDF slides through while the page scrolls. `--focus-ring-reach` reads
-     as no gap here: the scroller is inset by that much and pulled back out
-     again, and `--pdf-head-top` below lifts the head out of the same inset. */
-  .page {
-    --page-gap: var(--focus-ring-reach);
-  }
-
-  .detail-grid {
-    flex: 0 0 auto;
-    min-height: auto;
-  }
-
   .pdf-panel {
     overflow-x: clip;
     overflow-y: visible;
-    /* The page's scroller keeps `--focus-ring-reach` of padding at its top,
-       and a sticky element measures from inside that padding — which left a
-       sliver of page showing above the head. Pull it back out. */
-    --pdf-head-top: calc(-1 * var(--focus-ring-reach));
+    /* The document scrolls, so the viewer's head pins itself right under
+       the app's sticky stack. */
+    --pdf-head-top: var(--app-stack-height, 0px);
   }
 }
 
@@ -1991,30 +1980,6 @@ onBeforeUnmount(() => {
      grid track wider than the container. */
   min-width: 0;
   padding-right: 0.25rem;
-  /* On a phone this column is what overflows the page's scroller, and a
-     scroller takes its scrollable height from the overflowing child's border
-     box — the padding `PageLayout` puts at its own bottom never counts. So
-     the last control in here, the "show all text" button, had nothing left
-     below it and lost the bottom of its focus ring. The room belongs on this
-     box, where it does end up in the canvas. */
-  padding-bottom: var(--focus-ring-reach);
-}
-
-/* Eigener Scroll-Bereich neben dem PDF — siehe den Block weiter oben. */
-@media (min-width: 1000px) {
-  .meta-panel {
-    min-height: 0;
-    overflow-y: auto;
-    /* Rechts Platz für die Scrollbar, damit sie nicht auf den Eingabefeldern
-       liegt. Links der Fokusring: die Felder füllen die Spalte, und
-       `overflow-y: auto` klippt auch waagrecht — ohne diesen Rand fehlt dem
-       Ring seine linke Seite. Der negative Rand nimmt ihn außen wieder weg. */
-    padding-right: 0.5rem;
-    padding-left: var(--focus-ring-reach);
-    padding-bottom: var(--focus-ring-reach);
-    margin-left: calc(-1 * var(--focus-ring-reach));
-    margin-bottom: calc(-1 * var(--focus-ring-reach));
-  }
 }
 
 .meta-top {

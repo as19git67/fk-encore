@@ -5,7 +5,7 @@ import PageLayout from './PageLayout.vue'
 import { STACK_TARGET_ID, formatDocumentTitle } from './pageLayout'
 import { saveListAnchor, takeListAnchor } from '../../utils/listAnchor'
 import type { ListAnchor } from '../../utils/listAnchor'
-import { markNavigation, saveScrollOffset, setPageScroller } from '../../utils/scrollMemory'
+import { markNavigation, saveScrollOffset } from '../../utils/scrollMemory'
 
 /**
  * The page skeleton's two contracts with the app shell: the sticky part
@@ -47,7 +47,6 @@ beforeEach(() => {
   host = document.createElement('div')
   document.body.appendChild(host)
   sessionStorage.clear()
-  setPageScroller(null)
   markNavigation(false)
 })
 
@@ -114,12 +113,30 @@ describe('PageLayout', () => {
     expect(stack.querySelector('h1')).toBeNull()
   })
 
+  it('lifts the title row with its actions into the stack on a detail page', async () => {
+    const stack = document.createElement('div')
+    stack.id = STACK_TARGET_ID
+    document.body.appendChild(stack)
+
+    const router = makeRouter()
+    await router.push('/finanzen/konto/1')
+    const el = await mountPage(router, { title: 'Buchung', stickyHeader: true }, {
+      actions: () => h('button', { class: 'probe-back', 'aria-label': 'Zurück' }),
+      default: () => h('p', 'Inhalt'),
+    })
+    // One <h1>, and it scrolls nowhere: it sits in the stack with the way back.
+    expect(el.querySelector('h1')).toBeNull()
+    expect(stack.querySelectorAll('h1')).toHaveLength(1)
+    expect(stack.querySelector('.page-header .probe-back')).not.toBeNull()
+    expect(el.querySelector('.page-content p')?.textContent).toBe('Inhalt')
+  })
+
   it('exposes scroll mode, width and readiness as classes and data', async () => {
     const router = makeRouter()
     await router.push('/')
-    const el = await mountPage(router, { title: 'Galerie', scroll: 'self', width: 'full', ready: false })
+    const el = await mountPage(router, { title: 'Karte', scroll: 'fill', width: 'full', ready: false })
     const page = el.querySelector('.page')!
-    expect(page.classList.contains('page--scroll-self')).toBe(true)
+    expect(page.classList.contains('page--scroll-fill')).toBe(true)
     expect(page.classList.contains('page--width-full')).toBe(true)
     expect(page.getAttribute('data-page-ready')).toBe('false')
   })

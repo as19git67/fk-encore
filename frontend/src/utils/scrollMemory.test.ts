@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
-  clearPageScroller,
   clearScrollOffset,
   currentScrollTop,
   markNavigation,
@@ -8,20 +7,11 @@ import {
   readScrollOffset,
   saveScrollOffset,
   scrollToTop,
-  setPageScroller,
 } from './scrollMemory'
-
-function fakeScroller(top: number) {
-  const el = document.createElement('div')
-  Object.defineProperty(el, 'scrollTop', { value: top, writable: true })
-  el.scrollTo = vi.fn() as unknown as typeof el.scrollTo
-  return el
-}
 
 describe('scrollMemory', () => {
   beforeEach(() => {
     sessionStorage.clear()
-    setPageScroller(null)
     markNavigation(false)
     window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
   })
@@ -47,26 +37,13 @@ describe('scrollMemory', () => {
     expect(readScrollOffset('/dokumente')).toBeNull()
   })
 
-  it('reads the page’s own scroller when one is registered', () => {
-    const el = fakeScroller(250)
-    const getter = () => el
-    setPageScroller(getter)
+  it('reads and sets the document’s offset', () => {
+    // The document is the only scroller (issue #1674).
+    Object.defineProperty(window, 'scrollY', { value: 250, configurable: true })
     expect(currentScrollTop()).toBe(250)
     scrollToTop(120)
-    expect(el.scrollTo).toHaveBeenCalledWith({ top: 120, behavior: 'instant' })
-
-    clearPageScroller(getter)
-    expect(currentScrollTop()).toBe(Math.round(window.scrollY))
-  })
-
-  it('keeps the newer registration when an old page unregisters late', () => {
-    const first = () => fakeScroller(10)
-    const second = fakeScroller(99)
-    setPageScroller(first)
-    setPageScroller(() => second)
-    // The page that left tidies up after the new one registered.
-    clearPageScroller(first)
-    expect(currentScrollTop()).toBe(99)
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 120, behavior: 'instant' })
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
   })
 
   it('tells a restore whether the user came back or picked the page fresh', () => {

@@ -6,10 +6,12 @@
  *   - Owns a `useGallerySource` (sparse array of length `total`). The
  *     component never iterates this array; it only reads slots inside the
  *     rendered rows.
- *   - TanStack `useVirtualizer` virtualizes ROWS (not items). A row holds
- *     `cols` photos; layout inside the row is a plain CSS grid. Row height
- *     is fixed (cell + gap) so the virtualizer can compute the total
- *     scroll height as `rowCount * rowHeight` without measuring.
+ *   - TanStack's window virtualizer (`usePageVirtualizer`) virtualizes ROWS
+ *     (not items). A row holds `cols` photos; layout inside the row is a
+ *     plain CSS grid. Row height is fixed (cell + gap) so the virtualizer
+ *     can compute the total height as `rowCount * rowHeight` without
+ *     measuring. The document scrolls, not the grid (issue #1674): iOS
+ *     scrolls to the top on a tap on the status bar only then.
  *   - As soon as a row becomes visible, the component asks the source to
  *     `ensureRange(rowStart, rowEnd)` — the source fires page fetches for
  *     any unloaded slots that overlap the visible window.
@@ -51,7 +53,7 @@
  *                                    aligned with the fullscreen selection.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import { usePageVirtualizer } from '../composables/usePageVirtualizer'
 import { type GalleryGridEntry, type GallerySortDir, type GallerySortField } from '../api/gallery'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
@@ -170,6 +172,7 @@ const containerWidth = ref(0)
 const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
+const rowsRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
@@ -222,9 +225,11 @@ const overscan = computed(() => {
 // crossing itself from chattering.
 let lastPastHalf = false
 function updateScrollPosition() {
-  const el = scrollRef.value
-  if (!el) return
-  const next = isPastHalf(el.scrollTop, el.clientHeight, el.scrollHeight, lastPastHalf)
+  if (!scrollRef.value) return
+  // Measured against the grid's own rows, not the whole document, so the
+  // title above and the end of the page below do not shift the middle.
+  const top = Math.max(0, window.scrollY - scrollMargin.value)
+  const next = isPastHalf(top, window.innerHeight, totalSize.value, lastPastHalf)
   if (next !== lastPastHalf) {
     lastPastHalf = next
     emit('position-changed', { pastHalf: next })
@@ -241,7 +246,7 @@ onMounted(() => {
       if (entry) recalcLayout(entry.contentRect.width)
     })
     resizeObs.observe(scrollRef.value)
-    scrollRef.value.addEventListener('scroll', updateScrollPosition, { passive: true })
+    window.addEventListener('scroll', updateScrollPosition, { passive: true })
   }
 })
 
@@ -249,7 +254,7 @@ onBeforeUnmount(() => {
   loadGeneration++
   resizeObs?.disconnect()
   resizeObs = null
-  scrollRef.value?.removeEventListener('scroll', updateScrollPosition)
+  window.removeEventListener('scroll', updateScrollPosition)
   if (trailingTimer) {
     clearTimeout(trailingTimer)
     trailingTimer = null
@@ -260,13 +265,9 @@ onBeforeUnmount(() => {
 // ── Row count drives the virtualizer ────────────────────────────────────────
 const rowCount = computed(() => Math.ceil((total.value ?? 0) / cols.value))
 
-const virtualizer = useVirtualizer(
-  computed(() => ({
-    count: rowCount.value,
-    getScrollElement: () => scrollRef.value,
-    estimateSize: () => rowHeight.value,
-    overscan: overscan.value,
-  })),
+const { virtualizer, scrollToRow, rowOffset, scrollMargin } = usePageVirtualizer(
+  rowsRef,
+  computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: overscan.value })),
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
@@ -361,9 +362,9 @@ async function loadAndScroll(anchor: number | null | undefined) {
     // skeleton and put the user in the wrong place.
     const exactIdx = anchor != null ? findLoadedIndexById(anchor) : null
     if (exactIdx !== null) {
-      virtualizer.value.scrollToIndex(Math.floor(exactIdx / cols.value), { align: 'center' })
+      scrollToRow(Math.floor(exactIdx / cols.value), 'center')
     } else {
-      virtualizer.value.scrollToIndex(Math.floor((totalRows - 1) / cols.value), { align: 'end' })
+      scrollToRow(Math.floor((totalRows - 1) / cols.value), 'end')
     }
   }
   // After the post-init scroll settles, refresh the at-start / at-end
@@ -489,7 +490,7 @@ function scrollToIndex(index: number, align: 'start' | 'center' | 'end' | 'auto'
   if (cols.value <= 0 || total.value === 0) return
   const clamped = Math.max(0, Math.min(index, total.value - 1))
   const row = Math.floor(clamped / cols.value)
-  virtualizer.value.scrollToIndex(row, { align })
+  scrollToRow(row, align)
 }
 
 // Parent-triggered reload. `source.reload` re-inits the sparse entries
@@ -539,6 +540,7 @@ defineExpose({
 
     <div
       v-if="ready && total > 0"
+      ref="rowsRef"
       class="vg-inner"
       :style="{ height: `${totalSize}px` }"
     >
@@ -547,7 +549,7 @@ defineExpose({
         :key="String(row.key)"
         class="vg-row"
         :style="{
-          transform: `translateY(${row.start}px)`,
+          transform: `translateY(${rowOffset(row.start)}px)`,
           height: `${row.size}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
@@ -676,14 +678,8 @@ defineExpose({
 <style scoped>
 .virtual-gallery {
   position: relative;
-  height: 100%;
   width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
   background: var(--p-content-background);
-  -webkit-overflow-scrolling: touch;
-  contain: layout size style;
-  scrollbar-gutter: stable;
   padding: 6px;
   box-sizing: border-box;
 }

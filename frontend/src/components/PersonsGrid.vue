@@ -2,8 +2,9 @@
 /**
  * Virtualized grid of person cards.
  *
- * Mirrors the architecture of VirtualAlbumGrid: TanStack useVirtualizer
- * virtualizes ROWS. Each row is a CSS grid holding `cols` person cards;
+ * Mirrors the architecture of VirtualAlbumGrid: TanStack's window
+ * virtualizer (`usePageVirtualizer`) virtualizes ROWS, and the document
+ * scrolls, not the grid (issue #1674). Each row is a CSS grid holding `cols` person cards;
  * row height is fixed so total scroll height is computed without measuring.
  *
  * Data source: caller's in-memory sorted+filtered persons array — no
@@ -16,7 +17,7 @@
  *   - rescrollToRemembered(opts) — re-apply after filter/sort changes.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import { usePageVirtualizer } from '../composables/usePageVirtualizer'
 import HeicImage from './HeicImage.vue'
 import { type Person, getPhotoUrl } from '../api/photos'
 import { thumbnailImageStyle } from '../utils/faceBbox'
@@ -41,6 +42,7 @@ const cellSize = ref(TARGET_CELL_MIN_PX)
 const rowHeight = computed(() => CELL_HEIGHT + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
+const rowsRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
@@ -72,13 +74,9 @@ onBeforeUnmount(() => {
 // ── Virtualizer ──────────────────────────────────────────────────────────────
 const rowCount = computed(() => Math.ceil(props.persons.length / Math.max(1, cols.value)))
 
-const virtualizer = useVirtualizer(
-  computed(() => ({
-    count: rowCount.value,
-    getScrollElement: () => scrollRef.value,
-    estimateSize: () => rowHeight.value,
-    overscan: 4,
-  })),
+const { virtualizer, scrollToRow, rowOffset } = usePageVirtualizer(
+  rowsRef,
+  computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: 4 })),
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
@@ -129,7 +127,7 @@ function scrollToPerson(id: number, opts: { highlight?: boolean; focus?: boolean
   if (cols.value <= 0 || props.persons.length === 0) return false
   const idx = props.persons.findIndex(p => p.id === id)
   if (idx < 0) return false
-  virtualizer.value.scrollToIndex(Math.floor(idx / cols.value), { align: 'center' })
+  scrollToRow(Math.floor(idx / cols.value), 'center')
   if (opts.highlight) highlightPerson(id)
   if (opts.focus) {
     requestAnimationFrame(() => {
@@ -143,7 +141,7 @@ async function rescrollToRemembered(opts: { highlight?: boolean } = {}) {
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   if (!props.rememberedPersonId || props.persons.length === 0) return
   if (!scrollToPerson(props.rememberedPersonId, opts)) {
-    virtualizer.value.scrollToIndex(0, { align: 'start' })
+    window.scrollTo({ top: 0, behavior: 'instant' })
   }
 }
 
@@ -171,13 +169,13 @@ watch(
     <div v-if="persons.length === 0" class="pg-empty">
       Keine Personen passen zum Filter.
     </div>
-    <div class="pg-inner" :style="{ height: `${totalSize}px` }">
+    <div ref="rowsRef" class="pg-inner" :style="{ height: `${totalSize}px` }">
       <div
         v-for="row in virtualRows"
         :key="String(row.key)"
         class="pg-row"
         :style="{
-          transform: `translateY(${row.start}px)`,
+          transform: `translateY(${rowOffset(row.start)}px)`,
           height: `${row.size}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
@@ -216,14 +214,7 @@ watch(
 
 <style scoped>
 .pg {
-  flex: 1;
   width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  contain: layout size style;
-  scrollbar-gutter: stable;
   padding: 6px;
   box-sizing: border-box;
 }

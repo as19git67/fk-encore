@@ -328,10 +328,15 @@ Behavior:
   content scrolls in an element of its own (split view, virtual gallery).
   The scroll element is reachable via `ref` and via
   `provide('pageScroller')`, so that `useScrollRestore` finds it.
+  *Superseded by issue #1674:* `self` is gone. The document is the only
+  scroller (iOS scrolls to the top on a status-bar tap only then); virtual
+  grids use `usePageVirtualizer` against `window`, side columns pin with
+  `.page-aside`, and `scroll="fill"` keeps one viewport for maps only.
 - `width`: `normal` = max. 1200px centered (forms, detail, admin);
   `wide` = max. 1600px (tables, finance); `full` = full width with
   page margin (gallery, maps).
-- The `<h1>` sits **in the content**, not in the sticky stack. Only toolbar and
+- The `<h1>` sits **in the content**, not in the sticky stack (detail pages
+  lift it with `sticky-header` since issue #1674). Only toolbar and
   notices are sticky. Reason: On the phone the sticky height is tight, the
   title is dispensable while scrolling, the toolbar is not.
 

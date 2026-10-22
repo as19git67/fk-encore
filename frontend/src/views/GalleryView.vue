@@ -476,6 +476,9 @@ async function shareSelectedPhotos() {
 const curationBusy = ref(false)
 const linkVisibilityBusy = ref(false)
 const galleryRef = ref<InstanceType<typeof VirtualGallery> | null>(null)
+// The grid puts itself back on the photo the user left (`aroundPhotoId`), so
+// PageLayout must not also restore the document's old offset over it.
+const placesItself = () => true
 
 async function applyCurationToSelection(target: 'favorite' | 'hidden' | 'visible') {
   const ids = Array.from(selectedIds.value)
@@ -1699,8 +1702,8 @@ void refreshReviewSequence()
 <template>
   <PageLayout
     title="Fotos"
-    scroll="self"
     width="full"
+    :resolve-anchor="placesItself"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -1784,6 +1787,35 @@ void refreshReviewSequence()
           <i class="pi pi-list" /> Details anzeigen
         </button>
       </ErrorBanner>
+      <!-- Upload and delete progress: in the sticky stack, so they stay in
+           view while the photos scroll underneath (issue #1674). -->
+      <div v-if="uploading" class="upload-progress-bar">
+        <div class="upload-progress-bar__info">
+          <i class="pi pi-upload" />
+          <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
+          <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
+        </div>
+        <div class="upload-progress-bar__track">
+          <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
+        </div>
+      </div>
+
+      <!-- Upload success message -->
+      <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
+        <i class="pi pi-check-circle" />
+        <span>{{ uploadResultMessage }}</span>
+      </div>
+
+      <!-- Delete progress bar (#299) -->
+      <div v-if="deleteBusy" class="delete-progress-bar">
+        <div class="delete-progress-bar__info">
+          <i class="pi pi-spin pi-spinner" />
+          <span>{{ deleteCount }} {{ deleteCount === 1 ? 'Foto' : 'Fotos' }} werden gelöscht…</span>
+        </div>
+        <div class="delete-progress-bar__track">
+          <div class="delete-progress-bar__fill" />
+        </div>
+      </div>
     </template>
 
     <!-- Drag overlay -->
@@ -1827,35 +1859,6 @@ void refreshReviewSequence()
     <!-- In-flow body: progress bars, the grid row and the floating selection
          tray. The wrapper is the positioned box the tray is anchored to. -->
     <div class="gallery-body">
-      <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
-      <div v-if="uploading" class="upload-progress-bar">
-        <div class="upload-progress-bar__info">
-          <i class="pi pi-upload" />
-          <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
-          <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
-        </div>
-        <div class="upload-progress-bar__track">
-          <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
-        </div>
-      </div>
-
-      <!-- Upload success message -->
-      <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
-        <i class="pi pi-check-circle" />
-        <span>{{ uploadResultMessage }}</span>
-      </div>
-
-      <!-- Delete progress bar (#299) -->
-      <div v-if="deleteBusy" class="delete-progress-bar">
-        <div class="delete-progress-bar__info">
-          <i class="pi pi-spin pi-spinner" />
-          <span>{{ deleteCount }} {{ deleteCount === 1 ? 'Foto' : 'Fotos' }} werden gelöscht…</span>
-        </div>
-        <div class="delete-progress-bar__track">
-          <div class="delete-progress-bar__fill" />
-        </div>
-      </div>
-
       <!-- Grid + persistent desktop detail panel. On <768px the panel is
            hidden via CSS so the grid takes the full width and details
            remain reachable via the fullscreen flyout. -->
@@ -1884,7 +1887,7 @@ void refreshReviewSequence()
              but always visible on desktop, driven by the cursor cell. The
              reactive cursor → hydrate flow keeps it in sync with grid
              clicks, keyboard navigation, and fullscreen prev/next. -->
-        <aside v-if="cursorPhoto" class="desktop-sidebar">
+        <aside v-if="cursorPhoto" class="desktop-sidebar page-aside">
           <PhotoDetailSidebar
             :photo="cursorPhoto"
             :variant-photo="variantPhoto"
@@ -2067,40 +2070,30 @@ void refreshReviewSequence()
 /* Page frame and title: PageLayout (issue #1272). */
 
 /* The in-flow body below the sticky stack: the positioned box the floating
-   selection tray is anchored to; the content row inside takes the rest. */
+   selection tray is anchored to. */
 .gallery-body {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 /* ── Content row: grid + persistent desktop sidebar ──────────────────── */
+/* The grid is as tall as its rows and the document scrolls (issue #1674). */
 .content-row {
   display: flex;
-  flex: 1;
-  min-height: 0;          /* required so the nested VirtualGallery scroll
-                             container actually scrolls instead of pushing
-                             the row past the viewport */
 }
 
 .grid-area {
   flex: 1;
   min-width: 0;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
 }
 
-/* Desktop detail panel — fixed width, scrolls independently of the grid.
+/* Desktop detail panel — fixed width, pinned under the sticky stack
+   (`.page-aside`) and scrolling on its own while the grid goes past.
    Hidden on mobile where the fullscreen flyout takes over. */
 .desktop-sidebar {
   width: 280px;
   flex-shrink: 0;
   border-left: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.08));
   background: var(--p-content-background);
-  overflow-y: auto;
   overflow-x: hidden;
 }
 
@@ -2159,10 +2152,6 @@ void refreshReviewSequence()
   padding: 0.5rem 1rem;
   background: var(--p-blue-50);
   border-bottom: 1px solid var(--p-blue-200);
-  /* Sticky so the bar remains visible when the gallery is scrolled on iOS */
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 .upload-progress-bar__info {
   display: flex;
