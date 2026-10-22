@@ -1891,6 +1891,13 @@
       "when": 1788900000000,
       "tag": "0269_photo_composite_weights",
       "breakpoints": true
+    },
+    {
+      "idx": 270,
+      "version": "7",
+      "when": 1788990000000,
+      "tag": "0270_ai_pick_taste_model",
+      "breakpoints": true
     }
   ]
 }

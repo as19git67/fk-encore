@@ -483,6 +483,76 @@ class TestAestheticHead:
         assert client.get("/aesthetic-head").json()["head"]["version"] == "vith_head_v1"
 
 
+class TestTaste:
+    """The personal taste model (foto-aesthetik, stage 7): the service fits and scores, the app stores."""
+
+    @staticmethod
+    def _library():
+        import numpy as np
+
+        rng = np.random.default_rng(2)
+        taste = rng.normal(size=16)
+        rows, groups = [], []
+        for g in range(40):
+            photos = []
+            vals = []
+            for i in range(3):
+                pid = f"{g}{i:02d}"
+                v = rng.normal(size=16)
+                rows.append((pid, v.tolist()))
+                vals.append((pid, float(v @ taste)))
+            best = max(vals, key=lambda t: t[1])[0]
+            for pid, _ in vals:
+                photos.append({"photo_id": pid, "kept": pid == best, "base": 0.5})
+            groups.append({"group_id": g + 1, "photos": photos})
+        return rows, groups
+
+    def test_replay_scores_every_photo_of_usable_groups_and_lists_missing(self):
+        rows, groups = self._library()
+        groups.append({"group_id": 99, "photos": [
+            {"photo_id": "nope", "kept": True, "base": 0.5},
+            {"photo_id": rows[0][0], "kept": False, "base": 0.5},
+        ]})
+        with patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=rows)):
+            body = client.post("/taste/replay", json={"groups": groups}).json()
+        assert body["version"] == "clip_taste_v1"
+        assert body["groups"] == 40
+        assert body["folds"] == 5
+        assert len(body["scores"]) == 120
+        assert body["missing"] == ["nope"]
+
+    def test_replay_refuses_without_a_usable_group(self):
+        groups = [{"group_id": 1, "photos": [
+            {"photo_id": "1", "kept": True, "base": 0.5},
+            {"photo_id": "2", "kept": True, "base": 0.4},
+        ]}]
+        with patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=[("1", [0.1]), ("2", [0.2])])):
+            response = client.post("/taste/replay", json={"groups": groups})
+        assert response.status_code == 409
+
+    def test_train_returns_the_model(self):
+        rows, groups = self._library()
+        with patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=rows)):
+            body = client.post("/taste/train", json={"groups": groups}).json()
+        model = body["model"]
+        assert len(model["weights"]) == 16
+        assert model["groups"] == 40
+        assert model["pairs"] == 80
+        assert body["missing"] == []
+
+    def test_score_multiplies_stored_vectors(self):
+        rows = [("1", [1.0, 2.0]), ("2", [0.5, 0.0])]
+        with patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=rows)):
+            body = client.post("/taste/score", json={"weights": [2.0, -1.0], "photo_ids": ["1", "2", "3"]}).json()
+        assert body["scores"] == [{"photo_id": "1", "value": 0.0}, {"photo_id": "2", "value": 1.0}]
+        assert body["missing"] == ["3"]
+
+    def test_score_refuses_a_model_of_another_size(self):
+        with patch("app.api.endpoints.repository.get_clip_embeddings", AsyncMock(return_value=[("1", [1.0, 2.0])])):
+            response = client.post("/taste/score", json={"weights": [1.0], "photo_ids": ["1"]})
+        assert response.status_code == 422
+
+
 class TestRedundantPairsEndpoint:
     """`/redundant-pairs` reports which members of a similar-photo group show
     the same shot, so the main app's auto-pick stops selecting both of them.

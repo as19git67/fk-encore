@@ -6,7 +6,8 @@
  * window, shows how far the library is, follows a running night and keeps
  * the history; an admin can start a run outside the window or stop one.
  * Stage 4 adds the provisional head: learnt from the night's scores, it
- * gives new photos a value at import and shows how close it gets.
+ * gives new photos a value at import and shows how close it gets. Stage 7
+ * replays the auto-pick with a personal taste learnt from the CLIP vector.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
@@ -34,6 +35,10 @@ import {
   replayCompositeScore,
   adoptCompositeScore,
   resetCompositeScore,
+  replayTaste,
+  adoptTaste,
+  resetTaste,
+  type TasteReport,
   type CompositeReport,
   type CompositeWeights,
   type ReplayReport,
@@ -52,8 +57,24 @@ const loaded = ref(false)
 const error = ref<string | null>(null)
 const info = ref<string | null>(null)
 const busy = ref<
-  'save' | 'start' | 'stop' | 'backfill' | 'train' | 'clear' | 'replay' | 'adopt' | 'composite' | 'composite-adopt' | 'composite-reset' | number | null
+  | 'save'
+  | 'start'
+  | 'stop'
+  | 'backfill'
+  | 'train'
+  | 'clear'
+  | 'replay'
+  | 'adopt'
+  | 'composite'
+  | 'composite-adopt'
+  | 'composite-reset'
+  | 'taste'
+  | 'taste-adopt'
+  | 'taste-reset'
+  | number
+  | null
 >(null)
+const taste = ref<TasteReport | null>(null)
 const replay = ref<ReplayReport | null>(null)
 const composite = ref<CompositeReport | null>(null)
 
@@ -287,6 +308,76 @@ function adoptReplay() {
         replay.value = await replayAutoPick()
       } catch (e) {
         error.value = message(e, 'Die Gewichte konnten nicht übernommen werden')
+      } finally {
+        busy.value = null
+      }
+    },
+  })
+}
+
+// ─── Personal taste ─────────────────────────────────────────────────────────
+
+async function runTaste() {
+  busy.value = 'taste'
+  error.value = null
+  info.value = null
+  try {
+    taste.value = await replayTaste()
+  } catch (e) {
+    error.value = message(e, 'Das Nachspielen ist fehlgeschlagen')
+  } finally {
+    busy.value = null
+  }
+}
+
+const tasteRecommended = computed(() =>
+  taste.value?.variants.find((v) => v.key === taste.value?.recommended) ?? null,
+)
+
+function adoptTasteModel() {
+  const best = tasteRecommended.value
+  const formula = taste.value?.variants.find((v) => v.key === 'formula')
+  if (!best || !formula) return
+  confirm.require({
+    message:
+      `Deinen persönlichen Geschmack in den Auto-Pick übernehmen? Er trifft deine Wahl in ${percent(best.hit_rate)} ` +
+      `statt ${percent(formula.hit_rate)} der Gruppen. Gelernt wird aus allen deinen geprüften Gruppen; die offenen ` +
+      `Gruppen werden danach neu bewertet.`,
+    header: 'Persönlichen Geschmack übernehmen',
+    icon: 'pi pi-check',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Übernehmen',
+    accept: async () => {
+      busy.value = 'taste-adopt'
+      try {
+        taste.value = await adoptTaste()
+        info.value = 'Übernommen. Die offenen Gruppen werden im Hintergrund neu bewertet.'
+        adopt(await getAestheticOverview(), false)
+      } catch (e) {
+        error.value = message(e, 'Der persönliche Geschmack konnte nicht übernommen werden')
+      } finally {
+        busy.value = null
+      }
+    },
+  })
+}
+
+function resetTasteModel() {
+  confirm.require({
+    message: 'Den persönlichen Geschmack aus dem Auto-Pick nehmen? Die offenen Gruppen werden neu bewertet.',
+    header: 'Nur die Formel',
+    icon: 'pi pi-undo',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Entfernen',
+    accept: async () => {
+      busy.value = 'taste-reset'
+      try {
+        await resetTaste()
+        info.value = 'Entfernt. Die offenen Gruppen werden im Hintergrund neu bewertet.'
+        taste.value = null
+        adopt(await getAestheticOverview(), false)
+      } catch (e) {
+        error.value = message(e, 'Das Entfernen ist fehlgeschlagen')
       } finally {
         busy.value = null
       }
@@ -623,6 +714,81 @@ function rescoreAll() {
             icon="pi pi-check"
             :loading="busy === 'adopt'"
             @click="adoptReplay"
+          />
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="ae-taste">
+        <h2 id="ae-taste" class="card-title">Persönlicher Geschmack</h2>
+        <p class="muted">
+          Die Formel misst Schärfe, Augen, Belichtung und Ästhetik. Was dir darüber hinaus gefällt, Menschen, Licht oder
+          Bildaufbau, sieht sie nicht. Hier lernt ein kleines Modell aus deinen geprüften Gruppen, welche Merkmale im
+          CLIP-Fingerabdruck der Fotos du behältst, und legt das als vierten Baustein auf die Formel. Gemessen wird an
+          Gruppen, aus denen es nicht gelernt hat; übernehmen lässt es sich nur, wenn es spürbar öfter trifft.
+        </p>
+        <p class="muted">
+          Heute:
+          <template v-if="overview.taste">
+            mit persönlichem Geschmack, gelernt am {{ when(overview.taste.fitted_at) }} aus
+            {{ count(overview.taste.groups) }} Gruppen ({{ percent(overview.taste.hit_rate_before) }} →
+            {{ percent(overview.taste.hit_rate_after) }}).
+          </template>
+          <template v-else>nur die Formel.</template>
+        </p>
+        <template v-if="taste">
+          <p class="muted">
+            {{ count(taste.vector_groups) }} von {{ count(taste.decided_groups) }} entschiedenen Gruppen haben für jedes
+            Foto einen CLIP-Vektor und zählen.
+          </p>
+          <ScrollX v-if="taste.vector_groups > 0">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Bewertung</th>
+                  <th scope="col" class="num">Trifft deine Wahl</th>
+                  <th scope="col" class="num">Gruppen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="v in taste.variants" :key="v.key">
+                  <td>
+                    {{ v.label }}
+                    <Tag v-if="v.key === taste.recommended" value="Empfohlen" severity="success" />
+                    <div v-if="v.key === 'current'" class="muted">gelernt auch aus diesen Gruppen</div>
+                    <div v-if="v.key === 'taste_only'" class="muted">nur zum Vergleich, ohne die Formel</div>
+                  </td>
+                  <td class="num">{{ percent(v.hit_rate) }}</td>
+                  <td class="num">{{ count(v.hits) }} / {{ count(v.groups) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+          <p v-if="taste.reason" class="muted">{{ taste.reason }}</p>
+        </template>
+        <div class="buttons">
+          <Button
+            label="Nachspielen"
+            icon="pi pi-replay"
+            severity="secondary"
+            outlined
+            :loading="busy === 'taste'"
+            @click="runTaste"
+          />
+          <Button
+            v-if="tasteRecommended"
+            :label="overview.taste ? 'Neu lernen und übernehmen' : 'Übernehmen'"
+            icon="pi pi-check"
+            :loading="busy === 'taste-adopt'"
+            @click="adoptTasteModel"
+          />
+          <Button
+            v-if="overview.taste"
+            label="Nur die Formel"
+            icon="pi pi-undo"
+            severity="secondary"
+            text
+            :loading="busy === 'taste-reset'"
+            @click="resetTasteModel"
           />
         </div>
       </section>

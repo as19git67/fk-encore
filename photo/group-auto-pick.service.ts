@@ -55,6 +55,8 @@ import {
 } from "./group-auto-pick";
 import { bestPerOrientation, computeOrientationVariants, groupIsOrientationPairSql } from "./orientation-variants";
 import { fetchWithTimeout } from "./rpc-timeout";
+import { loadTasteModels, tasteBonuses } from "./taste-model";
+import { realTasteDeps } from "./taste-deps";
 import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers } from "./duplicate-candidates";
 
 const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
@@ -388,6 +390,22 @@ export async function recomputeAiPicksForGroups(
     prominenceByUser.set(userId, await loadFaceProminenceData(uniquePhotoIds, userId));
   }
 
+  // Personal taste (foto-aesthetik.md, stage 7): one scoring call per user
+  // with an adopted model. Without the embedding service the groups are
+  // scored by the formula alone, as before the model existed.
+  const tasteByUser = new Map<number, Map<number, number>>();
+  const tasteModels = await loadTasteModels(distinctUserIds);
+  for (const [userId, model] of tasteModels) {
+    const userPhotoIds = groups
+      .filter((g) => g.user_id === userId)
+      .flatMap((g) => byGroup.get(g.id) ?? []);
+    try {
+      tasteByUser.set(userId, await tasteBonuses(model, userPhotoIds, realTasteDeps()));
+    } catch (err: any) {
+      console.warn("Taste model unavailable, scoring with the formula alone:", err.message);
+    }
+  }
+
   let scored = 0;
   let skipped = 0;
   const nowSql = sql`NOW()`;
@@ -398,12 +416,14 @@ export async function recomputeAiPicksForGroups(
       continue;
     }
     const prominenceMap = prominenceByUser.get(groupUserId);
+    const taste = tasteByUser.get(groupUserId);
     const groupSignals = photoIds.map((pid) => {
-      const base: PhotoSignals = signalByPhotoId.get(pid) ?? {
+      const known: PhotoSignals = signalByPhotoId.get(pid) ?? {
         photo_id: pid,
         face_count: 0,
         face_coverage: 0,
       };
+      const base: PhotoSignals = taste?.has(pid) ? { ...known, taste_bonus: taste.get(pid) } : known;
       const prom = prominenceMap?.get(pid);
       if (prom) {
         return {

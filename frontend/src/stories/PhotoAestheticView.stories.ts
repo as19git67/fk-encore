@@ -48,6 +48,7 @@ const BASE: AestheticOverview = {
     trigger: 'after_run', status: 'done', phase: null, applied: 458, without_vector: 3, note: null, error: null,
     report: HEAD, started_at: '2026-10-21T04:01:00Z', ended_at: '2026-10-21T04:13:00Z',
   },
+  taste: null,
 }
 
 const RUNNING: AestheticOverview = {
@@ -120,6 +121,18 @@ export const KopfUngenutzt: Story = {
           trigger: 'manual', status: 'running', phase: 'train', applied: 0, without_vector: 0, note: null, error: null,
           report: null, started_at: new Date().toISOString(), ended_at: null,
         },
+      }),
+    },
+  },
+}
+
+export const Geschmack: Story = {
+  name: 'Persönlicher Geschmack übernommen',
+  parameters: {
+    msw: {
+      handlers: handlers({
+        ...BASE,
+        taste: { version: 'clip_taste_v1', groups: 991, hit_rate_before: 0.62, hit_rate_after: 0.71, fitted_at: '2026-10-22T15:30:00Z' },
       }),
     },
   },

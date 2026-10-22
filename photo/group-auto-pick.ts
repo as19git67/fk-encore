@@ -165,6 +165,12 @@ export interface PhotoSignals {
    *  fallback derived from face_count when not populated. */
   face_prominence?: number;
   orientation?: Orientation;
+  /**
+   * What the user's taste model adds to the score, in score units and
+   * centred on their reviewed photos (photo/taste-model.ts). Absent without
+   * an adopted model or without a CLIP vector.
+   */
+  taste_bonus?: number | null;
 }
 
 export type AiConfidence = "high" | "medium" | "low";
@@ -362,6 +368,11 @@ export function scorePhoto(
     used.exposure = exposure;
   }
 
+  if (signals.taste_bonus != null && Number.isFinite(signals.taste_bonus)) {
+    score += signals.taste_bonus;
+    used.taste = signals.taste_bonus;
+  }
+
   return {
     photo_id: signals.photo_id,
     score,
@@ -373,6 +384,16 @@ export function scorePhoto(
     ...(signals.orientation ? { orientation: signals.orientation } : {}),
     signals: used,
   };
+}
+
+/**
+ * `fraction` of the top score, measured downwards from it. Equal to
+ * `top · fraction` for the usual positive scores; a taste bonus can push a
+ * score below zero, and there the plain product would lie above the top and
+ * leave the group without a pick.
+ */
+function fractionOfTop(top: number, fraction: number): number {
+  return top - (1 - fraction) * Math.abs(top);
 }
 
 /**
@@ -410,7 +431,7 @@ export function computeGroupPick(
     (a, b) => b.score - a.score || a.photo_id - b.photo_id,
   );
   const topScore = ranked[0].score;
-  const cutoff = topScore * MULTI_PICK_THRESHOLD;
+  const cutoff = fractionOfTop(topScore, MULTI_PICK_THRESHOLD);
   const picked = ranked.filter((s) => s.score >= cutoff);
   const pickedIds = new Set(picked.map((p) => p.photo_id));
 
@@ -433,7 +454,7 @@ export function computeGroupPick(
       const bestOfOrientation = ranked.find(
         (s) => orientationByPhotoId.get(s.photo_id) === orientation,
       );
-      if (bestOfOrientation && bestOfOrientation.score >= topScore * ORIENTATION_FLOOR) {
+      if (bestOfOrientation && bestOfOrientation.score >= fractionOfTop(topScore, ORIENTATION_FLOOR)) {
         pickedIds.add(bestOfOrientation.photo_id);
       }
     }
@@ -489,7 +510,7 @@ export function computeGroupPick(
           !accepted.includes(s.photo_id) &&
           !suppressed.includes(s.photo_id) &&
           !promoted.includes(s.photo_id) &&
-          s.score >= topScore * DIVERSITY_FLOOR &&
+          s.score >= fractionOfTop(topScore, DIVERSITY_FLOOR) &&
           !repeatsAccepted(s.photo_id, accepted),
       );
       if (!replacement) break;

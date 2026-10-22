@@ -93,6 +93,8 @@ export interface AestheticOverview {
   head_error: string | null
   head_pending: number | null
   head_job: AestheticHeadJob | null
+  /** The caller's adopted taste model; null for the formula alone. */
+  taste: TasteSetting | null
 }
 
 export interface StartAestheticRunResponse {
@@ -215,4 +217,47 @@ export function adoptCompositeScore(): Promise<CompositeReport> {
 
 export function resetCompositeScore(): Promise<void> {
   return apiFetch('/photos/aesthetic/composite/reset', { method: 'POST' })
+}
+
+// ─── Stage 7: personal taste from the CLIP vector ──────────────────────────
+
+export interface TasteSetting {
+  version: string
+  groups: number
+  hit_rate_before: number
+  hit_rate_after: number
+  fitted_at: string
+}
+
+export type TasteVariantKey = 'formula' | 'current' | 'with_taste' | 'taste_only'
+
+export interface TasteVariant {
+  key: TasteVariantKey
+  label: string
+  groups: number
+  hits: number
+  hit_rate: number
+}
+
+export interface TasteReport {
+  decided_groups: number
+  /** ...in which every photo has a CLIP vector; the replay runs on these. */
+  vector_groups: number
+  variants: TasteVariant[]
+  recommended: 'with_taste' | null
+  reason: string | null
+  min_groups: number
+  adopted: TasteSetting | null
+}
+
+export function replayTaste(): Promise<TasteReport> {
+  return apiFetch('/photos/aesthetic/taste/replay', { method: 'POST' })
+}
+
+export function adoptTaste(): Promise<TasteReport> {
+  return apiFetch('/photos/aesthetic/taste/adopt', { method: 'POST' })
+}
+
+export function resetTaste(): Promise<{ removed: boolean }> {
+  return apiFetch('/photos/aesthetic/taste/reset', { method: 'POST' })
 }
