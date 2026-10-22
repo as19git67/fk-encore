@@ -10,7 +10,10 @@ vi.mock('../../api/assistant', () => ({
   downloadResult: vi.fn(),
 }))
 
+vi.mock('../../api/documents', () => ({ searchDocuments: vi.fn() }))
+
 import { discardProposal, downloadResult, executeProposal } from '../../api/assistant'
+import { searchDocuments } from '../../api/documents'
 
 const pending: Proposal = {
   proposal_id: 7,
@@ -164,5 +167,37 @@ describe('ProposalCard', () => {
     expect(button(el, 'PDF herunterladen')).toBeTruthy()
     const mail = [...el.querySelectorAll('a')].find((a) => a.getAttribute('href')?.startsWith('mailto:'))
     expect(decodeURIComponent(mail!.getAttribute('href')!)).toContain('subject=Ihre Rechnung RE-2026-0001')
+  })
+
+  it('encloses a document searched on the card, also when the assistant proposed none', async () => {
+    vi.mocked(searchDocuments).mockResolvedValue({
+      mode: 'hybrid', query: 'Vertrag',
+      items: [{ id: 205, title: 'Mitgliedsvertrag', original_filename: 'vertrag.pdf' }],
+    } as unknown as Awaited<ReturnType<typeof searchDocuments>>)
+    vi.mocked(executeProposal).mockResolvedValue({ ...letter, status: 'executed', result_summary: 'Brief erstellt' })
+    const bare: Proposal = {
+      ...letter,
+      letter: { ...letter.letter!, body: 'Sehr geehrte Damen und Herren,\n\nich kündige.', attachments: [], gaps: [] },
+    }
+    const el = mountCard(bare)
+    expect(el.textContent).toContain('Keine Anlagen.')
+    expect(el.textContent).toContain('Als Dokument ablegen')
+    expect(el.textContent).not.toContain('verknüpft mit den Anlagen')
+
+    const input = el.querySelector<HTMLInputElement>('#letter-9-add-attachment')!
+    input.value = 'Vertrag'
+    input.dispatchEvent(new Event('input'))
+    await new Promise((r) => setTimeout(r, 400))
+    await flushPromises()
+    expect(searchDocuments).toHaveBeenCalledWith('Vertrag', 'hybrid', 10)
+    const option = [...document.querySelectorAll('li[role="option"]')].find((o) => o.textContent?.includes('Mitgliedsvertrag'))
+    ;(option as HTMLElement).click()
+    await flushPromises()
+    expect(el.querySelector<HTMLInputElement>('#letter-9-att-205')?.checked).toBe(true)
+    expect(el.textContent).toContain('verknüpft mit den Anlagen')
+
+    button(el, 'Ausführen').click()
+    await flushPromises()
+    expect(vi.mocked(executeProposal).mock.calls[0]![1]!.attachment_ids).toEqual([205])
   })
 })

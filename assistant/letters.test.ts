@@ -193,6 +193,28 @@ describe("render_letter", () => {
     expect(u.postal_address).toBe("Beispielweg 2\n12345 Musterstadt");
   });
 
+  it("encloses documents added on the card, but only ones the user can see", async () => {
+    const { proposal } = await draftFromInvoices();
+    clients.documents.storeGeneratedDocument.mockResolvedValueOnce({ id: 901 });
+    clients.documents.createCollection.mockResolvedValueOnce({ id: 78, title: "Brief" });
+
+    const row = await executeAssistantProposal({
+      id: proposal.proposal_id,
+      edits: {
+        sender: "User734\nBeispielweg 2\n12345 Musterstadt",
+        body: BODY.replace("[[Zahlungsdatum]]", "20.03.2026"),
+        destinations: ["document", "collection"],
+        // 103 kept, 101 and 102 dropped; 999 added but not visible to the user.
+        attachment_ids: [103, 999],
+      },
+    });
+    expect(row.error).toBeNull();
+    expect(clients.documents.storeGeneratedDocument.mock.calls[0]![0].linked_document_ids).toEqual([103]);
+    expect(clients.documents.createCollection.mock.calls[0]![0].document_ids).toEqual([901, 103]);
+    const [saved] = await db.select().from(assistantLetter);
+    expect(saved.attachments).toEqual([{ id: 103, title: "Rechnung Anfahrt" }]);
+  });
+
   it("only takes edits on proposals that offer them", async () => {
     setAuth([...PERMS, "module.photos", "albums.manage"]);
     const [stored] = await db

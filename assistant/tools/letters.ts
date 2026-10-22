@@ -81,8 +81,10 @@ function editOf(args: Record<string, unknown>, edits: ProposalEdits): Record<str
   }
   if (edits.destinations) next.destinations = destinationsOf(edits.destinations);
   if (edits.attachment_ids) {
-    const keep = new Set(edits.attachment_ids);
-    next.attachments = attachmentsOf(args.attachments).filter((a) => keep.has(a.id));
+    // Titles of added documents are looked up (and their visibility checked) on execute.
+    const known = new Map(attachmentsOf(args.attachments).map((a) => [a.id, a]));
+    const ids = [...new Set(edits.attachment_ids.filter((n) => Number.isInteger(n) && n > 0))].slice(0, MAX_ATTACHMENTS);
+    next.attachments = ids.map((id) => known.get(id) ?? { id, title: `Dokument ${id}` });
   }
   return next;
 }
@@ -135,7 +137,7 @@ export const renderLetter: WriteToolDefinition = {
       attachment_document_ids: {
         type: "array",
         items: { type: "integer" },
-        description: "documents enclosed with the letter; default: the documents of the working set",
+        description: "documents enclosed with the letter (ids from the working set or an earlier tool result in this conversation, e.g. the contract a termination refers to); default: the documents of the working set",
       },
     },
     required: ["body"],
@@ -169,7 +171,9 @@ export const renderLetter: WriteToolDefinition = {
     };
   },
   async execute(args, ctx) {
-    const letter = draftOf(args);
+    const drafted = draftOf(args);
+    // Enclosures may have been added on the card: only what the user can see goes along.
+    const letter = { ...drafted, attachments: await titlesOf(drafted.attachments.map((a) => a.id), ctx) };
     if (letter.gaps.length) {
       throw new Error(`Der Brief hat noch Lücken: ${letter.gaps.join(", ")}. Bitte im Text ausfüllen.`);
     }

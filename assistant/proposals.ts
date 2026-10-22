@@ -85,7 +85,10 @@ export interface ProposalEdits {
   subject?: string;
   body?: string;
   destinations?: LetterDestination[];
-  /** Enclosures to keep; only ids the proposal already had. */
+  /**
+   * The enclosures, in order: kept ones from the proposal and documents the
+   * user added on the card. Visibility is checked again when the letter runs.
+   */
   attachment_ids?: number[];
 }
 
