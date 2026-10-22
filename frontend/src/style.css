@@ -151,10 +151,17 @@ body {
 }
 
 /* The document is the page's one scroller (issue #1674). Whatever the
-   browser scrolls into view by itself — the next element on Tab, a hash
-   anchor — lands below the sticky stack, not under it. */
-html {
-  scroll-padding-top: var(--app-stack-height, 0px);
+   browser scrolls into view by itself on the page — the next element on Tab,
+   a hash anchor — lands below the sticky stack, not under it.
+
+   A margin on the page's content, not `scroll-padding-top` on <html>: the
+   padding counted for everything, and a menu that PrimeVue opens right under
+   its button in the stack sits inside that band. Focusing it scrolled the
+   page by the stack's height, so the menu came to rest a whole bar below
+   its button. The stack and the overlays beside #app are not page content
+   and never scroll the page. */
+#app .content * {
+  scroll-margin-top: calc(var(--app-stack-height, 0px) + var(--space-2));
 }
 
 /* A column beside the main list that stays in view while the document
@@ -188,10 +195,9 @@ html {
 }
 
 /* Anything scrolled into view (a list row on the way back from a detail
-   page, a heading anchor) lands a little below the sticky stack; the stack
-   itself is cleared by the document's `scroll-padding-top` above. */
+   page, a heading anchor) lands a little below the sticky stack. */
 .scroll-anchor {
-  scroll-margin-top: var(--space-2);
+  scroll-margin-top: calc(var(--app-stack-height, 0px) + var(--space-2));
 }
 
 /* Visible keyboard focus, one look everywhere. */

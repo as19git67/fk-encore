@@ -6,7 +6,11 @@ import InputText from 'primevue/inputtext'
 import App from '../App.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import VirtualAlbumGrid from '../components/VirtualAlbumGrid.vue'
+import GalleryView from '../views/GalleryView.vue'
 import type { Album } from '../api/photos'
+import type { GalleryGridEntry } from '../api/gallery'
+import { http, HttpResponse } from 'msw'
+import { defaultHandlers } from './handlers'
 
 /**
  * The application shell (issue #1272, stage 1): the sticky stack of navbar,
@@ -137,4 +141,115 @@ export const DetailseiteTelefon: Story = {
 export const Raster: Story = {
   name: 'Virtuelles Raster scrollt mit dem Dokument',
   render: shellAt('/fotos', DemoGrid),
+}
+
+// Polls until `read` returns something, the way the other stories wait for
+// the app to settle.
+async function waitFor<T>(read: () => T | null | undefined, what: string, timeoutMs = 10_000): Promise<T> {
+  const started = Date.now()
+  for (;;) {
+    const value = read()
+    if (value) return value
+    if (Date.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 400))
+
+function stackTop(): number {
+  return document.querySelector('.app-toolbar-stack')?.getBoundingClientRect().top ?? NaN
+}
+
+// A menu that opens from the stack while the page is scrolled: PrimeVue puts
+// it right under its button and focuses it, and the focus must not scroll
+// the page (it did, by the stack's height, while <html> carried the stack as
+// `scroll-padding-top`).
+export const MenueGescrollt: Story = {
+  name: 'Hauptmenü öffnet am Knopf, auch weiter unten auf der Seite',
+  parameters: { testViewport: { width: 360, height: 740 } },
+  render: shellAt('/finanzen', DemoDetail),
+  play: async () => {
+    const button = await waitFor(
+      () => document.querySelector<HTMLButtonElement>('.sticky-navbar button'),
+      'the menu button',
+    )
+    await waitFor(() => (document.documentElement.scrollHeight > window.innerHeight + 400 ? true : null), 'a long page')
+    window.scrollTo({ top: 400, behavior: 'instant' })
+    await settle()
+    button.click()
+    const menu = await waitFor(() => document.querySelector<HTMLElement>('.p-menu-overlay'), 'the menu')
+    await settle()
+    if (window.scrollY !== 400) throw new Error(`opening the menu scrolled the page to ${window.scrollY}`)
+    const gap = menu.getBoundingClientRect().top - button.getBoundingClientRect().bottom
+    if (Math.abs(gap) > 8) throw new Error(`the menu opens ${gap}px away from its button`)
+    button.click()
+  },
+}
+
+// The real gallery in the shell, with a library long enough that jumping to
+// the other end scrolls a long way (and short enough for the runner's
+// full-page screenshot).
+const LIBRARY = 300
+function libraryEntry(index: number): GalleryGridEntry {
+  return { id: index + 1, filename: `foto-${index + 1}.jpg`, curation: 'visible', orientation: null }
+}
+const idsHandler = http.get('/api/gallery/ids', () =>
+  HttpResponse.json({ ids: Array.from({ length: LIBRARY }, (_, i) => i + 1) }),
+)
+const libraryHandler = http.get('/api/gallery/grid', ({ request }) => {
+  const params = new URL(request.url).searchParams
+  const limit = Number(params.get('limit') ?? 200)
+  const offsetParam = params.get('offset')
+  const offset = offsetParam === null ? Math.max(0, LIBRARY - limit) : Number(offsetParam)
+  const end = Math.min(LIBRARY, offset + limit)
+  const photos = Array.from({ length: Math.max(0, end - offset) }, (_, i) => libraryEntry(offset + i))
+  return HttpResponse.json({ total: LIBRARY, offset, photos })
+})
+
+export const Galerie: Story = {
+  name: 'Galerie: Sprung ans Ende lässt den Stack stehen',
+  parameters: {
+    testViewport: { width: 390, height: 844 },
+    msw: {
+      handlers: [
+        libraryHandler,
+        idsHandler,
+        http.get('/api/photos/:id/ocr', () => HttpResponse.json({ ocr: null })),
+        http.get('/api/photos/uploaders', () => HttpResponse.json({ uploaders: [] })),
+        ...defaultHandlers,
+      ],
+    },
+  },
+  render: () => ({
+    components: { App },
+    setup() {
+      const router = useRouter()
+      const name = 'story-gallery'
+      if (!router.hasRoute(name)) router.addRoute({ path: '/fotos/story-galerie', name, component: GalleryView })
+      onMounted(() => { void router.push('/fotos/story-galerie') })
+      return () => h(App)
+    },
+  }),
+  play: async () => {
+    await waitFor(() => document.querySelector('.vg-cell'), 'the grid')
+    const jump = (label: string) => waitFor(
+      () => Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes(label)),
+      `the button "${label}"`,
+    )
+    // The grid lands on the newest photo; to the oldest and back again.
+    ;(await jump('Zum ältesten')).click()
+    await settle()
+    ;(await jump('Zum neuesten')).click()
+    await settle()
+    const end = document.documentElement.scrollHeight - window.innerHeight
+    if (end - window.scrollY > 200) throw new Error(`the jump to the newest stopped at ${window.scrollY} of ${end}`)
+    if (stackTop() !== 0) throw new Error(`the sticky stack left the screen after the jump (top ${stackTop()})`)
+
+    // Scrolling away by hand (the iPhone's status bar) stays where it went:
+    // nothing steers back to the photo the jump aimed at.
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    await settle()
+    if (window.scrollY !== 0) throw new Error(`the grid scrolled back to ${window.scrollY} after the user left`)
+  },
 }

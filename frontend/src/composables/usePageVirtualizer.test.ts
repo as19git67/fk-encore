@@ -53,14 +53,45 @@ describe('usePageVirtualizer', () => {
     // Row 0 begins where the grid begins, so it sits at the grid's own top.
     expect(api.rowOffset(300)).toBe(0)
 
-    // jsdom's document has no height, so the library would clamp every
-    // offset to 0; what matters is the offset the grid asks for.
-    const scrollToOffset = vi.spyOn(api.virtualizer.value, 'scrollToOffset').mockImplementation(() => {})
     Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
     api.scrollToRow(20, 'center')
     // Row 20 starts at 300 + 20 * 50 = 1300. Visible band is 900 - 100 = 800
     // tall; centring the 50px row leaves 375px of it above the row.
-    expect(scrollToOffset).toHaveBeenCalledWith(1300 - 100 - (800 - 50) / 2)
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 1300 - 100 - 375, behavior: 'instant' })
+    api.scrollToRow(20, 'start')
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 1200, behavior: 'instant' })
+    api.scrollToRow(20, 'end')
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 1300 + 50 - 900, behavior: 'instant' })
+    vi.restoreAllMocks()
+  })
+
+  it('scrolls once and leaves the page alone afterwards', async () => {
+    // The library's own scrollToIndex keeps steering for seconds and pulled
+    // the page back after a tap on the iPhone's status bar.
+    document.documentElement.style.setProperty('--app-stack-height', '100px')
+    const api = mountGrid(300)
+    await nextTick()
+    const steer = vi.spyOn(api.virtualizer.value, 'scrollToIndex')
+    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
+    vi.mocked(window.scrollTo).mockClear() // the library's mount-time no-op
+    api.scrollToRow(59, 'start')
+    expect(steer).not.toHaveBeenCalled()
+    expect(window.scrollTo).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it('does not scroll when the row is already in view', async () => {
+    document.documentElement.style.setProperty('--app-stack-height', '100px')
+    const api = mountGrid(300)
+    await nextTick()
+    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
+    // At scrollY 0 the band below the stack reaches to 900: row 0 (300–350)
+    // is in it, row 20 (1300–1350) is below it.
+    vi.mocked(window.scrollTo).mockClear() // the library's mount-time no-op
+    api.scrollToRow(0, 'auto')
+    expect(window.scrollTo).not.toHaveBeenCalled()
+    api.scrollToRow(20, 'auto')
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 1350 - 900, behavior: 'instant' })
     vi.restoreAllMocks()
   })
 })

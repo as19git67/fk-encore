@@ -1151,8 +1151,16 @@ Regeln:
   Zurück-Knopf beim Scrollen stehen bleiben.
 - Keine View definiert eigenes Header-/Toolbar-Layout, `position: sticky`
   oder `top:`-Offsets. Die Stack-Höhe liefert `--app-stack-height`
-  (von `App.vue` gemessen, auch auf `<html>`, dessen `scroll-padding-top`
-  sie freihält). `--menubar-height` gibt es nicht mehr.
+  (von `App.vue` gemessen, auch auf `<html>`). Was der Browser auf der
+  Seite in den Blick scrollt, hält per `scroll-margin-top` auf
+  `#app .content *` Abstand zum Stack — nie `scroll-padding-top` auf
+  `<html>`: das galt auch für Menüs direkt unter dem Stack, deren Fokus die
+  Seite dann um die Stack-Höhe verschob. `--menubar-height` gibt es nicht
+  mehr.
+- Virtuelle Raster scrollen mit `scrollToRow` aus `usePageVirtualizer`
+  (ein einziges `window.scrollTo`), nie mit `scrollToIndex` der Bibliothek:
+  das steuert bis zu fünf Sekunden nach und zog auf dem iPhone die Seite
+  nach einem Tipp auf die Statusleiste zurück.
 - Die Seite scrollt nie horizontal (`overflow-x: clip` auf `body`). Breite
   Inhalte (Tabellen, Streifen) gehören in `components/layout/ScrollX.vue`.
 - Abstände aus `--space-1` … `--space-6`, Seitenränder aus `--page-gutter`.
