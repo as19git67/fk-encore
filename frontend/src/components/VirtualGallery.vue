@@ -53,7 +53,7 @@
  *                                    aligned with the fullscreen selection.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { usePageVirtualizer } from '../composables/usePageVirtualizer'
+import { stackHeight, usePageVirtualizer } from '../composables/usePageVirtualizer'
 import { type GalleryGridEntry, type GallerySortDir, type GallerySortField } from '../api/gallery'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
@@ -279,6 +279,23 @@ function rowSlots(rowIndex: number): (GalleryGridEntry | null)[] {
   if (start >= end) return []
   return entries.value.slice(start, end)
 }
+
+// A new column count re-flows every row, so the same offset now shows other
+// photos — the desktop sidebar appearing right after the first landing was
+// enough to leave "the newest photo" a third of the library above the
+// screen. Keep the photo at the top of the visible band (or the end, when
+// the page was at its end) where it was.
+watch([cols, rowHeight], async ([nextCols], [prevCols, prevHeight]) => {
+  if (!ready.value || total.value === 0 || prevHeight <= 0) return
+  const bandTop = window.scrollY + stackHeight() - scrollMargin.value
+  const bandBottom = window.scrollY + window.innerHeight - scrollMargin.value
+  // The last row is on screen: stay at the end, whatever its height now.
+  const atEnd = bandBottom >= Math.ceil(total.value / prevCols) * prevHeight - prevHeight / 2
+  const topIdx = Math.max(0, Math.floor(bandTop / prevHeight)) * prevCols
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  if (atEnd) scrollToRow(Math.floor((total.value - 1) / nextCols), 'end')
+  else if (bandTop > 0) scrollToRow(Math.floor(topIdx / nextCols), 'start')
+})
 
 // ── Edge prefetch ───────────────────────────────────────────────────────────
 // Throttled, leading-edge + trailing call: the first scroll event always

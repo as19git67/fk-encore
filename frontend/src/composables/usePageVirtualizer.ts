@@ -102,19 +102,35 @@ export function usePageVirtualizer(
   }
 
   /**
-   * Bring row `index` into view. `center` centres it in the part of the
-   * viewport below the stack; the library's own `center` would use the whole
-   * viewport and leave the row half a stack too low.
+   * Bring row `index` into view, below the sticky stack. `center` centres it
+   * in the part of the viewport the stack leaves visible; `auto` scrolls
+   * only as far as needed and not at all when the row is already in view.
+   *
+   * One `window.scrollTo`, never the library's `scrollToIndex`: that one
+   * keeps steering towards its target for up to five seconds and moves the
+   * page back whenever the target shifts. On the iPhone the target shifts
+   * the moment Safari's toolbar comes back, so a tap on the status bar
+   * scrolled to the top and then straight back to the photo. Rows here have
+   * a fixed height, so there is nothing to steer after the first jump.
    */
   function scrollToRow(index: number, align: RowAlign = 'auto') {
     measure()
-    if (align !== 'center') {
-      virtualizer.value.scrollToIndex(index, { align })
-      return
-    }
+    const top = rowStart(index)
+    const { rowHeight } = options.value
     const visible = window.innerHeight - stack.value
-    const top = rowStart(index) - stack.value - (visible - options.value.rowHeight) / 2
-    virtualizer.value.scrollToOffset(Math.max(0, top))
+    const start = top - stack.value
+    const end = top + rowHeight - window.innerHeight
+    let offset: number
+    if (align === 'start') offset = start
+    else if (align === 'end') offset = end
+    else if (align === 'center') offset = start - (visible - rowHeight) / 2
+    else {
+      const current = window.scrollY
+      if (start < current) offset = start
+      else if (end > current) offset = end
+      else return
+    }
+    window.scrollTo({ top: Math.max(0, Math.round(offset)), behavior: 'instant' })
   }
 
   /** The grid-relative offset to place a virtual row at. */

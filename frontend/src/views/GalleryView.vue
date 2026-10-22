@@ -1622,8 +1622,11 @@ async function onGalleryLoaded(info: { total: number; offset: number }) {
       // a hard refresh), so the scroll silently no-ops and the cursor
       // stays highlighted off-screen until the next user interaction.
       // Awaiting hydrate gives the virtualizer the frames it needs.
+      // If the page moved meanwhile, the user scrolled (a tap on the iPhone's
+      // status bar included) — leave them where they went.
+      const scrolledFrom = window.scrollY
       await hydrateCursor(idx, { skipNeighbors: true })
-      galleryRef.value?.scrollToIndex(idx)
+      if (window.scrollY === scrolledFrom) galleryRef.value?.scrollToIndex(idx)
     }
   }
 }
