@@ -265,7 +265,7 @@ onBeforeUnmount(() => {
 // ── Row count drives the virtualizer ────────────────────────────────────────
 const rowCount = computed(() => Math.ceil((total.value ?? 0) / cols.value))
 
-const { virtualizer, scrollToRow, rowOffset, scrollMargin } = usePageVirtualizer(
+const { virtualizer, scrollToRow, rowOffset, scrollMargin, flying } = usePageVirtualizer(
   rowsRef,
   computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: overscan.value })),
 )
@@ -327,7 +327,7 @@ function runPrefetch() {
 }
 
 function schedulePrefetch() {
-  if (isInitialLoading.value) return
+  if (isInitialLoading.value || flying.value) return
   const now = Date.now()
   const elapsed = now - lastFire
   if (elapsed >= THROTTLE_MS) {
@@ -345,6 +345,9 @@ function schedulePrefetch() {
 }
 
 watch(virtualRows, schedulePrefetch, { flush: 'post' })
+// Rows mounted while the page flew past fetched nothing (see `flying` in
+// usePageVirtualizer); the ones on screen once it is still load now.
+watch(flying, (now) => { if (!now) runPrefetch() })
 
 // ── Initial + re-init on query change ───────────────────────────────────────
 const ready = ref(false)
@@ -587,6 +590,7 @@ defineExpose({
             @click="onTap(slot, $event, row.index * cols + i)"
           >
             <img
+              v-if="!flying"
               :src="thumbnailSrc(slot)"
               :alt="''"
               loading="lazy"

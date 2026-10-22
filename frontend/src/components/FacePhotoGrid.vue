@@ -95,7 +95,7 @@ onBeforeUnmount(() => {
 
 const rowCount = computed(() => Math.ceil(props.items.length / Math.max(1, cols.value)))
 
-const { virtualizer, scrollToRow, rowOffset } = usePageVirtualizer(
+const { virtualizer, scrollToRow, rowOffset, flying } = usePageVirtualizer(
   rowsRef,
   computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: 4 })),
 )
@@ -239,6 +239,7 @@ function openPhoto(idx: number) {
         >
           <div class="photo-thumb">
             <HeicImage
+              v-if="!flying"
               :src="thumbnailSrc(item)"
               :alt="item.photo.original_name"
               loading="lazy"
