@@ -14,6 +14,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import db from "../db/database";
 import { assistantProposal } from "../db/schema";
 import type { JsonSchema, ResultBlock, ToolContext, ToolOutcome, ToolSpec } from "./types";
+import type { CollageTextPosition, CollageTextSize } from "../photo/collage";
 
 /** What a write tool would do, ready to store. */
 export interface PreparedAction {
@@ -50,6 +51,37 @@ export interface WriteToolDefinition {
   edit?(args: Record<string, unknown>, edits: ProposalEdits): Record<string, unknown>;
   /** The text document the card shows, for a tool that files one. */
   preview?(args: Record<string, unknown>): TextDocumentPreview;
+  /** The collage the card previews and lets the user change; `result` once it ran. */
+  collage?(args: Record<string, unknown>, result: Record<string, unknown> | null): CollagePreview;
+}
+
+/** A photo of a collage, as the card draws it. */
+export interface CollagePhoto {
+  id: number;
+  filename: string;
+  auto_crop: { x: number; y: number } | null;
+}
+
+/** A collage as the card shows it: the photos in cell order, the layout and the caption. */
+export interface CollagePreview {
+  photos: CollagePhoto[];
+  layout: string;
+  text: string;
+  text_position: CollageTextPosition;
+  text_size: CollageTextSize;
+  text_color: string;
+  album_name: string | null;
+  /** The filed collage, once "Ausführen" ran. */
+  result: { photo_id: number; filename: string } | null;
+}
+
+/** What the user changed on a collage's card. */
+export interface CollageEdits {
+  layout?: string;
+  text?: string;
+  text_position?: CollageTextPosition;
+  text_size?: CollageTextSize;
+  text_color?: string;
 }
 
 /** A text document as the card shows it before it is filed. */
@@ -90,6 +122,8 @@ export interface ProposalEdits {
    * user added on the card. Visibility is checked again when the letter runs.
    */
   attachment_ids?: number[];
+  /** A collage's layout and caption. */
+  collage?: CollageEdits;
 }
 
 export type ProposalStatus = "pending" | "executing" | "executed" | "discarded";
@@ -113,6 +147,8 @@ export interface ProposalRow {
   letter: LetterDraft | null;
   /** Set for a text document: what will be filed. */
   text_document: TextDocumentPreview | null;
+  /** Set for a collage: what will be rendered, and afterwards the photo it became. */
+  collage: CollagePreview | null;
 }
 
 /** Per tool, how its stored arguments become the card's editable letter. */
@@ -131,6 +167,14 @@ function textDocumentOf(tool: string, args: Record<string, unknown>): TextDocume
   return preview ? preview(args) : null;
 }
 
+/** Per tool, the collage its stored arguments describe. */
+const collagers = new Map<string, (args: Record<string, unknown>, result: Record<string, unknown> | null) => CollagePreview>();
+
+function collageOf(tool: string, args: Record<string, unknown>, result: Record<string, unknown> | null = null): CollagePreview | null {
+  const collage = collagers.get(tool);
+  return collage ? collage(args, result) : null;
+}
+
 function proposalBlock(row: ProposalRow): ResultBlock {
   return { kind: "proposal", tool: row.tool, rows: [{ ...row }] };
 }
@@ -142,6 +186,7 @@ function proposalBlock(row: ProposalRow): ResultBlock {
 export function writeTool(def: WriteToolDefinition): ToolSpec {
   if (def.draft) drafters.set(def.name, def.draft.bind(def));
   if (def.preview) previewers.set(def.name, def.preview.bind(def));
+  if (def.collage) collagers.set(def.name, def.collage.bind(def));
   return {
     name: def.name,
     kind: "write",
@@ -173,6 +218,7 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
         error: null,
         letter: letterOf(def.name, prepared.arguments),
         text_document: textDocumentOf(def.name, prepared.arguments),
+        collage: collageOf(def.name, prepared.arguments),
       };
       return {
         text: [
@@ -291,6 +337,7 @@ export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {
     error: row.status === "pending" ? result.error ?? null : null,
     letter: letterOf(row.tool, row.arguments),
     text_document: textDocumentOf(row.tool, row.arguments),
+    collage: collageOf(row.tool, row.arguments, row.status === "executed" ? (row.result as Record<string, unknown> | null) : null),
   };
 }
 

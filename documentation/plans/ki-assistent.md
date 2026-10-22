@@ -573,6 +573,17 @@ behind it.
      model "NOT executed" and the system prompt forbids claiming otherwise.
      Write tools live in `assistant/tools/writes.ts`, the card in
      `components/assistant/ProposalCard.vue`.
+   - Later addition: `create_photo_collage` (`assistant/tools/collage.ts`)
+     proposes a collage of 2–9 photos with an optional caption at one of
+     nine places (center, the four edges, the four corners). The card
+     previews it with the layout table of the app's collage dialog and lets
+     the user change layout, caption, place and size
+     (`components/assistant/CollageProposal.vue`, edits under
+     `ProposalEdits.collage`). "Ausführen" renders the JPEG on the server
+     (`POST /photos/collage`, `photo/collage.ts`, sharp with an SVG caption)
+     and files it as a new photo dated one second after its newest source,
+     optionally into an album; the card then shows the photo and offers it
+     for download.
 
 5. **Follow-up questions and memory within a conversation.**
    - The loop sends the last N turns and, instead of raw tool results, a

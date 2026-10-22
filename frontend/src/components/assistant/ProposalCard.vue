@@ -13,6 +13,7 @@ import Tag from 'primevue/tag'
 import { discardProposal, downloadResult, executeProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
 import { letterGaps } from '../../utils/letterGaps'
 import LetterEditor, { type LetterForm } from './LetterEditor.vue'
+import CollageProposal, { type CollageForm } from './CollageProposal.vue'
 import MarkdownView from '../documents/MarkdownView.vue'
 
 const props = defineProps<{ proposal: Proposal }>()
@@ -52,6 +53,19 @@ function letterEdits(): ProposalEdits | undefined {
     destinations: f.destinations,
     attachment_ids: f.attachmentIds,
   }
+}
+
+function collageFormOf(p: Proposal): CollageForm | null {
+  const c = p.collage
+  return c ? { layout: c.layout, text: c.text, text_position: c.text_position, text_size: c.text_size } : null
+}
+
+const collageForm = ref<CollageForm | null>(collageFormOf(props.proposal))
+watch(() => props.proposal, (p) => { collageForm.value = collageFormOf(p) })
+
+function collageEdits(): ProposalEdits | undefined {
+  const f = collageForm.value
+  return f ? { collage: { ...f } } : undefined
 }
 
 /** The confirmed letter as an e-mail draft; the PDF has to be attached by hand. */
@@ -95,7 +109,7 @@ async function decide(action: 'execute' | 'discard') {
   requestError.value = null
   try {
     const id = current.value.proposal_id
-    const edits = action === 'execute' ? letterEdits() : undefined
+    const edits = action === 'execute' ? letterEdits() ?? collageEdits() : undefined
     const next = action === 'execute'
       ? await (edits ? executeProposal(id, edits) : executeProposal(id))
       : await discardProposal(id)
@@ -141,6 +155,14 @@ async function decide(action: 'execute' | 'discard') {
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
       </p>
+      <CollageProposal
+        v-if="collageForm && current.collage && current.status !== 'discarded'"
+        v-model="collageForm"
+        :collage="current.collage"
+        :editable="current.status === 'pending'"
+        :disabled="busy !== null"
+        :id-prefix="`collage-${current.proposal_id}`"
+      />
       <!-- One row, one look: links stay links (navigation, mailto), the download stays a button. -->
       <div
         v-if="current.status === 'executed' && (current.result_route || current.result_download)"

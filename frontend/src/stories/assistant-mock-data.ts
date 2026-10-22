@@ -190,3 +190,61 @@ export const CONVERSATION: ConversationDetail = {
     },
   ],
 }
+
+const COLLAGE_PHOTOS = [
+  { id: 31, filename: 'castle.jpg', auto_crop: { x: 0.5, y: 0.4 } },
+  { id: 32, filename: 'seagull.jpg', auto_crop: null },
+  { id: 33, filename: 'fish.jpg', auto_crop: null },
+  { id: 34, filename: 'museum.jpg', auto_crop: null },
+]
+
+/** A collage waiting on the card (layout and caption editable), and one that ran. */
+export const PROPOSAL_COLLAGE_BLOCK: ResultBlock = {
+  kind: 'proposal',
+  tool: 'create_photo_collage',
+  rows: [{
+    proposal_id: 6,
+    tool: 'create_photo_collage',
+    summary: 'Collage aus 4 Fotos (Held links) mit dem Text „Sommer am Beispielsee“ unten links als neues Foto ablegen',
+    count: 4,
+    status: 'pending',
+    result_summary: null,
+    result_route: null,
+    result_download: null,
+    error: null,
+    letter: null,
+    text_document: null,
+    collage: {
+      photos: COLLAGE_PHOTOS,
+      layout: 'hero-left',
+      text: 'Sommer am Beispielsee',
+      text_position: 'bottom-left',
+      text_size: 'medium',
+      text_color: '#ffffff',
+      album_name: null,
+      result: null,
+    },
+  }, {
+    proposal_id: 7,
+    tool: 'create_photo_collage',
+    summary: 'Collage aus 4 Fotos (Raster 2×2) als neues Foto ablegen',
+    count: 4,
+    status: 'executed',
+    result_summary: 'Collage aus 4 Fotos erstellt und als neues Foto abgelegt',
+    result_route: '/fotos/galerie?photoId=35',
+    result_download: null,
+    error: null,
+    letter: null,
+    text_document: null,
+    collage: {
+      photos: COLLAGE_PHOTOS,
+      layout: 'grid',
+      text: '',
+      text_position: 'center',
+      text_size: 'medium',
+      text_color: '#ffffff',
+      album_name: null,
+      result: { photo_id: 35, filename: 'steak.jpg' },
+    },
+  }],
+}

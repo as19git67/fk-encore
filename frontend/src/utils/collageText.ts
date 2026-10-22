@@ -11,6 +11,8 @@
 // 2000 px tall: the preview multiplies the fraction by the rendered stage
 // height (via container-query `cqh` units), the export by the canvas height.
 
+import type { CollageTextPosition } from '../api/assistant'
+
 export type CollageTextAlign = 'left' | 'center' | 'right'
 
 export interface CollageTextFontPreset {
@@ -158,4 +160,41 @@ export function wrapLines(
     out.push(line)
   }
   return out
+}
+
+// ── The assistant's collage: one caption at one of nine places ──────────────
+// (rendered by `photo/collage.ts` on the server).
+
+/** The nine places as a 3×3 grid, row by row, for a position picker. */
+export const COLLAGE_CAPTION_GRID: CollageTextPosition[] = [
+  'top-left', 'top', 'top-right',
+  'left', 'center', 'right',
+  'bottom-left', 'bottom', 'bottom-right',
+]
+
+export const COLLAGE_CAPTION_LABELS: Record<CollageTextPosition, string> = {
+  center: 'Mitte',
+  top: 'Oben',
+  bottom: 'Unten',
+  left: 'Links',
+  right: 'Rechts',
+  'top-left': 'Oben links',
+  'top-right': 'Oben rechts',
+  'bottom-left': 'Unten links',
+  'bottom-right': 'Unten rechts',
+}
+
+/**
+ * The horizontal alignment and the edge a caption hangs from — the same
+ * reading as the server's `textPlacement`: "left" alone is the left edge at
+ * mid height, "top" alone is centred at the top.
+ */
+export function captionPlacement(position: CollageTextPosition): {
+  align: CollageTextAlign
+  vertical: 'top' | 'middle' | 'bottom'
+} {
+  const parts = position.split('-')
+  const align = parts.includes('left') ? 'left' : parts.includes('right') ? 'right' : 'center'
+  const vertical = parts.includes('top') ? 'top' : parts.includes('bottom') ? 'bottom' : 'middle'
+  return { align, vertical }
 }
