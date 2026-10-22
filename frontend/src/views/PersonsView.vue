@@ -565,7 +565,14 @@ function resolvePersonAnchor(anchor: ListAnchor | null): boolean {
   return personsGridRef.value?.scrollToPerson(anchor.id, { highlight: true, focus: true }) ?? false
 }
 
-async function selectPersonItem(person: Person, focusPhotoId?: number) {
+/**
+ * `focusPhotoId` jumps to that photo. Without it, a tap on a tile
+ * (`preferCover`) lands on the photo the tile showed as cover — the grid
+ * picks the best one (#1689), so that is the photo the user tapped on.
+ * Otherwise the shared "last focused photo" (photoNav) wins when it belongs
+ * to this person, then the first photo.
+ */
+async function selectPersonItem(person: Person, focusPhotoId?: number, preferCover = false) {
   const alreadyLoaded = selectedPerson.value?.id === person.id && !!selectedPersonDetail.value
   if (!alreadyLoaded) {
     selectedPerson.value = person
@@ -587,9 +594,9 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
       loadingDetails.value = false
     }
   }
-  // Jump to a specific photo if requested, otherwise focus the shared
-  // "last focused photo" (photoNav) when it belongs to this person, falling
-  // back to the first.
+  if (!focusPhotoId && preferCover && person.cover_face_id) {
+    focusPhotoId = allPersonFaceItems.value.find(i => i.face.id === person.cover_face_id)?.photo.id
+  }
   if (focusPhotoId) {
     const idx = uniquePhotoFaceItems.value.findIndex(i => i.photo.id === focusPhotoId)
     selectedIndex.value = idx >= 0 ? idx : (uniquePhotoFaceItems.value.length > 0 ? 0 : -1)
@@ -612,7 +619,7 @@ watch(filteredPersons, () => {
 
 // ── Grid events ───────────────────────────────────────────────────────────────
 async function handlePersonSelected(person: Person) {
-  await selectPersonItem(person)
+  await selectPersonItem(person, undefined, true)
 }
 
 function backToGrid() {
