@@ -6,7 +6,7 @@
  * job then tops the queue up again (`topUpPageWordsBackfill`, called by the
  * worker), so the rest follows in batches without another click. The chain
  * stops on its own once no document is left — or when the pending jobs are
- * cancelled, because then no job finishes to top it up.
+ * cancelled, because a top-up needs jobs of the running batch still waiting.
  */
 
 import { sql } from "drizzle-orm";
@@ -77,11 +77,16 @@ export async function queuePageWordsBatch(limit: number): Promise<PageWordsBackf
  * Returns how many documents it queued; the caller wakes the workers.
  */
 export async function topUpPageWordsBackfill(): Promise<number> {
+  // Only while jobs of the running batch still wait: "Abbrechen" deletes the
+  // pending ones, and the job that was processing then must not start the
+  // next batch on its way out. A batch that runs out naturally always gets
+  // topped up before it is empty, because LOW_WATER is above zero.
   const rows = await db.execute<{ n: number }>(sql`
     SELECT COUNT(*)::int AS n FROM document_scan_queue
-    WHERE service = 'page_words' AND status IN ('pending', 'processing')
+    WHERE service = 'page_words' AND status = 'pending'
   `);
-  if (Number(rows.rows[0]?.n ?? 0) >= LOW_WATER) return 0;
+  const pending = Number(rows.rows[0]?.n ?? 0);
+  if (pending === 0 || pending >= LOW_WATER) return 0;
   const ids = await missing(PAGE_WORDS_BATCH, true);
   await queue(ids);
   return ids.length;

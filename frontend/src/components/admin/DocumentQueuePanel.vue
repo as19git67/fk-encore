@@ -47,6 +47,14 @@ const docTotalFailed = computed(() =>
 const docIsActive = computed(
   () => docTotalPending.value > 0 || docTotalProcessing.value > 0
 )
+// The word-position backfill runs for hours in the background and yields to
+// every text extraction, so it must not lock the pipeline's own actions.
+const BACKGROUND_SERVICES = new Set(['page_words'])
+const docPipelineActive = computed(() =>
+  docQueueStatus.value.services.some(
+    (svc) => !BACKGROUND_SERVICES.has(svc.service) && (svc.pending > 0 || svc.processing > 0),
+  )
+)
 
 async function fetchDocQueueStatus() {
   try {
@@ -282,7 +290,7 @@ async function handleDocRetry() {
         icon="pi pi-sparkles"
         severity="secondary"
         :loading="docReclassifyLoading"
-        :disabled="docReclassifyLoading || docIsActive"
+        :disabled="docReclassifyLoading || docPipelineActive"
         @click="handleDocReclassifyAll('classify_only')"
       />
       <Button
@@ -290,7 +298,7 @@ async function handleDocRetry() {
         icon="pi pi-refresh"
         severity="secondary"
         :loading="docReclassifyLoading"
-        :disabled="docReclassifyLoading || docIsActive"
+        :disabled="docReclassifyLoading || docPipelineActive"
         @click="handleDocReclassifyAll('full')"
       />
       <Button
@@ -298,7 +306,7 @@ async function handleDocRetry() {
         icon="pi pi-play"
         severity="secondary"
         :loading="docReclassifyLoading"
-        :disabled="docReclassifyLoading || docIsActive"
+        :disabled="docReclassifyLoading || docPipelineActive"
         @click="handleDocReclassifyAll('resume')"
       />
       <Button
@@ -307,7 +315,7 @@ async function handleDocRetry() {
         severity="secondary"
         v-tooltip.top="'Wendet das aktuelle Ordner- und Dateinamensschema auf alle Dokumente an.'"
         :loading="docRelocateLoading"
-        :disabled="docRelocateLoading || docReclassifyLoading || docIsActive"
+        :disabled="docRelocateLoading || docReclassifyLoading || docPipelineActive"
         @click="handleDocRelocateAll"
       />
       <Button
@@ -325,7 +333,7 @@ async function handleDocRetry() {
         severity="secondary"
         v-tooltip.top="'Lässt bestehende Dokumente, deren Steuer-Einordnung noch nicht geprüft ist, erneut vom Klassifier analysieren, um fehlende Steuer-Daten zu ergänzen.'"
         :loading="taxBackfillLoading"
-        :disabled="taxBackfillLoading || docReclassifyLoading || docIsActive"
+        :disabled="taxBackfillLoading || docReclassifyLoading || docPipelineActive"
         @click="handleTaxBackfill"
       />
       <Button
