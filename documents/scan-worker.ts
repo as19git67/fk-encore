@@ -42,6 +42,7 @@ import { ReceiptOcrUnavailableError } from "./receipt-ocr-client";
 import { AI_PRIORITY, withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
 import { notifyDocScanQueueChanged } from "./scan-queue-events";
 import { runTaxValues } from "./tax-values";
+import { topUpPageWordsBackfill } from "./page-words-backfill";
 
 console.log("[boot] documents/scan-worker.ts: all imports resolved");
 
@@ -102,6 +103,20 @@ class DocumentScanWorker {
   }
 
   private async processNext(): Promise<boolean> {
+    const hadWork = await this.processOne();
+    // A finished word-position job queues the next batch of the backfill, so
+    // the admin's one click carries it through to the last document.
+    if (hadWork && this.service === "page_words") {
+      const queued = await topUpPageWordsBackfill().catch((err) => {
+        console.error("[documents.scan-worker] page_words top-up failed:", err);
+        return 0;
+      });
+      if (queued) triggerWorkers();
+    }
+    return hadWork;
+  }
+
+  private async processOne(): Promise<boolean> {
     // classify/embed talk to the LLM service — back off if it's down
     // so we don't burn retries on a cold-start window.
     if (this.service === "classify" || this.service === "embed" || this.service === "tax_values") {
