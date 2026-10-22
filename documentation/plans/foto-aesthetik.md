@@ -354,6 +354,38 @@ prerequisite for the nightly job.
    "Bildwirkung" in the photo sidebar and as "Bilder erklären" in the
    auto-pick review, pick first.
 
+7. **Personal taste** — *done, per user.* The replays of stage 5 settled
+   at about two hits in three: fitting the weights of a handful of
+   measured signals cannot see what the user keeps beyond them (people,
+   light, framing). The CLIP ViT-H/14 vector carries that, and the
+   embedding service has it for every photo. `embedding_service/app/
+   services/taste_model.py` fits a pairwise logistic regression on the
+   differences of [formula score, CLIP vector] between each kept and each
+   hidden photo of a reviewed group; each group's pairs share one unit of
+   weight, the vector part has an L2 penalty chosen on every fourth group
+   by pairwise log-loss, the formula's coefficient (`base_weight`) is
+   practically free. The service keeps nothing: `POST /taste/replay`
+   returns each photo's score from a model fitted without its group (5
+   folds by group id, as in the app's replays), `/taste/train` the model on
+   all groups, `/taste/score` `weights · vector` for weights the app sends.
+   The app side is `photo/taste-model.ts`: the report counts top-1 hits of
+   the formula alone, of formula plus taste, of taste alone (for
+   comparison) and, with a model adopted, of today's (in-sample); it
+   recommends formula plus taste from 30 groups on with 2 points and 2
+   groups over the formula. Adopting refits on all groups, refuses a model
+   with `base_weight ≤ 0`, stores it in `ai_pick_taste_model` and re-scores
+   the open groups. The auto-pick then adds
+   `(weights · vector − offset) / base_weight` to each photo's score
+   (`PhotoSignals.taste_bonus`, shown as `signals.taste`): in the formula's
+   units and centred on the reviewed photos, so the multi-pick threshold
+   and the confidence gate keep their meaning; the thresholds are taken
+   downwards from the top score so a negative score still has a pick.
+   Without the embedding service the groups are scored by the formula
+   alone. Endpoints `POST /photos/aesthetic/taste/replay`, `/adopt`,
+   `/reset`, card "Persönlicher Geschmack" on the Ästhetik page. The model
+   is the user's own and moves only the auto-pick, not the overall score
+   the household shares.
+
 ## Sources
 
 Q-Align (ICML 2024) and the OneAlign model card with AVA/KonIQ figures

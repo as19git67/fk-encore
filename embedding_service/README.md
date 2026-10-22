@@ -127,6 +127,14 @@ head on the stored CLIP vector, trained on photo ids with their nightly Q-Align 
 in `${MODELS_DIR}/aesthetic_head/`. It is used only when it ranks held-out photos closer to
 Q-Align than the zero-shot prompts. `/score` reads stored vectors, no image.
 
+### `POST /taste/replay`, `POST /taste/train`, `POST /taste/score`
+The personal taste of the auto-pick (`documentation/plans/foto-aesthetik.md`, stage 7): a
+pairwise logistic regression on [formula score, CLIP vector] over one user's reviewed groups
+("kept over hidden"). `/replay` returns each photo's score from a model fitted without its
+group (5 folds by group id), `/train` returns the model fitted on all groups, `/score` returns
+`weights · vector` of stored photos under the weights the app sends. The service keeps no model;
+the app stores it per user.
+
 ### `POST /similar-groups`
 Clusters photos into visually similar groups within a sliding time window.
 

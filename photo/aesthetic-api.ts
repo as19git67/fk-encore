@@ -31,6 +31,17 @@ import { adoptReplay, replayAutoPick, type ReplayReport } from "./group-auto-pic
 import { recomputeAiPicksForUser } from "./group-auto-pick.service";
 import { adoptComposite, replayComposite, type CompositeReport } from "./composite-replay";
 import type { AiPickWeights } from "../db/schema";
+import {
+  TasteNotAdoptedError,
+  adoptTaste,
+  deleteTasteModel,
+  loadTasteModel,
+  replayTaste,
+  settingOf,
+  type TasteReport,
+  type TasteSetting,
+} from "./taste-model";
+import { realTasteDeps } from "./taste-deps";
 
 function requireAdmin(): void {
   adminUserId();
@@ -70,17 +81,20 @@ export interface AestheticOverview {
   head_pending: number | null;
   /** The training job in progress, or the last one since the app started. */
   head_job: HeadJob | null;
+  /** The caller's adopted taste model; null for the formula alone. */
+  taste: TasteSetting | null;
 }
 
 export const getAestheticOverview = api(
   { expose: true, method: "GET", path: "/photos/aesthetic", auth: true },
   async (): Promise<AestheticOverview> => {
-    requireAdmin();
-    const [settings, scored, backlog, runs] = await Promise.all([
+    const userId = adminUserId();
+    const [settings, scored, backlog, runs, taste] = await Promise.all([
       getAestheticSettings(),
       countScored(AESTHETIC_MODEL),
       countBacklog(AESTHETIC_MODEL),
       listRuns(20),
+      loadTasteModel(userId),
     ]);
     let scorer: ScorerStatus | null = null;
     let scorerError: string | null = null;
@@ -115,6 +129,7 @@ export const getAestheticOverview = api(
       head_error: headError,
       head_pending: headPending,
       head_job: headJob(),
+      taste: settingOf(taste),
     };
   },
 );
@@ -291,5 +306,48 @@ export const resetCompositeScore = api(
     requireAdmin();
     await saveCompositeSetting(null);
     rebuildComposites(null);
+  },
+);
+
+// ─── Personal taste (stage 7) ────────────────────────────────────────────────
+
+/**
+ * Replays the caller's reviewed groups with the formula alone and with a
+ * taste model on the CLIP vector, fitted without the group it is judged on.
+ */
+export const replayTasteModel = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/taste/replay", auth: true },
+  async (): Promise<TasteReport> => {
+    const userId = adminUserId();
+    return replayTaste(userId, realTasteDeps());
+  },
+);
+
+/** Fits the taste model on every reviewed group and re-scores the open groups; refused without a measured gain. */
+export const adoptTasteModel = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/taste/adopt", auth: true },
+  async (): Promise<TasteReport> => {
+    const userId = adminUserId();
+    try {
+      const report = await adoptTaste(userId, realTasteDeps());
+      recomputeAiPicksForUser(userId).catch((err) => log.error(err, "aesthetic: re-scoring after adopting the taste model failed"));
+      return report;
+    } catch (err) {
+      if (err instanceof TasteNotAdoptedError) throw APIError.failedPrecondition(err.message);
+      throw err;
+    }
+  },
+);
+
+/** Back to the formula alone; the open groups are re-scored. */
+export const resetTasteModel = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/taste/reset", auth: true },
+  async (): Promise<{ removed: boolean }> => {
+    const userId = adminUserId();
+    const removed = await deleteTasteModel(userId);
+    if (removed) {
+      recomputeAiPicksForUser(userId).catch((err) => log.error(err, "aesthetic: re-scoring after removing the taste model failed"));
+    }
+    return { removed };
   },
 );

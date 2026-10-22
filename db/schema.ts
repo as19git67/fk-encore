@@ -403,6 +403,8 @@ export interface AiPickPhotoScore {
     clip_technical?: number;
     /** Q-Align quality, when the user's weights put it in the technical slot. */
     qalign_quality?: number;
+    /** What the user's taste model adds to the score (foto-aesthetik.md, stage 7). */
+    taste?: number;
   };
 }
 
@@ -549,6 +551,33 @@ export const aiPickUserWeights = pgTable("ai_pick_user_weights", {
     .notNull()
     .defaultNow(),
   metadata: jsonb("metadata").$type<AiPickWeightsMetadata>().notNull().default({} as any),
+});
+
+/** How the taste model was adopted (foto-aesthetik.md, stage 7). */
+export interface AiPickTasteMetadata {
+  groups: number;
+  pairs: number;
+  ridge_lambda: number;
+  train_pair_accuracy: number;
+  hit_rate_before: number;
+  hit_rate_after: number;
+}
+
+// The user's personal taste model: weights on the CLIP vector, learnt from
+// their own reviewed groups. The auto-pick adds (weights · vector − offset) /
+// base_weight to the formula score. No row: the formula alone.
+export const aiPickTasteModel = pgTable("ai_pick_taste_model", {
+  user_id: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  version: text("version").notNull(),
+  weights: jsonb("weights").$type<number[]>().notNull(),
+  base_weight: doublePrecision("base_weight").notNull(),
+  offset: doublePrecision("offset").notNull(),
+  metadata: jsonb("metadata").$type<AiPickTasteMetadata>().notNull(),
+  fitted_at: timestamp("fitted_at", { withTimezone: true, mode: "string" })
+    .notNull()
+    .defaultNow(),
 });
 
 // ========== Albums ==========

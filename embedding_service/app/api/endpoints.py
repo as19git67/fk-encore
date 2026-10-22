@@ -57,6 +57,14 @@ from app.models.schemas import (
     SimilarGroupMember,
     SimilarGroupsRequest,
     SimilarGroupsResponse,
+    TasteGroupsRequest,
+    TasteModelReport,
+    TastePhotoScore,
+    TasteReplayResponse,
+    TasteScore,
+    TasteScoreRequest,
+    TasteScoreResponse,
+    TasteTrainResponse,
     TextSearchRequest,
 )
 from app.services.embedding_service import clip_embedder_class, dino_embedder_class
@@ -65,6 +73,7 @@ from app.services.scene_pairs import find_scene_pairs
 from app.services.diverse_select import select_diverse
 from app.services.redundant_pairs import find_redundant_pairs
 from app.services import aesthetic_head
+from app.services import taste_model
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -358,6 +367,101 @@ async def parse_query_endpoint(request: ParseQueryRequest) -> ParseQueryResponse
         ) from exc
 
     return ParseQueryResponse(**parsed)
+
+
+# ---------------------------------------------------------------------------
+# /taste
+# ---------------------------------------------------------------------------
+
+async def _taste_groups(request: TasteGroupsRequest, db: AsyncSession):
+    """The usable groups, their CLIP vectors and the photo ids without one."""
+    import numpy as np
+
+    ids = list({p.photo_id for g in request.groups for p in g.photos})
+    rows = await repository.get_clip_embeddings(db, ids)
+    vectors = {pid: np.asarray(v, dtype=np.float64) for pid, v in rows}
+    groups = [
+        taste_model.Group(
+            group_id=g.group_id,
+            photos=[taste_model.GroupPhoto(photo_id=p.photo_id, kept=p.kept, base=p.base) for p in g.photos],
+        )
+        for g in request.groups
+    ]
+    usable = taste_model.usable_groups(groups, vectors)
+    missing = sorted(pid for pid in ids if pid not in vectors)
+    if not usable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Keine entschiedene Gruppe, in der jedes Foto einen CLIP-Vektor hat",
+        )
+    return usable, vectors, missing
+
+
+@router.post("/taste/replay", response_model=TasteReplayResponse, tags=["quality"])
+async def taste_replay(request: TasteGroupsRequest, db: DbDep) -> TasteReplayResponse:
+    """Out-of-fold scores of the personal taste model: each group scored by a model fitted without it.
+
+    Groups go to fold `i % 5` in the order of their id; the app counts hits.
+    """
+    from fastapi.concurrency import run_in_threadpool
+
+    usable, vectors, missing = await _taste_groups(request, db)
+    combined, taste = await run_in_threadpool(taste_model.out_of_fold, usable, vectors)
+    scores = [
+        TastePhotoScore(photo_id=p.photo_id, group_id=g.group_id, combined=combined[p.photo_id], taste=taste[p.photo_id])
+        for g in usable
+        for p in g.photos
+        if p.photo_id in combined
+    ]
+    return TasteReplayResponse(
+        version=taste_model.MODEL_VERSION,
+        groups=len(usable),
+        folds=min(taste_model.FOLDS, len(usable)),
+        scores=scores,
+        missing=missing,
+    )
+
+
+@router.post("/taste/train", response_model=TasteTrainResponse, tags=["quality"])
+async def taste_train(request: TasteGroupsRequest, db: DbDep) -> TasteTrainResponse:
+    """Fits the taste model on every usable group; the app stores it, this service keeps nothing."""
+    from fastapi.concurrency import run_in_threadpool
+
+    usable, vectors, missing = await _taste_groups(request, db)
+    model = await run_in_threadpool(taste_model.train, usable, vectors)
+    return TasteTrainResponse(
+        model=TasteModelReport(
+            version=taste_model.MODEL_VERSION,
+            base_weight=model.base_weight,
+            weights=[float(v) for v in model.weights],
+            offset=model.offset,
+            ridge_lambda=model.ridge_lambda,
+            groups=model.groups,
+            pairs=model.pairs,
+            train_pair_accuracy=round(model.train_pair_accuracy, 4),
+        ),
+        missing=missing,
+    )
+
+
+@router.post("/taste/score", response_model=TasteScoreResponse, tags=["quality"])
+async def taste_score(request: TasteScoreRequest, db: DbDep) -> TasteScoreResponse:
+    """`weights · vector` for stored photos under the model the app sends; 422 on a length mismatch."""
+    import numpy as np
+
+    rows = await repository.get_clip_embeddings(db, request.photo_ids)
+    weights = np.asarray(request.weights, dtype=np.float64)
+    scores: List[TasteScore] = []
+    for pid, v in rows:
+        vector = np.asarray(v, dtype=np.float64)
+        if vector.shape != weights.shape:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Das Modell hat {len(weights)} Gewichte, der CLIP-Vektor {len(vector)} Werte",
+            )
+        scores.append(TasteScore(photo_id=pid, value=float(vector @ weights)))
+    found = {s.photo_id for s in scores}
+    return TasteScoreResponse(scores=scores, missing=[pid for pid in request.photo_ids if pid not in found])
 
 
 # ---------------------------------------------------------------------------

@@ -235,3 +235,68 @@ class AestheticHeadScoreResponse(BaseModel):
     version: str
     scores: List[AestheticHeadScore]
     missing: List[str] = Field(..., description="Photo ids without a CLIP vector here")
+
+
+# ---------------------------------------------------------------------------
+# /taste (foto-aesthetik, stage 7)
+# ---------------------------------------------------------------------------
+
+class TasteGroupPhoto(BaseModel):
+    photo_id: str
+    kept: bool = Field(..., description="The user kept the photo (not hidden)")
+    base: float = Field(..., description="Today's auto-pick score of the photo for this user")
+
+
+class TasteGroup(BaseModel):
+    group_id: int
+    photos: List[TasteGroupPhoto] = Field(..., min_length=2)
+
+
+class TasteGroupsRequest(BaseModel):
+    groups: List[TasteGroup] = Field(..., min_length=1)
+
+
+class TastePhotoScore(BaseModel):
+    photo_id: str
+    group_id: int
+    combined: float = Field(..., description="Formula plus taste, from a model fitted without this group")
+    taste: float = Field(..., description="Taste alone, from a model fitted without this group")
+
+
+class TasteReplayResponse(BaseModel):
+    version: str
+    groups: int = Field(..., description="Groups with a kept and a hidden photo and a CLIP vector for every photo")
+    folds: int
+    scores: List[TastePhotoScore]
+    missing: List[str] = Field(..., description="Photo ids without a CLIP vector here")
+
+
+class TasteModelReport(BaseModel):
+    version: str
+    base_weight: float
+    weights: List[float]
+    offset: float
+    ridge_lambda: float
+    groups: int
+    pairs: int
+    train_pair_accuracy: float
+
+
+class TasteTrainResponse(BaseModel):
+    model: TasteModelReport
+    missing: List[str]
+
+
+class TasteScoreRequest(BaseModel):
+    weights: List[float] = Field(..., min_length=1)
+    photo_ids: List[str] = Field(..., min_length=1, max_length=2000)
+
+
+class TasteScore(BaseModel):
+    photo_id: str
+    value: float = Field(..., description="weights · CLIP vector, unscaled")
+
+
+class TasteScoreResponse(BaseModel):
+    scores: List[TasteScore]
+    missing: List[str]
