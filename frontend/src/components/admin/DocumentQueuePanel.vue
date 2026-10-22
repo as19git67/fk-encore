@@ -16,7 +16,7 @@ import { useRealtimeEvent } from '../../composables/useRealtime'
 const docQueueStatus = ref<DocQueueStatus>({ services: [], jobs: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
-const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number; status_breakdown?: Record<string, number> } | null>(null)
+const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number; status_breakdown?: Record<string, number>; embed_queued?: number } | null>(null)
 const docRelocateLoading = ref(false)
 const docRelocateResult = ref<RelocateAllDocumentsResponse | null>(null)
 const pageWordsLoading = ref(false)
@@ -161,6 +161,9 @@ async function handleDocRetry() {
     <div v-if="docReclassifyResult !== null" class="mb-3">
       <Message severity="info" :closable="false">
         {{ docReclassifyResult.queued }} Dokument(e) in die Warteschlange eingereiht.
+        <template v-if="docReclassifyResult.embed_queued">
+          {{ docReclassifyResult.embed_queued }} fertige(s) Dokument(e) ohne Embedding nachgereiht.
+        </template>
         <template v-if="docReclassifyResult.skipped_encrypted">
           {{ docReclassifyResult.skipped_encrypted }} verschlüsselte Dokument(e) übersprungen.
         </template>
@@ -176,7 +179,9 @@ async function handleDocRetry() {
     <div v-if="pageWordsResult !== null" class="mb-3">
       <Message severity="info" :closable="false">
         {{ pageWordsResult.queued }} Dokument(e) zum Nachtragen der Wortpositionen eingereiht,
-        {{ pageWordsResult.remaining }} noch ohne. Die Aufträge laufen nur, solange keine neue Texterkennung wartet.
+        {{ pageWordsResult.remaining }} noch ohne (die eingereihten mitgezählt). Den Rest reiht die
+        Verarbeitung selbst in Paketen nach. Die Aufträge laufen nur, solange keine neue Texterkennung wartet;
+        nach „Abbrechen“ setzt ein erneuter Klick fort.
       </Message>
     </div>
 

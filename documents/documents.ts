@@ -2475,6 +2475,28 @@ export interface ReclassifyAllResponse {
   skipped_encrypted?: number;
   /** In resume mode: status breakdown of the non-ready documents found. */
   status_breakdown?: Record<string, number>;
+  /**
+   * In resume mode: finished documents whose embedding was still missing.
+   * classify marks a document ready before embed runs, so cancelling the
+   * queue in between leaves it ready without one.
+   */
+  embed_queued?: number;
+}
+
+/** Ready documents with text but no embedding and no embed job waiting. */
+async function readyWithoutEmbedding(): Promise<number[]> {
+  const rows = await db.execute<{ id: number }>(sql`
+    SELECT d.id FROM documents d
+    WHERE d.status = 'ready'
+      AND d.extracted_text IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM document_embeddings e WHERE e.document_id = d.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM document_scan_queue q
+        WHERE q.document_id = d.id AND q.service = 'embed' AND q.status IN ('pending', 'processing')
+      )
+    ORDER BY d.id
+  `);
+  return rows.rows.map((r) => Number(r.id));
 }
 
 export interface RelocateAllDocumentsResponse {
@@ -2526,8 +2548,20 @@ export const reclassifyAll = api(
       if (Object.keys(counts).length > 0) statusBreakdown = counts;
     }
 
+    let embedQueued = 0;
+    if (resume) {
+      const embedIds = await readyWithoutEmbedding();
+      for (const id of embedIds) await requeueDocument(id, ["embed"]);
+      embedQueued = embedIds.length;
+      if (embedQueued) triggerWorkers();
+    }
+
     if (rows.length === 0) {
-      return { queued: 0, ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}) };
+      return {
+        queued: 0,
+        ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}),
+        ...(embedQueued > 0 ? { embed_queued: embedQueued } : {}),
+      };
     }
 
     console.log(
@@ -2553,6 +2587,7 @@ export const reclassifyAll = api(
       queued: ids.length,
       ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}),
       ...(statusBreakdown ? { status_breakdown: statusBreakdown } : {}),
+      ...(embedQueued > 0 ? { embed_queued: embedQueued } : {}),
     };
   },
 );

@@ -25,6 +25,7 @@ import { extractPdfText } from "./text-extract";
 import { findBoxes } from "./page-words";
 import { findTextBoxes, hasPageWords, loadPageWords, replacePageWords } from "./page-words-store";
 import { queuePageWordsBackfill } from "./page-words-api";
+import { topUpPageWordsBackfill } from "./page-words-backfill";
 import { runPageWords, runTextExtract } from "./document-ops";
 
 const USER_ID = 991531;
@@ -166,6 +167,33 @@ describe("the backfill queue", () => {
     const again = await queuePageWordsBackfill(5000);
     expect(await queuedIds()).toEqual([DOC_IDS[1], DOC_IDS[0]]);
     expect(again.remaining).toBeGreaterThanOrEqual(2);
+  });
+
+  it("tops itself up after a job, skipping documents a job already ran for", async () => {
+    await insertDoc(DOC_IDS[0], { confidence: 80 });
+    await insertDoc(DOC_IDS[1], { confidence: 40 });
+    await insertDoc(DOC_IDS[2], { confidence: 20 });
+    // Tried before and still without words (a failed read, an empty scan).
+    await db.insert(documentScanQueue).values([
+      { document_id: DOC_IDS[1], service: "page_words", priority: 9, status: "done" },
+      { document_id: DOC_IDS[2], service: "page_words", priority: 9, status: "failed" },
+    ]);
+
+    const pendingIds = async () => (await db
+      .select({ id: documentScanQueue.document_id })
+      .from(documentScanQueue)
+      .where(and(
+        inArray(documentScanQueue.document_id, DOC_IDS),
+        eq(documentScanQueue.service, "page_words"),
+        eq(documentScanQueue.status, "pending"),
+      ))).map((r) => r.id);
+
+    await topUpPageWordsBackfill();
+    expect(await pendingIds()).toEqual([DOC_IDS[0]]);
+
+    // A click retries the tried ones too.
+    await queuePageWordsBackfill(5000);
+    expect((await pendingIds()).sort()).toEqual([DOC_IDS[0], DOC_IDS[1], DOC_IDS[2]].sort());
   });
 });
 
