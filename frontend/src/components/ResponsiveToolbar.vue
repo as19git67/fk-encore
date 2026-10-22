@@ -40,6 +40,7 @@ const menuRef = ref<InstanceType<typeof Menu> | null>(null)
 // How many of `props.items` are rendered inline. The rest spill into the
 // overflow menu. Starts optimistic (all visible) and is corrected on mount.
 const visibleCount = ref(props.items.length)
+const naturalWidth = ref(0)
 
 const visibleItems = computed(() => props.items.slice(0, visibleCount.value))
 const overflowItems = computed(() => props.items.slice(visibleCount.value))
@@ -112,6 +113,13 @@ function recompute() {
   const overflowSample = children[children.length - 1]
   const overflowWidth = overflowSample ? overflowSample.offsetWidth : 0
   const itemWidths = children.slice(0, -1).map((el) => el.offsetWidth)
+  // The width every item needs inline. The measurement row does not depend
+  // on the container, so a parent may cap the toolbar at it without a loop
+  // (`max-width: var(--responsive-toolbar-natural)`) and hand the rest of
+  // the row to whatever sits beside it.
+  naturalWidth.value = Math.ceil(
+    itemWidths.reduce((sum, w) => sum + w, 0) + gap * Math.max(0, itemWidths.length - 1),
+  )
 
   apply(computeVisibleCount(itemWidths, overflowWidth, container.clientWidth, gap))
 }
@@ -147,7 +155,11 @@ watch(
 </script>
 
 <template>
-  <div ref="containerRef" class="responsive-toolbar">
+  <div
+    ref="containerRef"
+    class="responsive-toolbar"
+    :style="naturalWidth ? { '--responsive-toolbar-natural': `${naturalWidth}px` } : undefined"
+  >
     <Button
       v-for="item in visibleItems"
       :key="item.key"

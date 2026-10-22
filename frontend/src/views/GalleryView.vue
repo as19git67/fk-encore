@@ -996,9 +996,9 @@ function triggerFileSelect() {
 // Filter, sort and select mode are no longer here — they are part of the
 // shared toolbar. ResponsiveToolbar pushes whatever does not fit into an
 // overflow dropdown. Order = reading order.
-// On a phone the actions share one row with filter, sort and select: the
-// jump is an icon, the other labels are short (the tooltip keeps the long
-// text).
+// The jump and the upload are icons everywhere; on a phone the other labels
+// are short too, so the actions share one row with filter, sort and select
+// (the tooltip keeps the long text).
 const phone = useBelow('sm')
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
@@ -1020,7 +1020,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (jumpButton.value) {
     items.push({
       key: 'jump',
-      label: phone.value ? '' : jumpButton.value.label,
+      label: '',
       title: jumpButton.value.label,
       icon: jumpButton.value.icon,
       severity: 'secondary',
@@ -1053,7 +1053,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
           }
         : {
             key: 'upload',
-            label: 'Hochladen',
+            label: '',
             title: 'Fotos hochladen',
             icon: 'pi pi-upload',
             command: triggerFileSelect,
@@ -1722,7 +1722,7 @@ void refreshReviewSequence()
          gallery's own actions sit in its actions slot; filter, sort, the
          chips, the count and select mode are the toolbar's own. -->
     <template #toolbar>
-      <ListToolbar :model="toolbar">
+      <ListToolbar :model="toolbar" compact>
         <template #search>
           <NaturalSearchBar
             v-model="searchInput"
@@ -2127,6 +2127,14 @@ void refreshReviewSequence()
 .header__toolbar {
   flex: 1 1 16rem;
   min-width: 0;
+  /* No wider than its buttons need, so the free space of the row stays
+     between the search and filter, sort and select, and all buttons stand
+     together on the right; the overflow toggle follows the last one. */
+  max-width: var(--responsive-toolbar-natural, none);
+  justify-content: flex-end;
+}
+.header__toolbar :deep(.responsive-toolbar__more) {
+  margin-left: 0;
 }
 /* On a phone the actions take what filter, sort and select leave in their
    row instead of wrapping onto a row of their own; what does not fit goes
