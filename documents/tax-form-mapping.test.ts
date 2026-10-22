@@ -69,6 +69,27 @@ describe("mapToForm", () => {
     expect(find(m, "kap.sparer_pauschbetrag", "spouse")!.notes.join(" ")).toContain("zusammen mehr als 2.000 €");
   });
 
+  it("expects 5,5 % Soli on Kapitalertragsteuer, which has no Freigrenze", () => {
+    const note = (m: ReturnType<typeof mapToForm>, key: string) => find(m, key, "self")!.notes.join(" ");
+    const zero = mapToForm(2025, [
+      v(8, "jahressteuerbescheinigung", "kapitalertragsteuer", 50000),
+      v(8, "jahressteuerbescheinigung", "solidaritaetszuschlag", 0),
+    ], { joint: false });
+    expect(note(zero, "kap.solidaritaetszuschlag")).toContain("die Freigrenze gilt hier nicht");
+    expect(note(zero, "kap.kapitalertragsteuer")).not.toContain("SolZG");
+    // No Soli read at all: the note stands on the Kapitalertragsteuer.
+    const missing = mapToForm(2025, [v(8, "jahressteuerbescheinigung", "kapitalertragsteuer", 50000)], { joint: false });
+    expect(note(missing, "kap.kapitalertragsteuer")).toContain("etwa 27,50 €");
+    // Two banks, each with its Soli: nothing to check.
+    const right = mapToForm(2025, [
+      v(8, "jahressteuerbescheinigung", "kapitalertragsteuer", 50000),
+      v(8, "jahressteuerbescheinigung", "solidaritaetszuschlag", 2750),
+      v(9, "jahressteuerbescheinigung", "kapitalertragsteuer", 10000),
+      v(9, "jahressteuerbescheinigung", "solidaritaetszuschlag", 550),
+    ], { joint: false });
+    expect(note(right, "kap.solidaritaetszuschlag")).not.toContain("SolZG");
+  });
+
   it("§ 35a: only the labour share, never a cash payment, with the reduction as a note", () => {
     const m = mapToForm(2025, [
       v(7, "handwerkerrechnung", "arbeitskosten", 80000),
