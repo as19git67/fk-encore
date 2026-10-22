@@ -70,7 +70,7 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
-import { useAtLeast } from '../composables/useBreakpoint'
+import { useAtLeast, useBelow } from '../composables/useBreakpoint'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import type { FilterChip } from '../components/layout/listToolbar'
 import { parsePinnedPhotoIds, PHOTO_IDS_QUERY_KEY } from '../utils/photoIdsQuery'
@@ -996,6 +996,10 @@ function triggerFileSelect() {
 // Filter, sort and select mode are no longer here — they are part of the
 // shared toolbar. ResponsiveToolbar pushes whatever does not fit into an
 // overflow dropdown. Order = reading order.
+// On a phone the actions share one row with filter, sort and select: the
+// jump is an icon, the other labels are short (the tooltip keeps the long
+// text).
+const phone = useBelow('sm')
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
@@ -1004,7 +1008,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (activeCount.value > 0 && !filter.value.collectionId && !selectMode.value) {
     items.push({
       key: 'save-rule',
-      label: 'Als Regel-Mappe',
+      label: phone.value ? 'Regel-Mappe' : 'Als Regel-Mappe',
       title: 'Filter als Regel-Sammelmappe speichern',
       icon: 'pi pi-folder',
       severity: 'secondary',
@@ -1016,7 +1020,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (jumpButton.value) {
     items.push({
       key: 'jump',
-      label: jumpButton.value.label,
+      label: phone.value ? '' : jumpButton.value.label,
       title: jumpButton.value.label,
       icon: jumpButton.value.icon,
       severity: 'secondary',
@@ -1028,7 +1032,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (canReviewGroups.value && totalUnreviewed.value > 0) {
     items.push({
       key: 'group-review',
-      label: `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
+      label: phone.value ? `Gruppen (${totalUnreviewed.value})` : `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
       title: `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
       icon: 'pi pi-images',
       severity: 'success',
@@ -2123,6 +2127,14 @@ void refreshReviewSequence()
 .header__toolbar {
   flex: 1 1 16rem;
   min-width: 0;
+}
+/* On a phone the actions take what filter, sort and select leave in their
+   row instead of wrapping onto a row of their own; what does not fit goes
+   into the overflow menu. */
+@media (max-width: 639px) {
+  .header__toolbar {
+    flex-basis: 0;
+  }
 }
 
 /* The natural search fills the toolbar's search area. */

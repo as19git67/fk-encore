@@ -234,7 +234,9 @@ export const Galerie: Story = {
   play: async () => {
     await waitFor(() => document.querySelector('.vg-cell'), 'the grid')
     const jump = (label: string) => waitFor(
-      () => Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes(label)),
+      // On a phone the jump is an icon; its name is the aria-label.
+      () => Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+        .find((b) => b.textContent?.includes(label) || b.getAttribute('aria-label') === label),
       `the button "${label}"`,
     )
     // The grid scrolls in its own box, the document not at all: a document

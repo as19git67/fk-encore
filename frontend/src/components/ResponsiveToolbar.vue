@@ -159,6 +159,7 @@ watch(
       :text="item.text"
       :disabled="item.disabled"
       :class="['responsive-toolbar__item', item.itemClass]"
+      :aria-label="item.label ? undefined : item.title"
       v-tooltip.bottom="item.title"
       @click="item.command"
     />
