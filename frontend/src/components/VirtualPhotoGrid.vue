@@ -98,7 +98,7 @@ onBeforeUnmount(() => {
 // ── Virtualizer over rows ────────────────────────────────────────────────────
 const rowCount = computed(() => Math.ceil(props.photos.length / Math.max(1, cols.value)))
 
-const { virtualizer, rowOffset } = usePageVirtualizer(
+const { virtualizer, rowOffset, flying } = usePageVirtualizer(
   rowsRef,
   computed(() => {
     // Read `rowHeight` here so it becomes a dependency of this computed.
@@ -142,6 +142,7 @@ function rowPhotos(rowIndex: number): Photo[] {
           @click="emit('open', photo)"
         >
           <HeicImage
+            v-if="!flying"
             :src="getPhotoUrl(photo.filename, 400)"
             :alt="photo.original_name"
             objectFit="cover"

@@ -30,6 +30,9 @@ export interface PageVirtualizerOptions {
 
 export type RowAlign = 'start' | 'center' | 'end' | 'auto'
 
+/** How long the page must be still before a grid loads its images again. */
+export const SETTLE_MS = 150
+
 /** The height of the app's sticky stack, as `App.vue` publishes it. */
 export function stackHeight(): number {
   if (typeof document === 'undefined') return 0
@@ -62,8 +65,33 @@ export function usePageVirtualizer(
   // Whatever moves the grid down also makes the document taller, so watching
   // <body> catches a notice appearing above it as well as the stack growing.
   let observer: ResizeObserver | null = null
+  // ── Flying past ────────────────────────────────────────────────────────
+  // A tap on the iPhone's status bar, or a jump to the other end, moves the
+  // page by more than a screen per frame through thousands of rows. Every
+  // frame mounts a new set of rows, and each one used to start its
+  // thumbnails: on 7,000 photos that was hundreds of decoded images in under
+  // a second, enough for Safari to kill the page and reload it — which
+  // looked like the gallery scrolling back to the photo it opened on. While
+  // `flying` is true a grid shows its cells without images and fetches
+  // nothing; it turns false once the page has been still for a moment.
+  const flying = ref(false)
+  let lastScrollY = 0
+  let settleTimer: ReturnType<typeof setTimeout> | null = null
+  function onScroll() {
+    const y = window.scrollY
+    if (Math.abs(y - lastScrollY) > window.innerHeight) flying.value = true
+    lastScrollY = y
+    if (settleTimer) clearTimeout(settleTimer)
+    settleTimer = setTimeout(() => {
+      settleTimer = null
+      flying.value = false
+    }, SETTLE_MS)
+  }
+
   onMounted(() => {
     measure()
+    lastScrollY = window.scrollY
+    window.addEventListener('scroll', onScroll, { passive: true })
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(measure)
       observer.observe(document.body)
@@ -81,6 +109,9 @@ export function usePageVirtualizer(
     observer?.disconnect()
     observer = null
     window.removeEventListener('resize', measure)
+    window.removeEventListener('scroll', onScroll)
+    if (settleTimer) clearTimeout(settleTimer)
+    settleTimer = null
   })
 
   const virtualizer = useWindowVirtualizer(
@@ -138,6 +169,6 @@ export function usePageVirtualizer(
     return start - scrollMargin.value
   }
 
-  return { virtualizer, scrollToRow, rowOffset, scrollMargin, measure }
+  return { virtualizer, scrollToRow, rowOffset, scrollMargin, measure, flying }
 }
 

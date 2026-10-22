@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { computed, createApp, defineComponent, h, nextTick, ref, type App } from 'vue'
-import { stackHeight, usePageVirtualizer } from './usePageVirtualizer'
+import { SETTLE_MS, stackHeight, usePageVirtualizer } from './usePageVirtualizer'
 
 /**
  * The grids scroll with the document (issue #1674). What has to hold: rows
@@ -92,6 +92,31 @@ describe('usePageVirtualizer', () => {
     expect(window.scrollTo).not.toHaveBeenCalled()
     api.scrollToRow(20, 'auto')
     expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 1350 - 900, behavior: 'instant' })
+    vi.restoreAllMocks()
+  })
+
+  it('reports flying while the page moves more than a screen per frame', async () => {
+    vi.useFakeTimers()
+    const api = mountGrid(300)
+    await nextTick()
+    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
+    const scrollTo = (y: number) => {
+      Object.defineProperty(window, 'scrollY', { value: y, configurable: true })
+      window.dispatchEvent(new Event('scroll'))
+    }
+    // An ordinary swipe: a few hundred pixels per frame.
+    scrollTo(300)
+    expect(api.flying.value).toBe(false)
+    // A tap on the status bar from far down: thousands per frame.
+    scrollTo(50_000)
+    scrollTo(20_000)
+    expect(api.flying.value).toBe(true)
+    vi.advanceTimersByTime(SETTLE_MS - 1)
+    expect(api.flying.value).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(api.flying.value).toBe(false)
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 })
