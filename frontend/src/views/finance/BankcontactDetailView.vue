@@ -460,7 +460,7 @@ async function del() {
 </script>
 
 <template>
-  <PageLayout :title="isNew ? 'Bankkontakt anlegen' : bc?.name ?? 'Bankkontakt'" width="normal">
+  <PageLayout :title="isNew ? 'Bankkontakt anlegen' : bc?.name ?? 'Bankkontakt'" width="normal" sticky-header>
     <template #actions>
       <Button
         label="Zurück"

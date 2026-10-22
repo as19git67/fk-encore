@@ -257,6 +257,10 @@ function publishStackHeight() {
   const height = toolbarStackRef.value?.getBoundingClientRect().height ?? 0
   const value = `${Math.round(height)}px`
   container.style.setProperty('--app-stack-height', value)
+  // Also on <html>: its `scroll-padding-top` keeps anything the browser
+  // scrolls into view (focus, `scrollIntoView`) clear of the stack, and a
+  // virtual grid reads the number from there (`usePageVirtualizer`).
+  document.documentElement.style.setProperty('--app-stack-height', value)
 }
 
 function observeStack() {

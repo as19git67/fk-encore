@@ -554,6 +554,7 @@ onBeforeUnmount(() => {
     :ready="!!collection && !loading"
     :anchor-key="listAnchorKey"
     :resolve-anchor="resolveListAnchor"
+    sticky-header
   >
     <template #actions>
       <Button

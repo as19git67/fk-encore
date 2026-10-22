@@ -10,42 +10,21 @@
  * start and begins at the top, which is why `markNavigation` records whether
  * the navigation came from history.
  *
- * Which element is "whatever is scrolling" differs per page: a page that
- * scrolls with the document leaves `window.scrollY`, a page that scrolls
- * inside its content area (`scroll="self"`) leaves that element's `scrollTop`.
- * `PageLayout` registers the right one, so nothing else has to know.
+ * Whatever is scrolling is always the document (issue #1674): no page has a
+ * scroller of its own around its main content any more, because iOS only
+ * scrolls to the top on a tap on the status bar when the document scrolls.
  */
 
 const PREFIX = 'scroll_offset:'
 
-type ScrollerGetter = () => HTMLElement | null
-
-let activeScroller: ScrollerGetter | null = null
 let cameFromHistory = false
 
-/**
- * Register the element whose `scrollTop` is this page's position, or `null`
- * for a page that scrolls with the document. Registering replaces the
- * previous page's scroller, since only one page is on screen.
- */
-export function setPageScroller(getter: ScrollerGetter | null): void {
-  activeScroller = getter
-}
-
-/** Drop the registration if it is still the current one (on unmount). */
-export function clearPageScroller(getter: ScrollerGetter | null): void {
-  if (activeScroller === getter) activeScroller = null
-}
-
 export function currentScrollTop(): number {
-  const el = activeScroller?.() ?? null
-  return Math.round(el ? el.scrollTop : window.scrollY)
+  return Math.round(window.scrollY)
 }
 
 export function scrollToTop(top: number): void {
-  const el = activeScroller?.() ?? null
-  if (el) el.scrollTo({ top, behavior: 'instant' })
-  else window.scrollTo({ top, behavior: 'instant' })
+  window.scrollTo({ top, behavior: 'instant' })
 }
 
 export function saveScrollOffset(routeKey: string, top = currentScrollTop()): void {

@@ -2,8 +2,9 @@
 /**
  * Virtualized grid of album cards.
  *
- * Mirrors the architecture of `VirtualGallery`: TanStack `useVirtualizer`
- * virtualizes ROWS (not items). Each row is a CSS grid that holds `cols`
+ * Mirrors the architecture of `VirtualGallery`: TanStack's window
+ * virtualizer (`usePageVirtualizer`) virtualizes ROWS (not items) and the
+ * document scrolls, not the grid (issue #1674). Each row is a CSS grid that holds `cols`
  * cards; row height is fixed (square cell + gap) so the virtualizer can
  * compute total scroll height as `rowCount * rowHeight` without measuring.
  *
@@ -23,7 +24,7 @@
  *     came back to from the detail view.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import { usePageVirtualizer } from '../composables/usePageVirtualizer'
 import HeicImage from './HeicImage.vue'
 import { type Album } from '../api/photos'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
@@ -82,6 +83,7 @@ const cellSize = ref(TARGET_CELL_MIN_PX)
 const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
+const rowsRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
@@ -115,13 +117,9 @@ onBeforeUnmount(() => {
 // ── Virtualizer over rows ────────────────────────────────────────────────────
 const rowCount = computed(() => Math.ceil(props.albums.length / Math.max(1, cols.value)))
 
-const virtualizer = useVirtualizer(
-  computed(() => ({
-    count: rowCount.value,
-    getScrollElement: () => scrollRef.value,
-    estimateSize: () => rowHeight.value,
-    overscan: 4,
-  })),
+const { virtualizer, scrollToRow, rowOffset } = usePageVirtualizer(
+  rowsRef,
+  computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: 4 })),
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
@@ -177,7 +175,7 @@ function scrollToAlbum(id: number, opts: { highlight?: boolean; focus?: boolean 
   const idx = props.albums.findIndex(a => a.id === id)
   if (idx < 0) return false
   const row = Math.floor(idx / cols.value)
-  virtualizer.value.scrollToIndex(row, { align: 'center' })
+  scrollToRow(row, 'center')
   if (opts.highlight) highlightAlbum(id)
   if (opts.focus) {
     // Wait one frame for Vue/virtualizer to render the newly-visible row,
@@ -193,7 +191,7 @@ function scrollToAlbum(id: number, opts: { highlight?: boolean; focus?: boolean 
 /**
  * Bring the parent-provided `rememberedAlbumId` back into view, or scroll
  * to the top if it's not in the current visible set. The parent calls
- * this after filter / sort / search changes — `useVirtualizer` keeps its
+ * this after filter / sort / search changes — the document keeps its
  * scroll offset in absolute pixels, so a shrunk-then-restored list would
  * otherwise leave the user clamped at the top of the new layout.
  */
@@ -204,7 +202,7 @@ async function rescrollToRemembered(opts: { highlight?: boolean } = {}) {
   if (target !== null && target !== undefined && scrollToAlbum(target, opts)) {
     return
   }
-  virtualizer.value.scrollToIndex(0, { align: 'start' })
+  window.scrollTo({ top: 0, behavior: 'instant' })
 }
 
 defineExpose({ scrollToAlbum, rescrollToRemembered })
@@ -235,13 +233,13 @@ watch(
 
 <template>
   <div ref="scrollRef" class="vag" @keydown="handleContainerKeydown">
-    <div class="vag__inner" :style="{ height: `${totalSize}px` }">
+    <div ref="rowsRef" class="vag__inner" :style="{ height: `${totalSize}px` }">
       <div
         v-for="row in virtualRows"
         :key="String(row.key)"
         class="vag__row"
         :style="{
-          transform: `translateY(${row.start}px)`,
+          transform: `translateY(${rowOffset(row.start)}px)`,
           height: `${rowHeight}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
@@ -299,14 +297,7 @@ watch(
 
 <style scoped>
 .vag {
-  flex: 1;
   width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  contain: layout size style;
-  scrollbar-gutter: stable;
   padding: 6px;
   box-sizing: border-box;
 }

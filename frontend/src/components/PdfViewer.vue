@@ -404,6 +404,7 @@ function restoreAnchor(anchor: ViewAnchor): boolean {
   const { dx, dy } = anchorScrollDelta(anchor, el.getBoundingClientRect())
   const scroller = scrollParentOf(el)
   if (scroller) scroller.scrollTop += dy
+  else window.scrollBy({ top: dy, behavior: 'instant' })
   wrapper.scrollLeft += dx
   return true
 }
@@ -482,7 +483,10 @@ function clampedPage(value: number): number {
   return Math.min(Math.max(1, Math.floor(value)), Math.max(1, totalPages.value))
 }
 
-/** The nearest ancestor that can actually scroll vertically. */
+/**
+ * The nearest ancestor that can actually scroll vertically, or `null` when
+ * that is the document itself (the narrow layout, issue #1674).
+ */
 function scrollParentOf(el: HTMLElement): HTMLElement | null {
   let node = el.parentElement
   while (node) {
@@ -502,7 +506,17 @@ function scrollToPageElement(pageNumber: number) {
   // took the pinned head up with it — the controls left the screen on the way
   // to the page they were used to reach.
   const scroller = scrollParentOf(el)
-  if (!scroller) return
+  if (!scroller) {
+    // The document scrolls: the head is pinned under the app's sticky stack,
+    // at its own `top`, and covers everything above its bottom edge.
+    const head = headRef.value
+    const headTop = head ? Number.parseFloat(getComputedStyle(head).top) || 0 : 0
+    const covered = headTop + (head ? head.getBoundingClientRect().height : 0)
+    const margin = Number.parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+    const top = window.scrollY + el.getBoundingClientRect().top - covered - margin
+    window.scrollTo({ top: Math.max(0, top), behavior: 'instant' })
+    return
+  }
   // The head only has to be cleared where it is pinned *over* the scrollport:
   // in the tall layout the scroller is the page, and the head floats at its
   // top edge. Where the pages scroll inside their own box the head stands

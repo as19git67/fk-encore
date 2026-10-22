@@ -3,8 +3,9 @@
  * Virtualized grid for an in-memory list of photos.
  *
  * Mirrors the row-virtualization architecture of `VirtualGallery` /
- * `VirtualAlbumGrid` (TanStack `useVirtualizer` over ROWS, fixed row height
- * = square cell + gap), but the data source is a plain `Photo[]` the parent
+ * `VirtualAlbumGrid` (TanStack's window virtualizer over ROWS via
+ * `usePageVirtualizer`, fixed row height = square cell + gap, the document
+ * scrolls — issue #1674), but the data source is a plain `Photo[]` the parent
  * already holds — no server pagination, no `useGallerySource`. Used by the
  * public/shared album view, which loads the whole album up front.
  *
@@ -15,7 +16,7 @@
  *     `--grid-min-col` gallery thumbnail width).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import { usePageVirtualizer } from '../composables/usePageVirtualizer'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo } from '../api/photos'
 
@@ -41,6 +42,7 @@ const cellSize = ref(TARGET_CELL_MIN_PX)
 const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
+const rowsRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function targetCols(width: number): number {
@@ -96,7 +98,8 @@ onBeforeUnmount(() => {
 // ── Virtualizer over rows ────────────────────────────────────────────────────
 const rowCount = computed(() => Math.ceil(props.photos.length / Math.max(1, cols.value)))
 
-const virtualizer = useVirtualizer(
+const { virtualizer, rowOffset } = usePageVirtualizer(
+  rowsRef,
   computed(() => {
     // Read `rowHeight` here so it becomes a dependency of this computed.
     // Otherwise the options only re-evaluate when `rowCount` changes — and on
@@ -105,12 +108,7 @@ const virtualizer = useVirtualizer(
     // the virtualizer would keep its initial row-height estimate and space the
     // rows far too tall (landscape works by chance: cols 3 → 5 bumps rowCount).
     const estimatedRowHeight = rowHeight.value
-    return {
-      count: rowCount.value,
-      getScrollElement: () => scrollRef.value,
-      estimateSize: () => estimatedRowHeight,
-      overscan: 4,
-    }
+    return { count: rowCount.value, rowHeight: estimatedRowHeight, overscan: 4 }
   }),
 )
 
@@ -126,13 +124,13 @@ function rowPhotos(rowIndex: number): Photo[] {
 
 <template>
   <div ref="scrollRef" class="vpg">
-    <div class="vpg__inner" :style="{ height: `${totalSize}px` }">
+    <div ref="rowsRef" class="vpg__inner" :style="{ height: `${totalSize}px` }">
       <div
         v-for="row in virtualRows"
         :key="String(row.key)"
         class="vpg__row"
         :style="{
-          transform: `translateY(${row.start}px)`,
+          transform: `translateY(${rowOffset(row.start)}px)`,
           height: `${rowHeight}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
@@ -156,14 +154,7 @@ function rowPhotos(rowIndex: number): Photo[] {
 
 <style scoped>
 .vpg {
-  flex: 1;
   width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  contain: layout size style;
-  scrollbar-gutter: stable;
   padding: var(--grid-gap-compact);
   box-sizing: border-box;
 }

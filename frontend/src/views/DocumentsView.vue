@@ -69,12 +69,6 @@ import type { ListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
 const auth = useAuthStore()
-/**
- * The list scrolls inside its own column (the preview pane sits beside it),
- * so the page's offset has to be read from that element. `PageLayout` saves
- * and restores it; the view only points at it.
- */
-const listColumn = ref<HTMLElement | null>(null)
 /** The list's own key for the anchor and the offset — one per list, not per filter. */
 const ANCHOR_KEY = 'dokumente'
 
@@ -768,12 +762,10 @@ onMounted(async () => {
 <template>
   <PageLayout
     title="Dokumente"
-    scroll="self"
     width="full"
     :ready="!loading"
     :anchor-key="ANCHOR_KEY"
     legacy-anchor-key="documents"
-    :scroller="listColumn"
     :resolve-anchor="resolveListAnchor"
   >
     <template #actions>
@@ -870,7 +862,7 @@ onMounted(async () => {
          The header and toolbar above stay full width: a filter panel squeezed
          into a 600px column is worse than one that spans the page. -->
     <div class="list-region" :class="{ 'list-region--split': isSplit }">
-      <div ref="listColumn" class="list-column">
+      <div class="list-column">
     <!-- Sammelmappen: an extra layer above the documents, never a replacement -->
     <div v-if="!loading && visibleCollections.length > 0" class="collection-strip">
       <CollectionTiles
@@ -1067,7 +1059,11 @@ onMounted(async () => {
 
       </div>
 
-      <DocumentPreviewPane v-if="isSplit" :document-id="activeDocId" class="detail-column" />
+      <DocumentPreviewPane
+        v-if="isSplit"
+        :document-id="activeDocId"
+        class="detail-column page-aside page-aside--fill"
+      />
     </div>
 
     <!-- Dialogs -->
@@ -1106,39 +1102,30 @@ onMounted(async () => {
    Single column by default; the two-column grid only exists once the media
    query in useSplitView matches, so the stylesheet and the script cannot
    disagree about whether the pane is there. */
-/* The only part of the view that scrolls. `min-height: 0` is what lets it
-   shrink below its content and hand the overflow to the columns inside. */
+/* The list scrolls with the document (issue #1674), so a tap on the iOS
+   status bar takes it back to the top. */
 .list-region {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
 }
 .list-region--split {
   display: grid;
   grid-template-columns: minmax(500px, 600px) 1fr;
-  align-items: stretch;
+  align-items: start;
   gap: 1rem;
 }
-/* Each column scrolls on its own, so reading the preview never moves the list
-   and vice versa. */
 .list-column {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  /* A Sammelmappe row fills this column, so its focus ring lands on the
-     column's edge — which `overflow-y: auto` clips, horizontally too, and
-     the last row's ring falls off the bottom of the scrollable canvas.
-     Room on every side, taken straight back off the outside. */
-  padding: calc(0.75rem + var(--focus-ring-reach)) var(--focus-ring-reach);
-  margin: calc(-1 * var(--focus-ring-reach));
+  padding-top: 0.75rem;
 }
+/* The preview stays pinned beside the list and scrolls its own document, so
+   reading it never moves the list and walking the list never loses it. */
 .list-region--split .detail-column {
-  min-height: 0;
-  margin-block: 0.75rem;
+  --page-aside-inset: 0.75rem;
+  margin-top: 0.75rem;
 }
 .collection-strip {
   margin-bottom: 12px;

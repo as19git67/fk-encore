@@ -420,7 +420,7 @@ function transactionCash(tx: PortfolioTransaction): string {
 </script>
 
 <template>
-  <PageLayout :title="title" :hint="hint" width="wide" :ready="!loading">
+  <PageLayout :title="title" :hint="hint" width="wide" :ready="!loading" sticky-header>
     <template #actions>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
       <Button

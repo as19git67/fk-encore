@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, useSlots, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useSlots, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { PAGE_SCROLLER_KEY, STACK_TARGET_ID, formatDocumentTitle } from './pageLayout'
+import { STACK_TARGET_ID, formatDocumentTitle } from './pageLayout'
 import type { AnchorResolution } from './pageLayout'
 import { clearListAnchor, focusListAnchor, takeListAnchor } from '../../utils/listAnchor'
 import type { ListAnchor } from '../../utils/listAnchor'
-import {
-  clearPageScroller,
-  navigatedFromHistory,
-  readScrollOffset,
-  setPageScroller,
-} from '../../utils/scrollMemory'
+import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory'
 
 /**
  * The one page skeleton every view fills (issue #1272, stage 1).
@@ -22,7 +17,7 @@ import {
  * and content scrolls underneath it. Outside the app shell — Storybook, a
  * unit test — that target does not exist and the same markup renders inline.
  *
- *   <PageLayout title="Dokumente" scroll="self" width="full">
+ *   <PageLayout title="Dokumente" width="full">
  *     <template #actions>  … buttons beside the title             </template>
  *     <template #toolbar>  … search / filter / sort (sticky)       </template>
  *     <template #notice>   … Message banners (sticky, under toolbar)</template>
@@ -30,13 +25,23 @@ import {
  *     <template #selection>… the selection bar, only while active  </template>
  *   </PageLayout>
  *
+ * The document is the page's only scroller (issue #1674): iOS scrolls to the
+ * top on a tap on the status bar only when the document itself scrolls, so
+ * no view wraps its main content in a scroller of its own. Virtual grids
+ * measure against `window` (`usePageVirtualizer`), a column beside the list
+ * stays in view with the global `.page-aside` class.
+ *
  * `scroll="page"` (default): the content scrolls with the document.
- * `scroll="self"`: the page takes exactly one viewport below the sticky
- * stack and the content scrolls inside `.page-content`; that element is
- * provided as `pageScroller` for whoever needs the offset (scroll restore).
+ * `scroll="fill"`: the page takes exactly one viewport below the sticky
+ * stack and the content stretches to fill it — for a map, which has no
+ * length to scroll through and pans by itself. Nothing scrolls inside.
+ *
+ * `sticky-header`: the title row with `#actions` (the back button of a
+ * detail page and its actions) goes into the sticky stack as well, above the
+ * toolbar, so the way out never scrolls off the screen.
  */
 
-export type PageScroll = 'page' | 'self'
+export type PageScroll = 'page' | 'fill'
 export type PageWidth = 'normal' | 'wide' | 'full'
 
 const props = withDefaults(
@@ -69,12 +74,8 @@ const props = withDefaults(
     anchorKey?: string
     /** Read an older build's anchor key once, so an open tab keeps working. */
     legacyAnchorKey?: 'documents'
-    /**
-     * The element that actually scrolls, when it is not the page content —
-     * a list column beside a detail pane, say. Only needed for the offset
-     * fallback; the anchor is looked up in the whole page either way.
-     */
-    scroller?: HTMLElement | null
+    /** Lift the title row and `#actions` into the sticky stack (detail pages). */
+    stickyHeader?: boolean
   }>(),
   {
     hint: undefined,
@@ -84,7 +85,7 @@ const props = withDefaults(
     resolveAnchor: undefined,
     anchorKey: undefined,
     legacyAnchorKey: undefined,
-    scroller: undefined,
+    stickyHeader: false,
   },
 )
 
@@ -92,7 +93,6 @@ const slots = useSlots()
 const route = useRoute()
 
 const contentEl = ref<HTMLElement | null>(null)
-provide(PAGE_SCROLLER_KEY, contentEl)
 
 /**
  * Teleport only when the app shell provides the stack. Decided once on
@@ -105,7 +105,7 @@ onMounted(() => {
 })
 
 const stackTarget = `#${STACK_TARGET_ID}`
-const hasStackContent = computed(() => !!(slots.toolbar || slots.notice || slots.selection))
+const hasStackContent = computed(() => props.stickyHeader || !!(slots.toolbar || slots.notice || slots.selection))
 
 watch(
   () => [props.title, route?.path] as const,
@@ -117,9 +117,7 @@ watch(
 )
 
 // ── Scroll and focus restore (issue #1272, stage 4) ──────────────────────────
-// The page that is on screen owns the app's scroll position, so it registers
-// its scroller; the router saves that offset when a navigation leaves.
-const scroller = () => props.scroller ?? (props.scroll === 'self' ? contentEl.value : null)
+// The router saves the document's offset when a navigation leaves a page.
 
 const restoreKey = computed(() => props.anchorKey ?? String(route?.name ?? route?.path ?? ''))
 
@@ -156,15 +154,10 @@ async function restorePosition() {
   }
   const top = readScrollOffset(route?.fullPath ?? restoreKey.value)
   if (top === null) return
-  const el = scroller()
-  requestAnimationFrame(() => {
-    if (el) el.scrollTo({ top, behavior: 'instant' })
-    else window.scrollTo({ top, behavior: 'instant' })
-  })
+  requestAnimationFrame(() => window.scrollTo({ top, behavior: 'instant' }))
 }
 
 onMounted(() => {
-  setPageScroller(scroller)
   if (props.ready) void restorePosition()
 })
 watch(
@@ -173,7 +166,6 @@ watch(
     if (ready) void restorePosition()
   },
 )
-onBeforeUnmount(() => clearPageScroller(scroller))
 
 defineExpose({ contentEl })
 </script>
@@ -184,10 +176,19 @@ defineExpose({ contentEl })
     :class="[`page--scroll-${scroll}`, `page--width-${width}`]"
     :data-page-ready="ready ? 'true' : 'false'"
   >
-    <!-- Sticky part: toolbar, notices, selection bar. In the shell this
-         lands in the app's stack; elsewhere it renders right here. -->
+    <!-- Sticky part: title row (sticky-header), toolbar, notices, selection
+         bar. In the shell this lands in the app's stack; elsewhere it
+         renders right here. -->
     <Teleport v-if="hasStackContent" :to="stackTarget" :disabled="!hasStackTarget">
       <div class="page-stack" :class="[`page--width-${width}`, { 'page-stack--inline': !hasStackTarget }]">
+        <header v-if="stickyHeader" class="page-header page-header--sticky" data-testid="page-header">
+          <div class="page-heading">
+            <h1 class="page-title">{{ title }}</h1>
+          </div>
+          <div v-if="slots.actions" class="page-actions">
+            <slot name="actions" />
+          </div>
+        </header>
         <div v-if="slots.toolbar" class="page-toolbar" data-testid="page-toolbar">
           <slot name="toolbar" />
         </div>
@@ -200,7 +201,10 @@ defineExpose({ contentEl })
       </div>
     </Teleport>
 
-    <header class="page-header">
+    <!-- With a sticky header the hint stays on the page: it explains the
+         page once, it does not need to follow the reader down. -->
+    <p v-if="stickyHeader && hint" class="page-hint page-hint--lead">{{ hint }}</p>
+    <header v-if="!stickyHeader" class="page-header">
       <div class="page-heading">
         <h1 class="page-title">{{ title }}</h1>
         <p v-if="hint" class="page-hint">{{ hint }}</p>
@@ -224,8 +228,7 @@ defineExpose({ contentEl })
      begins with a bar of its own that pins itself under the app's stack
      (the document viewer's head) closes it by setting `--page-gap`, so
      nothing of the content shows through above that bar while it scrolls
-     past. On `scroll="self"` the content is inset by `--focus-ring-reach`
-     and pulled back out again, so that much gap reads as none. */
+     past. */
   gap: var(--page-gap, var(--space-3));
   width: 100%;
   min-width: 0;
@@ -236,29 +239,16 @@ defineExpose({ contentEl })
 .page--width-wide { max-width: var(--page-max-wide); }
 .page--width-full { max-width: none; }
 
-/* One viewport below the sticky stack; the content owns the scrollbar. */
-.page--scroll-self {
+/* One viewport below the sticky stack, filled by the content (a map). */
+.page--scroll-fill {
   height: calc(100dvh - var(--app-stack-height));
-  overflow: hidden;
   padding-bottom: 0;
 }
-.page--scroll-self .page-content {
+.page--scroll-fill .page-content {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  /* Keeps absolutely placed content (visually hidden labels) inside this
-     scroller; placed against <main> they would lengthen the document and
-     let the whole page scroll under the app's stack. */
-  position: relative;
   display: flex;
   flex-direction: column;
-  /* A scroller clips what reaches past it, and a focus ring reaches 4px
-     past its element. A row that fills this column loses the ring on the
-     sides; the last row loses it at the bottom, where no amount of
-     scrolling brings it back. Room on every side, taken straight off
-     again as a negative margin, so nothing moves. */
-  padding: var(--focus-ring-reach);
-  margin: calc(-1 * var(--focus-ring-reach));
 }
 
 .page-header {
@@ -284,6 +274,14 @@ defineExpose({ contentEl })
   margin: var(--space-1) 0 0;
   color: var(--p-text-muted-color);
   font-size: var(--text-md);
+}
+/* In the sticky stack the title row is one line of the stack, not the
+   head of the page: smaller, so the stack keeps the viewport for content. */
+.page-header--sticky .page-title {
+  font-size: var(--text-xl);
+}
+.page-hint--lead {
+  margin: 0;
 }
 /* Actions wrap below the title on a narrow screen instead of pushing past
    the viewport edge; each button then wraps within the row. */
@@ -341,6 +339,17 @@ defineExpose({ contentEl })
 @media (max-width: 639px) {
   .page-title {
     font-size: var(--text-2xl);
+  }
+  /* On a phone the actions stay beside the title rather than wrapping under
+     it, so the sticky row costs one line; the title gives way. */
+  .page-header--sticky {
+    flex-wrap: nowrap;
+  }
+  .page-header--sticky .page-title {
+    font-size: var(--text-lg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 </style>

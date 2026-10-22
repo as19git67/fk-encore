@@ -72,7 +72,7 @@ vi.mock('../components/DocumentThumbnail.vue', () => ({ default: { render: () =>
 
 import DocumentCollectionDetailView from './DocumentCollectionDetailView.vue'
 import { collectionAnchorKey, saveListAnchor, takeListAnchor } from '../utils/listAnchor'
-import { markNavigation, setPageScroller } from '../utils/scrollMemory'
+import { markNavigation } from '../utils/scrollMemory'
 import { STACK_TARGET_ID } from '../components/layout/pageLayout'
 
 function makeRouter(): Router {
@@ -110,7 +110,6 @@ beforeEach(() => {
   stack.id = STACK_TARGET_ID
   document.body.appendChild(stack)
   sessionStorage.clear()
-  setPageScroller(null)
   markNavigation(false)
   Element.prototype.scrollIntoView = vi.fn()
   // jsdom has none; PrimeVue and the page measure with it.

@@ -778,7 +778,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 <template>
   <PageLayout
     :title="selectedPersonDetail ? selectedPersonDetail.name : 'Personen'"
-    scroll="self"
     width="full"
     :ready="!loading"
     :anchor-key="ANCHOR_KEY"
@@ -877,7 +876,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
       <div
           ref="personSidebarSheet"
-          class="person-sidebar-sheet"
+          class="person-sidebar-sheet page-aside"
           :class="{ 'is-open': mobileSidebarOpen }"
           :role="sheetIsModal ? 'dialog' : undefined"
           :aria-modal="sheetIsModal ? 'true' : undefined"
@@ -1011,11 +1010,10 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 /* Page frame and title: PageLayout (issue #1272). Search, filter, sort and
    the result count: ListToolbar (issue #1278). */
 
+/* Photos and details side by side; the document scrolls the photos and the
+   details stay pinned beside them (`.page-aside`, issue #1674). */
 .gallery-layout {
   display: flex;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
 }
 
 /* ── Person Grid (Level 1) ──────────────────────────────────────────────── */
@@ -1023,11 +1021,8 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
    is the one margin, so the person tiles line up with the gallery's and the
    album grid's — all three grids add the same 6px inside their scroller. */
 .persons-grid-layout {
-  flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .person-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
@@ -1035,8 +1030,9 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 .pfm-label { font-weight: 500; font-size: var(--text-base); color: var(--p-text-muted-color); }
 
 /* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
+/* Desktop: the pinned column beside the photos (`.page-aside`). */
 .person-sidebar-sheet {
-  display: contents;
+  flex-shrink: 0;
 }
 
 .sidebar-sheet-header { display: none; }
@@ -1059,6 +1055,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
   .person-sidebar-sheet {
     display: block;
     position: fixed;
+    top: auto;
     bottom: 0;
     left: 0;
     right: 0;

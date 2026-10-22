@@ -150,10 +150,48 @@ body {
   overflow-x: clip;
 }
 
+/* The document is the page's one scroller (issue #1674). Whatever the
+   browser scrolls into view by itself — the next element on Tab, a hash
+   anchor — lands below the sticky stack, not under it. */
+html {
+  scroll-padding-top: var(--app-stack-height, 0px);
+}
+
+/* A column beside the main list that stays in view while the document
+   scrolls (issue #1674): the photo details beside a grid, the preview beside
+   the document list, the PDF beside a document's attributes. It pins itself
+   right under the sticky stack and scrolls its own content, so it never
+   needs a `top:` of its own. `--page-aside-inset` keeps a gap above and
+   below a card that should not touch the stack. `.page-aside--fill` takes
+   the whole height even when its content is shorter — a viewer that sizes
+   itself to its box. Below `md` a column like this is usually a sheet or
+   gone; the view decides that with its own media query. */
+.page-aside {
+  position: sticky;
+  top: calc(var(--app-stack-height, 0px) + var(--page-aside-inset, 0px));
+  align-self: flex-start;
+  max-height: calc(100dvh - var(--app-stack-height, 0px) - 2 * var(--page-aside-inset, 0px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.page-aside--fill {
+  height: calc(100dvh - var(--app-stack-height, 0px) - 2 * var(--page-aside-inset, 0px));
+}
+
+/* The bottom counterpart: a bar that stays at the bottom of the screen while
+   the document scrolls above it — the assistant's question field. */
+.page-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
 /* Anything scrolled into view (a list row on the way back from a detail
-   page, a heading anchor) has to land below the sticky stack, not under it. */
+   page, a heading anchor) lands a little below the sticky stack; the stack
+   itself is cleared by the document's `scroll-padding-top` above. */
 .scroll-anchor {
-  scroll-margin-top: calc(var(--app-stack-height) + var(--space-2));
+  scroll-margin-top: var(--space-2);
 }
 
 /* Visible keyboard focus, one look everywhere. */

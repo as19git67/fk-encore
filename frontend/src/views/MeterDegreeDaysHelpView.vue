@@ -24,7 +24,7 @@ const examples = [
 </script>
 
 <template>
-  <PageLayout title="Gradtage und Witterungsbereinigung" width="normal">
+  <PageLayout title="Gradtage und Witterungsbereinigung" width="normal" sticky-header>
     <template #actions>
       <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
     </template>

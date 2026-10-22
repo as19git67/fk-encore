@@ -2,13 +2,14 @@
 /**
  * Virtualized grid of face-annotated photo thumbnails for a single person.
  *
- * Mirrors the architecture of VirtualGallery / VirtualAlbumGrid: TanStack
- * useVirtualizer virtualizes ROWS (not individual cells). Each rendered row is
+ * Mirrors the architecture of VirtualGallery / VirtualAlbumGrid: TanStack's
+ * window virtualizer (`usePageVirtualizer`, the document scrolls — issue
+ * #1674) virtualizes ROWS (not individual cells). Each rendered row is
  * a CSS grid containing `cols` photos, and the fixed square row height lets the
  * virtualizer compute the scroll area without measuring every thumbnail.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import { usePageVirtualizer } from '../composables/usePageVirtualizer'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
 import { getPhotoDetailsBatch, type CurationStatus, type FaceBBox } from '../api/photos'
@@ -58,6 +59,7 @@ const cellSize = ref(TARGET_CELL_MIN_PX)
 const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
+const rowsRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
@@ -93,13 +95,9 @@ onBeforeUnmount(() => {
 
 const rowCount = computed(() => Math.ceil(props.items.length / Math.max(1, cols.value)))
 
-const virtualizer = useVirtualizer(
-  computed(() => ({
-    count: rowCount.value,
-    getScrollElement: () => scrollRef.value,
-    estimateSize: () => rowHeight.value,
-    overscan: 4,
-  })),
+const { virtualizer, scrollToRow, rowOffset } = usePageVirtualizer(
+  rowsRef,
+  computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: 4 })),
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems() as VirtualRow[])
@@ -179,7 +177,7 @@ watch(() => props.items, () => {
 
 function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
   if (idx < 0 || idx >= props.items.length || cols.value <= 0) return
-  virtualizer.value.scrollToIndex(Math.floor(idx / cols.value), { align })
+  scrollToRow(Math.floor(idx / cols.value), align)
 }
 
 watch(() => props.selectedIndex, (idx) => scrollToItemIndex(idx, 'auto'))
@@ -213,13 +211,13 @@ function openPhoto(idx: number) {
     </div>
     <div v-else-if="items.length === 0" class="info-text">Keine Fotos.</div>
 
-    <div v-else class="pg-inner" :style="{ height: `${totalSize}px` }">
+    <div v-else ref="rowsRef" class="pg-inner" :style="{ height: `${totalSize}px` }">
       <div
         v-for="row in renderedRows"
         :key="String(row.key)"
         class="pg-row"
         :style="{
-          transform: `translateY(${row.start}px)`,
+          transform: `translateY(${rowOffset(row.start)}px)`,
           height: `${row.size}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
@@ -287,12 +285,6 @@ function openPhoto(idx: number) {
   flex: 1;
   min-width: 0;
   width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  contain: layout size style;
-  scrollbar-gutter: stable;
   padding: 6px;
   box-sizing: border-box;
 }

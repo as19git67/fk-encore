@@ -618,7 +618,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <PageLayout title="Gruppen-Review" width="normal" :ready="!loading">
+  <PageLayout title="Gruppen-Review" width="normal" :ready="!loading" sticky-header>
     <template #actions>
       <Button
         icon="pi pi-arrow-left"

@@ -101,6 +101,7 @@ onMounted(load)
     hint="Wähle die Zähler aus, die in der Schnell-Erfassung erscheinen sollen, und sortiere sie in deiner Ablese-Reihenfolge."
     width="normal"
     :ready="!loading"
+    sticky-header
   >
     <template #actions>
       <Button icon="pi pi-arrow-left" label="Zur Erfassung" severity="secondary" outlined @click="router.push({ name: 'zaehler-schnellerfassung' })" />
