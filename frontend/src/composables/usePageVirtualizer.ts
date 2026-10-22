@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
-import { useWindowVirtualizer } from '@tanstack/vue-virtual'
+import { useVirtualizer, useWindowVirtualizer } from '@tanstack/vue-virtual'
+import type { Virtualizer } from '@tanstack/vue-virtual'
 
 /**
  * A row virtualizer for a grid that scrolls with the document (issue #1674).
@@ -20,6 +21,16 @@ import { useWindowVirtualizer } from '@tanstack/vue-virtual'
  *
  * Rows have a fixed height in every grid here (square cell plus gap), which
  * is what lets the centre be computed without measuring.
+ *
+ * The exception: the big photo grids (gallery, a person's photos, the shared
+ * album) pass a `scroller` and scroll inside it again. With tens of thousands
+ * of photos the document grew millions of pixels tall, and a jump from one
+ * end to the other — or a tap on the status bar — made Safari's GPU process
+ * allocate past its limit (10 GB in the jetsam log) and the page crashed,
+ * from about 6,000 photos on. An inner scroller does not hit that. The price
+ * is the status-bar tap, which iOS only gives the document. With a scroller
+ * the rows are measured against it: `scrollMargin` is their offset inside
+ * it, there is no sticky stack to keep clear of, and scrolling moves it.
  */
 
 export interface PageVirtualizerOptions {
@@ -49,16 +60,39 @@ function documentTop(el: HTMLElement): number {
 export function usePageVirtualizer(
   rowsEl: Ref<HTMLElement | null>,
   options: Ref<PageVirtualizerOptions>,
+  scroller?: Ref<HTMLElement | null>,
 ) {
   const scrollMargin = ref(0)
   const stack = ref(0)
 
+  /** How far the grid has scrolled: the scroller's offset, else the page's. */
+  function scrollTop(): number {
+    return scroller ? (scroller.value?.scrollTop ?? 0) : window.scrollY
+  }
+
+  /** The height of what the scroller (or the window) shows. */
+  function viewportHeight(): number {
+    return scroller ? (scroller.value?.clientHeight ?? 0) : window.innerHeight
+  }
+
+  function scrollToOffset(top: number) {
+    const target = scroller ? scroller.value : window
+    target?.scrollTo({ top: Math.max(0, Math.round(top)), behavior: 'instant' })
+  }
+
   function measure() {
     const el = rowsEl.value
     if (!el) return
-    const top = documentTop(el)
+    let top: number
+    if (scroller) {
+      const box = scroller.value
+      if (!box) return
+      top = Math.round(el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop)
+    } else {
+      top = documentTop(el)
+    }
     if (top !== scrollMargin.value) scrollMargin.value = top
-    const height = stackHeight()
+    const height = scroller ? 0 : stackHeight()
     if (height !== stack.value) stack.value = height
   }
 
@@ -78,8 +112,8 @@ export function usePageVirtualizer(
   let lastScrollY = 0
   let settleTimer: ReturnType<typeof setTimeout> | null = null
   function onScroll() {
-    const y = window.scrollY
-    if (Math.abs(y - lastScrollY) > window.innerHeight) flying.value = true
+    const y = scrollTop()
+    if (Math.abs(y - lastScrollY) > viewportHeight()) flying.value = true
     lastScrollY = y
     if (settleTimer) clearTimeout(settleTimer)
     settleTimer = setTimeout(() => {
@@ -88,17 +122,33 @@ export function usePageVirtualizer(
     }, SETTLE_MS)
   }
 
+  let scrollTarget: HTMLElement | Window | null = null
+  function listenTo(target: HTMLElement | Window | null) {
+    if (target === scrollTarget) return
+    scrollTarget?.removeEventListener('scroll', onScroll)
+    scrollTarget = target
+    scrollTarget?.addEventListener('scroll', onScroll, { passive: true })
+    lastScrollY = scrollTop()
+  }
+
   onMounted(() => {
     measure()
-    lastScrollY = window.scrollY
-    window.addEventListener('scroll', onScroll, { passive: true })
+    listenTo(scroller ? scroller.value : window)
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(measure)
       observer.observe(document.body)
       if (rowsEl.value) observer.observe(rowsEl.value)
+      if (scroller?.value) observer.observe(scroller.value)
     }
     window.addEventListener('resize', measure)
   })
+  if (scroller) {
+    watch(scroller, (el) => {
+      listenTo(el)
+      if (el) observer?.observe(el)
+      measure()
+    }, { flush: 'post' })
+  }
   // The rows may only appear once their data has arrived (`v-else` after a
   // spinner); measure them the moment they do.
   watch(rowsEl, (el) => {
@@ -109,25 +159,28 @@ export function usePageVirtualizer(
     observer?.disconnect()
     observer = null
     window.removeEventListener('resize', measure)
-    window.removeEventListener('scroll', onScroll)
+    listenTo(null)
     if (settleTimer) clearTimeout(settleTimer)
     settleTimer = null
   })
 
-  const virtualizer = useWindowVirtualizer(
-    computed(() => {
-      const { count, rowHeight, overscan } = options.value
-      return {
-        count,
-        estimateSize: () => rowHeight,
-        overscan: overscan ?? 4,
-        scrollMargin: scrollMargin.value,
-        scrollPaddingStart: stack.value,
-      }
-    }),
-  )
+  function rowOptions() {
+    const { count, rowHeight, overscan } = options.value
+    return {
+      count,
+      estimateSize: () => rowHeight,
+      overscan: overscan ?? 4,
+      scrollMargin: scrollMargin.value,
+      scrollPaddingStart: stack.value,
+    }
+  }
+  // Both kinds only ever get read (`getVirtualItems`, `getTotalSize`), so the
+  // callers see one type.
+  const virtualizer = (scroller
+    ? useVirtualizer(computed(() => ({ ...rowOptions(), getScrollElement: () => scroller.value })))
+    : useWindowVirtualizer(computed(rowOptions))) as Ref<Virtualizer<HTMLElement | Window, Element>>
 
-  /** Where row `index` begins, in document coordinates. */
+  /** Where row `index` begins, in the scroller's (or the document's) coordinates. */
   function rowStart(index: number): number {
     return scrollMargin.value + index * options.value.rowHeight
   }
@@ -148,20 +201,21 @@ export function usePageVirtualizer(
     measure()
     const top = rowStart(index)
     const { rowHeight } = options.value
-    const visible = window.innerHeight - stack.value
+    const height = viewportHeight()
+    const visible = height - stack.value
     const start = top - stack.value
-    const end = top + rowHeight - window.innerHeight
+    const end = top + rowHeight - height
     let offset: number
     if (align === 'start') offset = start
     else if (align === 'end') offset = end
     else if (align === 'center') offset = start - (visible - rowHeight) / 2
     else {
-      const current = window.scrollY
+      const current = scrollTop()
       if (start < current) offset = start
       else if (end > current) offset = end
       else return
     }
-    window.scrollTo({ top: Math.max(0, Math.round(offset)), behavior: 'instant' })
+    scrollToOffset(offset)
   }
 
   /** The grid-relative offset to place a virtual row at. */
@@ -169,6 +223,15 @@ export function usePageVirtualizer(
     return start - scrollMargin.value
   }
 
-  return { virtualizer, scrollToRow, rowOffset, scrollMargin, measure, flying }
+  /**
+   * The band of the grid's own rows that is visible right now, below the
+   * sticky stack, in the grid's coordinates (0 = its first row).
+   */
+  function visibleBand(): { top: number; bottom: number } {
+    const at = scrollTop() - scrollMargin.value
+    return { top: at + stack.value, bottom: at + viewportHeight() }
+  }
+
+  return { virtualizer, scrollToRow, rowOffset, scrollMargin, measure, flying, scrollTop, viewportHeight, visibleBand }
 }
 

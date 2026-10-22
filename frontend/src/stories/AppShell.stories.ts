@@ -208,7 +208,7 @@ const libraryHandler = http.get('/api/gallery/grid', ({ request }) => {
 })
 
 export const Galerie: Story = {
-  name: 'Galerie: Sprung ans Ende lässt den Stack stehen',
+  name: 'Galerie: scrollt im eigenen Kasten, Sprung ans Ende lässt den Stack stehen',
   parameters: {
     testViewport: { width: 390, height: 844 },
     msw: {
@@ -237,19 +237,26 @@ export const Galerie: Story = {
       () => Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes(label)),
       `the button "${label}"`,
     )
+    // The grid scrolls in its own box, the document not at all: a document
+    // millions of pixels tall crashed Safari on a jump to the other end.
+    const grid = document.querySelector<HTMLElement>('.virtual-gallery')!
     // The grid lands on the newest photo; to the oldest and back again.
     ;(await jump('Zum ältesten')).click()
     await settle()
+    if (grid.scrollTop > 200) throw new Error(`the jump to the oldest stopped at ${grid.scrollTop}`)
     ;(await jump('Zum neuesten')).click()
     await settle()
-    const end = document.documentElement.scrollHeight - window.innerHeight
-    if (end - window.scrollY > 200) throw new Error(`the jump to the newest stopped at ${window.scrollY} of ${end}`)
+    const end = grid.scrollHeight - grid.clientHeight
+    if (end < 1000) throw new Error(`the grid does not scroll in its own box (${end}px to scroll)`)
+    if (end - grid.scrollTop > 200) throw new Error(`the jump to the newest stopped at ${grid.scrollTop} of ${end}`)
+    const pageEnd = document.documentElement.scrollHeight - window.innerHeight
+    if (pageEnd > 1) throw new Error(`the document scrolls as well (${pageEnd}px)`)
     if (stackTop() !== 0) throw new Error(`the sticky stack left the screen after the jump (top ${stackTop()})`)
 
-    // Scrolling away by hand (the iPhone's status bar) stays where it went:
-    // nothing steers back to the photo the jump aimed at.
-    window.scrollTo({ top: 0, behavior: 'instant' })
+    // Scrolling away by hand stays where it went: nothing steers back to the
+    // photo the jump aimed at.
+    grid.scrollTo({ top: 0, behavior: 'instant' })
     await settle()
-    if (window.scrollY !== 0) throw new Error(`the grid scrolled back to ${window.scrollY} after the user left`)
+    if (grid.scrollTop !== 0) throw new Error(`the grid scrolled back to ${grid.scrollTop} after the user left`)
   },
 }

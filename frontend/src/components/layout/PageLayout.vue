@@ -34,7 +34,10 @@ import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory
  * `scroll="page"` (default): the content scrolls with the document.
  * `scroll="fill"`: the page takes exactly one viewport below the sticky
  * stack and the content stretches to fill it — for a map, which has no
- * length to scroll through and pans by itself. Nothing scrolls inside.
+ * length to scroll through and pans by itself, and for the big photo grids
+ * (gallery, a person's photos, the shared album), which scroll inside their
+ * own box: with tens of thousands of photos a document that tall crashed
+ * Safari (see `usePageVirtualizer`).
  *
  * `sticky-header`: the title row with `#actions` (the back button of a
  * detail page and its actions) goes into the sticky stack as well, above the

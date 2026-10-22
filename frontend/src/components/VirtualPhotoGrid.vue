@@ -3,9 +3,9 @@
  * Virtualized grid for an in-memory list of photos.
  *
  * Mirrors the row-virtualization architecture of `VirtualGallery` /
- * `VirtualAlbumGrid` (TanStack's window virtualizer over ROWS via
- * `usePageVirtualizer`, fixed row height = square cell + gap, the document
- * scrolls — issue #1674), but the data source is a plain `Photo[]` the parent
+ * `VirtualAlbumGrid` (TanStack's virtualizer over ROWS via
+ * `usePageVirtualizer`, fixed row height = square cell + gap, its own
+ * scroller like the gallery's), but the data source is a plain `Photo[]` the parent
  * already holds — no server pagination, no `useGallerySource`. Used by the
  * public/shared album view, which loads the whole album up front.
  *
@@ -110,6 +110,7 @@ const { virtualizer, rowOffset, flying } = usePageVirtualizer(
     const estimatedRowHeight = rowHeight.value
     return { count: rowCount.value, rowHeight: estimatedRowHeight, overscan: 4 }
   }),
+  scrollRef,
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
@@ -155,7 +156,14 @@ function rowPhotos(rowIndex: number): Photo[] {
 
 <style scoped>
 .vpg {
+  flex: 1;
   width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  contain: layout size style;
+  scrollbar-gutter: stable;
   padding: var(--grid-gap-compact);
   box-sizing: border-box;
 }

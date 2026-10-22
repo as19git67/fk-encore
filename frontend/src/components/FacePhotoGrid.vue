@@ -3,8 +3,9 @@
  * Virtualized grid of face-annotated photo thumbnails for a single person.
  *
  * Mirrors the architecture of VirtualGallery / VirtualAlbumGrid: TanStack's
- * window virtualizer (`usePageVirtualizer`, the document scrolls — issue
- * #1674) virtualizes ROWS (not individual cells). Each rendered row is
+ * virtualizer (`usePageVirtualizer`) virtualizes ROWS (not individual cells).
+ * Like the gallery, the grid is its own scroller: a person can have tens of
+ * thousands of photos, and a document that tall crashed Safari. Each rendered row is
  * a CSS grid containing `cols` photos, and the fixed square row height lets the
  * virtualizer compute the scroll area without measuring every thumbnail.
  */
@@ -98,6 +99,7 @@ const rowCount = computed(() => Math.ceil(props.items.length / Math.max(1, cols.
 const { virtualizer, scrollToRow, rowOffset, flying } = usePageVirtualizer(
   rowsRef,
   computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: 4 })),
+  scrollRef,
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems() as VirtualRow[])
@@ -286,6 +288,12 @@ function openPhoto(idx: number) {
   flex: 1;
   min-width: 0;
   width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  contain: layout size style;
+  scrollbar-gutter: stable;
   padding: 6px;
   box-sizing: border-box;
 }
