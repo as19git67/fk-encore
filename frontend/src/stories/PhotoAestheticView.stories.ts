@@ -37,6 +37,7 @@ const BASE: AestheticOverview = {
   scored: 19530,
   backlog: 458,
   active_run_id: null,
+  last_tick: { at: '2026-10-21T13:55:00Z', result: 'Außerhalb des Zeitfensters' },
   runs: [NIGHT, MANUAL, FAILED],
   scorer: { state: 'unloaded', error: null, version: null },
   scorer_error: null,
@@ -53,6 +54,7 @@ const RUNNING: AestheticOverview = {
   ...BASE,
   in_window: true,
   active_run_id: 4,
+  last_tick: { at: new Date(Date.now() - 23 * 60_000).toISOString(), result: 'Lauf 4 gestartet' },
   scorer: { state: 'loaded', error: null, version: 'qalign_v1' },
   runs: [
     { ...NIGHT, id: 4, status: 'running', phase: 'scoring', backlog: 458, scored: 212, failed: 1, remaining: null, ended_reason: null, ended_at: null, gpu_returned: false, started_at: new Date(Date.now() - 23 * 60_000).toISOString() },

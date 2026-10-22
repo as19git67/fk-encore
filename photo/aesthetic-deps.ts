@@ -14,9 +14,11 @@ import { photos } from "../db/schema";
 import { convertHeicToJpeg } from "./heic-convert.service";
 import { getPhotoDiskPath } from "./photo.service";
 import * as store from "./aesthetic-store";
-import type { LeaseView, NightDeps, ScoreOutcome, ScorerStatus } from "./aesthetic-nightly";
+import type { LeaseView, LlmLoad, NightDeps, ScoreOutcome, ScorerStatus } from "./aesthetic-nightly";
 import { startHeadJob, type HeadDeps, type HeadReport, type HeadScore } from "./aesthetic-head";
 import { fetchWithTimeout } from "./rpc-timeout";
+import { AI_PRIORITY } from "../ai-queue/slot-helper";
+import type { QueueModelStatus } from "../ai-queue/api";
 
 const EMBEDDING_SERVICE_URL = (process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001").replace(/\/$/, "");
 
@@ -95,13 +97,22 @@ export async function scorePhoto(photoId: number): Promise<ScoreOutcome> {
 
 async function lease(): Promise<LeaseView> {
   const status = await user.getLlmGpuLease();
-  return { active: status.lease.active, reloadState: status.reload.state, reloadDetail: status.reload.detail };
+  return {
+    active: status.lease.active,
+    reloadState: status.reload.state,
+    reloadDetail: status.reload.detail,
+    llmLoaded: status.llm_loaded,
+  };
 }
 
-async function llmBusy(): Promise<boolean> {
+async function llmLoad(): Promise<LlmLoad> {
   const { models } = await aiqueue.getQueueStatus();
-  const llm = models.find((m: { model: string }) => m.model === "llm");
-  return !!llm && (llm.activeSlot !== null || llm.waitingCount > 0);
+  const llm = models.find((m: QueueModelStatus) => m.model === "llm");
+  if (!llm) return "idle";
+  const { p0, p1 } = llm.waitingByPriority;
+  const activePriority = llm.activeSlot?.priority ?? null;
+  if (p0 > 0 || p1 > 0 || (activePriority !== null && activePriority < AI_PRIORITY.background)) return "interactive";
+  return llm.activeSlot || llm.waitingCount > 0 ? "background" : "idle";
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -169,7 +180,7 @@ export function realNightDeps(): NightDeps {
     giveBack: async () => {
       await user.returnLlmGpu();
     },
-    llmBusy,
+    llmLoad,
     scorerStatus,
     scorerLoad: () => lifecycle("/load"),
     scorerUnload: () => lifecycle("/unload"),

@@ -35,6 +35,14 @@ export const SWAP_TIMEOUT_MS = 30 * 60_000;
 /** The first load downloads the weights (~16 GB) into the models volume. */
 export const LOAD_TIMEOUT_MS = 2 * 60 * 60_000;
 export const UNLOAD_TIMEOUT_MS = 10 * 60_000;
+/**
+ * How long background work for the LLM (a classification backlog, say) may
+ * hold the window up. A busy queue at every tick would otherwise keep the
+ * job from ever starting; the lend waits for the request in flight, and the
+ * CPU twin carries on with the rest. Somebody waiting for an answer (the
+ * assistant, a critique) always wins.
+ */
+export const BACKGROUND_PATIENCE_MS = 30 * 60_000;
 
 export const PHASE = {
   lend: "gpu:lend",
@@ -50,7 +58,12 @@ export interface LeaseView {
   /** The llm-service's reload state: idle, stopping, downloading, loading, ready, error. */
   reloadState: string;
   reloadDetail: string | null;
+  /** Whether the llm-service has a model up and answers; a past failed reload leaves `error` behind while it does. */
+  llmLoaded: boolean;
 }
+
+/** Who holds or waits for the `llm` slot: nobody, background jobs only, or somebody waiting for an answer. */
+export type LlmLoad = "idle" | "background" | "interactive";
 
 export type ScorerState = "unloaded" | "loading" | "loaded" | "unloading" | "error";
 
@@ -83,8 +96,8 @@ export interface NightDeps {
   lease(): Promise<LeaseView>;
   lend(): Promise<void>;
   giveBack(): Promise<void>;
-  /** Whether an LLM request holds or waits for the `llm` slot in ai-queue. */
-  llmBusy(): Promise<boolean>;
+  /** Who holds or waits for the `llm` slot in ai-queue. */
+  llmLoad(): Promise<LlmLoad>;
   scorerStatus(): Promise<ScorerStatus>;
   scorerLoad(): Promise<void>;
   scorerUnload(): Promise<void>;
@@ -109,6 +122,22 @@ interface Active {
 
 let active: Active | null = null;
 
+/** Since when background LLM work has kept tonight's window from starting; null while it has not. */
+let busySince: number | null = null;
+
+export interface TickResult {
+  at: string;
+  /** What the tick did, or why nothing started, in words for the page. */
+  result: string;
+}
+
+let lastTickResult: TickResult | null = null;
+
+/** The last five-minute tick in this process, if one ran since the app started. */
+export function lastTick(): TickResult | null {
+  return lastTickResult;
+}
+
 /** The run in progress in this process, if any. */
 export function activeRun(): { runId: number | null; trigger: AestheticRunTrigger } | null {
   return active ? { runId: active.runId, trigger: active.trigger } : null;
@@ -124,6 +153,8 @@ export function stopActiveRun(): boolean {
 /** Test hook. */
 export function _resetNightly(): void {
   active = null;
+  busySince = null;
+  lastTickResult = null;
 }
 
 export type StartResult =
@@ -162,17 +193,32 @@ async function blocker(trigger: AestheticRunTrigger, deps: NightDeps): Promise<s
   if (trigger === "window") {
     const settings = await deps.store.getSettings();
     if (!settings.enabled) return "Der nächtliche Lauf ist ausgeschaltet";
-    if (!inWindow(deps.now(), settings.window_start, settings.window_end)) return "Außerhalb des Zeitfensters";
+    if (!inWindow(deps.now(), settings.window_start, settings.window_end)) {
+      busySince = null;
+      return "Außerhalb des Zeitfensters";
+    }
   }
   if ((await deps.store.countBacklog(AESTHETIC_MODEL)) === 0) return "Alle Fotos sind bewertet";
   const lease = await deps.lease();
   if (lease.active) return "Die GPU ist schon verliehen, etwa an einen Benchmark-Lauf";
-  if (lease.reloadState !== "idle" && lease.reloadState !== "ready") {
-    return lease.reloadState === "error"
-      ? `Das KI-Modell meldet einen Fehler: ${lease.reloadDetail ?? "unbekannt"}`
-      : "Das KI-Modell lädt gerade";
+  if (lease.reloadState === "error") {
+    // The state of the last reload, not of the service: a lend the
+    // llm-service rolled back, or an activation that failed, leaves `error`
+    // behind until the next reload, while the model it restored answers.
+    if (!lease.llmLoaded) return `Das KI-Modell meldet einen Fehler: ${lease.reloadDetail ?? "unbekannt"}`;
+  } else if (lease.reloadState !== "idle" && lease.reloadState !== "ready") {
+    return "Das KI-Modell lädt gerade";
   }
-  if (trigger === "window" && (await deps.llmBusy())) return "Das KI-Modell beantwortet gerade eine Anfrage";
+  if (trigger === "window") {
+    const load = await deps.llmLoad();
+    if (load === "interactive") return "Das KI-Modell beantwortet gerade eine Anfrage";
+    if (load === "background") {
+      const now = deps.now().getTime();
+      busySince ??= now;
+      if (now - busySince < BACKGROUND_PATIENCE_MS) return "Das KI-Modell arbeitet gerade Hintergrundaufgaben ab";
+    }
+  }
+  busySince = null;
   return null;
 }
 
@@ -402,10 +448,20 @@ export async function recover(deps: NightDeps): Promise<void> {
 
 /** What the five-minute job does: settle earlier runs, then start tonight's if it may. */
 export async function aestheticTick(deps: NightDeps): Promise<string> {
-  if (active) return "Ein Lauf ist im Gang";
-  await recover(deps);
-  const result = await tryStart("window", deps);
-  if (!result.started) return result.reason;
-  await result.done;
-  return `Lauf ${result.runId} beendet`;
+  const note = (result: string) => {
+    lastTickResult = { at: deps.now().toISOString(), result };
+    return result;
+  };
+  if (active) return note("Ein Lauf ist im Gang");
+  try {
+    await recover(deps);
+    const result = await tryStart("window", deps);
+    if (!result.started) return note(result.reason);
+    note(`Lauf ${result.runId} gestartet`);
+    await result.done;
+    return note(`Lauf ${result.runId} beendet`);
+  } catch (err) {
+    note(`Fehler: ${(err as Error).message}`);
+    throw err;
+  }
 }
