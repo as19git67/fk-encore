@@ -2342,6 +2342,10 @@ function triggerFileSelect() {
 // upload, leave) as a flat list. Filter, sort and select mode are no longer
 // here — they are part of the shared toolbar. ResponsiveToolbar pushes
 // whatever does not fit into an overflow dropdown. Order = reading order.
+// As in the gallery: the jump and the upload are icons everywhere, and on
+// a phone the group review gets a short label (the tooltip keeps the long
+// text).
+const phone = useBelow('sm')
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
@@ -2362,7 +2366,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (jumpButton.value && viewMode.value !== 'map') {
     items.push({
       key: 'jump',
-      label: jumpButton.value.label,
+      label: '',
       title: jumpButton.value.label,
       icon: jumpButton.value.icon,
       severity: 'secondary',
@@ -2374,7 +2378,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (canReviewGroups.value && unreviewedGroupCount.value > 0 && viewMode.value !== 'map') {
     items.push({
       key: 'group-review',
-      label: `Gruppen bearbeiten (${unreviewedGroupCount.value} offen)`,
+      label: phone.value ? `Gruppen (${unreviewedGroupCount.value})` : `Gruppen bearbeiten (${unreviewedGroupCount.value} offen)`,
       title: `Gruppen bearbeiten (${unreviewedGroupCount.value} offen)`,
       icon: 'pi pi-images',
       severity: 'success',
@@ -2435,7 +2439,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
           }
         : {
             key: 'upload',
-            label: 'Hochladen',
+            label: '',
             title: 'Fotos hochladen',
             icon: 'pi pi-upload',
             command: triggerFileSelect,
@@ -2620,7 +2624,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
          input, the album's own actions sit in its actions slot; filter,
          sort, the chips, the count and select mode are the toolbar's own. -->
     <template #toolbar>
-      <ListToolbar v-if="album" :model="toolbar">
+      <ListToolbar v-if="album" :model="toolbar" compact>
         <template #search>
           <!-- Natural-language search: global search, results filtered to this album -->
           <NaturalSearchBar
@@ -3511,7 +3515,23 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 /* The action toolbar inside ListToolbar's actions slot: it takes the space
    the shared controls leave and spills items into its overflow dropdown
    instead of wrapping. */
-.header__toolbar { flex: 1 1 16rem; min-width: 0; }
+.header__toolbar {
+  flex: 1 1 16rem;
+  min-width: 0;
+  /* As in the gallery: no wider than its buttons need, so all buttons stand
+     together on the right; the overflow toggle follows the last one. */
+  max-width: var(--responsive-toolbar-natural, none);
+  justify-content: flex-end;
+}
+.header__toolbar :deep(.responsive-toolbar__more) {
+  margin-left: 0;
+}
+/* On a phone the actions share the row with filter, sort and select. */
+@media (max-width: 639px) {
+  .header__toolbar {
+    flex-basis: 0;
+  }
+}
 
 /* ── Album-scoped natural search bar (in the toolbar's search area) ──────── */
 .album-search {
