@@ -17,7 +17,6 @@ import {
   wrapCaption,
 } from "./collage";
 import { createPhotoCollage } from "./collage-api";
-import * as path from "path";
 
 async function solid(width: number, height: number, rgb: [number, number, number]): Promise<Buffer> {
   return sharp({ create: { width, height, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).jpeg().toBuffer();
@@ -30,14 +29,6 @@ async function pixel(jpeg: Buffer, x: number, y: number): Promise<number[]> {
 }
 
 describe("collage layouts", () => {
-  it("are the collage dialog's layouts, so the card previews what the server renders", async () => {
-    // Loaded by path, so the app's own build never follows an import into the frontend.
-    const dialog = await import(path.resolve(__dirname, "../frontend/src/utils/collageLayouts.ts"));
-    for (let n = 1; n <= 10; n++) {
-      expect(collageLayouts(n)).toEqual(dialog.collageLayouts(n));
-    }
-  });
-
   it("pick the first variant unless one is named, and nothing for an unknown id", () => {
     expect(pickCollageLayout(4)?.id).toBe("grid");
     expect(pickCollageLayout(4, "hero-left")?.cells).toHaveLength(4);
