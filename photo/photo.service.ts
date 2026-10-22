@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
-import { eq, and, or, sql, inArray, notInArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
+import { eq, and, or, sql, inArray, notInArray, ilike, isNull, isNotNull, desc, gt, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, enqueuePoiDetectionForMissingMatches, enqueuePoiDetectionForEmptyMatches, DeferJobError } from "./scan-queue";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
@@ -6069,61 +6069,49 @@ function calculateOverlap(b1: any, b2: any): number {
   return intersectionArea / unionArea;
 }
 
+/**
+ * Which of a person's faces the person grid shows as cover. A face large
+ * enough to crop comes first (a tiny face in a group shot makes a blurry
+ * tile), then photos the user has not hidden, then the best photo by
+ * ai_quality_score (aesthetics and technique), then the sharpest face, and
+ * only then the newest — so a person without any scores still gets the
+ * latest photo, as before.
+ */
+const PERSON_COVER_MIN_FACE_WIDTH = 0.05;
+const personCoverOrder = sql.raw(`
+  CASE WHEN COALESCE((f.bbox::jsonb->>'width')::float, 0) >= ${PERSON_COVER_MIN_FACE_WIDTH} THEN 0 ELSE 1 END,
+  CASE WHEN pc.status = 'hidden' THEN 1 ELSE 0 END,
+  p.ai_quality_score DESC NULLS LAST,
+  f.sharpness DESC NULLS LAST,
+  COALESCE(p.taken_at, p.created_at) DESC NULLS LAST,
+  f.id DESC`);
+
 export async function listPersonsLogic(userId: number, limit?: number): Promise<ListPersonsResponse> {
   // A cover comes only from a photo the user can still open.
   const coverAccess = accessiblePhotoConditionFor(userId, sql`p.id`, sql`p.user_id`);
+  const coverFace = (column: SQL) => sql`(
+    SELECT ${column}
+    FROM user_face_assignments ufa
+    INNER JOIN faces f ON f.id = ufa.face_id
+    INNER JOIN photos p ON p.id = f.photo_id
+    LEFT JOIN photo_curation pc ON pc.photo_id = p.id AND pc.user_id = persons.user_id
+    WHERE ufa.person_id = persons.id
+      AND ufa.user_id = persons.user_id
+      AND ufa.ignored = ${rawFalse}
+      AND ${coverAccess}
+    ORDER BY ${personCoverOrder}
+    LIMIT 1
+  )`;
   const query = db.select({
       id: persons.id,
       user_id: persons.user_id,
       name: persons.name,
-      cover_face_id: sql<number>`COALESCE(
-        (
-          SELECT f.id
-          FROM user_face_assignments ufa
-          INNER JOIN faces f ON f.id = ufa.face_id
-          INNER JOIN photos p ON p.id = f.photo_id
-          WHERE ufa.person_id = persons.id
-            AND ufa.user_id = persons.user_id
-            AND ufa.ignored = ${rawFalse}
-            AND ${coverAccess}
-          ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
-          LIMIT 1
-        ),
-        persons.cover_face_id
-      )`,
+      cover_face_id: sql<number>`COALESCE(${coverFace(sql.raw("f.id"))}, persons.cover_face_id)`,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
       faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse}), 0) AS INTEGER)`,
-      cover_filename: sql<string>`COALESCE(
-        (
-          SELECT p.filename
-          FROM user_face_assignments ufa
-          INNER JOIN faces f ON f.id = ufa.face_id
-          INNER JOIN photos p ON p.id = f.photo_id
-          WHERE ufa.person_id = persons.id
-            AND ufa.user_id = persons.user_id
-            AND ufa.ignored = ${rawFalse}
-            AND ${coverAccess}
-          ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
-          LIMIT 1
-        ),
-        ''
-      )`,
-      cover_bbox: sql<string>`COALESCE(
-        (
-          SELECT f.bbox
-          FROM user_face_assignments ufa
-          INNER JOIN faces f ON f.id = ufa.face_id
-          INNER JOIN photos p ON p.id = f.photo_id
-          WHERE ufa.person_id = persons.id
-            AND ufa.user_id = persons.user_id
-            AND ufa.ignored = ${rawFalse}
-            AND ${coverAccess}
-          ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
-          LIMIT 1
-        ),
-        ''
-      )`,
+      cover_filename: sql<string>`COALESCE(${coverFace(sql.raw("p.filename"))}, '')`,
+      cover_bbox: sql<string>`COALESCE(${coverFace(sql.raw("f.bbox"))}, '')`,
       oldest_photo_at: sql<string>`(
         SELECT MIN(${rawCoalesceDate})::text
         FROM user_face_assignments ufa

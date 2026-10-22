@@ -1162,14 +1162,15 @@ describe("Photo Module", () => {
       });
 
       // Intentionally point persisted cover to the older face.
-      // listPersons/getPersonDetails should still resolve the newest face by taken_at.
+      // Without quality scores, listPersons/getPersonDetails should still
+      // resolve the newest face by taken_at.
       await dbExec(
         db.update(persons).set({ cover_face_id: olderFace!.id }).where(eq(persons.id, person!.id))
       );
       await db.insert(photoCuration).values({
         user_id: user1.id,
         photo_id: newerPhoto!.id,
-        status: "hidden",
+        status: "favorite",
       });
 
       const listRes = await service.listPersonsLogic(user1.id);
@@ -1187,12 +1188,67 @@ describe("Photo Module", () => {
         user_id: user1.id,
         mime_type: "image/jpeg",
         size: 456,
-        curation_status: "hidden",
+        curation_status: "favorite",
       });
       expect(new Date(details.faces[0].photo!.taken_at!).toISOString()).toBe(
         "2025-06-15T12:30:00.000Z"
       );
       expect(details.faces[1].photo?.curation_status).toBe("visible");
+    });
+
+    it("should use the best-scored photo with a usable face as person cover", async () => {
+      const person = await dbInsertReturning<{ id: number }>(
+        db.insert(persons).values({ user_id: user1.id, name: "Cover Person" }).returning()
+      );
+      const addFace = async (
+        name: string,
+        takenAt: string,
+        score: number | null,
+        bbox: { x: number; y: number; width: number; height: number },
+      ) => {
+        const photo = await dbInsertReturning<{ id: number }>(
+          db.insert(photos).values({
+            user_id: user1.id,
+            filename: name,
+            original_name: name,
+            mime_type: "image/jpeg",
+            size: 100,
+            taken_at: takenAt,
+            ai_quality_score: score,
+          }).returning()
+        );
+        const face = await dbInsertReturning<{ id: number }>(
+          db.insert(faces).values({
+            photo_id: photo!.id,
+            bbox: JSON.stringify(bbox),
+            embedding: JSON.stringify([0.1, 0.2]),
+          }).returning()
+        );
+        await db.insert(userFaceAssignments).values({
+          user_id: user1.id,
+          face_id: face!.id,
+          person_id: person!.id,
+          ignored: false,
+        });
+        return { photoId: photo!.id, faceId: face!.id };
+      };
+      const big = { x: 0.2, y: 0.2, width: 0.2, height: 0.2 };
+
+      await addFace("cover-newest.jpg", "2025-09-01T10:00:00.000Z", null, big);
+      const best = await addFace("cover-best.jpg", "2023-01-01T10:00:00.000Z", 0.9, big);
+      await addFace("cover-mid.jpg", "2024-01-01T10:00:00.000Z", 0.5, big);
+      // Higher score, but the face is too small to crop a cover from.
+      await addFace("cover-tiny.jpg", "2024-06-01T10:00:00.000Z", 0.95, { x: 0.5, y: 0.5, width: 0.02, height: 0.02 });
+
+      let listed = (await service.listPersonsLogic(user1.id)).persons.find((p) => p.id === person!.id);
+      expect(listed!.cover_face_id).toBe(best.faceId);
+      expect(listed!.cover_filename).toBe("cover-best.jpg");
+      expect(listed!.cover_bbox).toEqual(big);
+
+      // A photo the user hid never wins over a visible one.
+      await db.insert(photoCuration).values({ user_id: user1.id, photo_id: best.photoId, status: "hidden" });
+      listed = (await service.listPersonsLogic(user1.id)).persons.find((p) => p.id === person!.id);
+      expect(listed!.cover_filename).toBe("cover-mid.jpg");
     });
 
     it("should ignore all faces of a person", async () => {
