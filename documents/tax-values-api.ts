@@ -56,6 +56,11 @@ async function unread(year: number | undefined, reread: boolean, limit: number):
   return rows.rows.map((r) => Number(r.id));
 }
 
+/** Every unread evidence document, for "Fehlende fortsetzen". */
+export function unreadTaxEvidence(): Promise<number[]> {
+  return unread(undefined, false, 100_000);
+}
+
 async function countUnread(year: number | undefined): Promise<number> {
   const rows = await db.execute<{ n: number }>(sql`
     SELECT COUNT(*)::int AS n

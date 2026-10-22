@@ -16,7 +16,7 @@ import { useRealtimeEvent } from '../../composables/useRealtime'
 const docQueueStatus = ref<DocQueueStatus>({ services: [], jobs: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
-const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number; status_breakdown?: Record<string, number>; embed_queued?: number } | null>(null)
+const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number; status_breakdown?: Record<string, number>; embed_queued?: number; tax_values_queued?: number } | null>(null)
 const docRelocateLoading = ref(false)
 const docRelocateResult = ref<RelocateAllDocumentsResponse | null>(null)
 const pageWordsLoading = ref(false)
@@ -163,6 +163,9 @@ async function handleDocRetry() {
         {{ docReclassifyResult.queued }} Dokument(e) in die Warteschlange eingereiht.
         <template v-if="docReclassifyResult.embed_queued">
           {{ docReclassifyResult.embed_queued }} fertige(s) Dokument(e) ohne Embedding nachgereiht.
+        </template>
+        <template v-if="docReclassifyResult.tax_values_queued">
+          {{ docReclassifyResult.tax_values_queued }} Steuerbeleg(e) zum Auslesen der Werte nachgereiht.
         </template>
         <template v-if="docReclassifyResult.skipped_encrypted">
           {{ docReclassifyResult.skipped_encrypted }} verschlüsselte Dokument(e) übersprungen.

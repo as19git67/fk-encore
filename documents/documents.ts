@@ -105,6 +105,7 @@ import {
 import { applyDossierRulesQuietly } from "./dossiers";
 import { triggerWorkers } from "./scan-worker";
 import { queueTaxValuesIfEvidence } from "./tax-values";
+import { unreadTaxEvidence } from "./tax-values-api";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { decryptPdfWithPassword } from "./text-extract";
@@ -2481,6 +2482,14 @@ export interface ReclassifyAllResponse {
    * queue in between leaves it ready without one.
    */
   embed_queued?: number;
+  /** In resume mode: finished evidence whose tax values were never read. */
+  tax_values_queued?: number;
+}
+
+export interface RelocateAllDocumentsResponse {
+  processed: number;
+  moved: number;
+  failed: number;
 }
 
 /** Ready documents with text but no embedding and no embed job waiting. */
@@ -2499,10 +2508,86 @@ async function readyWithoutEmbedding(): Promise<number[]> {
   return rows.rows.map((r) => Number(r.id));
 }
 
-export interface RelocateAllDocumentsResponse {
-  processed: number;
-  moved: number;
-  failed: number;
+export type ResumeStep = "receipt_ocr" | "classify" | "text_extract";
+
+/** Where a document that is not ready continues. */
+export function resumeStep(doc: { status: string; has_text: boolean; receipt_pending: boolean }): ResumeStep {
+  if (doc.receipt_pending) return "receipt_ocr";
+  if (doc.status === "classifying" && doc.has_text) return "classify";
+  return "text_extract";
+}
+
+/**
+ * "Fehlende fortsetzen": picks up what a cancelled queue left behind.
+ *
+ * A document that is not ready continues where it stopped: a receipt with its
+ * receipt OCR, a document whose text is already there with classify, anything
+ * else from text_extract. A ready document can still miss what runs after
+ * classify — its embedding and its tax values — because classify marks it
+ * ready first. The word-position backfill is not resumed here: it is an
+ * admin's choice, and its own button carries on.
+ */
+export async function resumeMissing(): Promise<ReclassifyAllResponse> {
+  const rows = await dbAll<{ id: number; status: string; has_text: boolean; receipt_pending: boolean }>(
+    db.select({
+      id: documents.id,
+      status: documents.status,
+      has_text: sql<boolean>`${documents.extracted_text} IS NOT NULL`,
+      receipt_pending: sql<boolean>`${documents.receipt_ocr_state} IS NOT DISTINCT FROM 'pending'`,
+    }).from(documents)
+      .where(and(ne(documents.status, "ready"), ne(documents.status, "encrypted"))),
+  );
+  const encRows = await dbAll<{ id: number }>(
+    db.select({ id: documents.id }).from(documents).where(eq(documents.status, "encrypted")),
+  );
+  const skippedEncrypted = encRows.length;
+
+  // Build a status breakdown so the UI/logs show WHY these documents
+  // weren't ready — crucial for diagnosing pipeline issues.
+  const counts: Record<string, number> = {};
+  for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  const statusBreakdown = Object.keys(counts).length > 0 ? counts : undefined;
+
+  const idsFor = (step: ResumeStep) => rows.filter((r) => resumeStep(r) === step).map((r) => r.id);
+  const receipts = idsFor("receipt_ocr");
+  const toClassify = idsFor("classify");
+  const fromStart = idsFor("text_extract");
+
+  if (rows.length) {
+    console.log(
+      `[documents] reclassify-all(resume): queuing ${rows.length} documents ` +
+        `(${receipts.length} receipt OCR, ${toClassify.length} classify, ${fromStart.length} from text extraction) — ` +
+        `status breakdown: ${JSON.stringify(statusBreakdown)}, skipped encrypted: ${skippedEncrypted}`,
+    );
+  }
+
+  for (const id of receipts) await requeueDocument(id, ["receipt_ocr"]);
+  if (toClassify.length) {
+    await db.update(documents).set({ last_error: null }).where(inArray(documents.id, toClassify));
+    for (const id of toClassify) await requeueDocument(id, ["classify", "embed"]);
+  }
+  if (fromStart.length) {
+    await db.update(documents).set({ status: "pending", last_error: null }).where(inArray(documents.id, fromStart));
+    for (const id of fromStart) await requeueDocument(id, ["text_extract", "classify", "embed"]);
+  }
+
+  const embedIds = await readyWithoutEmbedding();
+  for (const id of embedIds) await requeueDocument(id, ["embed"]);
+
+  let taxValuesQueued = 0;
+  for (const id of await unreadTaxEvidence()) {
+    if (await queueTaxValuesIfEvidence(id)) taxValuesQueued++;
+  }
+
+  if (rows.length || embedIds.length || taxValuesQueued) triggerWorkers();
+
+  return {
+    queued: rows.length,
+    ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}),
+    ...(statusBreakdown ? { status_breakdown: statusBreakdown } : {}),
+    ...(embedIds.length > 0 ? { embed_queued: embedIds.length } : {}),
+    ...(taxValuesQueued > 0 ? { tax_values_queued: taxValuesQueued } : {}),
+  };
 }
 
 export const reclassifyAll = api(
@@ -2512,67 +2597,18 @@ export const reclassifyAll = api(
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
 
+    if (req.mode === "resume") return resumeMissing();
+
     const full = req.mode === "full";
-    const resume = req.mode === "resume";
     const services: readonly import("./scan-queue").DocumentScanService[] =
-      full ? ["text_extract", "classify", "embed"]
-      : resume ? ["text_extract", "classify", "embed"]
-      : ["classify", "embed"];
-    const newStatus = (full || resume) ? "pending" : "classifying";
+      full ? ["text_extract", "classify", "embed"] : ["classify", "embed"];
 
-    const baseQuery = db.select({ id: documents.id, status: documents.status }).from(documents);
-    const rows = await dbAll<{ id: number; status: string }>(
-      resume
-        ? baseQuery.where(and(
-            ne(documents.status, "ready"),
-            ne(documents.status, "encrypted"),
-          ))
-        : baseQuery,
-    );
-
-    // Count encrypted documents separately so the UI can inform the user.
-    let skippedEncrypted = 0;
-    let statusBreakdown: Record<string, number> | undefined;
-    if (resume) {
-      const encRows = await dbAll<{ id: number }>(
-        db.select({ id: documents.id }).from(documents)
-          .where(eq(documents.status, "encrypted")),
-      );
-      skippedEncrypted = encRows.length;
-      // Build a status breakdown so the UI/logs show WHY these documents
-      // weren't ready — crucial for diagnosing pipeline issues.
-      const counts: Record<string, number> = {};
-      for (const r of rows) {
-        counts[r.status] = (counts[r.status] ?? 0) + 1;
-      }
-      if (Object.keys(counts).length > 0) statusBreakdown = counts;
-    }
-
-    let embedQueued = 0;
-    if (resume) {
-      const embedIds = await readyWithoutEmbedding();
-      for (const id of embedIds) await requeueDocument(id, ["embed"]);
-      embedQueued = embedIds.length;
-      if (embedQueued) triggerWorkers();
-    }
-
-    if (rows.length === 0) {
-      return {
-        queued: 0,
-        ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}),
-        ...(embedQueued > 0 ? { embed_queued: embedQueued } : {}),
-      };
-    }
-
-    console.log(
-      `[documents] reclassify-all(resume): queuing ${rows.length} documents — ` +
-        `status breakdown: ${JSON.stringify(statusBreakdown)}, ` +
-        `skipped encrypted: ${skippedEncrypted}`,
-    );
+    const rows = await dbAll<{ id: number }>(db.select({ id: documents.id }).from(documents));
+    if (rows.length === 0) return { queued: 0 };
 
     const ids = rows.map((r) => r.id);
     const patch: Partial<typeof documents.$inferInsert> = {
-      status: newStatus as any,
+      status: full ? "pending" : "classifying",
       last_error: null,
     };
     if (full) patch.force_ocr = true;
@@ -2583,12 +2619,7 @@ export const reclassifyAll = api(
     }
     triggerWorkers();
 
-    return {
-      queued: ids.length,
-      ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}),
-      ...(statusBreakdown ? { status_breakdown: statusBreakdown } : {}),
-      ...(embedQueued > 0 ? { embed_queued: embedQueued } : {}),
-    };
+    return { queued: ids.length };
   },
 );
 
