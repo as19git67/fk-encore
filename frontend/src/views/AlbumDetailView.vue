@@ -2589,7 +2589,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   <PageLayout
     :title="album ? album.name : 'Album'"
     :hint="headerHint"
-    :scroll="viewMode === 'map' ? 'fill' : 'page'"
+    scroll="fill"
     width="full"
     :ready="!loading"
     :resolve-anchor="placesItself"
@@ -2828,7 +2828,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
         <div
           ref="sidebarSheet"
-          class="sidebar-sheet page-aside"
+          class="sidebar-sheet"
           :class="{ 'is-open': mobileSidebarOpen }"
           :role="sheetIsModal ? 'dialog' : undefined"
           :aria-modal="sheetIsModal ? 'true' : undefined"
@@ -3520,20 +3520,27 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 }
 
 /* ── Two-column layout ──────────────────────────────────────────────────── */
-/* The grid is as tall as its rows and the document scrolls (issue #1674);
-   the details stay pinned beside it (`.page-aside`). */
+/* Grid and details fill the viewport below the stack (scroll="fill") and
+   each scrolls on its own: the grid scrolls inside its own box, as in the
+   gallery (see `usePageVirtualizer`). */
 .gallery-layout {
   display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .grid-area {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 
 
 /* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
-.sidebar-sheet { flex-shrink: 0; }
+.sidebar-sheet { flex-shrink: 0; overflow-y: auto; }
 .sidebar-sheet-header { display: none; }
 .sidebar-sheet-close { display: none; }
 

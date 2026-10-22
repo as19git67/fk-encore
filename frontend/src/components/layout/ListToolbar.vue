@@ -35,6 +35,13 @@ import { hasOpenOverlay, overlayAbove } from '../../utils/overlayLayer'
 
 const props = defineProps<{
   model: ListToolbarModel
+  /**
+   * One row for what the user operates: the search on the left, the buttons
+   * as icons on the right (the view's own actions spill into their overflow
+   * menu), and chips and count always on the row below. The gallery, whose
+   * toolbar carries the most actions.
+   */
+  compact?: boolean
 }>()
 
 const slots = useSlots()
@@ -85,6 +92,7 @@ const sortItems = computed(() => {
 })
 
 const sortLabel = computed(() => props.model.sort?.fieldLabel.value ?? 'Sortierung')
+const selectLabel = computed(() => (props.model.selection?.active.value ? 'Auswahl beenden' : 'Auswählen'))
 
 function onSearchInput(value: string | undefined) {
   const search = props.model.search
@@ -156,7 +164,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 </script>
 
 <template>
-  <div class="list-toolbar" data-testid="list-toolbar">
+  <div class="list-toolbar" :class="{ 'list-toolbar--compact': compact }" data-testid="list-toolbar">
     <div class="list-toolbar__main">
       <div
         v-if="slots.search || model.search"
@@ -197,7 +205,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
         <Button
           v-if="model.filter?.open"
           icon="pi pi-filter"
-          label="Filter"
+          :label="compact ? undefined : 'Filter'"
           :badge="filterBadge"
           badge-severity="info"
           size="small"
@@ -214,14 +222,15 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
         <template v-if="model.sort">
           <Button
             icon="pi pi-sort-alt"
-            :label="sortLabel"
+            :label="compact ? undefined : sortLabel"
+            :aria-label="compact ? `Sortierung: ${sortLabel}` : undefined"
             size="small"
             outlined
             severity="secondary"
             class="list-toolbar__button"
             aria-haspopup="true"
             data-testid="list-sort"
-            v-tooltip.bottom="'Sortierung'"
+            v-tooltip.bottom="compact ? `Sortierung: ${sortLabel}` : 'Sortierung'"
             @click="toggleSortMenu"
           />
           <Menu ref="sortMenu" :model="sortItems" :popup="true" />
@@ -248,7 +257,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
         <Button
           v-if="model.selection"
           :icon="model.selection.active.value ? 'pi pi-times' : 'pi pi-check-square'"
-          :label="model.selection.active.value ? 'Auswahl beenden' : 'Auswählen'"
+          :label="compact ? undefined : selectLabel"
+          :aria-label="compact ? selectLabel : undefined"
+          v-tooltip.bottom="compact ? selectLabel : undefined"
           size="small"
           :outlined="!model.selection.active.value"
           severity="secondary"
@@ -379,6 +390,28 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
    edge — without the slack it pokes past a 360px viewport. */
 .list-toolbar__count .pi-spin {
   margin-inline: 0.25rem;
+}
+
+/* Compact (the gallery): from sm on, search and buttons share one row —
+   the search at its natural width on the left, the buttons on the right,
+   the view's actions taking what is left and spilling into their overflow
+   menu — and chips and count always go on the row below. */
+@media (min-width: 640px) {
+  .list-toolbar--compact .list-toolbar__main {
+    flex-basis: 100%;
+    flex-wrap: nowrap;
+  }
+  .list-toolbar--compact .list-toolbar__search {
+    flex: 0 1 36rem;
+  }
+  .list-toolbar--compact .list-toolbar__controls {
+    flex: 1 1 0;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+}
+.list-toolbar--compact .list-toolbar__meta {
+  flex-basis: 100%;
 }
 
 /* Below sm the buttons keep their icons and drop the words, so the whole

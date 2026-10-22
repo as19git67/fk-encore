@@ -1142,7 +1142,7 @@ Regeln:
   `usePageVirtualizer` (Fenster-Virtualizer, `scrollMargin` und
   Stack-Höhe eingerechnet). `scroll="fill"` ist nur für Inhalte ohne Länge
   (Karte): genau ein Viewport unter dem Stack, nichts scrollt darin.
-- Ausnahme: die großen Foto-Raster (Galerie, Fotos einer Person, geteiltes
+- Ausnahme: die großen Foto-Raster (Galerie, Album, Fotos einer Person, geteiltes
   Album) scrollen in ihrem eigenen Kasten — `scroll="fill"` an `PageLayout`,
   das Raster gibt `usePageVirtualizer` sein Element als dritten Parameter.
   Mit zehntausenden Fotos wurde das Dokument Millionen Pixel hoch, und ein
