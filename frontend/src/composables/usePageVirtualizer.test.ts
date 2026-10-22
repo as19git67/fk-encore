@@ -119,4 +119,58 @@ describe('usePageVirtualizer', () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
+
+  it('scrolls its own box when it has one, and ignores the stack there', async () => {
+    // The big photo grids scroll inside a box again: a document millions of
+    // pixels tall crashed Safari on a jump to the other end.
+    vi.useFakeTimers()
+    document.documentElement.style.setProperty('--app-stack-height', '100px')
+    window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
+    let api: ReturnType<typeof usePageVirtualizer> | null = null
+    let box: HTMLElement | null = null
+    const Comp = defineComponent({
+      setup() {
+        const scroller = ref<HTMLElement | null>(null)
+        const rows = ref<HTMLElement | null>(null)
+        api = usePageVirtualizer(rows, computed(() => ({ count: 100, rowHeight: 50 })), scroller)
+        return () => h('div', { ref: scroller, class: 'box' }, [h('div', { ref: rows, class: 'rows' })])
+      },
+    })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    // The box sits 200px down the page; its rows begin 6px inside it.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.classList.contains('rows') ? 206 : 200
+      return { top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect
+    })
+    app = createApp(Comp)
+    app.mount(host)
+    await nextTick()
+    box = host.querySelector('.box') as HTMLElement
+    Object.defineProperty(box, 'clientHeight', { value: 600, configurable: true })
+    box.scrollTo = vi.fn() as unknown as typeof box.scrollTo
+    api!.measure()
+    expect(api!.scrollMargin.value).toBe(6)
+
+    api!.scrollToRow(20, 'center')
+    // Row 20 starts at 6 + 1000 inside the box; centring the 50px row in the
+    // box's 600px leaves 275px above it. No stack to subtract in here.
+    expect(box.scrollTo).toHaveBeenLastCalledWith({ top: 1006 - 275, behavior: 'instant' })
+    expect(window.scrollTo).not.toHaveBeenCalledWith(expect.objectContaining({ top: 1006 - 275 }))
+
+    // Flying is measured on the box too.
+    const scrollBox = (y: number) => {
+      box!.scrollTop = y
+      box!.dispatchEvent(new Event('scroll'))
+    }
+    scrollBox(200)
+    expect(api!.flying.value).toBe(false)
+    scrollBox(40_000)
+    expect(api!.flying.value).toBe(true)
+    vi.advanceTimersByTime(SETTLE_MS)
+    expect(api!.flying.value).toBe(false)
+    expect(api!.visibleBand()).toEqual({ top: 40_000 - 6, bottom: 40_000 - 6 + 600 })
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 })

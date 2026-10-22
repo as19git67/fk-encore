@@ -778,6 +778,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 <template>
   <PageLayout
     :title="selectedPersonDetail ? selectedPersonDetail.name : 'Personen'"
+    :scroll="selectedPerson ? 'fill' : 'page'"
     width="full"
     :ready="!loading"
     :anchor-key="ANCHOR_KEY"
@@ -876,7 +877,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
       <div
           ref="personSidebarSheet"
-          class="person-sidebar-sheet page-aside"
+          class="person-sidebar-sheet"
           :class="{ 'is-open': mobileSidebarOpen }"
           :role="sheetIsModal ? 'dialog' : undefined"
           :aria-modal="sheetIsModal ? 'true' : undefined"
@@ -1010,10 +1011,15 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 /* Page frame and title: PageLayout (issue #1272). Search, filter, sort and
    the result count: ListToolbar (issue #1278). */
 
-/* Photos and details side by side; the document scrolls the photos and the
-   details stay pinned beside them (`.page-aside`, issue #1674). */
+/* Photos and details side by side in the viewport below the stack
+   (scroll="fill"); each scrolls on its own. The photos do not scroll with
+   the document: a person can have tens of thousands of them, and a
+   document that tall crashed Safari (see `usePageVirtualizer`). */
 .gallery-layout {
   display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ── Person Grid (Level 1) ──────────────────────────────────────────────── */
@@ -1030,9 +1036,10 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 .pfm-label { font-weight: 500; font-size: var(--text-base); color: var(--p-text-muted-color); }
 
 /* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
-/* Desktop: the pinned column beside the photos (`.page-aside`). */
+/* Desktop: the column beside the photos, scrolling on its own. */
 .person-sidebar-sheet {
   flex-shrink: 0;
+  overflow-y: auto;
 }
 
 .sidebar-sheet-header { display: none; }

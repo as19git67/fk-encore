@@ -1142,6 +1142,14 @@ Regeln:
   `usePageVirtualizer` (Fenster-Virtualizer, `scrollMargin` und
   Stack-Höhe eingerechnet). `scroll="fill"` ist nur für Inhalte ohne Länge
   (Karte): genau ein Viewport unter dem Stack, nichts scrollt darin.
+- Ausnahme: die großen Foto-Raster (Galerie, Fotos einer Person, geteiltes
+  Album) scrollen in ihrem eigenen Kasten — `scroll="fill"` an `PageLayout`,
+  das Raster gibt `usePageVirtualizer` sein Element als dritten Parameter.
+  Mit zehntausenden Fotos wurde das Dokument Millionen Pixel hoch, und ein
+  Sprung ans andere Ende (oder ein Tipp auf die Statusleiste) trieb Safaris
+  GPU-Prozess über sein Limit, die Seite stürzte ab (ab etwa 6000 Fotos).
+  Der Tipp auf die Statusleiste wirkt dort nicht; „Zum ältesten“ ist der Weg
+  nach oben. Ein neues Raster, das so groß werden kann, macht es genauso.
 - Eine Spalte neben der Liste, die stehen bleibt (Fotodetails neben dem
   Raster, Vorschau neben der Dokumentliste, PDF neben den Attributen),
   trägt die globale Klasse `.page-aside` (`.page-aside--fill` für volle
@@ -1158,7 +1166,7 @@ Regeln:
   Seite dann um die Stack-Höhe verschob. `--menubar-height` gibt es nicht
   mehr.
 - Virtuelle Raster scrollen mit `scrollToRow` aus `usePageVirtualizer`
-  (ein einziges `window.scrollTo`), nie mit `scrollToIndex` der Bibliothek:
+  (ein einziges `scrollTo` auf Fenster oder Kasten), nie mit `scrollToIndex` der Bibliothek:
   das steuert bis zu fünf Sekunden nach und zog auf dem iPhone die Seite
   nach einem Tipp auf die Statusleiste zurück.
 - Die Seite scrollt nie horizontal (`overflow-x: clip` auf `body`). Breite

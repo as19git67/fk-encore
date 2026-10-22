@@ -70,7 +70,7 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
-import { useAtLeast } from '../composables/useBreakpoint'
+import { useAtLeast, useBelow } from '../composables/useBreakpoint'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import type { FilterChip } from '../components/layout/listToolbar'
 import { parsePinnedPhotoIds, PHOTO_IDS_QUERY_KEY } from '../utils/photoIdsQuery'
@@ -996,6 +996,10 @@ function triggerFileSelect() {
 // Filter, sort and select mode are no longer here — they are part of the
 // shared toolbar. ResponsiveToolbar pushes whatever does not fit into an
 // overflow dropdown. Order = reading order.
+// On a phone the actions share one row with filter, sort and select: the
+// jump is an icon, the other labels are short (the tooltip keeps the long
+// text).
+const phone = useBelow('sm')
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
@@ -1004,7 +1008,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (activeCount.value > 0 && !filter.value.collectionId && !selectMode.value) {
     items.push({
       key: 'save-rule',
-      label: 'Als Regel-Mappe',
+      label: phone.value ? 'Regel-Mappe' : 'Als Regel-Mappe',
       title: 'Filter als Regel-Sammelmappe speichern',
       icon: 'pi pi-folder',
       severity: 'secondary',
@@ -1016,7 +1020,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (jumpButton.value) {
     items.push({
       key: 'jump',
-      label: jumpButton.value.label,
+      label: phone.value ? '' : jumpButton.value.label,
       title: jumpButton.value.label,
       icon: jumpButton.value.icon,
       severity: 'secondary',
@@ -1028,7 +1032,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   if (canReviewGroups.value && totalUnreviewed.value > 0) {
     items.push({
       key: 'group-review',
-      label: `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
+      label: phone.value ? `Gruppen (${totalUnreviewed.value})` : `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
       title: `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
       icon: 'pi pi-images',
       severity: 'success',
@@ -1622,11 +1626,11 @@ async function onGalleryLoaded(info: { total: number; offset: number }) {
       // a hard refresh), so the scroll silently no-ops and the cursor
       // stays highlighted off-screen until the next user interaction.
       // Awaiting hydrate gives the virtualizer the frames it needs.
-      // If the page moved meanwhile, the user scrolled (a tap on the iPhone's
-      // status bar included) — leave them where they went.
-      const scrolledFrom = window.scrollY
+      // If the grid moved meanwhile, the user scrolled — leave them where
+      // they went.
+      const scrolledFrom = galleryRef.value?.getScrollTop()
       await hydrateCursor(idx, { skipNeighbors: true })
-      if (window.scrollY === scrolledFrom) galleryRef.value?.scrollToIndex(idx)
+      if (galleryRef.value?.getScrollTop() === scrolledFrom) galleryRef.value?.scrollToIndex(idx)
     }
   }
 }
@@ -1705,6 +1709,7 @@ void refreshReviewSequence()
 <template>
   <PageLayout
     title="Fotos"
+    scroll="fill"
     width="full"
     :resolve-anchor="placesItself"
     @dragenter="onDragEnter"
@@ -1890,7 +1895,7 @@ void refreshReviewSequence()
              but always visible on desktop, driven by the cursor cell. The
              reactive cursor → hydrate flow keeps it in sync with grid
              clicks, keyboard navigation, and fullscreen prev/next. -->
-        <aside v-if="cursorPhoto" class="desktop-sidebar page-aside">
+        <aside v-if="cursorPhoto" class="desktop-sidebar">
           <PhotoDetailSidebar
             :photo="cursorPhoto"
             :variant-photo="variantPhoto"
@@ -2073,30 +2078,42 @@ void refreshReviewSequence()
 /* Page frame and title: PageLayout (issue #1272). */
 
 /* The in-flow body below the sticky stack: the positioned box the floating
-   selection tray is anchored to. */
+   selection tray is anchored to; the content row inside takes the rest of
+   the viewport (scroll="fill"). */
 .gallery-body {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── Content row: grid + persistent desktop sidebar ──────────────────── */
-/* The grid is as tall as its rows and the document scrolls (issue #1674). */
+/* The grid scrolls inside its own box, not with the document: with tens of
+   thousands of photos a document that tall crashed Safari on a jump to the
+   other end (see `usePageVirtualizer`). */
 .content-row {
   display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .grid-area {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 
-/* Desktop detail panel — fixed width, pinned under the sticky stack
-   (`.page-aside`) and scrolling on its own while the grid goes past.
+/* Desktop detail panel — fixed width, scrolls independently of the grid.
    Hidden on mobile where the fullscreen flyout takes over. */
 .desktop-sidebar {
   width: 280px;
   flex-shrink: 0;
   border-left: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.08));
   background: var(--p-content-background);
+  overflow-y: auto;
   overflow-x: hidden;
 }
 
@@ -2110,6 +2127,14 @@ void refreshReviewSequence()
 .header__toolbar {
   flex: 1 1 16rem;
   min-width: 0;
+}
+/* On a phone the actions take what filter, sort and select leave in their
+   row instead of wrapping onto a row of their own; what does not fit goes
+   into the overflow menu. */
+@media (max-width: 639px) {
+  .header__toolbar {
+    flex-basis: 0;
+  }
 }
 
 /* The natural search fills the toolbar's search area. */

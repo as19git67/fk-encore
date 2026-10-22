@@ -586,7 +586,7 @@ onUnmounted(() => {
 <template>
   <PageLayout
     :title="album?.name || 'Geteiltes Album'"
-    :scroll="isMapView ? 'fill' : 'page'"
+    scroll="fill"
     width="full"
     :ready="!loading"
   >
@@ -834,9 +834,10 @@ onUnmounted(() => {
 <style scoped>
 /* Page frame and title: PageLayout (issue #1272). */
 
-/* The one flex region below the title: the map fills it (scroll="fill"),
-   the virtualized grid scrolls with the document. Carries the former
-   root state class `shared-album-view--grid`. */
+/* The one flex region below the title (scroll="fill"): the map fills it,
+   the virtualized grid scrolls inside it — an album can be large enough
+   that a document that tall crashed Safari (see `usePageVirtualizer`).
+   Carries the former root state class `shared-album-view--grid`. */
 .shared-album-body {
   display: flex;
   flex-direction: column;

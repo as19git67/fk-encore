@@ -6,12 +6,13 @@
  *   - Owns a `useGallerySource` (sparse array of length `total`). The
  *     component never iterates this array; it only reads slots inside the
  *     rendered rows.
- *   - TanStack's window virtualizer (`usePageVirtualizer`) virtualizes ROWS
+ *   - TanStack's virtualizer (`usePageVirtualizer`) virtualizes ROWS
  *     (not items). A row holds `cols` photos; layout inside the row is a
  *     plain CSS grid. Row height is fixed (cell + gap) so the virtualizer
  *     can compute the total height as `rowCount * rowHeight` without
- *     measuring. The document scrolls, not the grid (issue #1674): iOS
- *     scrolls to the top on a tap on the status bar only then.
+ *     measuring. The grid is its own scroller: a document millions of
+ *     pixels tall crashed Safari on a jump to the other end (see
+ *     `usePageVirtualizer`).
  *   - As soon as a row becomes visible, the component asks the source to
  *     `ensureRange(rowStart, rowEnd)` — the source fires page fetches for
  *     any unloaded slots that overlap the visible window.
@@ -53,7 +54,7 @@
  *                                    aligned with the fullscreen selection.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { stackHeight, usePageVirtualizer } from '../composables/usePageVirtualizer'
+import { usePageVirtualizer } from '../composables/usePageVirtualizer'
 import { type GalleryGridEntry, type GallerySortDir, type GallerySortField } from '../api/gallery'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
@@ -226,10 +227,10 @@ const overscan = computed(() => {
 let lastPastHalf = false
 function updateScrollPosition() {
   if (!scrollRef.value) return
-  // Measured against the grid's own rows, not the whole document, so the
-  // title above and the end of the page below do not shift the middle.
-  const top = Math.max(0, window.scrollY - scrollMargin.value)
-  const next = isPastHalf(top, window.innerHeight, totalSize.value, lastPastHalf)
+  // Measured against the grid's own rows, so its padding does not shift the
+  // middle.
+  const top = Math.max(0, scrollTop() - scrollMargin.value)
+  const next = isPastHalf(top, viewportHeight(), totalSize.value, lastPastHalf)
   if (next !== lastPastHalf) {
     lastPastHalf = next
     emit('position-changed', { pastHalf: next })
@@ -246,7 +247,7 @@ onMounted(() => {
       if (entry) recalcLayout(entry.contentRect.width)
     })
     resizeObs.observe(scrollRef.value)
-    window.addEventListener('scroll', updateScrollPosition, { passive: true })
+    scrollRef.value.addEventListener('scroll', updateScrollPosition, { passive: true })
   }
 })
 
@@ -254,7 +255,7 @@ onBeforeUnmount(() => {
   loadGeneration++
   resizeObs?.disconnect()
   resizeObs = null
-  window.removeEventListener('scroll', updateScrollPosition)
+  scrollRef.value?.removeEventListener('scroll', updateScrollPosition)
   if (trailingTimer) {
     clearTimeout(trailingTimer)
     trailingTimer = null
@@ -265,9 +266,12 @@ onBeforeUnmount(() => {
 // ── Row count drives the virtualizer ────────────────────────────────────────
 const rowCount = computed(() => Math.ceil((total.value ?? 0) / cols.value))
 
-const { virtualizer, scrollToRow, rowOffset, scrollMargin, flying } = usePageVirtualizer(
+const {
+  virtualizer, scrollToRow, rowOffset, scrollMargin, flying, scrollTop, viewportHeight, visibleBand,
+} = usePageVirtualizer(
   rowsRef,
   computed(() => ({ count: rowCount.value, rowHeight: rowHeight.value, overscan: overscan.value })),
+  scrollRef,
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
@@ -287,8 +291,7 @@ function rowSlots(rowIndex: number): (GalleryGridEntry | null)[] {
 // the page was at its end) where it was.
 watch([cols, rowHeight], async ([nextCols], [prevCols, prevHeight]) => {
   if (!ready.value || total.value === 0 || prevHeight <= 0) return
-  const bandTop = window.scrollY + stackHeight() - scrollMargin.value
-  const bandBottom = window.scrollY + window.innerHeight - scrollMargin.value
+  const { top: bandTop, bottom: bandBottom } = visibleBand()
   // The last row is on screen: stay at the end, whatever its height now.
   const atEnd = bandBottom >= Math.ceil(total.value / prevCols) * prevHeight - prevHeight / 2
   const topIdx = Math.max(0, Math.floor(bandTop / prevHeight)) * prevCols
@@ -537,6 +540,8 @@ defineExpose({
   loadEntryAt: source.loadEntryAt,
   findLoadedIndexById,
   scrollToIndex,
+  /** How far the grid has scrolled — to tell whether the user moved it. */
+  getScrollTop: scrollTop,
   // Only the cells that are actually loaded — a sparse window in a grid that
   // may be far larger. Everything else would have to be fetched first.
   getLoadedIds: () =>
@@ -699,7 +704,13 @@ defineExpose({
 <style scoped>
 .virtual-gallery {
   position: relative;
+  height: 100%;
   width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  contain: layout size style;
+  scrollbar-gutter: stable;
   background: var(--p-content-background);
   padding: 6px;
   box-sizing: border-box;
