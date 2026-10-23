@@ -101,14 +101,8 @@ async function save() {
 
 <template>
   <PageLayout :title="'Sync-Zeiten' + (bankcontact ? ' — ' + bankcontact.name : '')" width="normal" sticky-header>
-    <template #actions>
-      <Button
-        label="Zurück"
-        icon="pi pi-arrow-left"
-        severity="secondary"
-        text
-        @click="router.push({ name: 'finance-bankcontact-detail', params: { id: bankcontactId } })"
-      />
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="router.push({ name: 'finance-bankcontact-detail', params: { id: bankcontactId } })" />
     </template>
 
     <template #notice>

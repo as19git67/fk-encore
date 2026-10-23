@@ -619,13 +619,17 @@ onMounted(() => {
 
 <template>
   <PageLayout title="Gruppen-Review" width="normal" :ready="!loading" sticky-header>
-    <template #actions>
+    <template #back>
       <Button
         icon="pi pi-arrow-left"
         text rounded
+        aria-label="Zurück zur Galerie"
         v-tooltip.bottom="'Zurück zur Galerie'"
         @click="backToGallery"
       />
+    </template>
+
+    <template #actions>
       <Button
         icon="pi pi-check-circle"
         severity="success"

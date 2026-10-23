@@ -103,8 +103,11 @@ onMounted(loadData)
 
 <template>
   <PageLayout :title="user?.name ?? 'Benutzer'" width="normal" :ready="!loading" sticky-header>
-    <template #actions>
+    <template #back>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
+    </template>
+
+    <template #actions>
       <Button v-if="!loading && user && auth.hasPermission('users.delete')" label="Benutzer löschen" icon="pi pi-trash" severity="danger" outlined @click="showDeleteConfirm = true" />
     </template>
 

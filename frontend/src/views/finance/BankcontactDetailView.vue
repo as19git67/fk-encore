@@ -461,14 +461,8 @@ async function del() {
 
 <template>
   <PageLayout :title="isNew ? 'Bankkontakt anlegen' : bc?.name ?? 'Bankkontakt'" width="normal" sticky-header>
-    <template #actions>
-      <Button
-        label="Zurück"
-        icon="pi pi-arrow-left"
-        severity="secondary"
-        text
-        @click="router.push({ name: 'finance-bankcontacts' })"
-      />
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="router.push({ name: 'finance-bankcontacts' })" />
     </template>
 
     <template #notice>

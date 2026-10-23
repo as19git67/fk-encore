@@ -708,7 +708,9 @@ const extractedFields = computed(() => {
 
 <template>
   <PageLayout :title="tx?.counterparty || 'Buchung'" width="normal" :ready="!!tx" sticky-header>
-    <template #actions>
+    <!-- While edits are pending the way out is "Abbrechen": it drops them
+         and leaves. -->
+    <template #back>
       <Button
         v-if="isDirty"
         label="Abbrechen"
@@ -718,12 +720,15 @@ const extractedFields = computed(() => {
       />
       <Button
         v-else
-        icon="pi pi-chevron-left"
-        severity="secondary"
+        icon="pi pi-arrow-left"
+        text
         rounded
         aria-label="Zurück"
         @click="goBack"
       />
+    </template>
+
+    <template #actions>
       <div v-if="inBasket" class="basket-nav" aria-label="Navigation durch den Basket">
         <Button
           icon="pi pi-chevron-left"

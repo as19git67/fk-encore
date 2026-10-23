@@ -8,8 +8,8 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
 
 <template>
   <PageLayout title="Bankkontakte – Hilfe" width="normal" sticky-header>
-    <template #actions>
-      <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
     </template>
 
     <p class="intro">

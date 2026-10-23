@@ -92,8 +92,8 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
   <!-- The `upload-view` class stays on the root so the Storybook story can
        still find the hidden file input (`.upload-view input[type=file]`). -->
   <PageLayout title="Dokument hochladen" width="normal" class="upload-view" sticky-header>
-    <template #actions>
-      <Button icon="pi pi-arrow-left" label="Zurück" text @click="goToList" />
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goToList" />
     </template>
 
     <template #notice>

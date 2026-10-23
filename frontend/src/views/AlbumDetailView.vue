@@ -2603,20 +2603,20 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <template #actions>
-      <template v-if="album">
-        <Button
-          icon="pi pi-arrow-left"
-          size="small"
-          text
-          rounded
-          class="header__back"
-          :aria-label="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
-          v-tooltip="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
-          @click="navigateBackToAlbums"
-        />
-        <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
-      </template>
+    <template #back>
+      <Button
+        icon="pi pi-arrow-left"
+        text
+        rounded
+        class="header__back"
+        :aria-label="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
+        v-tooltip="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
+        @click="navigateBackToAlbums"
+      />
+    </template>
+
+    <template v-if="album" #actions>
+      <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
     </template>
 
     <!-- Sticky part (lifted into the app stack by PageLayout): the shared

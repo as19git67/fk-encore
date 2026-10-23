@@ -791,9 +791,8 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     :anchor-key="ANCHOR_KEY"
     :resolve-anchor="resolvePersonAnchor"
   >
-    <template #actions>
+    <template v-if="selectedPerson" #back>
       <Button
-        v-if="selectedPerson"
         icon="pi pi-arrow-left"
         text rounded
         aria-label="Zurück zur Übersicht"

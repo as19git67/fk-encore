@@ -144,8 +144,11 @@ Ein Absatz mit **fettem** und *kursivem* Text.
     :ready="!loading"
     sticky-header
   >
-    <template #actions>
+    <template #back>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
+    </template>
+
+    <template #actions>
       <Button
         v-if="auth.hasPermission('module.assistant')"
         icon="pi pi-sparkles"
