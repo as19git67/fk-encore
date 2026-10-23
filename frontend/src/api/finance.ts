@@ -749,6 +749,67 @@ export async function getPortfolioPerformance(
   return apiFetch(`/finance/portfolio/performance${qs ? '?' + qs : ''}`)
 }
 
+// ── Allocation, income over time, savings plans (#1700) ─────────────
+
+export interface AllocationSlice {
+  key: string
+  label: string
+  value: string
+  weight_pct: string
+  positions: number
+}
+
+export interface PortfolioAnalysisGroup {
+  currency: string
+  account_ids: number[]
+  market_value: string
+  by_security: AllocationSlice[]
+  by_type: AllocationSlice[]
+  concentrated: AllocationSlice[]
+  unvalued_positions: number
+  income: {
+    months: Array<{ month: string; income: string; payouts: number }>
+    years: Array<{ year: number; income: string; payouts: number }>
+    ttm: string
+    ttm_from: string
+    current_yield_pct: string | null
+    yield_on_cost_pct: string | null
+  }
+}
+
+export interface PortfolioSavingsPlan extends PositionSavingsPlan {
+  key: string
+  name: string | null
+  currency: string
+}
+
+export interface PortfolioAnalysisResponse {
+  today: string
+  mixed_currency: boolean
+  concentration_threshold_pct: number
+  groups: PortfolioAnalysisGroup[]
+  by_currency: Array<{ currency: string; value: string; positions: number }>
+  savings_plans: PortfolioSavingsPlan[]
+}
+
+export async function getPortfolioAnalysis(
+  opts: { accounts?: number[]; closed?: boolean } = {},
+): Promise<PortfolioAnalysisResponse> {
+  const params = new URLSearchParams()
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
+  const qs = params.toString()
+  return apiFetch(`/finance/portfolio/analysis${qs ? '?' + qs : ''}`)
+}
+
+export interface PortfolioSettings {
+  concentration_threshold_pct: number
+}
+
+export async function savePortfolioSettings(settings: PortfolioSettings): Promise<PortfolioSettings> {
+  return apiFetch('/finance/portfolio/settings', { method: 'PUT', body: JSON.stringify(settings) })
+}
+
 export interface PortfolioTransaction extends Omit<DepotTransaction, 'created_at'> {
   account_label: string
   position_key: string
@@ -1269,6 +1330,24 @@ export interface PortfolioPositionResponse {
   unverifiable_changes: number
   /** Per depot: the security in the master, and what taking it out would delete. */
   depots?: PositionDepotSecurity[]
+  /** Buys at a regular interval and a steady amount, per depot (#1700). */
+  savings_plans?: PositionSavingsPlan[]
+}
+
+export type SavingsPlanInterval = 'monthly' | 'bimonthly' | 'quarterly' | 'semiannual' | 'annual'
+
+export interface PositionSavingsPlan {
+  account_id: number
+  account_label: string
+  interval: SavingsPlanInterval
+  /** Median cash per execution. */
+  amount: string
+  executions: number
+  first: string
+  last: string
+  /** The next execution is not overdue by more than half an interval. */
+  active: boolean
+  next: string | null
 }
 
 /** The security in one depot's master, for "Aus Depot entfernen". */

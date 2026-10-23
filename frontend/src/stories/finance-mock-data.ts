@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PerformancePeriod, PortfolioPerformanceResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, PositionHistoryPoint, PositionNewsResponse, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PerformancePeriod, PortfolioAnalysisResponse, PortfolioPerformanceResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, PositionHistoryPoint, PositionNewsResponse, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -515,6 +515,10 @@ export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
     { year: 2025, realized: '0.00', realized_complete: true, sell_count: 0, income: '120.00', dividend_count: 1, fees: '0.00', taxes: '30.00' },
     { year: 2024, realized: '0.00', realized_complete: true, sell_count: 0, income: '0.00', dividend_count: 0, fees: '20.00', taxes: '0.00' },
   ],
+  savings_plans: [
+    { account_id: 12, account_label: 'Depot Musterbroker', interval: 'monthly', amount: '150.00', executions: 14, first: '2025-08-01', last: '2026-09-01', active: true, next: '2026-10-01' },
+    { account_id: 11, account_label: 'Depot Beispielbank', interval: 'quarterly', amount: '300.00', executions: 4, first: '2024-01-15', last: '2024-10-15', active: false, next: null },
+  ],
 }
 
 export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
@@ -916,4 +920,84 @@ export function mockPortfolioPerformance(
       ]
     : [group]
   return { period, today: PERF_TODAY, price_stale_days: 10, mixed_currency: opts.mixed === true, groups }
+}
+
+/**
+ * Made-up allocation, income and savings plans for the portfolio page
+ * (#1700). With `mixed`, a second depot in USD; with `concentrated`, one
+ * position above the threshold.
+ */
+export function mockPortfolioAnalysis(opts: { mixed?: boolean; threshold?: number } = {}): PortfolioAnalysisResponse {
+  const threshold = opts.threshold ?? 10
+  const securities = [
+    { key: PF_ISIN_A, label: 'Alpha Industries AG', value: 9000, type: 'equity' },
+    { key: PF_ISIN_B, label: 'Beispiel World ETF', value: 5250, type: 'etf' },
+  ]
+  const total = securities.reduce((s, x) => s + x.value, 0)
+  const slice = (key: string, label: string, value: number, positions: number) => ({
+    key, label, value: value.toFixed(2), weight_pct: ((value / total) * 100).toFixed(2), positions,
+  })
+  const bySecurity = securities.map((x) => slice(x.key, x.label, x.value, 1))
+  const types: Record<string, string> = { equity: 'Aktien', etf: 'ETFs', fund: 'Fonds' }
+  const byType = Object.entries(types)
+    .map(([type, label]) => {
+      const of = securities.filter((x) => x.type === type)
+      return slice(type, label, of.reduce((s, x) => s + x.value, 0), of.length)
+    })
+    .filter((t) => t.positions > 0)
+    .sort((a, b) => Number(b.value) - Number(a.value))
+  const months: Array<{ month: string; income: string; payouts: number }> = []
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(Date.UTC(2024, 4 + i, 1))
+    const month = d.toISOString().slice(0, 7)
+    const m = d.getUTCMonth() + 1
+    const income = m === 5 ? 210 + i * 2 : m === 3 || m === 9 ? 45 : m === 12 ? 60 : m === 1 ? -12 : 0
+    months.push({ month, income: income.toFixed(2), payouts: income > 0 ? 1 : 0 })
+  }
+  const years = [2024, 2025, 2026].map((year) => {
+    const of = months.filter((m) => m.month.startsWith(String(year)))
+    return { year, income: of.reduce((s, m) => s + Number(m.income), 0).toFixed(2), payouts: of.reduce((s, m) => s + m.payouts, 0) }
+  })
+  const ttm = months.slice(-12).reduce((s, m) => s + Number(m.income), 0)
+  const group = {
+    currency: 'EUR',
+    account_ids: [11, 12],
+    market_value: total.toFixed(2),
+    by_security: bySecurity,
+    by_type: byType,
+    concentrated: bySecurity.filter((s) => Number(s.weight_pct) > threshold),
+    unvalued_positions: 1,
+    income: {
+      months,
+      years,
+      ttm: ttm.toFixed(2),
+      ttm_from: '2025-10-02',
+      current_yield_pct: ((ttm / total) * 100).toFixed(2),
+      yield_on_cost_pct: ((ttm / 12000) * 100).toFixed(2),
+    },
+  }
+  const usd = {
+    ...group,
+    currency: 'USD',
+    account_ids: [14],
+    market_value: '2400.00',
+    by_security: [{ key: 'US0000000EEE5', label: 'Example Corp', value: '2400.00', weight_pct: '100.00', positions: 1 }],
+    by_type: [{ key: 'equity', label: 'Aktien', value: '2400.00', weight_pct: '100.00', positions: 1 }],
+    concentrated: [{ key: 'US0000000EEE5', label: 'Example Corp', value: '2400.00', weight_pct: '100.00', positions: 1 }],
+    unvalued_positions: 0,
+    income: { ...group.income, months: [], years: [], ttm: '0.00', current_yield_pct: '0.00', yield_on_cost_pct: null },
+  }
+  return {
+    today: PERF_TODAY,
+    mixed_currency: opts.mixed === true,
+    concentration_threshold_pct: threshold,
+    groups: opts.mixed ? [group, usd] : [group],
+    by_currency: opts.mixed
+      ? [{ currency: 'EUR', value: total.toFixed(2), positions: 2 }, { currency: 'USD', value: '2400.00', positions: 1 }]
+      : [{ currency: 'EUR', value: total.toFixed(2), positions: 2 }],
+    savings_plans: [
+      { account_id: 12, account_label: 'Depot Musterbroker', key: PF_ISIN_B, name: 'Beispiel World ETF', currency: 'EUR', interval: 'monthly', amount: '150.00', executions: 14, first: '2025-08-01', last: '2026-09-01', active: true, next: '2026-10-01' },
+      { account_id: 11, account_label: 'Depot Beispielbank', key: PF_ISIN_A, name: 'Alpha Industries AG', currency: 'EUR', interval: 'quarterly', amount: '300.00', executions: 4, first: '2024-01-15', last: '2024-10-15', active: false, next: null },
+    ],
+  }
 }

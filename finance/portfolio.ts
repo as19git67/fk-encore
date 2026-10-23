@@ -93,6 +93,7 @@ import {
 import { cleanSecurityName, isPersonName, paperTypeOf, type PaperType } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
+import { detectSavingsPlans, type SavingsPlan } from "./portfolio-analysis-calc";
 
 console.log("[boot] finance/portfolio.ts: all imports resolved");
 
@@ -1049,7 +1050,7 @@ export async function loadTransactions(accountIds: number[], identity?: Security
 }
 
 /** The keys the quotes are kept under: the held securities with an ISIN or WKN. */
-function quotedKeys(holdings: HoldingRow[]): string[] {
+export function quotedKeys(holdings: HoldingRow[]): string[] {
   const keys = new Set<string>();
   for (const h of holdings) {
     const key = h.isin || h.wkn;
@@ -1412,6 +1413,14 @@ interface PositionResponse {
   unverifiable_changes: number;
   /** Per depot: where the security stands in the master, and what taking it out would delete. */
   depots: PositionDepotSecurity[];
+  /** Buys at a regular interval and a steady amount (#1700), per depot. */
+  savings_plans: PositionSavingsPlan[];
+}
+
+export interface PositionSavingsPlan extends Omit<SavingsPlan, "amount" | "key"> {
+  account_label: string;
+  /** Median cash per execution, scale 2. */
+  amount: string;
 }
 
 /** The security in one depot's master, for "Aus Depot entfernen" on the position page. */
@@ -1723,6 +1732,14 @@ export const getPortfolioPosition = api(
         };
       });
 
+    const savingsPlans: PositionSavingsPlan[] = detectSavingsPlans(
+      [...txsByAccount.values()]
+        .flat()
+        .filter((t) => t.kind === "buy")
+        .map((t) => ({ account_id: t.account_id, key, day: dateOnly(t.executed_at), cash: cashOf(t) })),
+      quoteDay(new Date().toISOString()),
+    ).map(({ key: _key, amount, ...p }) => ({ ...p, amount: amount.toFixed(2), account_label: labelById.get(p.account_id) ?? "" }));
+
     const recon = await reconcileHoldings(ids, key);
     const securityDepots = await positionDepotSecurities(auth, position, labelById);
 
@@ -1737,6 +1754,7 @@ export const getPortfolioPosition = api(
       holding_gaps: recon.gaps,
       unverifiable_changes: recon.unverifiable,
       depots: securityDepots,
+      savings_plans: savingsPlans,
     };
   },
 );

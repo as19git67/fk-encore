@@ -106,3 +106,12 @@ export const DEPOT_KIND_LABELS: Record<string, string> = {
 export function depotKindLabel(kind: string): string {
   return DEPOT_KIND_LABELS[kind] ?? kind
 }
+
+/** How often a savings plan buys (#1700). */
+export const SAVINGS_PLAN_INTERVAL_LABELS: Record<string, string> = {
+  monthly: 'monatlich',
+  bimonthly: 'alle zwei Monate',
+  quarterly: 'vierteljährlich',
+  semiannual: 'halbjährlich',
+  annual: 'jährlich',
+}
