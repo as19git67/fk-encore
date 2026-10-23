@@ -67,7 +67,16 @@ onBeforeUnmount(() => { if (copiedTimer) clearTimeout(copiedTimer) })
 
 // A lookup that found nothing has its "· 0" in the steps above; an empty
 // grid under the answer said the same thing again, with nothing in it.
-const shownBlocks = computed(() => props.blocks.filter((b) => b.kind === 'analysis' || b.rows.length > 0))
+// While the answer is still arriving, only proposal cards show: the lists of
+// the rounds in between are the model's search, and most of them are gone
+// from the final answer (a repeated search replaces the earlier one, an answer
+// may stand without rows). The steps line says what was looked up meanwhile.
+const shownBlocks = computed(() => props.blocks.filter((b) =>
+  (b.kind === 'analysis' || b.rows.length > 0) && (!props.pending || b.kind === 'proposal')))
+
+// Between two rounds nothing runs and nothing is written yet, but the model
+// is still at work: say so, or the answer looks finished.
+const thinking = computed(() => props.pending && !props.content && props.steps.every((s) => s.done))
 
 // One answer often holds several lists of the same kind: the model searched
 // the tax documents, then all documents, then summarised three. Only the
@@ -102,7 +111,7 @@ function isFolded(i: number): boolean {
       </li>
     </ul>
 
-    <div v-if="content || (pending && !steps.length)" class="bubble">
+    <div v-if="content || thinking" class="bubble">
       <div v-if="content && role === 'assistant'" ref="richEl" class="text text--rich">
         <template v-for="(b, i) in rendered" :key="i">
           <p v-if="b.type === 'p'">
