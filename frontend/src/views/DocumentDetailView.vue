@@ -21,11 +21,14 @@ import Chip from 'primevue/chip'
 import Popover from 'primevue/popover'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useConfirm } from 'primevue/useconfirm'
+import { isIosLike, printPdfBlob } from '../utils/printPdf'
+import { shareFiles } from '../utils/shareFile'
 import {
   deleteDocument,
   dismissDocumentError,
   downloadDocument,
   fetchDocumentBytes,
+  fetchDocumentDownload,
   getDocument,
   getDocumentText,
   listDocumentCategories,
@@ -742,13 +745,55 @@ async function onDownload() {
   downloading.value = true
   error.value = ''
   try {
-    const name = doc.value.original_filename || `${doc.value.title || 'dokument'}.pdf`
-    await downloadDocument(doc.value.id, name)
+    await downloadDocument(doc.value.id, downloadName())
   } catch (err: any) {
     error.value = err.message || 'Download fehlgeschlagen'
   } finally {
     downloading.value = false
   }
+}
+
+/**
+ * Print the PDF the download serves. Desktop browsers get their print dialog
+ * straight away. iPhone and iPad print through the share sheet ("Drucken"),
+ * which needs a tap of its own once the file is here (`utils/printPdf.ts`).
+ */
+const printing = ref(false)
+const printFile = ref<File | null>(null)
+
+function downloadName(): string {
+  if (!doc.value) return 'dokument.pdf'
+  return doc.value.original_filename || `${doc.value.title || 'dokument'}.pdf`
+}
+
+async function onPrint() {
+  if (!doc.value) return
+  printing.value = true
+  error.value = ''
+  try {
+    const blob = await fetchDocumentDownload(doc.value.id)
+    if (isIosLike()) {
+      printFile.value = new File([blob], downloadName(), { type: blob.type || 'application/pdf' })
+    } else {
+      await printPdfBlob(blob)
+    }
+  } catch (err: any) {
+    error.value = err.message || 'Drucken fehlgeschlagen'
+  } finally {
+    printing.value = false
+  }
+}
+
+function onShareForPrint() {
+  const file = printFile.value
+  printFile.value = null
+  if (!file) return
+  // Straight from the tap, nothing awaited before: iOS rejects it otherwise.
+  shareFiles([file], file.name).then((shared) => {
+    if (!shared) void printPdfBlob(file)
+  }).catch((err: any) => {
+    error.value = err?.message || 'Drucken fehlgeschlagen'
+  })
 }
 
 function onDelete() {
@@ -869,6 +914,14 @@ const headerActions = computed<ToolbarItem[]>(() => {
       text: true,
       disabled: downloading.value,
       command: () => void onDownload(),
+    },
+    {
+      key: 'print',
+      icon: busy('pi pi-print', printing.value),
+      title: 'Drucken',
+      text: true,
+      disabled: printing.value,
+      command: () => void onPrint(),
     },
     {
       key: 'follow-up',
@@ -1093,6 +1146,13 @@ onBeforeUnmount(() => {
                   <div>
                     <strong>Herunterladen</strong>
                     <span>Dokument als Datei speichern — mit durchsuchbarer Textebene. Bei reinen Scans wird die Textebene bei Bedarf per OCR erzeugt.</span>
+                  </div>
+                </li>
+                <li>
+                  <i class="pi pi-print" aria-hidden="true" />
+                  <div>
+                    <strong>Drucken</strong>
+                    <span>Öffnet den Druckdialog des Browsers mit dem PDF. Auf iPhone und iPad über das Teilen-Menü („Drucken“).</span>
                   </div>
                 </li>
                 <li>
@@ -1732,6 +1792,22 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <Dialog
+      class="dialog-sm"
+      :visible="printFile !== null"
+      modal
+      header="Drucken"
+      @update:visible="(v: boolean) => { if (!v) printFile = null }"
+    >
+      <p class="print-hint">
+        Das Dokument ist bereit. Im Teilen-Menü steht „Drucken“.
+      </p>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" text @click="printFile = null" />
+        <Button label="Drucken …" icon="pi pi-print" data-testid="print-share" @click="onShareForPrint" />
+      </template>
+    </Dialog>
+
     <DocumentFollowUpDialog
       v-if="doc"
       v-model:visible="followUpOpen"
@@ -1802,7 +1878,8 @@ onBeforeUnmount(() => {
 .propose-dialog :deep(.p-select) {
   width: 100%;
 }
-.propose-hint {
+.propose-hint,
+.print-hint {
   margin: 0;
   color: var(--p-text-muted-color);
   font-size: var(--text-base);

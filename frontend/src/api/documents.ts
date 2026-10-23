@@ -1186,18 +1186,26 @@ export async function fetchDocumentBytes(id: number): Promise<Uint8Array> {
 }
 
 /**
+ * The PDF the download serves (searchable, and for a text document the one
+ * rendered from its Markdown), as a Blob — for saving, printing or sharing.
+ */
+export async function fetchDocumentDownload(id: number): Promise<Blob> {
+  const token = localStorage.getItem('auth_token')
+  const res = await fetch(`${API_BASE_URL}/documents/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`Download ${id}: HTTP ${res.status}`)
+  return res.blob()
+}
+
+/**
  * Download a document as a file. The backend serves a searchable
  * (OCR-layered) PDF when the original lacked a text layer, building it on
  * demand for documents imported before that feature existed — so the
  * downloaded file is always selectable. Triggers a browser "Save as".
  */
 export async function downloadDocument(id: number, filename: string): Promise<void> {
-  const token = localStorage.getItem('auth_token')
-  const res = await fetch(`${API_BASE_URL}/documents/${id}/download`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`Download ${id}: HTTP ${res.status}`)
-  const blob = await res.blob()
+  const blob = await fetchDocumentDownload(id)
   const url = URL.createObjectURL(blob)
   try {
     const a = document.createElement('a')
