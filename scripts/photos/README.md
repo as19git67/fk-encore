@@ -213,6 +213,11 @@ Etappe 2 in `documentation/auto-pick-face-relevance.md`.
 
 ## `diagnose-eyes-open.mjs`
 
+Dieselbe Auswertung gibt es für den eigenen Nutzer ohne Skript: Karte
+„Augen und Lächeln“ unter Fotos › Einstellungen › Ästhetik
+(`POST /photos/aesthetic/face-signals`, `photo/face-signals-report.ts`).
+Das Skript bleibt für den Blick über alle Nutzer und den Report als Datei.
+
 Etappe 5. Trifft die Augenöffnung aus den Gesichtslandmarken die
 Entscheidungen des Nutzers besser als der heutige CLIP-Wert `eyes_open`?
 

@@ -411,7 +411,9 @@ pair from the 68-point model (`_68`). Filled during the scan; the landmark
 backfill re-measures faces that already have landmarks from the stored
 points without re-detection. Section 3b of `diagnose-eyes-open.mjs` checks
 both against the user's decisions, with chance (50 %) as the baseline since
-there is no existing smile signal.
+there is no existing smile signal. The same evaluation runs per user from
+the card "Augen und Lächeln" under Fotos › Einstellungen › Ästhetik
+(`POST /photos/aesthetic/face-signals`, `photo/face-signals-report.ts`).
 
 ## 7. Validation: offline replay is mandatory, not optional
 

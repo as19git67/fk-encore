@@ -261,3 +261,40 @@ export function adoptTaste(): Promise<TasteReport> {
 export function resetTaste(): Promise<{ removed: boolean }> {
   return apiFetch('/photos/aesthetic/taste/reset', { method: 'POST' })
 }
+
+export interface FacePairCounts {
+  pairs: number
+  decided: number
+  hits: number
+  strong: number
+  strong_hits: number
+}
+
+export interface FaceSignalResult extends FacePairCounts {
+  key: string
+  label: string
+  kind: 'eyes' | 'mouth'
+  /** CLIP `eyes_open` on the same pairs; eyes only. */
+  clip: FacePairCounts | null
+  verdict: 'better' | 'not_better' | 'too_few' | 'no_coverage'
+}
+
+export interface FaceSignalsReport {
+  coverage: {
+    faces: number
+    with_landmarks: number
+    large_enough: number
+    with_eyes: number
+    with_mouth: number
+  }
+  reviewed_groups: number
+  pairs: number
+  signals: FaceSignalResult[]
+  blocked: string | null
+  min_decided_pairs: number
+}
+
+/** Eyes and mouth from the facial landmarks against the caller's reviewed groups. Read-only. */
+export function measureFaceSignals(): Promise<FaceSignalsReport> {
+  return apiFetch('/photos/aesthetic/face-signals', { method: 'POST' })
+}

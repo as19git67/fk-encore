@@ -38,6 +38,9 @@ import {
   replayTaste,
   adoptTaste,
   resetTaste,
+  measureFaceSignals,
+  type FaceSignalResult,
+  type FaceSignalsReport,
   type TasteReport,
   type CompositeReport,
   type CompositeWeights,
@@ -71,12 +74,14 @@ const busy = ref<
   | 'taste'
   | 'taste-adopt'
   | 'taste-reset'
+  | 'face-signals'
   | number
   | null
 >(null)
 const taste = ref<TasteReport | null>(null)
 const replay = ref<ReplayReport | null>(null)
 const composite = ref<CompositeReport | null>(null)
+const faceSignals = ref<FaceSignalsReport | null>(null)
 
 const enabled = ref(false)
 const windowStart = ref('01:00')
@@ -392,6 +397,37 @@ function weightsText(w: CompositeWeights | null): string {
   if (!w) return 'bisherige Formel mit CLIP'
   return `${percent(w.aesthetics)} Ästhetik · ${percent(w.quality)} Technik · ${percent(w.blur)} Schärfe`
 }
+
+async function runFaceSignals() {
+  busy.value = 'face-signals'
+  error.value = null
+  info.value = null
+  try {
+    faceSignals.value = await measureFaceSignals()
+  } catch (e) {
+    error.value = message(e, 'Die Auswertung ist fehlgeschlagen')
+  } finally {
+    busy.value = null
+  }
+}
+
+function hitRate(hits: number, n: number): string {
+  return n > 0 ? percent(hits / n) : '–'
+}
+
+function faceVerdict(s: FaceSignalResult): { value: string; severity: 'success' | 'secondary' } | null {
+  if (s.verdict === 'better') {
+    return { value: s.kind === 'eyes' ? 'Besser als CLIP' : 'Über dem Zufall', severity: 'success' }
+  }
+  if (s.verdict === 'not_better') {
+    return { value: s.kind === 'eyes' ? 'Nicht besser' : 'Nicht über dem Zufall', severity: 'secondary' }
+  }
+  if (s.verdict === 'too_few') return { value: 'Zu wenige Paare', severity: 'secondary' }
+  return null
+}
+
+const eyeSignals = computed(() => faceSignals.value?.signals.filter((s) => s.kind === 'eyes') ?? [])
+const mouthSignals = computed(() => faceSignals.value?.signals.filter((s) => s.kind === 'mouth') ?? [])
 
 async function runComposite() {
   busy.value = 'composite'
@@ -855,6 +891,86 @@ function rescoreAll() {
             text
             :loading="busy === 'composite-reset'"
             @click="resetComposite"
+          />
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="ae-face-signals">
+        <h2 id="ae-face-signals" class="card-title">Augen und Lächeln</h2>
+        <p class="muted">
+          Aus den Gesichtspunkten werden je Gesicht die Augenöffnung und die Form des Mundes gemessen. Hier zeigt sich, ob
+          das zu deinen Entscheidungen passt: In deinen geprüften Gruppen wird jedes behaltene Foto mit jedem
+          ausgeblendeten verglichen. Ein Wert trifft, wenn das behaltene Foto den höheren hat. Die Augen stehen neben dem
+          bisherigen CLIP-Wert, der Mund neben dem Zufall (50 %). Am Auto-Pick ändert das nichts.
+        </p>
+        <template v-if="faceSignals">
+          <p class="muted">
+            {{ count(faceSignals.coverage.with_landmarks) }} von {{ count(faceSignals.coverage.faces) }} Gesichtern haben
+            Landmarken, {{ count(faceSignals.coverage.large_enough) }} sind groß genug zum Messen.
+            {{ count(faceSignals.reviewed_groups) }} geprüfte Gruppen ergeben {{ count(faceSignals.pairs) }} Paare.
+          </p>
+          <Message v-if="faceSignals.blocked" severity="info" :closable="false">{{ faceSignals.blocked }}</Message>
+          <ScrollX v-if="eyeSignals.some((s) => s.pairs > 0)">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Augen</th>
+                  <th scope="col" class="num">Entschieden</th>
+                  <th scope="col" class="num">Trifft</th>
+                  <th scope="col" class="num">CLIP trifft</th>
+                  <th scope="col" class="num">Bei großem Unterschied</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in eyeSignals" :key="s.key">
+                  <td>
+                    {{ s.label }}
+                    <Tag v-if="faceVerdict(s)" v-bind="faceVerdict(s)!" />
+                  </td>
+                  <td class="num">{{ count(s.decided) }} / {{ count(s.pairs) }}</td>
+                  <td class="num">{{ hitRate(s.hits, s.decided) }}</td>
+                  <td class="num">{{ s.clip ? hitRate(s.clip.hits, s.clip.decided) : '–' }}</td>
+                  <td class="num">{{ hitRate(s.strong_hits, s.strong) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+          <ScrollX v-if="mouthSignals.some((s) => s.pairs > 0)">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Mund</th>
+                  <th scope="col" class="num">Entschieden</th>
+                  <th scope="col" class="num">Trifft</th>
+                  <th scope="col" class="num">Bei großem Unterschied</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in mouthSignals" :key="s.key">
+                  <td>
+                    {{ s.label }}
+                    <Tag v-if="faceVerdict(s)" v-bind="faceVerdict(s)!" />
+                  </td>
+                  <td class="num">{{ count(s.decided) }} / {{ count(s.pairs) }}</td>
+                  <td class="num">{{ hitRate(s.hits, s.decided) }}</td>
+                  <td class="num">{{ hitRate(s.strong_hits, s.strong) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+          <p class="muted">
+            Ein Urteil gibt es ab {{ faceSignals.min_decided_pairs }} entschiedenen Paaren. „Großer Unterschied“ ist die
+            obere Hälfte der entschiedenen Paare.
+          </p>
+        </template>
+        <div class="buttons">
+          <Button
+            label="Auswerten"
+            icon="pi pi-chart-bar"
+            severity="secondary"
+            outlined
+            :loading="busy === 'face-signals'"
+            @click="runFaceSignals"
           />
         </div>
       </section>

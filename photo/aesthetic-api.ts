@@ -31,6 +31,7 @@ import { adoptReplay, replayAutoPick, type ReplayReport } from "./group-auto-pic
 import { recomputeAiPicksForUser } from "./group-auto-pick.service";
 import { adoptComposite, replayComposite, type CompositeReport } from "./composite-replay";
 import type { AiPickWeights } from "../db/schema";
+import { faceSignalsReport, type FaceSignalsReport } from "./face-signals-report";
 import {
   TasteNotAdoptedError,
   adoptTaste,
@@ -306,6 +307,21 @@ export const resetCompositeScore = api(
     requireAdmin();
     await saveCompositeSetting(null);
     rebuildComposites(null);
+  },
+);
+
+// ─── Eyes and smile from the facial landmarks ───────────────────────────────
+
+/**
+ * Measures the landmark eye and mouth ratios against the caller's reviewed
+ * groups (kept vs. hidden), the eyes next to today's CLIP `eyes_open`.
+ * Read-only; changes nothing in the auto-pick.
+ */
+export const faceSignals = api(
+  { expose: true, method: "POST", path: "/photos/aesthetic/face-signals", auth: true },
+  async (): Promise<FaceSignalsReport> => {
+    const userId = adminUserId();
+    return faceSignalsReport(userId);
   },
 );
 
