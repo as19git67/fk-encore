@@ -182,12 +182,16 @@ function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
   scrollToRow(Math.floor(idx / cols.value), align)
 }
 
-watch(() => props.selectedIndex, (idx) => scrollToItemIndex(idx, 'auto'))
+// After the DOM update: opening a person swaps the "Lade…" line for the
+// rows in the same tick that items and the selected index arrive. Before
+// the patch the rows element has no height yet, so the box cannot scroll
+// to the selected photo and the jump is clamped to the top.
+watch(() => props.selectedIndex, (idx) => scrollToItemIndex(idx, 'auto'), { flush: 'post' })
 
 watch(() => [props.items, cols.value] as const, () => {
   scrollToItemIndex(props.selectedIndex, 'auto')
   commitRenderedRows(virtualRows.value)
-})
+}, { flush: 'post' })
 
 function thumbnailSrc(item: FacePhotoItem): string {
   return photoThumbnailSrc({

@@ -68,6 +68,53 @@ export const BreiteKacheln: Story = {
   },
 }
 
+/** Enough photos that the last ones sit well below the box's fold. */
+const manyItems: FacePhotoItem[] = Array.from({ length: 60 }, (_, i) => ({
+  face: { id: 1000 + i, bbox: BBOXES[i % BBOXES.length]! },
+  photo: { id: 2000 + i, filename: FILES[i % FILES.length]!, original_name: FILES[i % FILES.length]! },
+}))
+const COVER_INDEX = 52
+
+/**
+ * Opening a person: the grid mounts while the details load, then items and
+ * the selected photo (the cover) arrive in one tick. The grid has to scroll
+ * its box so the selected tile is in view — it used to stay at the top
+ * because the jump ran before the rows had their height.
+ */
+export const ScrollsToSelected: Story = {
+  name: 'Springt zum gewählten Foto',
+  render: () => ({
+    components: { FacePhotoGrid },
+    data: () => ({ items: [] as FacePhotoItem[], selectedIndex: -1, loading: true }),
+    mounted(this: { items: FacePhotoItem[]; selectedIndex: number; loading: boolean }) {
+      setTimeout(() => {
+        this.items = manyItems
+        this.selectedIndex = COVER_INDEX
+        this.loading = false
+      }, 50)
+    },
+    template: `<div style="width:100%; max-width:640px; height:520px">
+      <FacePhotoGrid :items="items" :loadingDetails="loading" v-model:selectedIndex="selectedIndex" />
+    </div>`,
+  }),
+  play: async ({ canvasElement }) => {
+    const deadline = Date.now() + 3000
+    let selected: HTMLElement | null = null
+    while (Date.now() < deadline) {
+      selected = canvasElement.querySelector<HTMLElement>('.photo-item.selected')
+      if (selected) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    if (!selected) throw new Error('selected photo was never rendered')
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const box = canvasElement.querySelector<HTMLElement>('.photo-grid-scroll')!.getBoundingClientRect()
+    const tile = selected.getBoundingClientRect()
+    if (tile.top < box.top - 1 || tile.bottom > box.bottom + 1) {
+      throw new Error(`selected photo is outside the box: tile ${tile.top.toFixed(0)}–${tile.bottom.toFixed(0)}, box ${box.top.toFixed(0)}–${box.bottom.toFixed(0)}`)
+    }
+  },
+}
+
 /**
  * Waits for the thumbnails to decode, then compares each face box's centre
  * with its tile's centre. Tolerance is one pixel of rounding plus the box's
