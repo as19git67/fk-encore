@@ -9,6 +9,7 @@ import {
   calibrateAiPickWeights,
   backfillPhotoDimensions,
   backfillFaceSharpness,
+  backfillFaceLandmarks,
   type AiPickWeightsCalibrationResult,
 } from '../../api/photos'
 import { useScanQueueStatus } from '../../composables/useScanQueueStatus'
@@ -112,6 +113,52 @@ async function handleBackfillFaceSharpness() {
     aiPickError.value = err.message || 'Fehler beim Messen der Gesichtsschärfe'
   } finally {
     faceSharpnessLoading.value = false
+  }
+}
+
+// Facial landmarks / eye openness (Etappe 5, documentation/auto-pick-face-relevance.md).
+// Same cursor loop as the sharpness backfill; each batch re-runs the face
+// detector, so it is slower per photo.
+const faceLandmarksProgress = ref<{
+  photos_scanned: number
+  faces_updated: number
+  faces_unmatched: number
+  photos_failed: number
+  remaining_faces: number
+  done: boolean
+} | null>(null)
+const faceLandmarksLoading = ref(false)
+
+async function handleBackfillFaceLandmarks() {
+  faceLandmarksProgress.value = null
+  aiPickError.value = ''
+  faceLandmarksLoading.value = true
+  const totals = {
+    photos_scanned: 0,
+    faces_updated: 0,
+    faces_unmatched: 0,
+    photos_failed: 0,
+    remaining_faces: 0,
+    done: false,
+  }
+  try {
+    let cursor: number | undefined
+    for (;;) {
+      const batch = await backfillFaceLandmarks(cursor)
+      totals.photos_scanned += batch.photos_scanned
+      totals.faces_updated += batch.faces_updated
+      totals.faces_unmatched += batch.faces_unmatched
+      totals.photos_failed += batch.photos_failed
+      totals.remaining_faces = batch.remaining_faces
+      totals.done = batch.next_photo_id === null
+      faceLandmarksProgress.value = { ...totals }
+      if (batch.next_photo_id === null) break
+      cursor = batch.next_photo_id
+    }
+  } catch (err: any) {
+    aiPickError.value = err.message || 'Fehler beim Nachtragen der Gesichtslandmarken'
+  } finally {
+    faceLandmarksLoading.value = false
   }
 }
 
@@ -235,6 +282,25 @@ function pct(v: number | undefined | null): string {
       :loading="faceSharpnessLoading"
       :disabled="faceSharpnessLoading || dimensionsLoading || aiPickLoading || groupingLoading || isActive"
       @click="handleBackfillFaceSharpness"
+    />
+
+    <Message v-if="faceLandmarksProgress" severity="info" :closable="false" class="data-management-group__item">
+      Gesichtslandmarken nachgetragen: {{ faceLandmarksProgress.faces_updated }} Gesichter in
+      {{ faceLandmarksProgress.photos_scanned }} Fotos
+      (nicht wiedergefunden: {{ faceLandmarksProgress.faces_unmatched }}, fehlgeschlagen:
+      {{ faceLandmarksProgress.photos_failed }}).
+      <span v-if="!faceLandmarksProgress.done">
+        Noch offen: {{ faceLandmarksProgress.remaining_faces }} Gesichter.
+      </span>
+    </Message>
+    <Button class="data-management-group__item"
+      icon="pi pi-eye"
+      outlined
+      label="Augen-Landmarken nachtragen"
+      v-tooltip.top="'Lässt die Gesichtserkennung über Fotos mit älteren Gesichtern noch einmal laufen und speichert die Gesichtspunkte samt Augenöffnung je Gesicht. Personenzuordnungen bleiben erhalten. Dauert etwa eine Sekunde pro Foto.'"
+      :loading="faceLandmarksLoading"
+      :disabled="faceLandmarksLoading || faceSharpnessLoading || dimensionsLoading || aiPickLoading || groupingLoading || isActive"
+      @click="handleBackfillFaceLandmarks"
     />
 
     <Button class="data-management-group__item"

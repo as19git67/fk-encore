@@ -2228,6 +2228,26 @@ export const backfillFaceSharpness = api(
   }
 );
 
+/**
+ * Backfill facial landmarks and eye openness (Etappe 5 of
+ * documentation/auto-pick-face-relevance.md) for faces scanned before the
+ * columns existed. Re-runs the face detector and matches by box overlap, so
+ * person assignments stay untouched. `data.manage`, batched and resumable
+ * like the sharpness backfill.
+ */
+export const backfillFaceLandmarks = api(
+  { expose: true, method: "POST", path: "/photos/backfill-face-landmarks", auth: true },
+  async (params: { afterPhotoId?: number; limit?: number }): Promise<service.FaceLandmarksBackfillResult> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.backfillFaceLandmarksLogic({
+      afterPhotoId: params.afterPhotoId,
+      limit: params.limit,
+    });
+  }
+);
+
 // ========== AI Auto-Pick (Track I) ==========
 
 /**

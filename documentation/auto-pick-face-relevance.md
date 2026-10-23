@@ -185,7 +185,7 @@ it only acts where two shots of the same scene are pitted against each other.
 | bbox per face | **yes** (`faces.bbox`) |
 | Person assignment / ignored | **yes** (`user_face_assignments`) |
 | Sharpness **per face** | **no** — only the minimum |
-| Eyes open **per face** | **no** — only the minimum |
+| Eyes open **per face** | **yes** since Stage 5 (`faces.eye_aspect`, `faces.eye_aspect_68`) |
 | Gaze direction | **no** — but see below |
 
 `faces.quality` exists, is set to a constant `100` on insert,
@@ -202,6 +202,10 @@ persistence plus re-detection.
 **Eye openness is not possible this way.** Five landmarks give eye *centers*, not
 eyelid contours. That would still require CLIP per crop or a
 68-point model — the most expensive of the three options.
+*Correction (2026-10):* the service runs the `buffalo_l` pack, which already
+contains a 106-point and a 68-point landmark model; `FaceAnalysis.get()`
+runs both on every face. Only the five `kps` were returned. Eyelid contours
+were therefore free all along — see Stage 5.
 
 Sharpness per face needs a backfill, but a cheap one: the
 Laplacian variance over a bbox crop is pure pixel arithmetic. No
@@ -370,8 +374,35 @@ but no new model.
 can come in between at any time; only makes sense once several varying signals
 are available.
 
-**Stage 5 — eyes open per face.** Most expensive option, only if the
-measurement shows that it is worthwhile.
+**Stage 5 — eyes open per face.** Turned out to be the cheap option
+(see the correction in Section 4). **Done — data collection, without any
+formula change:**
+
+- `/detect` of the InsightFace service also returns `landmark_2d_106` and
+  `landmark_3d_68` (x/y in image pixels).
+- Columns `faces.landmarks` (JSON `{ kps, lm106, lm68 }`, normalised like
+  `bbox`), `faces.eye_aspect` and `faces.eye_aspect_68` (migration
+  `0272_face_landmarks.sql`). `kps` is persisted at the same time, so
+  Stage 3 (gaze direction) needs no further re-detection.
+- `photo/face-eyes.ts`: `eye_aspect` is height over width of each eye
+  contour of the 106-point set along its principal axis (independent of
+  point order and head tilt), `eye_aspect_68` the textbook EAR
+  (Soukupová & Čech 2016). Mean of both eyes, measured in pixels. Faces
+  narrower than `MIN_EYE_FACE_PIXELS` (48) keep `NULL`. Only raw ratios are
+  stored; where "closed" begins is for the replay to decide.
+- Measured during the scan and for existing data via
+  `POST /photos/backfill-face-landmarks` (button "Augen-Landmarken
+  nachtragen" under Fotos › Einstellungen › Wartung). The backfill
+  re-detects and matches by box overlap (`matchDetections`, IoU ≥ 0.5)
+  instead of a forced rescan, which would delete the face rows and every
+  person assignment with them.
+- `scripts/photos/diagnose-eyes-open.mjs` compares both ratios with the
+  CLIP `eyes_open` pairwise in reviewed groups (kept vs. hidden),
+  prominence-weighted per photo.
+
+**Next:** run the backfill, then the diagnosis. Only if a landmark ratio
+beats CLIP there does it go into the replay with re-learned weights.
+Mouth corners for a smile signal are in the same stored landmarks.
 
 ## 7. Validation: offline replay is mandatory, not optional
 
