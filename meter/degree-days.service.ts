@@ -26,6 +26,7 @@ import { meterDevices, meterHomeLocations, meterReadings } from "../db/schema";
 import { roundToGrid } from "../trip-planner/weather-client";
 import { listMeters } from "./meter.service";
 import { importTariffEntries, listElectricityTariffs } from "./tariffs.service";
+import { actingUserForScope, homeScopeWhere, resolveSettingsScope } from "./household.service";
 import {
   getArchiveClient,
   getGeocodingClient,
@@ -135,9 +136,11 @@ function mapHome(row: typeof meterHomeLocations.$inferSelect): HomeLocation {
   return { label: row.label, lat: row.lat, lon: row.lon, source: row.source, updatedAt: row.updated_at };
 }
 
+/** The household's home location when `userId` belongs to one (#1647), else their own. */
 export async function getHomeLocation(userId: number): Promise<HomeLocation | null> {
+  const scope = await resolveSettingsScope(userId);
   const row = await dbFirst<typeof meterHomeLocations.$inferSelect>(
-    db.select().from(meterHomeLocations).where(eq(meterHomeLocations.user_id, userId)),
+    db.select().from(meterHomeLocations).where(homeScopeWhere(scope)),
   );
   return row ? mapHome(row) : null;
 }
@@ -161,16 +164,25 @@ export async function setHomeLocation(
     source: input.source,
     updated_at: new Date().toISOString(),
   };
-  const [row] = await db
-    .insert(meterHomeLocations)
-    .values({ user_id: userId, ...values })
-    .onConflictDoUpdate({ target: meterHomeLocations.user_id, set: values })
-    .returning();
+  const scope = await resolveSettingsScope(userId);
+  const [row] =
+    scope.kind === "household"
+      ? await db
+          .insert(meterHomeLocations)
+          .values({ group_id: scope.groupId, ...values })
+          .onConflictDoUpdate({ target: meterHomeLocations.group_id, set: values })
+          .returning()
+      : await db
+          .insert(meterHomeLocations)
+          .values({ user_id: userId, ...values })
+          .onConflictDoUpdate({ target: meterHomeLocations.user_id, set: values })
+          .returning();
   return mapHome(row);
 }
 
 export async function deleteHomeLocation(userId: number): Promise<void> {
-  await db.delete(meterHomeLocations).where(eq(meterHomeLocations.user_id, userId));
+  const scope = await resolveSettingsScope(userId);
+  await db.delete(meterHomeLocations).where(homeScopeWhere(scope));
 }
 
 export async function searchPlaces(query: string): Promise<GeocodeCandidate[]> {
@@ -286,11 +298,22 @@ export async function fillDegreeDaysForUser(
   return { from, to, monthsMissing: missing.length, monthsWritten: written, monthsIncomplete: incomplete };
 }
 
-/** Every household with a home location — the daily job's audience. */
+/**
+ * Every household with a home location — the daily job's audience. One user
+ * per location: the job acts as that user, and the household's members would
+ * otherwise each fetch the same months.
+ */
 export async function userIdsWithHomeLocation(): Promise<number[]> {
-  const rows = await dbAll<{ user_id: number }>(
-    db.select({ user_id: meterHomeLocations.user_id }).from(meterHomeLocations),
+  const rows = await dbAll<{ user_id: number | null; group_id: number | null }>(
+    db
+      .select({ user_id: meterHomeLocations.user_id, group_id: meterHomeLocations.group_id })
+      .from(meterHomeLocations),
   );
-  return rows.map((row) => row.user_id);
+  const result: number[] = [];
+  for (const row of rows) {
+    const userId = await actingUserForScope(row);
+    if (userId !== null) result.push(userId);
+  }
+  return result;
 }
 

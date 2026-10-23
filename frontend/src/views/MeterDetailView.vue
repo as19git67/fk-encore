@@ -65,6 +65,11 @@ const auth = useAuthStore()
 const confirmDialog = useConfirm()
 const canManage = computed(() => auth.hasPermission('meters.manage'))
 const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
+/**
+ * Edit, delete, device swap and API keys: the meter's owner and the owners of
+ * its group. Other household members read and enter readings (#1647).
+ */
+const canManageMeter = computed(() => canManage.value && (detail.value?.canManage ?? false))
 
 const meterId = computed(() => Number(route.params.id))
 
@@ -132,6 +137,15 @@ async function loadGroups(): Promise<GroupSummary[]> {
   }
 }
 
+/** Who else sees the meter, and whose it is when it is not the caller's (#1647). */
+const sharingLabel = computed(() => {
+  const m = detail.value
+  if (!m) return ''
+  const owner = m.ownerUserId === auth.user?.id ? '' : ` · von ${m.ownerName}`
+  if (m.groupId === null) return `Privat${owner}`
+  return `Geteilt mit ${m.household ? 'dem Haushalt' : 'der Gruppe'} „${m.groupName ?? ''}“${owner}`
+})
+
 const groupOptions = computed(() => [
   { label: 'Privat (nur ich)', value: null },
   ...groups.value.map((g) => ({ label: g.name, value: g.id })),
@@ -145,7 +159,7 @@ async function loadDetail() {
     await Promise.all([
       loadReadings(),
       loadReport(),
-      canManage.value ? loadApiKeys() : Promise.resolve(),
+      canManageMeter.value ? loadApiKeys() : Promise.resolve(),
     ])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden'
@@ -770,8 +784,8 @@ watch(meterId, () => loadDetail())
       <template v-if="!loading && detail">
         <FileButton :members="[{ entity_type: 'meter', entity_id: meterId }]" :title="detail.name" />
         <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />
-        <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
-        <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
+        <Button v-if="canManageMeter" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
+        <Button v-if="canManageMeter" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
       </template>
     </template>
 
@@ -786,6 +800,10 @@ watch(meterId, () => loadDetail())
         <Tag :value="typeLabel(detail.type)" severity="secondary" />
         <Tag v-if="detail.role" :value="roleLabel(detail.role)" severity="info" />
         <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
+        <span>
+          <i :class="detail.groupId === null ? 'pi pi-lock' : detail.household ? 'pi pi-home' : 'pi pi-users'" />
+          {{ sharingLabel }}
+        </span>
       </div>
 
       <!-- Figures -->
@@ -878,7 +896,7 @@ watch(meterId, () => loadDetail())
       <!-- Device history -->
       <div class="section-header">
         <h2><i class="pi pi-cog" /> Gerätehistorie</h2>
-        <Button v-if="canManage" label="Gerät ersetzen" icon="pi pi-refresh" size="small" @click="openReplace" />
+        <Button v-if="canManageMeter" label="Gerät ersetzen" icon="pi pi-refresh" size="small" @click="openReplace" />
       </div>
       <ScrollX class="device-table">
       <DataTable :value="detail.devices" size="small">
@@ -902,7 +920,7 @@ watch(meterId, () => loadDetail())
             <Tag :value="data.active ? 'aktiv' : 'ersetzt'" :severity="data.active ? 'success' : 'secondary'" />
           </template>
         </Column>
-        <Column v-if="canManage" style="width: 6.5rem">
+        <Column v-if="canManageMeter" style="width: 6.5rem">
           <template #body="{ data }">
             <div class="device-actions">
               <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" v-tooltip.left="'Gerät bearbeiten'" @click="openDeviceEdit(data)" />
@@ -982,7 +1000,7 @@ watch(meterId, () => loadDetail())
       </ScrollX>
 
       <!-- API keys -->
-      <template v-if="canManage">
+      <template v-if="canManageMeter">
         <div class="section-header">
           <h2><i class="pi pi-key" /> API-Keys</h2>
           <Button label="Neuer Key" icon="pi pi-plus" size="small" @click="openCreateKey" />

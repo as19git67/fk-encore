@@ -237,6 +237,49 @@ Documents module). A meter is visible to the owner + group members;
 `meters.manage` only applies to visible meters (no global admin bypass
 needed, household scope is enough).
 
+### 4.1 Household (#1647)
+
+Meters usually belong to the household, not to one person. An owner of a
+group can mark it as the household (`groups.household`, Zähler › Haushalt,
+`PUT /meters/household`); a person's household is the household group they
+belong to (lowest id if there are several, and marking one unmarks the other
+household groups that person owns).
+
+- **Sharing by default.** A new meter without an explicit `groupId` goes to
+  the creator's household; `groupId: null` keeps it private, and private
+  meters stay invisible to everybody else. `POST /meters/household/share`
+  shares all of the caller's private meters at once.
+- **Household settings.** Tariffs and assumptions
+  (`meter_electricity_tariffs.group_id`), fetched petrol prices and degree
+  days (stored as tariff rows) and the home location
+  (`meter_home_locations.group_id`) belong to the household when the person
+  looking has one, otherwise to that person (`resolveSettingsScope` in
+  `meter/household.service.ts`). So costs, profitability and degree-day
+  reports are identical for every member. Marking a household copies the
+  marking owner's personal tariffs and home location into it if it has none
+  yet; the personal rows stay. The daily degree-day and petrol-price jobs run
+  once per household, not once per member. `GET /meters/tariffs/electricity`
+  returns the `scope` it used, and the reports page says which tariff set the
+  costs are based on.
+- **Quick entry** stays a personal list, and lists every visible meter,
+  household meters included.
+
+Permissions on a visible meter (`mayManageMeter` in `meter/meter.service.ts`,
+covered by `meter/household.service.test.ts`):
+
+| Action | Owner of the meter | Owner of its group | Other member |
+|---|---|---|---|
+| See meter, readings, reports, anomalies | ✓ | ✓ | ✓ |
+| Enter and correct readings, confirm/dismiss anomalies | ✓ | ✓ | ✓ |
+| Edit master data and sharing, delete the meter | ✓ | ✓ | – |
+| Swap or edit devices, manage API keys | ✓ | ✓ | – |
+
+The usual permission keys apply on top (`meters.read_entry` for readings,
+`meters.manage` for the rest). A member who sees a meter but may not change
+it gets `permission_denied`; a meter outside the caller's scope stays
+`not_found`. Collections, exports and the assistant read meters through the
+same `visibleMetersWhere`.
+
 ---
 
 ## 5. Reports & anomaly detection

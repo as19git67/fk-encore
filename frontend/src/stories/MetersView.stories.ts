@@ -13,7 +13,11 @@ const MOCK_METERS = [
     notes: null,
     decimals: 0,
     groupId: null,
+    groupName: null,
+    household: false,
     ownerUserId: 1,
+    ownerName: 'Max Mustermann',
+    canManage: true,
     activeDeviceSerial: 'NEW-7',
     lastReadingValue: 45,
     lastReadingAt: '2026-01-01T08:00:00Z',
@@ -27,8 +31,12 @@ const MOCK_METERS = [
     location: 'Hauswirtschaftsraum',
     notes: null,
     decimals: 1,
-    groupId: null,
-    ownerUserId: 1,
+    groupId: 1,
+    groupName: 'Familie',
+    household: true,
+    ownerUserId: 2,
+    ownerName: 'Erika Musterfrau',
+    canManage: false,
     activeDeviceSerial: 'E-100',
     lastReadingValue: 12345.6,
     lastReadingAt: '2026-02-15T09:30:00Z',
@@ -91,6 +99,13 @@ const MOCK_API_KEYS = [
 
 const meterHandlers = [
   http.get('/api/meters', () => HttpResponse.json({ meters: MOCK_METERS })),
+  http.get('/api/meters/household', () =>
+    HttpResponse.json({
+      household: { id: 1, name: 'Familie', myRole: 'owner' },
+      groups: [{ id: 1, name: 'Familie', myRole: 'owner', household: true }],
+      privateMeterCount: 1,
+    }),
+  ),
   http.get('/api/meters/:id/readings', () =>
     HttpResponse.json({ readings: MOCK_READINGS, total: MOCK_READINGS.length }),
   ),

@@ -21,6 +21,7 @@ import { dbAll, dbFirst } from "../db/adapter";
 import { meters, meterDevices, meterReadings } from "../db/schema";
 import { listMeters } from "./meter.service";
 import { importTariffEntries, listElectricityTariffs } from "./tariffs.service";
+import { oneUserPerScope } from "./household.service";
 import {
   getOilBulletinClient,
   type BulletinFuel,
@@ -193,7 +194,10 @@ export async function fillPetrolPricesForUser(
   };
 }
 
-/** Households that own a wallbox meter — the job's audience, nobody else. */
+/**
+ * Households that own a wallbox meter — the job's audience, nobody else. One
+ * user per household (#1647): its members share the prices.
+ */
 export async function userIdsWithChargingMeter(): Promise<number[]> {
   const rows = await dbAll<{ owner_user_id: number }>(
     db
@@ -201,5 +205,5 @@ export async function userIdsWithChargingMeter(): Promise<number[]> {
       .from(meters)
       .where(eq(meters.role, "ev_charger_total")),
   );
-  return rows.map((row) => row.owner_user_id);
+  return await oneUserPerScope(rows.map((row) => row.owner_user_id));
 }

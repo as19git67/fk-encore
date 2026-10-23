@@ -19,9 +19,13 @@ import {
   createMeter,
   updateMeter,
   deleteMeter,
+  getMeterHousehold,
+  setMeterHousehold,
+  shareMetersWithHousehold,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
+  type MeterHouseholdState,
   type MeterListItem,
   type MeterRole,
   type MeterType,
@@ -54,6 +58,8 @@ const canManage = computed(() => auth.hasPermission('meters.manage'))
 
 const meters = ref<MeterListItem[]>([])
 const groups = ref<GroupSummary[]>([])
+const household = ref<MeterHouseholdState | null>(null)
+const householdId = computed(() => household.value?.household?.id ?? null)
 const loading = ref(false)
 const error = ref('')
 
@@ -82,12 +88,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [mRes, gRes] = await Promise.all([
+    const [mRes, gRes, hRes] = await Promise.all([
       listMeters({ collection: collectionScope.value ?? undefined }),
       loadGroups(),
+      getMeterHousehold().catch(() => null),
     ])
     meters.value = mRes.meters
     groups.value = gRes
+    household.value = hRes
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
@@ -109,8 +117,22 @@ async function loadGroups(): Promise<GroupSummary[]> {
 
 const groupOptions = computed(() => [
   { label: 'Privat (nur ich)', value: null },
-  ...groups.value.map((g) => ({ label: g.name, value: g.id })),
+  ...groups.value.map((g) => ({
+    label: g.id === householdId.value ? `${g.name} (Haushalt)` : g.name,
+    value: g.id,
+  })),
 ])
+
+/** Who else sees the meter, and whose it is when it is not the caller's (#1647). */
+function sharingLabel(m: MeterListItem): string {
+  const owner = m.ownerUserId === auth.user?.id ? '' : ` · von ${m.ownerName}`
+  if (m.groupId === null) return `Privat${owner}`
+  return `${m.household ? 'Haushalt' : 'Gruppe'} „${m.groupName ?? ''}“${owner}`
+}
+function sharingIcon(m: MeterListItem): string {
+  if (m.groupId === null) return 'pi pi-lock'
+  return m.household ? 'pi pi-home' : 'pi pi-users'
+}
 
 function typeLabel(t: MeterType) {
   return METER_TYPE_LABELS[t]
@@ -168,7 +190,8 @@ function emptyForm(): MeterForm {
     location: '',
     notes: '',
     decimals: 1,
-    groupId: null,
+    // A new meter belongs to the household unless the user picks otherwise.
+    groupId: householdId.value,
     deviceSerial: '',
     deviceInstalledAt: new Date(),
     deviceStartValue: 0,
@@ -271,7 +294,58 @@ async function performDelete(m: MeterListItem) {
   }
 }
 
-// ── Electricity prices / tariffs ───────────────────────────────────────────
+// ── Household (#1647) ────────────────────────────────────────────────────────
+
+const showHousehold = ref(false)
+const householdChoice = ref<number | null>(null)
+const savingHousehold = ref(false)
+const sharing = ref(false)
+const householdError = ref('')
+const householdNotice = ref('')
+
+const householdOptions = computed(() => [
+  { label: 'Kein Haushalt', value: null, disabled: household.value?.household?.myRole === 'member' },
+  ...(household.value?.groups ?? []).map((g) => ({
+    label: g.myRole === 'owner' ? g.name : `${g.name} (nur Gruppen-Besitzer)`,
+    value: g.id,
+    disabled: g.myRole !== 'owner',
+  })),
+])
+
+function openHousehold() {
+  householdChoice.value = householdId.value
+  householdError.value = ''
+  showHousehold.value = true
+}
+
+async function saveHousehold() {
+  savingHousehold.value = true
+  householdError.value = ''
+  try {
+    household.value = await setMeterHousehold(householdChoice.value)
+    showHousehold.value = false
+    await load()
+  } catch (err: any) {
+    householdError.value = err.message || 'Haushalt konnte nicht gespeichert werden'
+  } finally {
+    savingHousehold.value = false
+  }
+}
+
+async function shareAllWithHousehold() {
+  sharing.value = true
+  error.value = ''
+  try {
+    const res = await shareMetersWithHousehold()
+    householdNotice.value =
+      res.shared === 1 ? '1 Zähler ist jetzt mit dem Haushalt geteilt.' : `${res.shared} Zähler sind jetzt mit dem Haushalt geteilt.`
+    await load()
+  } catch (err: any) {
+    error.value = err.message || 'Zähler konnten nicht geteilt werden'
+  } finally {
+    sharing.value = false
+  }
+}
 
 onMounted(load)
 </script>
@@ -284,6 +358,13 @@ onMounted(load)
         icon="pi pi-chart-line"
         severity="secondary"
         @click="router.push({ name: 'zaehler-auswertungen' })"
+      />
+      <Button
+        v-if="canManage"
+        label="Haushalt"
+        icon="pi pi-home"
+        severity="secondary"
+        @click="openHousehold"
       />
       <Button
         v-if="canManage"
@@ -300,6 +381,25 @@ onMounted(load)
         @clear="clearCollectionScope"
       />
       <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
+      <Message v-if="householdNotice" severity="success" @close="householdNotice = ''" closable>{{ householdNotice }}</Message>
+      <Message
+        v-if="canManage && household?.household && household.privateMeterCount > 0 && !collectionScope"
+        severity="info"
+      >
+        <div class="share-notice">
+          <span>
+            {{ household.privateMeterCount === 1 ? 'Einer deiner Zähler ist' : `${household.privateMeterCount} deiner Zähler sind` }}
+            noch privat und für den Haushalt „{{ household.household.name }}“ unsichtbar.
+          </span>
+          <Button
+            label="Alle mit dem Haushalt teilen"
+            icon="pi pi-home"
+            size="small"
+            :loading="sharing"
+            @click="shareAllWithHousehold"
+          />
+        </div>
+      </Message>
     </template>
 
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Zähler werden geladen…</div>
@@ -327,6 +427,7 @@ onMounted(load)
         </div>
         <div class="meter-meta">
           <span v-if="m.location"><i class="pi pi-map-marker" /> {{ m.location }}</span>
+          <span><i :class="sharingIcon(m)" /> {{ sharingLabel(m) }}</span>
         </div>
         <div class="meter-figures">
           <div class="figure">
@@ -341,7 +442,7 @@ onMounted(load)
         </div>
         <div class="meter-actions" @click.stop>
           <FileButton :members="[{ entity_type: 'meter', entity_id: m.id }]" :title="m.name" />
-          <template v-if="canManage">
+          <template v-if="canManage && m.canManage">
             <Button icon="pi pi-pencil" text rounded severity="secondary" aria-label="Bearbeiten" v-tooltip.top="'Bearbeiten'" @click="openEdit(m)" />
             <Button icon="pi pi-trash" text rounded severity="danger" aria-label="Löschen" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
           </template>
@@ -401,6 +502,44 @@ onMounted(load)
         <Button label="Speichern" icon="pi pi-check" :loading="saving" @click="handleSave" />
       </template>
     </Dialog>
+
+    <Dialog class="dialog-sm" v-model:visible="showHousehold" header="Haushalt" modal>
+      <div class="household-dialog">
+        <p>
+          Zähler gehören meist dem ganzen Haushalt. Die Mitglieder der gewählten Gruppe sehen
+          die mit ihr geteilten Zähler samt Ablesungen, Auswertungen und Auffälligkeiten und
+          können selbst ablesen. Tarife, Annahmen und Standort gelten dann für den ganzen
+          Haushalt, damit alle dieselben Kosten sehen. Neue Zähler werden mit dem Haushalt
+          geteilt; „Privat“ bleibt wählbar.
+        </p>
+        <p class="hint">
+          Bearbeiten, Löschen, Gerätewechsel und API-Schlüssel bleiben beim Besitzer des
+          Zählers und den Besitzern der Gruppe. Festlegen kann den Haushalt nur ein Besitzer
+          der Gruppe.
+        </p>
+        <label>Gruppe
+          <Select
+            v-model="householdChoice"
+            :options="householdOptions"
+            option-label="label"
+            option-value="value"
+            option-disabled="disabled"
+            placeholder="Keine Gruppe vorhanden"
+          />
+        </label>
+        <Message v-if="householdError" severity="error">{{ householdError }}</Message>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showHousehold = false" />
+        <Button
+          label="Speichern"
+          icon="pi pi-check"
+          :loading="savingHousehold"
+          :disabled="householdChoice === householdId"
+          @click="saveHousehold"
+        />
+      </template>
+    </Dialog>
   </PageLayout>
 </template>
 
@@ -443,9 +582,36 @@ onMounted(load)
   font-size: var(--text-base);
   min-height: 1.2rem;
   margin-bottom: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem var(--space-3);
 }
 .meter-meta i {
   margin-right: 0.25rem;
+}
+.share-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.household-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.household-dialog p {
+  margin: 0;
+}
+.household-dialog .hint {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.household-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--p-text-muted-color);
 }
 .meter-figures {
   display: flex;

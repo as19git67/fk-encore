@@ -42,6 +42,7 @@ import {
   type EconomicsReport,
   type EnergyReport,
   type ElectricityTariff,
+  type TariffScope,
   type ElectricityTariffKind,
   type ElectricityTariffUnit,
   type MeterReportGranularity,
@@ -116,6 +117,7 @@ async function load() {
       loadSeasonProfile(),
       loadHeatingWeather(),
       loadAdvancePayments(),
+      loadTariffScope(),
     ])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Auswertungen'
@@ -578,12 +580,30 @@ async function openTariffs() {
   await loadTariffs()
 }
 
+/** Whose tariffs the costs use — the household's or the caller's own (#1647). */
+const tariffScope = ref<TariffScope | null>(null)
+const tariffScopeLabel = computed(() => {
+  if (!tariffScope.value) return ''
+  return tariffScope.value.kind === 'household'
+    ? `Kosten und Annahmen nach den Tarifen des Haushalts „${tariffScope.value.householdName ?? ''}“ — für alle Mitglieder dieselben.`
+    : 'Kosten und Annahmen nach deinen eigenen Tarifen.'
+})
+
+async function loadTariffScope() {
+  try {
+    tariffScope.value = (await listElectricityTariffs()).scope
+  } catch {
+    tariffScope.value = null
+  }
+}
+
 async function loadTariffs() {
   loadingTariffs.value = true
   tariffError.value = ''
   try {
     const res = await listElectricityTariffs()
     tariffs.value = res.tariffs
+    tariffScope.value = res.scope
   } catch (err: any) {
     tariffError.value = err.message || 'Tarife & Annahmen konnten nicht geladen werden'
   } finally {
@@ -787,6 +807,9 @@ onMounted(load)
       <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
     </template>
 
+    <p v-if="!loading && meters.length > 0 && tariffScopeLabel" class="tariff-scope">
+      <i class="pi pi-euro" /> {{ tariffScopeLabel }}
+    </p>
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Auswertungen werden geladen…</div>
     <div v-else-if="meters.length === 0" class="info">
       Noch keine Zähler angelegt — ohne Ablesungen gibt es nichts auszuwerten.
@@ -1116,6 +1139,7 @@ onMounted(load)
       modal
     >
       <div class="tariff-dialog">
+        <p v-if="tariffScopeLabel" class="tariff-scope"><i class="pi pi-home" /> {{ tariffScopeLabel }}</p>
         <div class="tariff-toolbar">
           <p>
             Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten, PV-Ersparnis und
@@ -1229,6 +1253,14 @@ onMounted(load)
 
 <style scoped>
 /* Page frame and title: PageLayout (issue #1272). */
+.tariff-scope {
+  margin: 0 0 var(--space-3);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.tariff-scope i {
+  margin-right: 0.25rem;
+}
 .info {
   padding: 2rem;
   text-align: center;
