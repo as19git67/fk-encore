@@ -44,6 +44,13 @@ export interface EvidenceKind {
 const atMost = (a: number | undefined, b: number | undefined, factor: number, what: string): string | null =>
   a !== undefined && b !== undefined && a > Math.round(b * factor) + 100 ? what : null;
 
+/**
+ * A at least B, in cents, with a euro of rounding; a missing A counts as 0.
+ * For values the law ties to another without a threshold.
+ */
+const atLeast = (a: number | undefined, b: number | undefined, factor: number, what: string): string | null =>
+  b !== undefined && b > 0 && (a ?? 0) < Math.round(b * factor) - 100 ? what : null;
+
 export const EVIDENCE_KINDS: readonly EvidenceKind[] = [
   {
     key: "lohnsteuerbescheinigung",
@@ -89,6 +96,10 @@ export const EVIDENCE_KINDS: readonly EvidenceKind[] = [
     checks: [
       (v) => atMost(v.kapitalertragsteuer, v.ertraege, 0.25, "Kapitalertragsteuer über 25 % der Kapitalerträge"),
       (v) => atMost(v.solidaritaetszuschlag, v.kapitalertragsteuer, 0.055, "Solidaritätszuschlag über 5,5 % der Kapitalertragsteuer"),
+      // The Freigrenze of § 3 SolZG 1995 applies to the assessed income tax
+      // and the Lohnsteuer, never to the Kapitalertragsteuer: whoever paid
+      // that paid 5,5 % Soli on it (§ 3 Abs. 1 Nr. 5 SolZG 1995).
+      (v) => atLeast(v.solidaritaetszuschlag, v.kapitalertragsteuer, 0.055, "Solidaritätszuschlag unter 5,5 % der Kapitalertragsteuer; auf Kapitalerträge gilt keine Freigrenze"),
       (v) => atMost(v.sparer_pauschbetrag, 200000, 1, "Sparer-Pauschbetrag über 2.000 €"),
     ],
   },

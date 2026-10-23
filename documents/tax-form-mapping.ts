@@ -137,6 +137,22 @@ function lawNotes(f: FormValue, year: number, joint: boolean, all: readonly Form
       }
       break;
     }
+    case "kap.kapitalertragsteuer":
+    case "kap.solidaritaetszuschlag": {
+      // § 3 Abs. 1 Nr. 5 SolZG 1995: 5,5 % of the Kapitalertragsteuer, with
+      // no Freigrenze — that one is for the income tax and the Lohnsteuer.
+      const sum = (key: string) => all.filter((x) => x.field.key === key && x.owner === f.owner).reduce((s, x) => s + x.cents, 0);
+      const kest = sum("kap.kapitalertragsteuer");
+      const soli = sum("kap.solidaritaetszuschlag");
+      const expected = Math.round(kest * 0.055);
+      const hasSoli = all.some((x) => x.field.key === "kap.solidaritaetszuschlag" && x.owner === f.owner);
+      // The note stands on the Soli, or on the Kapitalertragsteuer when no Soli was read at all.
+      const here = f.field.key === "kap.solidaritaetszuschlag" || !hasSoli;
+      if (here && kest > 0 && soli < expected - 100) {
+        n.push(`§ 3 Abs. 1 Nr. 5 SolZG: auf Kapitalertragsteuer von ${euro(kest)} fallen 5,5 % Solidaritätszuschlag an, etwa ${euro(expected)}; die Freigrenze gilt hier nicht. Beleg prüfen.`);
+      }
+      break;
+    }
     case "kind.betreuungskosten":
       n.push(year >= 2025
         ? `§ 10 Abs. 1 Nr. 5 EStG: abziehbar 80 %, höchstens 4.800 € je Kind (hier ${euro(Math.min(Math.round(c * 0.8), 480000))}). Verpflegung zählt nicht.`

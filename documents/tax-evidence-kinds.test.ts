@@ -32,6 +32,13 @@ describe("evidence kinds", () => {
     const bank = findEvidenceKind("jahressteuerbescheinigung")!;
     expect(checkEvidenceValues(bank, { ertraege: 120000, kapitalertragsteuer: 5000, solidaritaetszuschlag: 275 })).toEqual([]);
     expect(checkEvidenceValues(bank, { sparer_pauschbetrag: 300000 })).toEqual(["Sparer-Pauschbetrag über 2.000 €"]);
+    // No Freigrenze on Kapitalertragsteuer: a Soli of 0 beside it is a misreading.
+    const lowSoli = ["Solidaritätszuschlag unter 5,5 % der Kapitalertragsteuer; auf Kapitalerträge gilt keine Freigrenze"];
+    expect(checkEvidenceValues(bank, { kapitalertragsteuer: 50000, solidaritaetszuschlag: 0 })).toEqual(lowSoli);
+    expect(checkEvidenceValues(bank, { kapitalertragsteuer: 50000 })).toEqual(lowSoli);
+    expect(checkEvidenceValues(bank, { kapitalertragsteuer: 0, solidaritaetszuschlag: 0 })).toEqual([]);
+    // A Lohnsteuer under the Freigrenze carries no Soli.
+    expect(checkEvidenceValues(lstb, { lohnsteuer: 795040, solidaritaetszuschlag: 0 })).toEqual([]);
     const handwerker = findEvidenceKind("handwerkerrechnung")!;
     expect(checkEvidenceValues(handwerker, { arbeitskosten: 90000, rechnungsbetrag: 60000 })).toEqual(["Arbeitskosten über dem Rechnungsbetrag"]);
   });
