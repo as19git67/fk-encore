@@ -150,7 +150,7 @@ export const EVIDENCE_KINDS: readonly EvidenceKind[] = [
       { key: "arbeitskosten", label: "Arbeits-, Fahrt- und Maschinenkosten (Lohnanteil)", hint: "oft „davon Lohnkosten“ oder getrennt ausgewiesen", kind: "amount", formKey: "haushaltsnahe.handwerker" },
       { key: "material", label: "Materialkosten", kind: "amount", formKey: null },
       { key: "rechnungsbetrag", label: "Rechnungsbetrag brutto", kind: "amount", formKey: null },
-      { key: "bargeld", label: "Barzahlung", hint: "1 bei Barzahlung, 0 bei Überweisung oder Lastschrift", kind: "flag", formKey: null },
+      { key: "bargeld", label: "Barzahlung", hint: "1 nur, wenn der Beleg sagt, dass bar bezahlt wurde (z. B. „Betrag bar erhalten“); 0 bei Überweisung oder Lastschrift. Zahlungsbedingungen, Skonto bei Barzahlung, eine Bankverbindung oder der Hinweis, dass Barzahlungen nicht begünstigt sind, sagen nicht, dass bar bezahlt wurde", kind: "flag", formKey: null },
     ],
     checks: [(v) => atMost(v.arbeitskosten, v.rechnungsbetrag, 1, "Arbeitskosten über dem Rechnungsbetrag")],
   },
@@ -163,7 +163,7 @@ export const EVIDENCE_KINDS: readonly EvidenceKind[] = [
     fields: [
       { key: "arbeitskosten", label: "Kosten der Dienstleistung ohne Material", kind: "amount", formKey: "haushaltsnahe.dienstleistungen" },
       { key: "rechnungsbetrag", label: "Rechnungsbetrag brutto", kind: "amount", formKey: null },
-      { key: "bargeld", label: "Barzahlung", hint: "1 bei Barzahlung, 0 bei Überweisung oder Lastschrift", kind: "flag", formKey: null },
+      { key: "bargeld", label: "Barzahlung", hint: "1 nur, wenn der Beleg sagt, dass bar bezahlt wurde (z. B. „Betrag bar erhalten“); 0 bei Überweisung oder Lastschrift. Zahlungsbedingungen, Skonto bei Barzahlung, eine Bankverbindung oder der Hinweis, dass Barzahlungen nicht begünstigt sind, sagen nicht, dass bar bezahlt wurde", kind: "flag", formKey: null },
     ],
     checks: [(v) => atMost(v.arbeitskosten, v.rechnungsbetrag, 1, "Dienstleistungskosten über dem Rechnungsbetrag")],
   },

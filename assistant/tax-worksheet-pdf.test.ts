@@ -36,7 +36,7 @@ const FORM: WorksheetForm = {
     value({ key: "kap.verluste_sonstige", anlage: "anlage-kap", anlage_name: "Anlage KAP", label: "Verluste sonstige", line: 12, kennzahl: "415", place: "Zeile 12 · Kz 415", cents: 1000, contributions: [contribution(3, "Steuerbescheinigung Beispielbank", 1000, "corrected")] }),
     value({ key: "vorsorge.kv_wahlleistungen", anlage: "vorsorgeaufwand", anlage_name: "Vorsorgeaufwand", label: "Wahlleistungen", line: null, kennzahl: null, place: "siehe Hinweis zum Vordruck", form_note: "Gesetzlich versichert: Zeile 22.", cents: 30000, contributions: [contribution(4, "Beitragsbescheinigung Beispielkasse", 30000, "confirmed")] }),
   ],
-  skipped: [{ value_id: 9, document_id: 9, document_title: "Rechnung Malerbetrieb", evidence_kind_name: "Handwerkerrechnung", field_label: "Rechnungsbetrag brutto", form_label: null, value_cents: 99900, printed: "999,00", quote: null, status: "rejected", reason: "Zahl steht nicht im Text", note: null }],
+  skipped: [{ value_id: 9, document_id: 9, document_title: "Rechnung Malerbetrieb", evidence_kind_name: "Handwerkerrechnung", field_label: "Rechnungsbetrag brutto", form_label: null, value_cents: 99900, printed: "999,00", quote: null, status: "rejected", reason: "Zahl steht nicht im Text", note: null, cash_flag_value_id: null }],
 };
 
 describe("kennzahlSheet", () => {

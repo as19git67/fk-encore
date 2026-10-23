@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapToForm, type EvidenceValue } from "./tax-form-mapping";
+import { CASH_REASON, mapToForm, statesCashPayment, type EvidenceValue } from "./tax-form-mapping";
 
 const v = (documentId: number, evidenceKind: string, field: string, value: number, owner: EvidenceValue["owner"] = "self", status: EvidenceValue["status"] = "read"): EvidenceValue =>
   ({ documentId, evidenceKind, field, value, owner, status });
@@ -105,6 +105,35 @@ describe("mapToForm", () => {
     expect(hw.contributions.map((c) => c.documentId)).toEqual([7, 9]);
     expect(hw.notes.join(" ")).toContain("§ 35a Abs. 3 EStG: Steuerermäßigung 20 % der Arbeitskosten, höchstens 1.200 € (hier 184,00 €)");
     expect(m.skipped.map((s) => [s.value.documentId, s.reason])).toContainEqual([8, "§ 35a Abs. 5 EStG: bar bezahlt, zählt nicht"]);
+  });
+
+  it("does not take a cash flag read from payment terms, and a bank booking proves a non-cash payment", () => {
+    const cash = (documentId: number, quote: string | undefined, status: EvidenceValue["status"] = "read"): EvidenceValue =>
+      ({ ...v(documentId, "handwerkerrechnung", "bargeld", 1, "self", status), ...(quote !== undefined ? { quote } : {}) });
+    const m = mapToForm(2025, [
+      v(20, "handwerkerrechnung", "arbeitskosten", 10000),
+      cash(20, "Zahlbar innerhalb von 14 Tagen ohne Abzug"),
+      v(21, "handwerkerrechnung", "arbeitskosten", 20000),
+      cash(21, "Betrag bar erhalten"),
+      v(22, "handwerkerrechnung", "arbeitskosten", 40000),
+      cash(22, "Betrag bar erhalten"),
+      v(23, "handwerkerrechnung", "arbeitskosten", 80000),
+      cash(23, "Zahlbar ohne Abzug", "corrected"),
+    ], { joint: true, paidByBank: new Set([22]) });
+    const hw = find(m, "haushaltsnahe.handwerker", "return")!;
+    expect(hw.contributions.map((c) => c.documentId)).toEqual([20, 22]);
+    // Document 20 says nothing about the payment: check it. Document 22 has its booking.
+    expect(hw.notes).toContain("Zahlungsart prüfen: nach § 35a Abs. 5 EStG zählt nur unbare Zahlung.");
+    // What the user set stays.
+    expect(m.skipped.filter((s) => s.reason === CASH_REASON).map((s) => s.value.documentId)).toEqual([21, 23]);
+    expect(mapToForm(2025, [v(22, "handwerkerrechnung", "arbeitskosten", 40000)], { joint: true, paidByBank: new Set([22]) })
+      .values[0]!.notes).not.toContain("Zahlungsart prüfen: nach § 35a Abs. 5 EStG zählt nur unbare Zahlung.");
+  });
+
+  it("reads a cash payment only where the passage says it was paid that way", () => {
+    for (const q of ["Betrag bar erhalten", "Zahlungsart: Bar", "Barzahlung", "Betrag dankend erhalten"]) expect(statesCashPayment(q)).toBe(true);
+    for (const q of ["Bei Barzahlung 3 % Skonto", "Barzahlungen werden nach § 35a EStG nicht anerkannt", "Zahlbar sofort ohne Abzug",
+      "Bitte überweisen Sie den Betrag", "Bankverbindung: IBAN DE00 0000 0000 0000 0000 00", "Rechnungsbetrag", null]) expect(statesCashPayment(q)).toBe(false);
   });
 
   it("asks to check the payment when the invoice does not say", () => {

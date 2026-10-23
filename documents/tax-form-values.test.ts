@@ -9,7 +9,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
-import { documentTaxValue, documents } from "../db/schema";
+import { documentTaxValue, documents, financeAccount, financeAccountType, financeTransaction, financeTransactionDocument } from "../db/schema";
 import {
   buildTaxFormValues,
   confirmDocumentTaxValue,
@@ -99,7 +99,8 @@ describe("values by form field", () => {
     await value(LOHN_B, "lohnsteuerbescheinigung", "rv_arbeitnehmer", 111600, "spouse");
     await value(HANDWERK, "handwerkerrechnung", "arbeitskosten", 64000, "joint");
     await value(HANDWERK, "handwerkerrechnung", "material", 30000, "joint");
-    rejected = await value(HANDWERK, "handwerkerrechnung", "rechnungsbetrag", 99900, "joint", "rejected", { printed: "999,00", note: "Zahl steht nicht im Text" });
+    await value(HANDWERK, "handwerkerrechnung", "rechnungsbetrag", 99900, "joint", "rejected", { printed: "999,00", note: "Zahl steht nicht im Text" });
+    rejected = await value(LOHN_A, "lohnsteuerbescheinigung", "kirchensteuer", 61200, "self", "rejected", { printed: "612,00", note: "Zahl steht nicht im Text" });
     await value(FOREIGN, "lohnsteuerbescheinigung", "bruttoarbeitslohn", 9900000, "self");
   });
   afterAll(cleanup);
@@ -123,8 +124,32 @@ describe("values by form field", () => {
   it("lists a rejected value for correction, and leaves out what only steers a rule", async () => {
     const r = await buildTaxFormValues(USER, YEAR);
     expect(r.skipped.map((s) => [s.value_id, s.field_label, s.reason])).toEqual([
-      [rejected, "Rechnungsbetrag brutto", "Zahl steht nicht im Text"],
+      [rejected, "Einbehaltene Kirchensteuer des Arbeitnehmers", "Zahl steht nicht im Text"],
     ]);
+  });
+
+  it("skips a cash payment with the passage it was read from, and counts it once a bank booking is linked", async () => {
+    const flag = await value(HANDWERK, "handwerkerrechnung", "bargeld", 1, "joint", "read", { quote: "Betrag bar erhalten" });
+    const cash = (await buildTaxFormValues(USER, YEAR)).skipped.find((s) => s.document_id === HANDWERK)!;
+    expect(cash).toMatchObject({ field_label: "Arbeits-, Fahrt- und Maschinenkosten (Lohnanteil)", cash_flag_value_id: flag });
+    expect(cash.reason).toBe("§ 35a Abs. 5 EStG: bar bezahlt, zählt nicht (gelesen aus „Betrag bar erhalten“)");
+
+    const [type] = await db.select({ id: financeAccountType.id }).from(financeAccountType).where(eq(financeAccountType.kind, "giro"));
+    const [account] = await db.insert(financeAccount)
+      .values({ bankcontact_id: null, type_id: type!.id, currency_code: "EUR", account_number: "TAX-CASH-1", label: "Giro Test" })
+      .returning({ id: financeAccount.id });
+    try {
+      const [tx] = await db.insert(financeTransaction)
+        .values({ account_id: account!.id, booking_date: "2025-05-02", amount: "-999.00", currency_code: "EUR", counterparty: "Malerbetrieb Beispiel", dedupe_hash: "taxcash".padEnd(64, "0") })
+        .returning({ id: financeTransaction.id });
+      await db.insert(financeTransactionDocument).values({ transaction_id: tx!.id, document_id: HANDWERK });
+      const r = await buildTaxFormValues(USER, YEAR);
+      expect(r.skipped.find((s) => s.document_id === HANDWERK)).toBeUndefined();
+      expect(r.values.find((v) => v.key === "haushaltsnahe.handwerker")!.cents).toBe(64000);
+    } finally {
+      await db.delete(financeTransaction).where(eq(financeTransaction.account_id, account!.id));
+      await db.delete(financeAccount).where(eq(financeAccount.id, account!.id));
+    }
   });
 
   it("assesses jointly while a spouse has no return of their own, and puts Person B under the 400s", async () => {
