@@ -1709,12 +1709,16 @@ export const updateAlbumUserSettings = api(
  */
 export const listPersons = api(
   { expose: true, method: "GET", path: "/persons", auth: true },
-  async ({ limit }: { limit?: Query<number> }): Promise<ListPersonsResponse> => {
+  async ({ limit, hidden }: {
+    limit?: Query<number>;
+    /** Faces on the user's hidden photos: "include" counts them, "exclude" leaves them out. */
+    hidden?: Query<string>;
+  }): Promise<ListPersonsResponse> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "people.view");
-    return await service.listPersonsLogic(userId, limit);
+    return await service.listPersonsLogic(userId, limit, { hidden: hidden === "exclude" ? "exclude" : "include" });
   }
 );
 
@@ -2668,16 +2672,20 @@ export const searchPhotosNatural = api(
     query,
     limit,
     threshold,
+    hiddenMode,
   }: {
     query: string;
     limit?: number;
     threshold?: number;
+    /** "exclude" (default), "include" or "only" the user's hidden photos. */
+    hiddenMode?: string;
   }): Promise<{ results: service.NaturalSearchResult[]; parsed: service.ParsedQuery }> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
-    return await service.searchPhotosNaturalLogic(userId, query, limit ?? 500, threshold ?? 0.18);
+    const mode = hiddenMode === "include" || hiddenMode === "only" ? hiddenMode : "exclude";
+    return await service.searchPhotosNaturalLogic(userId, query, limit ?? 500, threshold ?? 0.18, mode);
   }
 );
 

@@ -58,6 +58,35 @@ function percent(v: number | undefined): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? Math.round(v * 100) : undefined;
 }
 
+/**
+ * Hidden photos (Ausgeblendet) are what the user put out of sight: no photo
+ * tool returns, counts or uses them unless the user asks for them in so many
+ * words. The model says so with `hidden`; leaving it out excludes them.
+ */
+export type HiddenChoice = "exclude" | "include" | "only";
+export const HIDDEN_PARAM = {
+  type: "string",
+  enum: ["include", "only"],
+  description: "leave out: hidden (ausgeblendete) photos are left out. include = also hidden ones, only = just the hidden ones; only when the user explicitly asks for hidden photos",
+} as const;
+
+export function hiddenOf(v: unknown): HiddenChoice {
+  const s = str(v);
+  return s === "include" || s === "only" ? s : "exclude";
+}
+
+/** Whether a photo with this curation status belongs into a result under `hidden`. */
+export function passesHidden(status: string | null | undefined, hidden: HiddenChoice): boolean {
+  const isHidden = status === "hidden";
+  return hidden === "include" || (hidden === "only" ? isHidden : !isHidden);
+}
+
+const HIDDEN_NOTE: Record<HiddenChoice, string> = {
+  exclude: "hidden photos left out",
+  include: "hidden photos included",
+  only: "only hidden photos",
+};
+
 function excerpt(text: string | undefined, max = 60): string | undefined {
   const t = text?.replace(/\s+/g, " ").trim();
   if (!t) return undefined;
@@ -89,9 +118,11 @@ export const listPhotos: ToolSpec = {
       order: { type: "string", enum: ["newest", "oldest", "best"], description: "best = by quality and aesthetics score" },
       limit: { type: "integer", description: "at most 60 (default 15)" },
       from_previous_result: { type: "boolean", description: "narrow the previous answer's photos" },
+      hidden: HIDDEN_PARAM,
     },
   },
   async run(args, ctx) {
+    const hidden = hiddenOf(args.hidden);
     const favorite = bool(args.favorite);
     const dateFrom = isoDate(args.date_from);
     const dateTo = isoDate(args.date_to);
@@ -139,6 +170,7 @@ export const listPhotos: ToolSpec = {
     if (!previous || serverFilter) {
       const res = await (photo.listPhotos({
         ...filter,
+        hiddenMode: hidden,
         sortBy: order === "best" ? "quality" : undefined,
         sortDir: oldest ? "asc" : "desc",
         limit: (previous ? NARROW_CAP : PHOTO_COUNT_CAP) + 1,
@@ -151,7 +183,8 @@ export const listPhotos: ToolSpec = {
         capped = false;
       }
     } else {
-      rows = await loadPhotoRows(previous);
+      // The details endpoint returns every photo it is asked for, hidden or not.
+      rows = (await loadPhotoRows(previous)).filter((p) => passesHidden(p.curation_status, hidden));
       if (oldest) rows = [...rows].reverse();
       if (order === "best") rows = [...rows].sort((a, b) => (b.ai_quality_score ?? -1) - (a.ai_quality_score ?? -1));
     }
@@ -164,6 +197,7 @@ export const listPhotos: ToolSpec = {
       favorite: favorite ? "true" : undefined, dateFrom, dateTo, personIds: personIds.join(",") || undefined,
       mediaTypes: mediaType, hasGps: hasGps === undefined ? undefined : String(hasGps), qualityMin,
       sortBy: order === "best" ? "ai_quality_score" : undefined, sortDir: order === "best" ? "desc" : undefined,
+      hiddenMode: hidden === "exclude" ? undefined : hidden,
     })}` : undefined;
     return {
       text: table(
@@ -172,7 +206,7 @@ export const listPhotos: ToolSpec = {
           p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p), excerpt(p.description),
           p.keywords?.length ? p.keywords.slice(0, 5).join(", ") : undefined, percent(p.ai_quality_score),
         ]),
-        { cap: limit, total: count, note: `photo count: ${countText}, ${ORDER_NOTE[order]}${previous ? " (narrowed from the previous result)" : ""}. For everything known about a few photos call photo_details(ids).` },
+        { cap: limit, total: count, note: `photo count: ${countText}, ${ORDER_NOTE[order]}, ${HIDDEN_NOTE[hidden]}${previous ? " (narrowed from the previous result)" : ""}. For everything known about a few photos call photo_details(ids).` },
       ),
       digest: digestOf("list_photos", count, rows.map((p) => p.id)),
       rowCount: count,
@@ -298,19 +332,23 @@ export const searchPhotos: ToolSpec = {
   source: "hand",
   parameters: {
     type: "object",
-    properties: { query: { type: "string", description: "e.g. 'Strand in Italien 2024'" } },
+    properties: {
+      query: { type: "string", description: "e.g. 'Strand in Italien 2024'" },
+      hidden: HIDDEN_PARAM,
+    },
     required: ["query"],
   },
   async run(args) {
     const q = str(args.query);
     if (!q) throw new Error("query is required");
-    const res = await (photo.searchPhotosNatural({ query: q, limit: 200 })) as unknown as { results: NaturalResult[] };
+    const hidden = hiddenOf(args.hidden);
+    const res = await (photo.searchPhotosNatural({ query: q, limit: 200, hiddenMode: hidden })) as unknown as { results: NaturalResult[] };
     const rows = res.results;
     return {
       text: table(
         ["id", "taken", "place", "score"],
         rows.map((r) => [r.photoId, (r.taken_at ?? r.created_at).slice(0, 10), place(r), r.score.toFixed(2)]),
-        { cap: 15, total: rows.length },
+        { cap: 15, total: rows.length, note: HIDDEN_NOTE[hidden] },
       ),
       digest: digestOf("search_photos", rows.length, rows.map((r) => r.photoId)),
       rowCount: rows.length,
@@ -320,7 +358,7 @@ export const searchPhotos: ToolSpec = {
         tool: "search_photos",
         total: rows.length,
         rows: rows.slice(0, 60).map((r) => ({ id: r.photoId, filename: r.filename ?? null, taken_at: r.taken_at ?? null })),
-        route: `/fotos/galerie${query({ q })}`,
+        route: `/fotos/galerie${query({ q, hiddenMode: hidden === "exclude" ? undefined : hidden })}`,
       },
     };
   },

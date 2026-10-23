@@ -13,6 +13,7 @@ import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
 import type { JsonSchema, RefType, ToolContext } from "../types";
 import { createPhotoCollage } from "./collage";
+import { HIDDEN_PARAM, hiddenOf } from "./photos";
 import { renderLetter } from "./letters";
 import { createTextDocument } from "./text-documents";
 import { euerPdf, taxWorksheetPdf } from "./tax";
@@ -41,6 +42,7 @@ const PHOTO_SELECTION: Record<string, Record<string, unknown>> = {
       date_from: { type: "string", description: "YYYY-MM-DD" },
       date_to: { type: "string", description: "YYYY-MM-DD" },
       person_ids: { type: "array", items: { type: "integer" } },
+      hidden: HIDDEN_PARAM,
     },
   },
   photo_ids: { type: "array", items: { type: "integer" }, description: "explicit photo ids, instead of a filter" },
@@ -91,7 +93,8 @@ async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): P
   const dateFrom = isoDate(f.date_from);
   const dateTo = isoDate(f.date_to);
   const personIds = ids(f.person_ids);
-  if (!favorite && !dateFrom && !dateTo && !personIds.length) {
+  const hidden = hiddenOf(f.hidden);
+  if (!favorite && !dateFrom && !dateTo && !personIds.length && hidden !== "only") {
     throw new Error("say which photos: a filter (favorite, date range, persons), photo_ids or from_previous_result");
   }
   const res = (await photo.listPhotos({
@@ -100,6 +103,7 @@ async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): P
     dateTo,
     personIds: personIds.length ? personIds.join(",") : undefined,
     personMode: personIds.length ? "include" : undefined,
+    hiddenMode: hidden,
     limit: MAX_PHOTOS + 1,
   })) as unknown as { photos: { id: number }[] };
   return res.photos.map((p) => p.id);

@@ -3175,6 +3175,29 @@
     "/persons": {
       "get": {
         "operationId": "GET:photo.listPersons",
+        "parameters": [
+          {
+            "allowEmptyValue": true,
+            "explode": true,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "number"
+            },
+            "style": "form"
+          },
+          {
+            "allowEmptyValue": true,
+            "description": "Faces on the user's hidden photos: \"include\" counts them, \"exclude\" leaves them out.\n",
+            "explode": true,
+            "in": "query",
+            "name": "hidden",
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4297,6 +4320,10 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "hiddenMode": {
+                    "description": "\"exclude\" (default), \"include\" or \"only\" the user's hidden photos.\n",
+                    "type": "string"
+                  },
                   "limit": {
                     "type": "number"
                   },

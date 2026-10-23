@@ -40,8 +40,12 @@ export const TOOL_ALLOWLIST: AllowlistEntry[] = [
     name: "list_persons",
     kind: "read",
     permissions: ["module.photos", "photos.view"],
-    summary: "People recognised in the photos (id, name); pass ids to list_photos as person_ids.",
+    summary: "People recognised in the photos (id, name, faces); pass ids to list_photos as person_ids. Faces on hidden photos are not counted unless hidden = \"include\".",
     columns: ["id", "name", "faceCount"],
-    invoke: () => photo.listPersons(),
+    // Hidden photos stay out of the assistant's answers unless asked for.
+    invoke: (p) => photo.listPersons({
+      limit: typeof p.limit === "number" ? p.limit : undefined,
+      hidden: p.hidden === "include" ? "include" : "exclude",
+    }),
   },
 ];
