@@ -304,6 +304,17 @@ export const faces = pgTable("faces", {
   // Raw Laplace variance behind `sharpness`, kept so the normalisation scale
   // can be re-calibrated without re-reading every crop in the library.
   sharpness_variance: real("sharpness_variance"),
+  // Landmarks from the face scan as JSON { kps, lm106, lm68 }, each a list of
+  // [x, y] normalised like `bbox` — see photo/face-eyes.ts. NULL: scanned
+  // before the column existed (backfill pending) or the face could not be
+  // matched again on re-detection.
+  landmarks: text("landmarks"),
+  // Raw eye openness (height/width of the eye contours, mean of both eyes)
+  // from the 106-point model, and the textbook EAR from the 68-point model.
+  // NULL: no landmarks, or the face is below MIN_EYE_FACE_PIXELS. Raw ratios
+  // only: where "closed" begins is decided by the replay, not stored here.
+  eye_aspect: real("eye_aspect"),
+  eye_aspect_68: real("eye_aspect_68"),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 

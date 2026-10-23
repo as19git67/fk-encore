@@ -1299,6 +1299,25 @@ export function backfillFaceSharpness(afterPhotoId?: number) {
   })
 }
 
+export interface FaceLandmarksBackfillResult {
+  photos_scanned: number
+  faces_updated: number
+  faces_unmatched: number
+  photos_failed: number
+  /** Cursor for the next batch; null once the pass is complete. */
+  next_photo_id: number | null
+  remaining_faces: number
+}
+
+/** One batch of the facial-landmark backfill (eye openness). Resumable —
+ *  feed `next_photo_id` back in until it returns null. */
+export function backfillFaceLandmarks(afterPhotoId?: number) {
+  return apiFetch<FaceLandmarksBackfillResult>('/photos/backfill-face-landmarks', {
+    method: 'POST',
+    body: JSON.stringify(afterPhotoId != null ? { afterPhotoId } : {}),
+  })
+}
+
 export interface AiPickWeights {
   face: number[]
   non_face: number[]

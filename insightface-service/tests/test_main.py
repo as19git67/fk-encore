@@ -31,6 +31,8 @@ class _FaceMock:
         self.embedding = embedding if embedding is not None else np.random.rand(512).astype(np.float32)
         self.bbox = bbox if bbox is not None else np.array([10.0, 10.0, 90.0, 90.0])
         self.kps = kps if kps is not None else np.zeros((5, 2))
+        self.landmark_2d_106 = np.full((106, 2), 50.0)
+        self.landmark_3d_68 = np.full((68, 3), 40.0)
 
 class _FakeAnalysis:
     def __init__(self, *args, **kwargs):
@@ -146,6 +148,24 @@ class TestDetectEndpoint:
         assert "bbox" in face
         assert "kps" in face
         assert "embedding" in face
+        assert len(face["landmark_2d_106"]) == 106
+        assert face["landmark_2d_106"][0] == [50.0, 50.0]
+        # Depth is dropped: x/y only.
+        assert len(face["landmark_3d_68"]) == 68
+        assert face["landmark_3d_68"][0] == [40.0, 40.0]
+
+    def test_landmarks_null_when_model_missing(self):
+        bare = type("Bare", (), {})()
+        bare.bbox = np.array([1.0, 2.0, 3.0, 4.0])
+        bare.kps = np.zeros((5, 2))
+        bare.embedding = np.zeros(4)
+        with patch.object(insightface_main.app_state, "get", return_value=[bare]):
+            data = {"file": ("photo.jpg", _make_image_file(), "image/jpeg")}
+            response = client.post("/detect", files=data)
+        assert response.status_code == 200
+        body = response.json()["faces"][0]
+        assert body["landmark_2d_106"] is None
+        assert body["landmark_3d_68"] is None
 
     def test_returns_empty_list_when_no_faces(self):
         with patch.object(insightface_main.app_state, "get", return_value=[]):

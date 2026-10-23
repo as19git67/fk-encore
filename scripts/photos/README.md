@@ -210,3 +210,37 @@ die Skala gesättigt oder die auswertbare Menge kleiner als 30 Gruppen ist.
 Der erste Produktivlauf (3,3 % Abdeckung, alle Werte an der Decke) hätte
 sonst „V1 widerlegt" gemeldet, obwohl gar nichts gemessen war — siehe
 Etappe 2 in `documentation/auto-pick-face-relevance.md`.
+
+## `diagnose-eyes-open.mjs`
+
+Etappe 5. Trifft die Augenöffnung aus den Gesichtslandmarken die
+Entscheidungen des Nutzers besser als der heutige CLIP-Wert `eyes_open`?
+
+Der Gesichtsdienst liefert seit Migration `0272` je Gesicht die Punkte der
+beiden Landmarken-Modelle aus `buffalo_l` (106 und 68 Punkte). Daraus
+berechnet `photo/face-eyes.ts` zwei Rohwerte: `faces.eye_aspect`
+(Höhe zu Breite der Augenkontur, 106 Punkte) und `faces.eye_aspect_68`
+(klassisches Eye Aspect Ratio). Beide bleiben gespeichert, weil vorher nicht
+feststeht, welches Modell einem sich schließenden Lid folgt.
+
+**Voraussetzung:** Backfill „Augen-Landmarken nachtragen" (Fotos ›
+Einstellungen › Wartung, `POST /photos/backfill-face-landmarks`). Er lässt
+die Gesichtserkennung erneut laufen und ordnet die Treffer über die
+Box-Überlappung den gespeicherten Gesichtern zu; Personenzuordnungen bleiben
+unberührt.
+
+**Aufbau des Reports:** Abdeckung, Verteilung beider Werte (geschlossene
+Augen sollten als linker Ausläufer sichtbar sein), dann paarweise in
+geprüften Gruppen „behalten gegen ausgeblendet": wie oft das Signal ein Paar
+entscheidet und wie oft das behaltene Foto den höheren Wert hat — jeweils
+gegen CLIP auf denselben Paaren. Je Foto zählt der prominenzgewichtete
+Mittelwert über die Gesichter, nicht das Minimum.
+
+```bash
+POSTGRES_DATABASE=encore node scripts/photos/diagnose-eyes-open.mjs
+```
+
+**Das Skript verweigert das Urteil** unter 90 % Abdeckung oder 30
+entschiedenen Paaren. Ein „besser als CLIP" ändert noch nichts an
+`scorePhoto()`; das geschieht erst nach dem Replay mit neu gelernten
+Gewichten.

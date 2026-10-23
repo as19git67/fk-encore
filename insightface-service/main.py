@@ -132,6 +132,18 @@ async def verify(file1: UploadFile = File(...), file2: UploadFile = File(...)):
     return {"similarity": sim}
 
 
+def _landmarks_xy(points) -> list[list[float]] | None:
+    """Landmark array as [[x, y], ...] in image pixels, or None when the
+    model pack did not produce it. The 3D model's depth column is dropped —
+    nothing downstream reads it."""
+    if points is None:
+        return None
+    arr = np.asarray(points, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[1] < 2:
+        return None
+    return arr[:, :2].round(2).tolist()
+
+
 @app.post("/detect")
 async def detect(file: UploadFile = File(...)):
     img = read_image(file)
@@ -143,7 +155,13 @@ async def detect(file: UploadFile = File(...)):
         result.append({
             "bbox": f.bbox.tolist(),
             "kps": f.kps.tolist(),
-            "embedding": f.embedding.tolist()
+            "embedding": f.embedding.tolist(),
+            # buffalo_l loads both landmark models, so FaceAnalysis.get() has
+            # already computed these for every face. Returning them costs
+            # nothing; the app derives eye openness from the eyelid points
+            # (photo/face-eyes.ts). Image pixels, x/y only.
+            "landmark_2d_106": _landmarks_xy(getattr(f, "landmark_2d_106", None)),
+            "landmark_3d_68": _landmarks_xy(getattr(f, "landmark_3d_68", None)),
         })
 
     return {
