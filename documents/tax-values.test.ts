@@ -54,6 +54,8 @@ describe("checkReadValues", () => {
         { field: "unbekannt", printed: "1,00" },
         { field: "bruttoarbeitslohn", printed: "1,00" },
         { field: "solidaritaetszuschlag", printed: null },
+        { field: "kv_arbeitnehmer", printed: "null" },
+        { field: "pv_arbeitnehmer", printed: "–" },
       ],
     }, LOHN_TEXT);
     expect(values.map((v) => [v.field, v.value, v.status, v.note])).toEqual([
@@ -101,6 +103,15 @@ describe("checkReadValues", () => {
     expect(values.map((v) => [v.field, v.value, v.status])).toEqual([["arbeitskosten", 80000, "read"], ["bargeld", 0, "read"]]);
     const invented = checkReadValues(HANDWERK, { flags: [{ field: "bargeld", value: true, quote: "Betrag bar erhalten" }] }, text);
     expect(invented[0]).toMatchObject({ status: "rejected", note: "Zitat steht nicht im Text" });
+  });
+
+  it("takes a cash payment only from a passage that says the invoice was paid in cash", () => {
+    const text = "Rechnung Dachdeckerarbeiten\nArbeitskosten 400,00 €\nBei Barzahlung 2 % Skonto.\n" +
+      "Barzahlungen sind nach § 35a EStG nicht begünstigt.\nBetrag bar erhalten.";
+    const read = (quote: string) => checkReadValues(HANDWERK, { flags: [{ field: "bargeld", value: true, quote }] }, text)[0];
+    expect(read("Bei Barzahlung 2 % Skonto.")).toMatchObject({ value: 1, status: "rejected", note: "Zitat sagt nicht, dass bar bezahlt wurde" });
+    expect(read("Barzahlungen sind nach § 35a EStG nicht begünstigt.")).toMatchObject({ status: "rejected" });
+    expect(read("Betrag bar erhalten.")).toMatchObject({ value: 1, status: "read", note: null });
   });
 
   it("survives answers of the wrong shape", () => {

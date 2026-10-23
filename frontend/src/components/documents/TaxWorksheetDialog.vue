@@ -85,6 +85,11 @@ function confirmValue(valueId: number) {
   void change(valueId, () => confirmTaxValue(valueId))
 }
 
+/** The invoice was not paid in cash: the cash flag read off it becomes 0. */
+function notCash(flagId: number) {
+  void change(flagId, () => correctTaxValue(flagId, 0))
+}
+
 function saveCorrection(valueId: number) {
   const value = eurosToCents(editAmount.value)
   if (value === null) {
@@ -253,6 +258,15 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
             <li v-for="s in worksheet.form.skipped" :key="s.value_id">
               <RouterLink :to="{ name: 'dokumente-detail', params: { id: String(s.document_id) } }">{{ s.document_title }}</RouterLink>:
               {{ s.field_label }}<template v-if="s.printed"> „{{ s.printed }}“</template> — {{ s.reason }}
+              <Button
+                v-if="canEdit && s.cash_flag_value_id !== null"
+                label="Nicht bar bezahlt"
+                text
+                size="small"
+                :loading="saving === s.cash_flag_value_id"
+                v-tooltip.top="'Überwiesen oder per Lastschrift bezahlt: der Betrag zählt'"
+                @click="notCash(s.cash_flag_value_id)"
+              />
               <Button
                 v-if="canEdit && s.status === 'rejected' && editing !== s.value_id"
                 icon="pi pi-pencil"

@@ -469,7 +469,7 @@ const TAX_FORM = {
       contributions: [{ value_id: 2, document_id: 72, document_title: "Lohnsteuerbescheinigung Partner", evidence_kind: "lohnsteuerbescheinigung", evidence_kind_name: "Lohnsteuerbescheinigung", field_label: "Arbeitnehmeranteil zur gesetzlichen Rentenversicherung", cents: 111600, value_cents: 223200, printed: null, quote: null, page: null, status: "confirmed", note: null }],
     },
   ],
-  skipped: [{ value_id: 3, document_id: 74, document_title: "Rechnung Malerbetrieb", evidence_kind_name: "Handwerkerrechnung", field_label: "Rechnungsbetrag brutto", form_label: null, value_cents: 99900, printed: "999,00", quote: null, status: "rejected", reason: "Zahl steht nicht im Text", note: "Zahl steht nicht im Text" }],
+  skipped: [{ value_id: 3, document_id: 74, document_title: "Rechnung Malerbetrieb", evidence_kind_name: "Handwerkerrechnung", field_label: "Rechnungsbetrag brutto", form_label: null, value_cents: 99900, printed: "999,00", quote: null, status: "rejected", reason: "Zahl steht nicht im Text", note: "Zahl steht nicht im Text", cash_flag_value_id: null }],
 };
 
 describe("tax_worksheet", () => {

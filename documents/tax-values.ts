@@ -10,7 +10,8 @@
  *
  * - an amount must stand in the text on its own (`amountAnchored`), else it
  *   is stored as `rejected` with the reason, never silently dropped;
- * - a flag is kept only with a quote the text really contains;
+ * - a flag is kept only with a quote the text really contains, and a cash
+ *   payment only with a quote that says the invoice was paid in cash;
  * - the kind's plausibility rules attach a note to values that cannot all
  *   be right;
  * - the owner comes from the household: the Bezugspersonen linked to the
@@ -37,6 +38,7 @@ import {
   userSubjectPersons,
 } from "../db/schema";
 import { amountAnchored, centsColumnAfter, parseGermanAmountCents } from "./tax-amounts";
+import { statesCashPayment } from "./tax-form-mapping";
 import {
   checkEvidenceValues,
   evidenceKindsFor,
@@ -176,7 +178,8 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
     const field = fieldOf(e.field);
     if (!field || field.kind !== "amount" || seen.has(field.key)) continue;
     const printed = str(e.printed) ?? (typeof e.printed === "number" ? String(e.printed).replace(".", ",") : null);
-    if (printed === null) continue;
+    // "null", "-", "k. A.": the model saying the field is not there, in a string.
+    if (printed === null || /^(?:null|none|undefined|n\/?a|k\.?\s*a\.?|[-–—]+|keine?|fehlt|nicht vorhanden)$/i.test(printed)) continue;
     seen.add(field.key);
     const quote = str(e.quote);
     const parsed = parseGermanAmountCents(printed);
@@ -210,13 +213,15 @@ export function checkReadValues(kind: EvidenceKind, raw: unknown, text: string):
     seen.add(field.key);
     const quote = str(e.quote);
     const anchored = quote !== null && haystack.includes(squash(quote));
+    // § 35a Abs. 5 EStG: payment terms or the hint that cash does not count are no cash payment.
+    const unfounded = anchored && field.key === "bargeld" && e.value && !statesCashPayment(quote);
     out.push({
       field: field.key,
       value: e.value ? 1 : 0,
       printed: null,
       quote,
-      status: anchored ? "read" : "rejected",
-      note: anchored ? null : "Zitat steht nicht im Text",
+      status: anchored && !unfounded ? "read" : "rejected",
+      note: !anchored ? "Zitat steht nicht im Text" : unfounded ? "Zitat sagt nicht, dass bar bezahlt wurde" : null,
     });
   }
 

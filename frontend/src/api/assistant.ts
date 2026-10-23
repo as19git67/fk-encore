@@ -438,6 +438,8 @@ export interface TaxFormSkipped {
   status: TaxValueStatus
   reason: string
   note: string | null
+  /** Skipped as paid in cash: the cash flag, corrected to 0 when it was not. */
+  cash_flag_value_id: number | null
 }
 
 /** The documents' values by Anlage, line and Kennzahl. */

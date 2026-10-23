@@ -19,7 +19,7 @@
  * values, never a judgement — a pension rises, a job changes.
  */
 
-import { and, eq, inArray, isNull, or, sql, gt } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { api, APIError, Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
@@ -28,11 +28,15 @@ import {
   documentTaxReading,
   documentTaxValue,
   documents,
+  financeAccount,
+  financeAccountType,
+  financeTransaction,
+  financeTransactionDocument,
   userSubjectPersons,
 } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { findEvidenceKind } from "./tax-evidence-kinds";
-import { mapToForm, type EvidenceValue, type EvidenceValueStatus, type ValueOwner } from "./tax-form-mapping";
+import { CASH_REASON, mapToForm, type EvidenceValue, type EvidenceValueStatus, type ValueOwner } from "./tax-form-mapping";
 import { findFormField, formCatalogue, placeLabel } from "./tax-forms/catalogue";
 import { householdOwner, type LinkedPerson } from "./tax-values";
 import { TAX_SECTIONS } from "./tax-sections";
@@ -113,6 +117,11 @@ export interface TaxFormSkipped {
   status: EvidenceValueStatus;
   reason: string;
   note: string | null;
+  /**
+   * Skipped as paid in cash (§ 35a Abs. 5 EStG): the cash flag that says so,
+   * which the user corrects to 0 when the invoice was not paid in cash.
+   */
+  cash_flag_value_id: number | null;
 }
 
 export interface TaxFormValuesResponse {
@@ -288,10 +297,32 @@ async function currentOwners(userId: number, year: number, rows: readonly Stored
   return out;
 }
 
+/**
+ * Documents linked to a booking on an account that is not a cash account:
+ * paid by transfer or direct debit, which is what § 35a Abs. 5 EStG asks for.
+ */
+async function documentsPaidByBank(rows: readonly StoredValue[]): Promise<Set<number>> {
+  const docIds = [...new Set(rows.filter((r) => r.field_key === "bargeld").map((r) => r.document_id))];
+  if (!docIds.length) return new Set();
+  const linked = await db
+    .selectDistinct({ document_id: financeTransactionDocument.document_id })
+    .from(financeTransactionDocument)
+    .innerJoin(financeTransaction, eq(financeTransaction.id, financeTransactionDocument.transaction_id))
+    .innerJoin(financeAccount, eq(financeAccount.id, financeTransaction.account_id))
+    .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+    .where(and(inArray(financeTransactionDocument.document_id, docIds), ne(financeAccountType.kind, "bargeld")));
+  return new Set(linked.map((l) => l.document_id));
+}
+
+/** The value feeds a field of the form (not only a rule, like material or the invoice total). */
+function feedsForm(v: EvidenceValue): boolean {
+  return !!findEvidenceKind(v.evidenceKind)?.fields.find((f) => f.key === v.field)?.formKey;
+}
+
 /** One year's stored values summed by field and owner. */
 async function yearMapping(userId: number, year: number, personId: number | null) {
   const [rows, joint] = await Promise.all([storedValues(userId, year, personId), isJointReturn(userId, year, personId)]);
-  const owners = await currentOwners(userId, year, rows);
+  const [owners, paidByBank] = await Promise.all([currentOwners(userId, year, rows), documentsPaidByBank(rows)]);
   const evidence: EvidenceValue[] = rows.map((r) => ({
     id: r.id,
     documentId: r.document_id,
@@ -300,8 +331,9 @@ async function yearMapping(userId: number, year: number, personId: number | null
     value: Number(r.value),
     owner: owners.get(r.id) ?? (r.owner as ValueOwner),
     status: r.status,
+    quote: r.quote,
   }));
-  return { rows, joint, mapping: mapToForm(year, evidence, { joint }) };
+  return { rows, joint, mapping: mapToForm(year, evidence, { joint, paidByBank }) };
 }
 
 /** The year's values by form field, for the caller (or one of their Steuerakten). */
@@ -385,11 +417,15 @@ export async function buildTaxFormValues(userId: number, year: number, personId:
       };
     });
 
+  // The cash flag of each document, to say where "bar bezahlt" was read.
+  const cashFlags = new Map(rows.filter((r) => r.field_key === "bargeld" && r.status !== "rejected").map((r) => [r.document_id, r]));
   const skipped: TaxFormSkipped[] = mapping.skipped
-    // Values that only steer a rule (material, invoice total) are no loss.
-    .filter((s) => s.reason !== "feeds no form field")
+    // Values that only steer a rule (material, invoice total) are no loss,
+    // read or not: nothing on the form waits for them.
+    .filter((s) => s.reason !== "feeds no form field" && !(s.reason === "rejected" && !feedsForm(s.value)))
     .map((s) => {
       const r = byId.get(s.value.id!)!;
+      const cash = s.reason === CASH_REASON ? cashFlags.get(r.document_id) ?? null : null;
       const formKey = findEvidenceKind(r.evidence_kind)?.fields.find((f) => f.key === r.field_key)?.formKey ?? null;
       return {
         value_id: r.id,
@@ -402,8 +438,11 @@ export async function buildTaxFormValues(userId: number, year: number, personId:
         printed: r.printed,
         quote: r.quote,
         status: r.status,
-        reason: s.reason === "rejected" ? (r.note ?? "nicht aus dem Text belegt") : s.reason,
+        reason: s.reason === "rejected"
+          ? (r.note ?? "nicht aus dem Text belegt")
+          : cash?.quote ? `${s.reason} (gelesen aus „${cash.quote}“)` : s.reason,
         note: r.note,
+        cash_flag_value_id: cash?.id ?? null,
       };
     });
 

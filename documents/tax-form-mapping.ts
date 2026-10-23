@@ -36,6 +36,8 @@ export interface EvidenceValue {
   value: number;
   owner: ValueOwner;
   status: EvidenceValueStatus;
+  /** The passage the value was read from, when the input carries it. */
+  quote?: string | null;
 }
 
 export interface Contribution {
@@ -72,13 +74,36 @@ export interface FormMapping {
 const euro = (cents: number): string =>
   `${(cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
-/** Flags of one document, by evidence field key. */
-function flagsByDocument(values: readonly EvidenceValue[]): Map<number, Map<string, number>> {
+export const CASH_REASON = "§ 35a Abs. 5 EStG: bar bezahlt, zählt nicht";
+
+/**
+ * Whether a passage says the invoice was paid in cash (§ 35a Abs. 5 EStG).
+ * Payment terms, a cash discount, bank details or the usual hint that cash
+ * payments do not count are no such statement: they name cash without
+ * saying it was paid that way.
+ */
+export function statesCashPayment(quote: string | null | undefined): boolean {
+  if (!quote) return false;
+  const q = quote.toLowerCase();
+  if (/\bbei\s+bar|skonto|unbar|überweis|lastschrift|abbuch|einzug|karte|girocard|\biban\b|\bbic\b|bankverbindung|konto|zahlbar|zahlungsziel|35\s*a|nicht\s+(?:steuerlich\s+)?(?:begünstigt|anerkannt|absetzbar|abzugsfähig|berücksichtigt|förderfähig)/.test(q)) return false;
+  return /\bbar\b|\bbar(?:zahlung|geld|betrag|kasse)|\bin\s+bar\b|\bkasse\b|dankend\s+erhalten|betrag\s+erhalten/.test(q);
+}
+
+/**
+ * Flags of one document, by evidence field key. A cash flag the model read
+ * from a passage that does not say so is no flag; one the user set stays.
+ */
+function flagsByDocument(values: readonly EvidenceValue[], paidByBank: ReadonlySet<number>): Map<number, Map<string, number>> {
   const out = new Map<number, Map<string, number>>();
   for (const v of values) {
     if (v.status === "rejected") continue;
     const kind = findEvidenceKind(v.evidenceKind);
     if (kind?.fields.find((f) => f.key === v.field)?.kind !== "flag") continue;
+    if (v.field === "bargeld" && v.value === 1 && v.status === "read") {
+      // A booking on a bank account linked to the document is the proof of a non-cash payment.
+      if (paidByBank.has(v.documentId)) continue;
+      if (v.quote !== undefined && !statesCashPayment(v.quote)) continue;
+    }
     const flags = out.get(v.documentId) ?? new Map<string, number>();
     flags.set(v.field, v.value);
     out.set(v.documentId, flags);
@@ -186,12 +211,15 @@ function lawNotes(f: FormValue, year: number, joint: boolean, all: readonly Form
 /**
  * Sum the evidence values of a year into form values.
  * `joint`: the year is a joint assessment (Zusammenveranlagung).
+ * `paidByBank`: documents linked to a booking on a bank account, i.e. paid
+ * without cash whatever was read off them.
  */
-export function mapToForm(year: number, values: readonly EvidenceValue[], opts: { joint: boolean }): FormMapping {
+export function mapToForm(year: number, values: readonly EvidenceValue[], opts: { joint: boolean; paidByBank?: ReadonlySet<number> }): FormMapping {
   const catalogue = formCatalogue(year);
   const fields = new Map(catalogue.fields.map((f) => [f.key, f]));
   const order = new Map(catalogue.fields.map((f, i) => [f.key, i]));
-  const flags = flagsByDocument(values);
+  const paidByBank = opts.paidByBank ?? new Set<number>();
+  const flags = flagsByDocument(values, paidByBank);
   const byKey = new Map<string, FormValue>();
   const skipped: FormMapping["skipped"] = [];
 
@@ -213,7 +241,7 @@ export function mapToForm(year: number, values: readonly EvidenceValue[], opts: 
     const docFlags = flags.get(v.documentId);
     const is35a = field.key.startsWith("haushaltsnahe.") && v.evidenceKind !== "nebenkostenabrechnung";
     if (is35a && docFlags?.get("bargeld") === 1) {
-      skipped.push({ value: v, reason: "§ 35a Abs. 5 EStG: bar bezahlt, zählt nicht" });
+      skipped.push({ value: v, reason: CASH_REASON });
       continue;
     }
     for (const target of owners(field, v.owner, opts.joint)) {
@@ -223,7 +251,7 @@ export function mapToForm(year: number, values: readonly EvidenceValue[], opts: 
       entry.cents += cents;
       entry.contributions.push({ ...(v.id !== undefined ? { valueId: v.id } : {}), documentId: v.documentId, evidenceKind: v.evidenceKind, field: v.field, cents, status: v.status });
       if (target.note && !entry.notes.includes(target.note)) entry.notes.push(target.note);
-      if (is35a && docFlags?.get("bargeld") === undefined) {
+      if (is35a && docFlags?.get("bargeld") === undefined && !paidByBank.has(v.documentId)) {
         const note = "Zahlungsart prüfen: nach § 35a Abs. 5 EStG zählt nur unbare Zahlung.";
         if (!entry.notes.includes(note)) entry.notes.push(note);
       }
