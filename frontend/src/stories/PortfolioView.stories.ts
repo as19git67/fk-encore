@@ -9,7 +9,9 @@ import {
   MOCK_PORTFOLIO_REVIEW_EMPTY,
   MOCK_PORTFOLIO_REVIEW_WITH_IGNORED,
   MOCK_PORTFOLIO_TRANSACTIONS,
+  mockPortfolioPerformance,
 } from './finance-mock-data'
+import type { PerformancePeriod } from '../api/finance'
 import { routeFromParameters } from './storyRoute'
 
 /** The portfolio page (issue #1336), in each state it can be in. */
@@ -30,6 +32,11 @@ const ENRICH_RUN_RUNNING = {
 
 const portfolioHandlers = [
   http.get('/api/finance/portfolio', () => HttpResponse.json(MOCK_PORTFOLIO)),
+  http.get('/api/finance/portfolio/performance', ({ request }) =>
+    HttpResponse.json(
+      mockPortfolioPerformance((new URL(request.url).searchParams.get('period') ?? '1Y') as PerformancePeriod, { gap: true }),
+    ),
+  ),
   http.get('/api/finance/portfolio/transactions', ({ request }) => {
     const url = new URL(request.url)
     const kind = url.searchParams.get('kind')
@@ -162,6 +169,22 @@ export const BelegeWerdenEingelesen: Story = {
     msw: {
       handlers: [
         http.get('/api/finance/portfolio/documents/enrich/status', () => HttpResponse.json({ run: ENRICH_RUN_RUNNING })),
+        ...portfolioHandlers,
+      ],
+    },
+  },
+}
+
+/** Depots in two currencies: each one's performance on its own. */
+export const ZweiWaehrungen: Story = {
+  name: 'Performance in zwei Währungen',
+  parameters: {
+    route: '/finanzen/portfolio?period=3Y',
+    msw: {
+      handlers: [
+        http.get('/api/finance/portfolio/performance', () =>
+          HttpResponse.json(mockPortfolioPerformance('3Y', { mixed: true })),
+        ),
         ...portfolioHandlers,
       ],
     },

@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, PositionHistoryPoint, PositionNewsResponse, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PerformancePeriod, PortfolioPerformanceResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, PositionHistoryPoint, PositionNewsResponse, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -805,4 +805,115 @@ export const MOCK_POSITION_NEWS: PositionNewsResponse = {
       provider: 'eodhd',
     },
   ],
+}
+
+// ── Portfolio performance (#1700) — synthetic series only ────────────
+
+const PERF_TODAY = '2026-10-02'
+
+function perfAddDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+}
+
+const PERF_SPAN_DAYS: Record<PerformancePeriod, number> = { '1M': 30, YTD: 275, '1Y': 365, '3Y': 1095, max: 1400 }
+
+/**
+ * A made-up portfolio: a smooth wave on a slow rise, a monthly savings
+ * plan in the invested line, and — with `gap` — three weeks without a
+ * price, shown as a gap rather than a guessed value.
+ */
+export function mockPortfolioPerformance(
+  period: PerformancePeriod = '1Y',
+  opts: { gap?: boolean; mixed?: boolean; positions?: boolean; base?: number } = {},
+): PortfolioPerformanceResponse {
+  const base = opts.base ?? 12000
+  const span = PERF_SPAN_DAYS[period]
+  const from = perfAddDays(PERF_TODAY, -span)
+  const gapFrom = perfAddDays(PERF_TODAY, -Math.round(span / 3))
+  const gapTo = perfAddDays(gapFrom, 20)
+  const step = span > 400 ? 7 : 1
+  const points = []
+  for (let d = 0; d <= span; d += step) {
+    const day = perfAddDays(from, d)
+    const weekday = new Date(`${day}T00:00:00Z`).getUTCDay()
+    if (step === 1 && (weekday === 0 || weekday === 6)) continue
+    const invested = base + Math.floor(d / 30) * (base / 48)
+    const growth = 1 + (0.07 * d) / 365 + 0.04 * Math.sin(d / 23)
+    const unvalued = opts.gap === true && day >= gapFrom && day <= gapTo
+    points.push({
+      day,
+      value: unvalued ? null : (invested * growth).toFixed(2),
+      invested: invested.toFixed(2),
+      twr_pct: unvalued ? null : ((growth - 1) * 100).toFixed(2),
+    })
+  }
+  const last = points[points.length - 1]!
+  const first = points[0]!
+  const years = span / 365
+  const twr = Number(last.twr_pct) / 100
+  const group = {
+    currency: 'EUR',
+    account_ids: [11, 12],
+    from: first.day,
+    to: last.day,
+    shortened: period === 'max',
+    start_value: first.value ?? '0.00',
+    end_value: last.value ?? '0.00',
+    net_flow: (Number(last.invested) - Number(first.invested) - 180).toFixed(2),
+    income: '180.00',
+    gain: (Number(last.value) - Number(first.value) - (Number(last.invested) - Number(first.invested) - 180)).toFixed(2),
+    twr_pct: (twr * 100).toFixed(2),
+    twr_pa_pct: years >= 1 ? ((Math.pow(1 + twr, 1 / years) - 1) * 100).toFixed(2) : null,
+    xirr_pct: ((twr * 0.9) / Math.max(years, 1) * 100).toFixed(2),
+    mwr_pct: (twr * 0.9 * 100).toFixed(2),
+    unvalued_days: opts.gap ? points.filter((p) => p.value === null).length : 0,
+    points,
+    gaps: opts.gap ? [{ from: gapFrom, to: gapTo }] : [],
+    unvalued_flows: 0,
+    implied_inflow: '0.00',
+    positions:
+      opts.positions === false
+        ? []
+        : [
+            { key: PF_ISIN_A, twr: '12.40', xirr: '10.85' },
+            { key: PF_ISIN_B, twr: '-3.15', xirr: '-2.80' },
+          ].map((p) => ({
+            key: p.key,
+            from: first.day,
+            to: last.day,
+            shortened: false,
+            start_value: '5000.00',
+            end_value: '5600.00',
+            net_flow: '0.00',
+            income: '0.00',
+            gain: '600.00',
+            twr_pct: p.twr,
+            twr_pa_pct: null,
+            xirr_pct: p.xirr,
+            mwr_pct: p.xirr,
+            unvalued_days: 0,
+          })),
+  }
+  const groups = opts.mixed
+    ? [
+        group,
+        {
+          ...group,
+          currency: 'USD',
+          account_ids: [14],
+          positions: [],
+          points: group.points.map((p) => ({
+            ...p,
+            value: p.value === null ? null : (Number(p.value) / 4).toFixed(2),
+            invested: (Number(p.invested) / 4).toFixed(2),
+          })),
+          start_value: (Number(group.start_value) / 4).toFixed(2),
+          end_value: (Number(group.end_value) / 4).toFixed(2),
+          gain: (Number(group.gain) / 4).toFixed(2),
+          net_flow: (Number(group.net_flow) / 4).toFixed(2),
+          income: '45.00',
+        },
+      ]
+    : [group]
+  return { period, today: PERF_TODAY, price_stale_days: 10, mixed_currency: opts.mixed === true, groups }
 }

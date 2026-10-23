@@ -15,6 +15,7 @@ import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
 import PortfolioReview from '../../components/finance/PortfolioReview.vue'
+import PortfolioPerformance from '../../components/finance/PortfolioPerformance.vue'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import { useSort } from '../../composables/useSort'
 import type { FilterChip } from '../../components/layout/listToolbar'
@@ -26,6 +27,7 @@ import {
   getPortfolio,
   resetDocumentReadings,
   listPortfolioTransactions,
+  type PortfolioPerformanceResponse,
   type PortfolioPosition,
   type PortfolioResponse,
   type PortfolioTransaction,
@@ -186,6 +188,17 @@ const showRealizedColumn = computed(() =>
   visiblePositions.value.some((p) => p.realized_gain !== null),
 )
 const showIncomeColumn = computed(() => visiblePositions.value.some((p) => p.income !== null))
+
+// TWR of each position over the period the performance section shows.
+const performance = ref<PortfolioPerformanceResponse | null>(null)
+const twrByKey = computed(() => {
+  const m = new Map<string, string | null>()
+  for (const g of performance.value?.groups ?? []) for (const p of g.positions) m.set(p.key, p.twr_pct)
+  return m
+})
+const showTwrColumn = computed(() => visiblePositions.value.some((p) => twrByKey.value.get(p.key) != null))
+const PERIOD_LABELS: Record<string, string> = { '1M': '1M', YTD: 'YTD', '1Y': '1J', '3Y': '3J', max: 'Max' }
+const twrHeading = computed(() => `TWR ${PERIOD_LABELS[performance.value?.period ?? '1Y'] ?? ''}`)
 
 function openPosition(key: string) {
   void router.push({
@@ -734,6 +747,12 @@ onBeforeUnmount(() => {
         </p>
       </section>
 
+      <PortfolioPerformance
+        :accounts="accountIds"
+        :closed="includeClosedDepots"
+        @loaded="performance = $event"
+      />
+
       <PortfolioReview
         :accounts="accountIds"
         :include-closed="includeClosedDepots"
@@ -773,6 +792,7 @@ onBeforeUnmount(() => {
                 <th v-if="showRealizedColumn" class="pf-col-num">Realisiert</th>
                 <th v-if="showIncomeColumn" class="pf-col-num">Erträge</th>
                 <th class="pf-col-num">Gesamt</th>
+                <th v-if="showTwrColumn" class="pf-col-num" title="Zeitgewichtete Rendite im gewählten Zeitraum">{{ twrHeading }}</th>
                 <th class="pf-col-depots">Depot</th>
               </tr>
             </thead>
@@ -832,6 +852,9 @@ onBeforeUnmount(() => {
                 <td class="pf-col-num" :class="isSignedCell(p.total_return)">
                   <span>{{ formatSignedCurrency(p.total_return, p.currency) }}</span>
                   <span v-if="p.total_return_pct !== null" class="pf-pct">{{ formatSignedPercent(p.total_return_pct) }}</span>
+                </td>
+                <td v-if="showTwrColumn" class="pf-col-num" :class="isSignedCell(twrByKey.get(p.key) ?? null)">
+                  {{ formatSignedPercent(twrByKey.get(p.key) ?? null) }}
                 </td>
                 <td class="pf-col-depots">
                   {{ depotLabels(p) }}

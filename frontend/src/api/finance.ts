@@ -684,6 +684,71 @@ export async function getPortfolio(
   return apiFetch(`/finance/portfolio${qs ? '?' + qs : ''}`)
 }
 
+// ── Performance over time (#1700) ────────────────────────────────────
+
+export type PerformancePeriod = '1M' | 'YTD' | '1Y' | '3Y' | 'max'
+
+export interface PerformancePoint {
+  day: string
+  /** Market value; null on a day a security held had no recent price. */
+  value: string | null
+  /** Net invested capital. */
+  invested: string
+  /** Time-weighted return since the period's start, percent. */
+  twr_pct: string | null
+}
+
+export interface PerformanceFigures {
+  from: string
+  to: string
+  /** The history does not reach back to the period's start. */
+  shortened: boolean
+  start_value: string
+  end_value: string
+  net_flow: string
+  income: string
+  gain: string
+  twr_pct: string | null
+  twr_pa_pct: string | null
+  xirr_pct: string | null
+  mwr_pct: string | null
+  unvalued_days: number
+}
+
+export interface PositionPerformance extends PerformanceFigures {
+  key: string
+}
+
+export interface PerformanceGroup extends PerformanceFigures {
+  currency: string
+  account_ids: number[]
+  points: PerformancePoint[]
+  gaps: Array<{ from: string; to: string }>
+  unvalued_flows: number
+  implied_inflow: string
+  positions: PositionPerformance[]
+}
+
+export interface PortfolioPerformanceResponse {
+  period: PerformancePeriod
+  today: string
+  price_stale_days: number
+  mixed_currency: boolean
+  groups: PerformanceGroup[]
+}
+
+export async function getPortfolioPerformance(
+  opts: { accounts?: number[]; closed?: boolean; period?: PerformancePeriod; position?: string } = {},
+): Promise<PortfolioPerformanceResponse> {
+  const params = new URLSearchParams()
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
+  if (opts.period) params.set('period', opts.period)
+  if (opts.position) params.set('position', opts.position)
+  const qs = params.toString()
+  return apiFetch(`/finance/portfolio/performance${qs ? '?' + qs : ''}`)
+}
+
 export interface PortfolioTransaction extends Omit<DepotTransaction, 'created_at'> {
   account_label: string
   position_key: string
