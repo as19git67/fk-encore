@@ -239,6 +239,20 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_photos: { rows: [{ id: 903, taken: "2022-08-14", place: "Musterstadt, Deutschland", description: "Sommerfest im Garten" }], total: 84 } },
   },
   {
+    id: "photos-leave-hidden-out",
+    title: "Ausgeblendete Fotos bleiben draußen",
+    question: "Zeig mir alle Fotos aus dem Jahr 2024.",
+    expect: [{ tool: "list_photos", args: { date_from: "2024-01-01", date_to: "2024-12-31", hidden: { $absent: true } } }],
+    results: { list_photos: { rows: [{ id: 905, taken: "2024-06-01", place: "Musterstadt, Deutschland" }], total: 640 } },
+  },
+  {
+    id: "photos-with-hidden-on-request",
+    title: "Ausgeblendete Fotos nur auf Wunsch",
+    question: "Zeig mir alle Fotos aus dem Jahr 2024, auch die ausgeblendeten.",
+    expect: [{ tool: "list_photos", args: { date_from: "2024-01-01", date_to: "2024-12-31", hidden: "include" } }],
+    results: { list_photos: { rows: [{ id: 906, taken: "2024-06-02", place: "Musterstadt, Deutschland" }], total: 702 } },
+  },
+  {
     id: "photo-metadata",
     title: "Alles über ein Foto",
     question: "Was weißt du über das Foto 904?",

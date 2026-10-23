@@ -159,6 +159,7 @@ import { computeOrientationVariants, photoOrientation } from "./orientation-vari
 import { accessiblePhotoCondition, accessiblePhotoConditionFor, assertPhotoAccess, coViewerIds } from "./photo-file-access";
 import {
   buildPhotoFilterConditions,
+  type HiddenMode,
   type PhotoFilterParams,
 } from "./photo.filters";
 import { repairMojibake } from "./text-encoding";
@@ -6086,7 +6087,20 @@ const personCoverOrder = sql.raw(`
   COALESCE(p.taken_at, p.created_at) DESC NULLS LAST,
   f.id DESC`);
 
-export async function listPersonsLogic(userId: number, limit?: number): Promise<ListPersonsResponse> {
+export async function listPersonsLogic(
+  userId: number,
+  limit?: number,
+  opts: { hidden?: "include" | "exclude" } = {},
+): Promise<ListPersonsResponse> {
+  // "exclude" leaves faces on the user's hidden photos out of the count and
+  // the period (the assistant); the people page counts every face.
+  const notHidden = opts.hidden === "exclude"
+    ? sql`AND NOT EXISTS (
+        SELECT 1 FROM faces hf
+        INNER JOIN photo_curation hpc ON hpc.photo_id = hf.photo_id AND hpc.user_id = persons.user_id AND hpc.status = 'hidden'
+        WHERE hf.id = ufa.face_id
+      )`
+    : sql``;
   // A cover comes only from a photo the user can still open.
   const coverAccess = accessiblePhotoConditionFor(userId, sql`p.id`, sql`p.user_id`);
   const coverFace = (column: SQL) => sql`(
@@ -6109,7 +6123,7 @@ export async function listPersonsLogic(userId: number, limit?: number): Promise<
       cover_face_id: sql<number>`COALESCE(${coverFace(sql.raw("f.id"))}, persons.cover_face_id)`,
       created_at: persons.created_at,
       updated_at: persons.updated_at,
-      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse}), 0) AS INTEGER)`,
+      faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse} ${notHidden}), 0) AS INTEGER)`,
       cover_filename: sql<string>`COALESCE(${coverFace(sql.raw("p.filename"))}, '')`,
       cover_bbox: sql<string>`COALESCE(${coverFace(sql.raw("f.bbox"))}, '')`,
       oldest_photo_at: sql<string>`(
@@ -6120,6 +6134,7 @@ export async function listPersonsLogic(userId: number, limit?: number): Promise<
         WHERE ufa.person_id = persons.id
           AND ufa.user_id = persons.user_id
           AND ufa.ignored = ${rawFalse}
+          ${notHidden}
       )`,
       newest_photo_at: sql<string>`(
         SELECT MAX(${rawCoalesceDate})::text
@@ -6129,13 +6144,14 @@ export async function listPersonsLogic(userId: number, limit?: number): Promise<
         WHERE ufa.person_id = persons.id
           AND ufa.user_id = persons.user_id
           AND ufa.ignored = ${rawFalse}
+          ${notHidden}
       )`,
   })
   .from(persons)
   .where(eq(persons.user_id, userId))
   .orderBy(
     sql`CASE WHEN ${persons.name} = 'Unbenannt' THEN 1 ELSE 0 END`,
-    sql`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse}), 0) AS INTEGER) DESC`
+    sql`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse} ${notHidden}), 0) AS INTEGER) DESC`
   )
   .$dynamic();
 
@@ -8416,8 +8432,16 @@ export async function searchPhotosNaturalLogic(
   userId: number,
   query: string,
   limit: number = 30,
-  threshold: number = 0.18
+  threshold: number = 0.18,
+  hiddenMode: HiddenMode = "exclude",
 ): Promise<{ results: NaturalSearchResult[]; parsed: ParsedQuery }> {
+  // The user's hidden photos stay out unless the caller asks for them, on
+  // every path below: the CLIP hits come back without any curation filter.
+  const hiddenCond = hiddenMode === "include"
+    ? sql`TRUE`
+    : hiddenMode === "only"
+      ? sql`${photoCuration.status} = 'hidden'`
+      : sql`COALESCE(${photoCuration.status}, 'visible') <> 'hidden'`;
   // Prefer the spaCy-based parser running in the embedding service – it
   // understands relative dates ("letzten Sommer", "vor 2 Jahren"), case-
   // insensitive locations, and produces fewer false positives. Falls back to
@@ -8434,7 +8458,7 @@ export async function searchPhotosNaturalLogic(
   // DB conditions for date + location structural filters
   const dbConditions: ReturnType<typeof and>[] = [
     eq(photos.user_id, userId),
-    or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
+    hiddenCond,
   ];
   if (parsed.fromDate) {
     dbConditions.push(sql`COALESCE(${photos.taken_at}, ${photos.created_at}) >= ${parsed.fromDate.toISOString()}`);
@@ -8466,7 +8490,7 @@ export async function searchPhotosNaturalLogic(
   const buildTextMatchConditions = () => {
     const base: any[] = [
       eq(photos.user_id, userId),
-      or(sql`${photoCuration.status} IS NULL`, sql`${photoCuration.status} != 'hidden'`),
+      hiddenCond,
     ];
     for (const tok of descriptionTokens) {
       const pattern = `%${tok}%`;
@@ -8576,7 +8600,7 @@ export async function searchPhotosNaturalLogic(
     const rows = await dbAll<PhotoRow>(
       db.select(selectFields).from(photos)
         .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
-        .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+        .where(and(eq(photos.user_id, userId), inArray(photos.id, ids), hiddenCond))
     );
     const ordered = rows
       .map(r => toResult(r, merged.get(r.id) ?? 0))
@@ -8619,7 +8643,8 @@ export async function searchPhotosNaturalLogic(
   const ids = [...merged.keys()];
   const rows = await dbAll<PhotoRow>(
     db.select(selectFields).from(photos)
-      .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+      .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
+      .where(and(eq(photos.user_id, userId), inArray(photos.id, ids), hiddenCond))
   );
   const ordered = rows
     .map(r => toResult(r, merged.get(r.id) ?? 0))
