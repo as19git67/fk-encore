@@ -4406,9 +4406,29 @@ export async function createAlbumLogic(userId: number, req: CreateAlbumRequest):
     cover_filename: undefined,
     display_mode: (row!.display_mode as "grid" | "map") ?? "grid",
     photo_count: 0,
+    // A fresh album has neither participants nor a public link yet.
+    is_shared: false,
     created_at: row!.created_at ?? "",
     updated_at: row!.updated_at ?? "",
+    my_access_level: "owner",
   };
+}
+
+/** Same rule as the list: other participants or an active public link. */
+async function albumIsShared(albumId: number): Promise<boolean> {
+  const row = await dbFirst<{ shared: boolean }>(
+    db.select({
+      shared: sql<boolean>`EXISTS (
+        SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albumId}
+      ) OR EXISTS (
+        SELECT 1 FROM ${albumPublicLinks}
+        WHERE ${albumPublicLinks.album_id} = ${albumId}
+          AND ${albumPublicLinks.disabled_at} IS NULL
+          AND (${albumPublicLinks.expires_at} IS NULL OR ${albumPublicLinks.expires_at} > NOW())
+      )`,
+    }).from(albums).where(eq(albums.id, albumId))
+  );
+  return !!row?.shared;
 }
 
 export async function listAlbumsLogic(userId: number): Promise<ListAlbumsResponse> {
@@ -4981,8 +5001,10 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
     newest_photo_at: stats.newest_photo_at,
     oldest_photo_at: stats.oldest_photo_at,
     photo_count: stats.photo_count,
+    is_shared: await albumIsShared(req.id),
     created_at: updated.created_at ?? "",
     updated_at: updated.updated_at ?? "",
+    my_access_level: isOwner ? "owner" : (share!.access_level as Exclude<Album["my_access_level"], "owner" | undefined>),
   };
 }
 

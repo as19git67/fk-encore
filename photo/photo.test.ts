@@ -1319,6 +1319,24 @@ describe("Photo Module", () => {
       expect(response.albums.find(a => a.id === album.id)!.name).toBe("Urlaub");
     });
 
+    // The assistant creates albums through the generated service client, which
+    // decodes the response strictly: a missing is_shared failed the whole
+    // "create album" proposal with "missing field is_shared".
+    it("returns is_shared and my_access_level from create and update", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Sharing flags" });
+      expect(album.is_shared).toBe(false);
+      expect(album.my_access_level).toBe("owner");
+
+      const renamed = await service.updateAlbumLogic(user1.id, { id: album.id, name: "Sharing flags 2" });
+      expect(renamed.is_shared).toBe(false);
+      expect(renamed.my_access_level).toBe("owner");
+
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "write" });
+      const byParticipant = await service.updateAlbumLogic(user2.id, { id: album.id, description: "x" });
+      expect(byParticipant.is_shared).toBe(true);
+      expect(byParticipant.my_access_level).toBe("write");
+    });
+
     it("trims surrounding whitespace from album names on update", async () => {
       const album = await service.createAlbumLogic(user1.id, { name: "Gardasee" });
       const updated = await service.updateAlbumLogic(user1.id, { id: album.id, name: "Gardasee 2026 " });
