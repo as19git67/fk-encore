@@ -16,6 +16,7 @@ import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
 import SettlementDocumentDialog from '../../components/finance/SettlementDocumentDialog.vue'
+import PortfolioPerformance from '../../components/finance/PortfolioPerformance.vue'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useMediaQuery } from '../../composables/useBreakpoint'
 import { compactDateLabels, fullDateLabel } from '../../utils/financeChartDates'
@@ -522,6 +523,13 @@ function transactionCash(tx: PortfolioTransaction): string {
           </div>
         </div>
       </section>
+
+      <!-- ── Performance ──────────────────────────────────────────── -->
+      <PortfolioPerformance
+        :accounts="accountIds"
+        :closed="route.query.closedDepots === '1'"
+        :position="position.key"
+      />
 
       <!-- ── Chart ────────────────────────────────────────────────── -->
       <section class="pp-section" aria-labelledby="pp-chart-heading">

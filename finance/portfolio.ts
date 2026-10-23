@@ -180,7 +180,7 @@ async function writableDepots(
  * open depot — closed ones only with `includeClosed`. A closed depot asked
  * for by id is covered; the user picked it on purpose.
  */
-function scopeDepots(
+export function scopeDepots(
   all: DepotAccount[],
   requested: number[] | null,
   includeClosed: boolean,
@@ -190,7 +190,7 @@ function scopeDepots(
 }
 
 /** The depots among `depots` with at least one holding snapshot or one transaction. */
-async function withData(depots: DepotAccount[]): Promise<DepotAccount[]> {
+export async function withData(depots: DepotAccount[]): Promise<DepotAccount[]> {
   if (depots.length === 0) return depots;
   const ids = depots.map((d) => d.id);
   const [held, traded] = await Promise.all([
@@ -208,7 +208,7 @@ async function withData(depots: DepotAccount[]): Promise<DepotAccount[]> {
 }
 
 /** "1,2,3" → [1, 2, 3]; anything that is not a positive integer is an error. */
-function parseAccountIds(raw: string | undefined): number[] | null {
+export function parseAccountIds(raw: string | undefined): number[] | null {
   if (!raw || raw.trim() === "") return null;
   const ids = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   const parsed: number[] = [];
@@ -232,7 +232,7 @@ function normalizeDate(raw: string | undefined, field: string): string | null {
   return raw;
 }
 
-function positionKey(r: {
+export function positionKey(r: {
   isin: string | null;
   wkn: string | null;
   name: string | null;
@@ -380,7 +380,7 @@ interface PortfolioResponse {
   years: PortfolioYear[];
 }
 
-interface DepotTxRow {
+export interface DepotTxRow {
   id: number;
   account_id: number;
   isin: string | null;
@@ -490,7 +490,7 @@ function newAcc(key: string): PositionAcc {
  * The names of the people using this installation. A security name read
  * off a document that is one of them came from the address block.
  */
-async function householdNames(): Promise<string[]> {
+export async function householdNames(): Promise<string[]> {
   const rows = await db.select({ name: users.name }).from(users);
   return rows.map((r) => r.name).filter((n) => n.trim().length > 0);
 }
@@ -604,7 +604,7 @@ function dateOnly(raw: string): string {
 }
 
 /** Signed cash of a tax row (Thesaurierung, Vorabpauschale): always negative. */
-function accumulationTax(tx: DepotTxRow): number | null {
+export function accumulationTax(tx: DepotTxRow): number | null {
   const net = num(tx.net_amount);
   if (net !== null) return -Math.abs(net);
   const tax = num(tx.tax);
@@ -612,7 +612,7 @@ function accumulationTax(tx: DepotTxRow): number | null {
 }
 
 /** Signed net of a dividend row: net_amount first, gross − fees − tax as the fallback. */
-function dividendNet(tx: DepotTxRow): number | null {
+export function dividendNet(tx: DepotTxRow): number | null {
   const net = num(tx.net_amount);
   if (net !== null) return net;
   const gross = num(tx.gross_amount);
@@ -621,7 +621,7 @@ function dividendNet(tx: DepotTxRow): number | null {
 }
 
 /** Cash moved for a buy/sell: net first, then gross, then amount × price. */
-function cashOf(tx: DepotTxRow): number | null {
+export function cashOf(tx: DepotTxRow): number | null {
   const net = num(tx.net_amount);
   if (net !== null) return Math.abs(net);
   const gross = num(tx.gross_amount);
@@ -1020,7 +1020,7 @@ export function buildPortfolio(
   };
 }
 
-async function loadTransactions(accountIds: number[], identity?: SecurityIdentity): Promise<DepotTxRow[]> {
+export async function loadTransactions(accountIds: number[], identity?: SecurityIdentity): Promise<DepotTxRow[]> {
   if (accountIds.length === 0) return [];
   const ident = identity ?? (await securityIdentity());
   const rows = await db
@@ -1058,7 +1058,7 @@ function quotedKeys(holdings: HoldingRow[]): string[] {
   return [...keys];
 }
 
-function scopeCurrency(accounts: DepotAccount[]): { currency: string; mixed: boolean } {
+export function scopeCurrency(accounts: DepotAccount[]): { currency: string; mixed: boolean } {
   const codes = new Set(accounts.map((a) => a.currency_code));
   if (codes.size === 0) return { currency: "EUR", mixed: false };
   return { currency: accounts[0].currency_code, mixed: codes.size > 1 };
@@ -1499,7 +1499,7 @@ async function findPosition(
  * A position key as a link may carry it: from before the identifiers were
  * joined it may name the WKN, or an ISIN as OCR read it.
  */
-function normalizeKey(identity: SecurityIdentity, key: string): string {
+export function normalizeKey(identity: SecurityIdentity, key: string): string {
   return identity.key({ isin: /^[A-Z]{2}[A-Z0-9]{10}$/.test(key) ? key : null, wkn: /^[A-Z0-9]{6}$/.test(key) ? key : null, name: key });
 }
 
