@@ -131,6 +131,37 @@ describe('PageLayout', () => {
     expect(el.querySelector('.page-content p')?.textContent).toBe('Inhalt')
   })
 
+  it('puts the way back first, before the title, and the actions on the line below', async () => {
+    const router = makeRouter()
+    await router.push('/dokumente')
+    const el = await mountPage(router, { title: 'Ein sehr langer Dokumenttitel', stickyHeader: true }, {
+      back: () => h('button', { class: 'probe-back', 'aria-label': 'Zurück' }),
+      actions: () => h('button', { class: 'probe-action', 'aria-label': 'Löschen' }),
+    })
+    const header = el.querySelector('.page-header')
+    expect(header?.classList.contains('page-header--back')).toBe(true)
+    const line = header?.querySelector('.page-title-line')
+    // Back, then the title, on one line; the full title stays readable on hover.
+    expect(line?.firstElementChild?.querySelector('.probe-back')).not.toBeNull()
+    expect(line?.lastElementChild?.tagName).toBe('H1')
+    expect(line?.lastElementChild?.getAttribute('title')).toBe('Ein sehr langer Dokumenttitel')
+    // The actions are not on that line.
+    expect(line?.querySelector('.probe-action')).toBeNull()
+    expect(header?.querySelector('.page-actions .probe-action')).not.toBeNull()
+  })
+
+  it('keeps the plain title row on a page without a way back', async () => {
+    const router = makeRouter()
+    await router.push('/dokumente')
+    const el = await mountPage(router, { title: 'Dokumente' }, {
+      actions: () => h('button', { class: 'probe-action', 'aria-label': 'Hochladen' }),
+    })
+    const header = el.querySelector('.page-header')
+    expect(header?.classList.contains('page-header--back')).toBe(false)
+    expect(header?.querySelector('.page-back')).toBeNull()
+    expect(header?.querySelector('h1')?.hasAttribute('title')).toBe(false)
+  })
+
   it('exposes scroll mode, width and readiness as classes and data', async () => {
     const router = makeRouter()
     await router.push('/')

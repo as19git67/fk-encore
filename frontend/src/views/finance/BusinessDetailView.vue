@@ -612,8 +612,11 @@ async function removeParcel(p: BusinessParcel) {
 
 <template>
   <PageLayout :title="title" :hint="hint" width="wide" :ready="!loading" sticky-header>
-    <template #actions>
+    <template #back>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
+    </template>
+
+    <template #actions>
       <Select v-model="year" :options="yearOptions" size="small" aria-label="Steuerjahr" class="year-select" />
       <Button v-if="canWrite && data" icon="pi pi-pencil" text rounded aria-label="Betrieb bearbeiten" @click="openBusinessEdit" />
       <Button v-if="canWrite && data" icon="pi pi-trash" text rounded severity="danger" aria-label="Betrieb löschen" @click="removeBusiness" />

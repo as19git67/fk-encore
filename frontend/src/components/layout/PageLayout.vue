@@ -18,6 +18,7 @@ import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory
  * unit test — that target does not exist and the same markup renders inline.
  *
  *   <PageLayout title="Dokumente" width="full">
+ *     <template #back>     … the back button, left of the title   </template>
  *     <template #actions>  … buttons beside the title             </template>
  *     <template #toolbar>  … search / filter / sort (sticky)       </template>
  *     <template #notice>   … Message banners (sticky, under toolbar)</template>
@@ -39,9 +40,15 @@ import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory
  * own box: with tens of thousands of photos a document that tall crashed
  * Safari (see `usePageVirtualizer`).
  *
- * `sticky-header`: the title row with `#actions` (the back button of a
- * detail page and its actions) goes into the sticky stack as well, above the
- * toolbar, so the way out never scrolls off the screen.
+ * `sticky-header`: the title row with `#back` and `#actions` goes into the
+ * sticky stack as well, above the toolbar, so the way out never scrolls off
+ * the screen.
+ *
+ * `#back`: the way out sits first, left of the title, on every page that has
+ * one. The title then keeps the rest of its line (cut with "…") and the
+ * actions take a line of their own below it, starting at the same edge — a
+ * page with many actions hands them to `ResponsiveToolbar`, which folds what
+ * does not fit into a "more" menu instead of wrapping into a third line.
  */
 
 export type PageScroll = 'page' | 'fill'
@@ -184,9 +191,19 @@ defineExpose({ contentEl })
          renders right here. -->
     <Teleport v-if="hasStackContent" :to="stackTarget" :disabled="!hasStackTarget">
       <div class="page-stack" :class="[`page--width-${width}`, { 'page-stack--inline': !hasStackTarget }]">
-        <header v-if="stickyHeader" class="page-header page-header--sticky" data-testid="page-header">
+        <header
+          v-if="stickyHeader"
+          class="page-header page-header--sticky"
+          :class="{ 'page-header--back': !!slots.back }"
+          data-testid="page-header"
+        >
           <div class="page-heading">
-            <h1 class="page-title">{{ title }}</h1>
+            <div class="page-title-line">
+              <div v-if="slots.back" class="page-back" data-testid="page-back">
+                <slot name="back" />
+              </div>
+              <h1 class="page-title" :title="slots.back ? title : undefined">{{ title }}</h1>
+            </div>
           </div>
           <div v-if="slots.actions" class="page-actions">
             <slot name="actions" />
@@ -207,9 +224,14 @@ defineExpose({ contentEl })
     <!-- With a sticky header the hint stays on the page: it explains the
          page once, it does not need to follow the reader down. -->
     <p v-if="stickyHeader && hint" class="page-hint page-hint--lead">{{ hint }}</p>
-    <header v-if="!stickyHeader" class="page-header">
+    <header v-if="!stickyHeader" class="page-header" :class="{ 'page-header--back': !!slots.back }">
       <div class="page-heading">
-        <h1 class="page-title">{{ title }}</h1>
+        <div class="page-title-line">
+          <div v-if="slots.back" class="page-back" data-testid="page-back">
+            <slot name="back" />
+          </div>
+          <h1 class="page-title" :title="slots.back ? title : undefined">{{ title }}</h1>
+        </div>
         <p v-if="hint" class="page-hint">{{ hint }}</p>
       </div>
       <div v-if="slots.actions" class="page-actions">
@@ -266,6 +288,44 @@ defineExpose({ contentEl })
 .page-heading {
   min-width: 0;
 }
+.page-title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.page-back {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+/* A page with a way out: line one is back + title, the title cut with "…";
+   line two the actions, from the same left edge as the back button. */
+.page-header--back {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+}
+.page-header--back .page-heading {
+  width: 100%;
+}
+.page-header--back .page-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+.page-header--back .page-actions {
+  width: 100%;
+  margin-left: 0;
+  justify-content: flex-start;
+}
+.page-header--back .page-actions:empty {
+  display: none;
+}
 .page-title {
   margin: 0;
   font-size: var(--text-3xl);
@@ -318,8 +378,9 @@ defineExpose({ contentEl })
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--p-content-border-color);
 }
-/* …unless every slot is currently v-if'd away: then no strip at all. */
-.page-stack--inline:not(:has(.page-toolbar:not(:empty), .page-selection:not(:empty), .page-notice:not(:empty))) {
+/* …unless there is no title row and every slot is currently v-if'd away:
+   then no strip at all. */
+.page-stack--inline:not(:has(.page-header--sticky, .page-toolbar:not(:empty), .page-selection:not(:empty), .page-notice:not(:empty))) {
   display: none;
 }
 .page-toolbar,

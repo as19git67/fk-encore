@@ -1246,14 +1246,19 @@ steht ganz links, durch einen Spacer von dem Paar getrennt, und fragt über
 
 ## Detailseiten im Frontend
 
-Jede Detailseite beginnt ihren `#actions`-Slot mit demselben Ausgang:
-`<Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" />`, der
-`goBack` aus `useModuleBack(basePath, fallbackRouteName)` aufruft — History,
+Jede Seite mit einem Ausgang legt ihn in den `#back`-Slot von `PageLayout`:
+`<Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" />`. Der
+Pfeil steht damit links vor dem Titel, der Titel nimmt den Rest der Zeile
+(gekürzt mit „…“), und `#actions` rutscht in eine eigene zweite Zeile ab
+derselben Kante. Eine Seite mit vielen Aktionen gibt sie als `ToolbarItem[]`
+an `ResponsiveToolbar`, die in ein Mehr-Menü (⋮) faltet, was nicht passt —
+nie einen Zurück-Knopf in `#actions` oder rechts vom Titel. Detailseiten
+rufen dort `goBack` aus `useModuleBack(basePath, fallbackRouteName)` auf — History,
 wenn die vorige Seite im selben Modul lag oder eine Seite war, die Objekte
 aller Module öffnet (der Assistent, die Sammelmappen; Liste
 `CROSS_MODULE_ORIGINS` im Composable), sonst die Liste des Moduls.
-Danach kommen Vor/Zurück durch den Basket (wo es einen gibt) und erst dann
-die Aktionen der Seite. Die Seite setzt `sticky-header` an `PageLayout`, so
+In `#actions` kommen zuerst Vor/Zurück durch den Basket (wo es einen gibt)
+und erst dann die Aktionen der Seite. Die Seite setzt `sticky-header` an `PageLayout`, so
 bleibt diese Zeile im Sticky-Stack stehen, während der Inhalt scrollt
 (Issue #1674).
 

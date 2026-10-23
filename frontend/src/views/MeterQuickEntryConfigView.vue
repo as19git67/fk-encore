@@ -103,8 +103,8 @@ onMounted(load)
     :ready="!loading"
     sticky-header
   >
-    <template #actions>
-      <Button icon="pi pi-arrow-left" label="Zur Erfassung" severity="secondary" outlined @click="router.push({ name: 'zaehler-schnellerfassung' })" />
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück zur Erfassung" @click="router.push({ name: 'zaehler-schnellerfassung' })" />
     </template>
 
     <template #notice>

@@ -19,6 +19,7 @@ import Tag from 'primevue/tag'
 import SelectButton from 'primevue/selectbutton'
 import Chip from 'primevue/chip'
 import Popover from 'primevue/popover'
+import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useConfirm } from 'primevue/useconfirm'
 import {
   deleteDocument,
@@ -828,6 +829,100 @@ function goBack() {
   goModuleBack()
 }
 
+/**
+ * The page's own actions, most used first: on a phone the row folds from the
+ * end into the "more" menu, so deleting is the first to go and the help
+ * stays beside it. A running request turns its icon into a spinner.
+ */
+const headerActions = computed<ToolbarItem[]>(() => {
+  const d = doc.value
+  if (!d) return []
+  const canEdit = auth.hasPermission('documents.edit')
+  const busy = (icon: string, running: boolean) => (running ? 'pi pi-spin pi-spinner' : icon)
+  const items: ToolbarItem[] = []
+  if (canEdit && isTextDocument.value) {
+    items.push({
+      key: 'edit-text',
+      icon: 'pi pi-pen-to-square',
+      label: 'Bearbeiten',
+      title: 'Text bearbeiten',
+      text: true,
+      command: () => void router.push({ name: 'dokumente-text-bearbeiten', params: { id: d.id } }),
+    })
+  }
+  if (canEdit) {
+    items.push({
+      key: 'reclassify',
+      icon: busy('pi pi-refresh', saving.value),
+      label: 'Klassifizieren',
+      title: 'Neu klassifizieren',
+      text: true,
+      disabled: saving.value,
+      command: () => void onReclassify(),
+    })
+  }
+  items.push(
+    {
+      key: 'download',
+      icon: busy('pi pi-download', downloading.value),
+      title: 'Herunterladen — mit durchsuchbarer Textebene',
+      text: true,
+      disabled: downloading.value,
+      command: () => void onDownload(),
+    },
+    {
+      key: 'follow-up',
+      icon: 'pi pi-clock',
+      label: 'Wiedervorlage',
+      title: 'Auf Wiedervorlage legen',
+      text: true,
+      command: () => { followUpOpen.value = true },
+    },
+  )
+  if (auth.hasPermission('module.assistant') && !isTextDocument.value) {
+    items.push({
+      key: 'draft-reply',
+      icon: 'pi pi-sparkles',
+      title: 'Antwort mit dem Assistenten entwerfen',
+      text: true,
+      command: draftReply,
+    })
+  }
+  if (canEdit) {
+    items.push({
+      key: 'teacher',
+      icon: d.teacher_requested ? 'pi pi-flag-fill' : 'pi pi-flag',
+      label: d.teacher_requested ? 'Vorgemerkt' : 'Vormerken',
+      title: d.teacher_requested ? 'Vormerkung für den Cloud-Lehrer aufheben' : 'Für den Cloud-Lehrer vormerken',
+      text: true,
+      disabled: saving.value,
+      command: () => void onToggleTeacherRequested(),
+    })
+  }
+  if (canEdit && !isTextDocument.value) {
+    items.push({
+      key: 'force-ocr',
+      icon: 'pi pi-eye',
+      label: 'OCR',
+      title: 'OCR erzwingen',
+      text: true,
+      disabled: saving.value,
+      command: () => void onReclassify({ forceOcr: true }),
+    })
+  }
+  if (auth.hasPermission('documents.delete')) {
+    items.push({
+      key: 'delete',
+      icon: 'pi pi-trash',
+      title: 'Dokument löschen',
+      severity: 'danger',
+      text: true,
+      command: onDelete,
+    })
+  }
+  return items
+})
+
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
   switch (status) {
     case 'ready': return 'success'
@@ -891,9 +986,12 @@ onBeforeUnmount(() => {
     :ready="!loading"
     sticky-header
   >
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
+    </template>
+
     <template #actions>
       <div class="detail-actions">
-        <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
         <div
           v-if="inCollection"
           class="basket-nav"
@@ -950,85 +1048,7 @@ onBeforeUnmount(() => {
             :basket="docBasket"
             :dossier-seed="dossierRuleSeed"
           />
-          <Button
-            v-if="doc && auth.hasPermission('module.assistant') && !isTextDocument"
-            icon="pi pi-sparkles"
-            text
-            rounded
-            aria-label="Antwort entwerfen"
-            v-tooltip.bottom="'Antwort mit dem Assistenten entwerfen'"
-            @click="draftReply"
-          />
-          <Button
-            v-if="auth.hasPermission('documents.edit') && doc && isTextDocument"
-            icon="pi pi-pen-to-square"
-            label="Bearbeiten"
-            aria-label="Text bearbeiten"
-            text
-            v-tooltip.bottom="'Text bearbeiten'"
-            @click="router.push({ name: 'dokumente-text-bearbeiten', params: { id: doc.id } })"
-          />
-          <Button
-            v-if="auth.hasPermission('documents.edit') && doc"
-            icon="pi pi-refresh"
-            label="Klassifizieren"
-            aria-label="Neu klassifizieren"
-            text
-            :loading="saving"
-            v-tooltip.bottom="'Neu klassifizieren'"
-            @click="onReclassify()"
-          />
-          <Button
-            v-if="auth.hasPermission('documents.edit') && doc && !isTextDocument"
-            icon="pi pi-eye"
-            label="OCR"
-            aria-label="OCR erzwingen"
-            text
-            :loading="saving"
-            title="Text-Layer der PDF ignorieren und komplett per OCR neu einlesen (hilft bei Scans mit fehlenden Leerzeichen)."
-            @click="onReclassify({ forceOcr: true })"
-          />
-          <Button
-            v-if="auth.hasPermission('documents.edit') && doc"
-            :icon="doc.teacher_requested ? 'pi pi-flag-fill' : 'pi pi-flag'"
-            :label="doc.teacher_requested ? 'Vorgemerkt' : 'Vormerken'"
-            :aria-label="doc.teacher_requested ? 'Vormerkung aufheben' : 'Für Cloud-Lehrer vormerken'"
-            text
-            :loading="saving"
-            :title="doc.teacher_requested
-              ? 'Dieses Dokument ist für den nächsten Cloud-Lehrer-Lauf vorgemerkt. Klicken zum Aufheben.'
-              : 'Schwer einzuordnen? Für den nächsten Cloud-Lehrer-Lauf vormerken — die Cloud klassifiziert es dann vorrangig.'"
-            @click="onToggleTeacherRequested"
-          />
-          <Button
-            v-if="doc"
-            icon="pi pi-download"
-            aria-label="Herunterladen"
-            text
-            rounded
-            :loading="downloading"
-            title="Dokument herunterladen — mit durchsuchbarer Textebene (wird bei reinen Scans bei Bedarf erzeugt)."
-            @click="onDownload"
-          />
-          <Button
-            v-if="doc"
-            icon="pi pi-clock"
-            label="Wiedervorlage"
-            aria-label="Wiedervorlage"
-            text
-            title="Dokument auf Wiedervorlage legen — es taucht am gewählten Datum wieder im Arbeitskorb auf."
-            @click="followUpOpen = true"
-          />
-          <Button
-            v-if="auth.hasPermission('documents.delete') && doc"
-            icon="pi pi-trash"
-            severity="danger"
-            text
-            rounded
-            aria-label="Löschen"
-            v-tooltip.bottom="'Dokument löschen'"
-            @click="onDelete"
-          />
+          <ResponsiveToolbar class="detail-toolbar" :items="headerActions" />
           <Button
             icon="pi pi-question-circle"
             aria-label="Hilfe zu den Aktionen"
@@ -1073,6 +1093,13 @@ onBeforeUnmount(() => {
                   <div>
                     <strong>Herunterladen</strong>
                     <span>Dokument als Datei speichern — mit durchsuchbarer Textebene. Bei reinen Scans wird die Textebene bei Bedarf per OCR erzeugt.</span>
+                  </div>
+                </li>
+                <li>
+                  <i class="pi pi-ellipsis-v" aria-hidden="true" />
+                  <div>
+                    <strong>Weitere Aktionen</strong>
+                    <span>Was nicht mehr in die Zeile passt, steht im Menü am Zeilenende.</span>
                   </div>
                 </li>
                 <li v-if="auth.hasPermission('documents.delete')">
@@ -1787,13 +1814,23 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 
-/* Back button, basket navigation and the action buttons, all in
-   PageLayout's #actions slot. */
+/* Basket navigation, filing and the action buttons: the second line of the
+   page header, under back + title. The toolbar takes what is left of the
+   line and folds the rest into its "more" menu; help stays last. */
 .detail-actions {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+.detail-actions > :not(.detail-toolbar) {
+  flex-shrink: 0;
+}
+.detail-toolbar {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .basket-nav {
   display: inline-flex;
@@ -1873,10 +1910,10 @@ onBeforeUnmount(() => {
   line-height: 1.35;
 }
 
-/* Back, basket, download and delete are icon-only everywhere; on phones the
-   remaining labelled buttons (Klassifizieren / OCR / Vormerken /
-   Wiedervorlage) would still overflow the viewport. Hide those labels too
-   and tighten padding so the row stays icon-only and fits comfortably. */
+/* On phones the labelled actions (Klassifizieren / OCR / Vormerken /
+   Wiedervorlage) drop their words so more of them fit before the "more"
+   menu takes over. The toolbar's measuring row sits in the same subtree, so
+   it measures the same icon-only buttons. */
 @media (max-width: 639px) {
   .detail-actions :deep(.p-button-label) {
     display: none;

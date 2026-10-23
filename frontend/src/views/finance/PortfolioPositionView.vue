@@ -421,8 +421,11 @@ function transactionCash(tx: PortfolioTransaction): string {
 
 <template>
   <PageLayout :title="title" :hint="hint" width="wide" :ready="!loading" sticky-header>
-    <template #actions>
+    <template #back>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
+    </template>
+
+    <template #actions>
       <Button
         icon="pi pi-refresh"
         label="Aktualisieren"

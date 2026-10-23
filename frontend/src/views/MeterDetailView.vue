@@ -762,8 +762,11 @@ watch(meterId, () => loadDetail())
 
 <template>
   <PageLayout :title="detail?.name ?? 'Zähler'" width="normal" :ready="!loading" sticky-header>
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="router.push({ name: 'zaehler-list' })" />
+    </template>
+
     <template #actions>
-      <Button class="back-button" icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
       <template v-if="!loading && detail">
         <FileButton :members="[{ entity_type: 'meter', entity_id: meterId }]" :title="detail.name" />
         <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />

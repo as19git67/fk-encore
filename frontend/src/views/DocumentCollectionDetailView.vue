@@ -556,14 +556,8 @@ onBeforeUnmount(() => {
     :resolve-anchor="resolveListAnchor"
     sticky-header
   >
-    <template #actions>
-      <Button
-        icon="pi pi-arrow-left"
-        text
-        rounded
-        aria-label="Zurück"
-        @click="goBack"
-      />
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
     </template>
 
     <template #notice>

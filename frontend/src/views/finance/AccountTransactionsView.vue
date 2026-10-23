@@ -1446,11 +1446,11 @@ function goBack() {
     <!-- Back sits with the title, like on every detail page (concept §7).
          In front of the toolbar it pushed the search field and the filter
          buttons inwards, so they no longer lined up with the list below. -->
-    <template #actions>
+    <template #back>
       <Button
         icon="pi pi-arrow-left"
-        label="Zurück"
         text
+        rounded
         aria-label="Zurück zur Kontoübersicht"
         v-tooltip.bottom="'Zurück zur Kontoübersicht'"
         @click="goBack"

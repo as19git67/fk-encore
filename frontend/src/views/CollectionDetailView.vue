@@ -17,7 +17,7 @@ import AddToCollectionDialog from '../components/collections/AddToCollectionDial
 import ExportDialog from '../components/collections/ExportDialog.vue'
 import ShareLinkDialog from '../components/collections/ShareLinkDialog.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
-import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
+import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useListSelection } from '../composables/useListSelection'
 import { decodeMember, encodeMember, groupedSelectionActions, type TypeAction } from '../utils/collectionActions'
 import { batchUpdateDocumentAttributes, batchUpdateDocumentTax } from '../api/documents'
@@ -340,6 +340,61 @@ async function toggleFavourite() {
 
 // ── Rule and album (#1548, stage 5) ──────────────────────────────────────────
 
+/** The folder's own actions; on a phone the row folds into a "more" menu. */
+const headerActions = computed<ToolbarItem[]>(() => {
+  const d = detail.value
+  if (!d) return []
+  const items: ToolbarItem[] = [
+    {
+      key: 'export',
+      icon: 'pi pi-download',
+      label: 'Exportieren',
+      title: 'Exportieren',
+      severity: 'secondary',
+      text: true,
+      itemClass: 'collection-export',
+      command: () => { exportOpen.value = true },
+    },
+  ]
+  if (d.can_administer && d.kind !== 'basket') {
+    items.push({
+      key: 'share-link',
+      icon: 'pi pi-globe',
+      label: 'Freigabelink',
+      title: 'Freigabelink',
+      severity: 'secondary',
+      text: true,
+      itemClass: 'collection-share-link',
+      command: () => { shareOpen.value = true },
+    })
+  }
+  if (d.kind === 'rule') {
+    items.push({
+      key: 'apply-rule',
+      icon: busy.value ? 'pi pi-spin pi-spinner' : 'pi pi-sync',
+      label: 'Regel anwenden',
+      title: 'Regel anwenden',
+      severity: 'secondary',
+      text: true,
+      disabled: busy.value,
+      command: () => void applyRule(),
+    })
+  }
+  if ((d.counts.photo ?? 0) > 0) {
+    items.push({
+      key: 'album',
+      icon: 'pi pi-book',
+      label: 'Album erstellen',
+      title: 'Album erstellen',
+      severity: 'secondary',
+      text: true,
+      disabled: busy.value,
+      command: () => void makeAlbum(),
+    })
+  }
+  return items
+})
+
 async function applyRule() {
   if (!detail.value) return
   const id = detail.value.id
@@ -379,8 +434,11 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
     :ready="!loading"
     sticky-header
   >
-    <template #actions>
+    <template #back>
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
+    </template>
+
+    <template #actions>
       <Button
         v-if="detail"
         :icon="detail.favourite ? 'pi pi-star-fill' : 'pi pi-star'"
@@ -391,42 +449,7 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
         :aria-pressed="detail.favourite"
         @click="toggleFavourite"
       />
-      <Button
-        v-if="detail"
-        icon="pi pi-download"
-        label="Exportieren"
-        severity="secondary"
-        text
-        data-testid="collection-export"
-        @click="exportOpen = true"
-      />
-      <Button
-        v-if="detail?.can_administer && detail.kind !== 'basket'"
-        icon="pi pi-globe"
-        label="Freigabelink"
-        severity="secondary"
-        text
-        data-testid="collection-share-link"
-        @click="shareOpen = true"
-      />
-      <Button
-        v-if="detail?.kind === 'rule'"
-        icon="pi pi-sync"
-        label="Regel anwenden"
-        severity="secondary"
-        text
-        :loading="busy"
-        @click="applyRule"
-      />
-      <Button
-        v-if="(detail?.counts.photo ?? 0) > 0"
-        icon="pi pi-book"
-        label="Album erstellen"
-        severity="secondary"
-        text
-        :disabled="busy"
-        @click="makeAlbum"
-      />
+      <ResponsiveToolbar class="cd-header-toolbar" :items="headerActions" />
     </template>
 
     <template #toolbar>
@@ -537,6 +560,10 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
 </template>
 
 <style scoped>
+.cd-header-toolbar {
+  flex: 1 1 0;
+  min-width: 0;
+}
 .cd-filter {
   display: flex;
   flex-wrap: wrap;

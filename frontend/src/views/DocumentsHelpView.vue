@@ -19,8 +19,8 @@ function goBack() {
 
 <template>
   <PageLayout title="Dokumente – Hilfe" width="normal" sticky-header>
-    <template #actions>
-      <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
+    <template #back>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
     </template>
 
     <div class="content">
