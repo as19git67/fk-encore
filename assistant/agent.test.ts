@@ -608,3 +608,54 @@ describe("Abbrechen", () => {
     expect(fn.mock.calls[0]![2]).toBe(controller.signal);
   });
 });
+
+describe("the user's permissions (#1648)", () => {
+  const NO_FINANCE = { userID: "8", permissions: ["module.assistant", "module.meters", "meters.view"] };
+
+  it("the prompt names the areas the user may use and those without permission", () => {
+    const prompt = buildSystemPrompt(catalogFor(NO_FINANCE), NOW, false, [], NO_FINANCE.permissions);
+    const access = prompt.slice(prompt.indexOf("Access of this user:"));
+    expect(access).toMatch(/May use: Zähler/);
+    expect(access).toMatch(/No permission for: Finanzen[^\n]*Dokumente[^\n]*Fotos/);
+    expect(prompt).toContain("Für Finanzen fehlt dir die Berechtigung");
+  });
+
+  it("a user with every area has no line without permission", () => {
+    const prompt = buildSystemPrompt(catalogFor(USER), NOW, false, [], USER.permissions);
+    expect(prompt).toContain("Access of this user:");
+    expect(prompt).not.toContain("No permission for:");
+  });
+
+  it("names the proposals the catalog offers", () => {
+    const user = { userID: "9", permissions: [...EVERYTHING, "albums.manage"] };
+    const prompt = buildSystemPrompt(catalogFor(user), NOW, false, [], user.permissions);
+    expect(prompt).toMatch(/Changes you can propose: [^\n]*create_album/);
+  });
+
+  it("a question about a missing area is answered with the missing permission, without a tool and without a nudge", async () => {
+    const { fn, requests } = scripted([answer("Für Finanzen fehlt dir die Berechtigung – wende dich an einen Administrator.")]);
+    const res = await runTurn({ user: NO_FINANCE, history: [], question: "Wie ist mein Kontostand?", tools: catalogFor(NO_FINANCE), chat: fn, now: NOW });
+    expect(res.answer).toContain("fehlt dir die Berechtigung");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.tools?.map((t) => t.function.name) ?? []).not.toContain("list_accounts");
+    expect(calledEndpoints()).toHaveLength(0);
+  });
+
+  it("a user with every area is still pushed to a tool, whatever the draft says", async () => {
+    clients.finance.getOverview.mockResolvedValue({ sections: [], unassigned: [] });
+    const { fn, requests } = scripted([
+      answer("Dafür fehlt dir die Berechtigung."),
+      calls(["list_accounts", {}]),
+      answer("Im System sind keine Konten angelegt."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "Wie ist mein Kontostand?", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: DATA_QUESTION_NUDGE });
+  });
+
+  it("a refused call reaches the model as no access, not as an empty result", async () => {
+    clients.finance.getOverview.mockRejectedValue(Object.assign(new Error("account not accessible"), { code: "permission_denied" }));
+    const { fn, requests } = scripted([calls(["list_accounts", {}]), answer("Dieses Konto kann ich nicht öffnen.")]);
+    await runTurn({ user: USER, history: [], question: "Wie ist mein Kontostand?", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect((requests[1]!.messages.at(-1) as { content: string }).content).toContain("no access (permission_denied)");
+  });
+});

@@ -506,7 +506,8 @@ behind it.
 3. **Chat page in the web app** (`frontend/src/views/AssistantView.vue`,
    `api/assistant.ts`, `components/assistant/`).
    - A module entry `assistent` in `config/modules.ts` (permission
-     `module.assistant`, seeded for every role that has any module), route
+     `module.assistant`, granted by its own role "Assistent User" since
+     #1648), route
      `/assistent`, plus a chat icon in the app header that opens the same
      page. The conversation scrolls with the document (issue #1674; was
      `scroll="self"`), the question field stays at the bottom
@@ -536,8 +537,8 @@ behind it.
      the answer, not the library; a chip in the gallery drops the set, a
      new search replaces it. "Zurück" on a detail page opened out of an
      answer returns to the chat (`useModuleBack` treats the assistant and
-     the Sammelmappen as origins), where `PageLayout` lands on the row. `module.assistant` is seeded for
-     every module role and checked on every endpoint but the stream, whose
+     the Sammelmappen as origins), where `PageLayout` lands on the row. `module.assistant` comes with
+     the role "Assistent User" (#1648) and is checked on every endpoint but the stream, whose
      media-scope token only lets the turn's owner follow it. The transaction
      list (`AccountTransactionsView`) takes `dateFrom`, `dateTo` and `tags`
      from a deep link once on entry, so `list_transactions` within one account
@@ -900,3 +901,21 @@ from the model.
   active parameters; the rounds' prefill is what adds up.
 - Conversations are personal data of the user; they are deleted with the
   user and excluded from backups' public exports like the documents.
+
+## Permissions (#1648)
+
+The assistant is a role of its own, "Assistent User" with `module.assistant`
+only; the module roles no longer carry it. The seed grants it once, in the
+start that creates the role, to everyone holding a module role, so nobody
+lost the chat on the upgrade and an admin's later withdrawal stands.
+
+The system prompt names the areas the user may use and those without
+permission (`assistant/access.ts`, by the same permissions the read tools
+ask for) and the write tools the catalog offers. A question about an area
+without permission is answered with the missing permission, not with "keine
+Daten"; the data-question nudge leaves such an answer alone. Only whole
+areas are named: inside an area the services filter on their own, and the
+assistant never says that something hidden exists. A tool refused with
+`permission_denied` reaches the model as "no access". The section grants
+nothing — the catalog, the tool run and the services still check every
+call. Benchmark case `balance-without-finance`.

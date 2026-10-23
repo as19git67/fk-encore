@@ -16,15 +16,40 @@ import { adminExcludedPermissions, allPermissions, defaultRoles, rolePermissions
  *   declared state without duplicating rows or clobbering user changes.
  * - The seed is a no-op under NODE_ENV=test / VITEST.
  */
+const ASSISTANT_ROLE = "Assistent User";
+
+/** The module roles that carried `module.assistant` before #1648. */
+const ASSISTANT_SOURCE_ROLES = ["Photo User", "Dokumente User", "Finance User", "Label User", "Zähler User"];
+
+async function grantAssistantToModuleUsers(db: any): Promise<void> {
+  const assistantRoleId = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, ASSISTANT_ROLE)))[0]?.id as number | undefined;
+  if (!assistantRoleId) return;
+  const sourceRoleIds = (await db
+    .select({ id: schema.roles.id })
+    .from(schema.roles)
+    .where(inArray(schema.roles.name, ASSISTANT_SOURCE_ROLES)) as { id: number }[]).map((r) => r.id);
+  if (!sourceRoleIds.length) return;
+  const holders = await db
+    .selectDistinct({ user_id: schema.userRoles.user_id })
+    .from(schema.userRoles)
+    .where(inArray(schema.userRoles.role_id, sourceRoleIds)) as { user_id: number }[];
+  for (const { user_id } of holders) {
+    await db.insert(schema.userRoles).values({ user_id, role_id: assistantRoleId }).onConflictDoNothing();
+    console.log(`[seed] Granted "${ASSISTANT_ROLE}" to user_id=${user_id} (assistant split from the module roles)`);
+  }
+}
+
 export async function seed(db: any): Promise<void> {
   const isTest = process.env.NODE_ENV === "test" || !!process.env.VITEST;
   if (isTest) return;
 
   // --- 1. Default roles (definitions in role-defaults.ts) ---
+  const createdRoles = new Set<string>();
   for (const role of defaultRoles) {
     const existing = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, role.name)))[0];
     if (!existing) {
       await db.insert(schema.roles).values(role);
+      createdRoles.add(role.name);
       console.log(`[seed] Created role: ${role.name}`);
     }
   }
@@ -76,6 +101,15 @@ export async function seed(db: any): Promise<void> {
         console.log(`[seed] Granted "Photo User" to user_id=${user_id} (migration from "User" role)`);
       }
     }
+  }
+
+  // --- 3b. Backfill: the assistant used to come with every module role
+  //      (#1528) and is a role of its own now (#1648). Whoever held a module
+  //      role when "Assistent User" appeared gets it once, so nobody loses
+  //      the chat on upgrade. Only in the start that creates the role: on
+  //      every later start an admin's withdrawal stands.
+  if (createdRoles.has(ASSISTANT_ROLE)) {
+    await grantAssistantToModuleUsers(db);
   }
 
   // --- 4. Enforce role -> permission assignments.

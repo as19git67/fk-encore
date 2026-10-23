@@ -47,6 +47,10 @@ export interface BenchCase {
   expect: ExpectedCall[];
   /** Fails on any tool call at all. */
   forbidTools?: boolean;
+  /** Runs as a user holding only these permissions; the catalog shrinks with them. */
+  permissions?: string[];
+  /** The answer must match this (case-insensitive regular expression). */
+  answerMatches?: string;
   /** Canned results by tool name; a tool without one gets "no data in the benchmark". */
   results: Record<string, unknown>;
 }
@@ -506,6 +510,16 @@ export const BENCH_CASES: BenchCase[] = [
     question: "Danke, das war's schon.",
     expect: [],
     forbidTools: true,
+    results: {},
+  },
+  {
+    id: "balance-without-finance",
+    title: "Fehlende Berechtigung statt „keine Daten“",
+    question: "Wie ist mein Kontostand?",
+    permissions: ["module.assistant", "module.meters", "meters.view"],
+    expect: [],
+    forbidTools: true,
+    answerMatches: "berechtigung",
     results: {},
   },
 

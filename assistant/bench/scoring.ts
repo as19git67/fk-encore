@@ -63,9 +63,12 @@ export function callMatches(expect: ExpectedCall, call: BenchCall): boolean {
  * that lists the categories first and one that searches straight away both
  * reach the right documents, so extra read calls are not penalised.
  */
-export function scoreCase(c: BenchCase, calls: BenchCall[], answered: boolean): CaseScore {
+export function scoreCase(c: BenchCase, calls: BenchCall[], answered: boolean, answer: string | null = null): CaseScore {
   if (c.forbidTools && calls.length) {
     return { tool_hit: false, args_hit: false, answered, passed: false, missing: ["no tool call expected"] };
+  }
+  if (c.answerMatches && !(answer && new RegExp(c.answerMatches, "i").test(answer))) {
+    return { tool_hit: true, args_hit: true, answered, passed: false, missing: [`answer matching /${c.answerMatches}/`] };
   }
   const called = new Set(calls.map((x) => x.tool));
   const tool_hit = c.expect.every((e) => called.has(e.tool));

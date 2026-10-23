@@ -77,7 +77,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   let error: string | null = null;
   try {
     const result = await runTurn({
-      user: deps.user,
+      user: c.permissions ? { userID: deps.user.userID, permissions: c.permissions } : deps.user,
       history: c.history ?? [],
       question: c.question,
       tools: cannedTools(c, deps.tools),
@@ -94,5 +94,5 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     if (err instanceof BenchCancelledError) throw err;
     error = err instanceof Error ? err.message : String(err);
   }
-  return { id: c.id, title: c.title, rounds_ms, calls, answer, error, score: scoreCase(c, calls, answer !== null) };
+  return { id: c.id, title: c.title, rounds_ms, calls, answer, error, score: scoreCase(c, calls, answer !== null, answer) };
 }

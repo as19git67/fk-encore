@@ -749,8 +749,8 @@ export function moduleEntryPath(mod: ModuleConfig): string {
  */
 export function landingPath(hasPermission: (permission: string) => boolean): string {
   const permitted = modules.filter((m) => !m.permission || hasPermission(m.permission))
-  // The assistant and Admin work on the other modules' data; every module
-  // role also grants the assistant, so it must not shadow the module itself.
+  // The assistant and Admin work on the other modules' data; next to a
+  // module role they must not shadow the module itself.
   const mod = permitted.find((m) => !SECONDARY_LANDING.has(m.id)) ?? permitted[0]
   return mod ? moduleEntryPath(mod) : '/profile'
 }
