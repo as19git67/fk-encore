@@ -964,6 +964,9 @@ export const groups = pgTable("groups", {
   id: serial("id").primaryKey(),
   slug: text("slug").unique().notNull(),
   name: text("name").notNull(),
+  // The group is a household (#1647): its members share utility meters and
+  // the meter settings behind costs and reports.
+  household: boolean("household").notNull().default(false),
   created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
@@ -3412,10 +3415,15 @@ export const meterAnomalies = pgTable(
 
 // Home coordinate of a household, rounded to the ~5 km grid, for fetching
 // heating degree days from the Open-Meteo archive (migration 0193).
+// Either one person's (user_id) or one household's (group_id, #1647).
 export const meterHomeLocations = pgTable("meter_home_locations", {
+  id: serial("id").primaryKey(),
   user_id: integer("user_id")
-    .primaryKey()
+    .unique("meter_home_locations_user_key")
     .references(() => users.id, { onDelete: "cascade" }),
+  group_id: integer("group_id")
+    .unique("meter_home_locations_group_key")
+    .references(() => groups.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
   lat: real("lat").notNull(),
   lon: real("lon").notNull(),
@@ -3434,6 +3442,9 @@ export const meterElectricityTariffs = pgTable(
     owner_user_id: integer("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // Set = the household's row (#1647), owner_user_id is who entered it;
+    // NULL = a personal row of owner_user_id.
+    group_id: integer("group_id").references(() => groups.id, { onDelete: "cascade" }),
     kind: text("kind").$type<MeterElectricityTariffKind>().notNull(),
     valid_from: timestamp("valid_from", { mode: "string", withTimezone: true }).notNull(),
     amount: numeric("amount", { precision: 14, scale: 6 }).notNull(),
@@ -3451,13 +3462,12 @@ export const meterElectricityTariffs = pgTable(
       table.kind,
       table.valid_from,
     ),
-    uniqueIndex("meter_electricity_tariffs_unique_idx").on(
-      table.owner_user_id,
-      table.kind,
-      table.valid_from,
-      table.unit,
-      table.name,
-    ),
+    uniqueIndex("meter_electricity_tariffs_unique_idx")
+      .on(table.owner_user_id, table.kind, table.valid_from, table.unit, table.name)
+      .where(sql`${table.group_id} IS NULL`),
+    uniqueIndex("meter_electricity_tariffs_group_unique_idx")
+      .on(table.group_id, table.kind, table.valid_from, table.unit, table.name)
+      .where(sql`${table.group_id} IS NOT NULL`),
   ],
 );
 

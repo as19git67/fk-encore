@@ -26,7 +26,14 @@ export interface MeterListItem {
   notes: string | null
   decimals: number
   groupId: number | null
+  /** Name of the group the meter is shared with, if any. */
+  groupName: string | null
+  /** Shared with the household group (#1647). */
+  household: boolean
   ownerUserId: number
+  ownerName: string
+  /** The caller may edit, delete, swap devices and manage API keys. */
+  canManage: boolean
   activeDeviceSerial: string | null
   lastReadingValue: number | null
   lastReadingAt: string | null
@@ -901,8 +908,47 @@ export interface UpsertElectricityTariffRequest {
   capacityLimitKw?: number | null
 }
 
+/** Whose tariffs apply: the household's (#1647) or the caller's own. */
+export interface TariffScope {
+  kind: 'personal' | 'household'
+  householdName: string | null
+}
+
 export function listElectricityTariffs() {
-  return apiFetch<{ tariffs: ElectricityTariff[] }>('/meters/tariffs/electricity')
+  return apiFetch<{ tariffs: ElectricityTariff[]; scope: TariffScope }>('/meters/tariffs/electricity')
+}
+
+// ── Household (#1647) ────────────────────────────────────────────────────────
+
+export interface MeterHouseholdGroup {
+  id: number
+  name: string
+  myRole: 'owner' | 'member'
+}
+
+export interface MeterHouseholdCandidate extends MeterHouseholdGroup {
+  household: boolean
+}
+
+export interface MeterHouseholdState {
+  household: MeterHouseholdGroup | null
+  groups: MeterHouseholdCandidate[]
+  privateMeterCount: number
+}
+
+export function getMeterHousehold() {
+  return apiFetch<MeterHouseholdState>('/meters/household')
+}
+
+export function setMeterHousehold(groupId: number | null) {
+  return apiFetch<MeterHouseholdState>('/meters/household', {
+    method: 'PUT',
+    body: JSON.stringify({ groupId }),
+  })
+}
+
+export function shareMetersWithHousehold() {
+  return apiFetch<{ shared: number }>('/meters/household/share', { method: 'POST' })
 }
 
 export function createElectricityTariff(req: UpsertElectricityTariffRequest) {

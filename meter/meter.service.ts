@@ -10,7 +10,9 @@
  *   total = Σ over devices of ((end_value ?? latest reading ?? start_value) - start_value)
  *
  * Visibility follows the documents module: a meter is visible to its owner
- * and, when `group_id` is set, to every member of that group.
+ * and, when `group_id` is set, to every member of that group. Structural
+ * changes (edit, delete, devices, API keys) are for the owner and the owners
+ * of that group; see household.service.ts (#1647).
  */
 
 import { collectionScopeCondition } from "../collections/scope";
@@ -20,12 +22,15 @@ import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import {
   groupMembers,
+  groups,
   meterDevices,
   meterReadings,
   meters,
+  users,
   type MeterRole,
   type MeterType,
 } from "../db/schema";
+import { loadHouseholdGroup } from "./household.service";
 
 export const METER_TYPES: readonly MeterType[] = [
   "electricity",
@@ -147,6 +152,31 @@ export async function loadUserGroupIds(userId: number): Promise<number[]> {
   return rows.map((r) => r.group_id);
 }
 
+/** Groups in which the user has the `owner` role — they may manage its meters. */
+export async function loadOwnedGroupIds(userId: number): Promise<number[]> {
+  const rows = await dbAll<{ group_id: number }>(
+    db
+      .select({ group_id: groupMembers.group_id })
+      .from(groupMembers)
+      .where(and(eq(groupMembers.user_id, userId), eq(groupMembers.role, "owner"))),
+  );
+  return rows.map((r) => r.group_id);
+}
+
+/**
+ * May `userId` change the meter itself — master data, sharing, devices, API
+ * keys, deletion? Its owner and the owners of its group may; other members
+ * read it, enter readings and work through anomalies (#1647).
+ */
+export function mayManageMeter(
+  userId: number,
+  meter: { owner_user_id: number; group_id: number | null },
+  ownedGroupIds: number[],
+): boolean {
+  if (meter.owner_user_id === userId) return true;
+  return meter.group_id !== null && ownedGroupIds.includes(meter.group_id);
+}
+
 /** Drizzle WHERE fragment selecting every meter visible to `userId`. */
 export function visibleMetersWhere(userId: number, groupIds: number[]): SQL {
   const ownerMatch = eq(meters.owner_user_id, userId);
@@ -164,7 +194,14 @@ export interface MeterListItem {
   notes: string | null;
   decimals: number;
   groupId: number | null;
+  /** Name of the group the meter is shared with, if any. */
+  groupName: string | null;
+  /** The meter is shared with a household group (#1647). */
+  household: boolean;
   ownerUserId: number;
+  ownerName: string;
+  /** The caller may edit, delete, swap devices and manage API keys. */
+  canManage: boolean;
   /** Serial number of the currently installed device, if one exists. */
   activeDeviceSerial: string | null;
   /** Latest reading on the active device. */
@@ -180,11 +217,14 @@ export async function listMeters(
   opts: { collectionId?: number } = {},
 ): Promise<MeterListItem[]> {
   const groupIds = await loadUserGroupIds(userId);
+  const ownedGroupIds = await loadOwnedGroupIds(userId);
   const visible = visibleMetersWhere(userId, groupIds);
-  const meterRows = await dbAll<typeof meters.$inferSelect>(
+  const meterRows = await dbAll<MeterWithSharing>(
     db
-      .select()
+      .select(meterWithSharingColumns)
       .from(meters)
+      .innerJoin(users, eq(users.id, meters.owner_user_id))
+      .leftJoin(groups, eq(groups.id, meters.group_id))
       .where(
         opts.collectionId
           ? and(visible, collectionScopeCondition("meter", meters.id, opts.collectionId, userId))
@@ -247,14 +287,56 @@ export async function listMeters(
       location: m.location,
       notes: m.notes,
       decimals: m.decimals,
-      groupId: m.group_id,
-      ownerUserId: m.owner_user_id,
+      ...sharingFields(userId, m, ownedGroupIds),
       activeDeviceSerial: active?.serial_number ?? null,
       lastReadingValue: activeLatest?.value ?? null,
       lastReadingAt: activeLatest?.taken_at ?? null,
       absoluteTotal,
     };
   });
+}
+
+type MeterWithSharing = typeof meters.$inferSelect & {
+  owner_name: string;
+  group_name: string | null;
+  group_household: boolean | null;
+};
+
+const meterWithSharingColumns = {
+  id: meters.id,
+  name: meters.name,
+  type: meters.type,
+  unit: meters.unit,
+  location: meters.location,
+  notes: meters.notes,
+  photo_path: meters.photo_path,
+  role: meters.role,
+  decimals: meters.decimals,
+  owner_user_id: meters.owner_user_id,
+  group_id: meters.group_id,
+  created_at: meters.created_at,
+  updated_at: meters.updated_at,
+  owner_name: users.name,
+  group_name: groups.name,
+  group_household: groups.household,
+};
+
+function sharingFields(
+  userId: number,
+  m: MeterWithSharing,
+  ownedGroupIds: number[],
+): Pick<
+  MeterListItem,
+  "groupId" | "groupName" | "household" | "ownerUserId" | "ownerName" | "canManage"
+> {
+  return {
+    groupId: m.group_id,
+    groupName: m.group_name,
+    household: m.group_household === true,
+    ownerUserId: m.owner_user_id,
+    ownerName: m.owner_name,
+    canManage: mayManageMeter(userId, m, ownedGroupIds),
+  };
 }
 
 // ── CRUD + device management (Etappe 2) ──────────────────────────────────────
@@ -351,6 +433,24 @@ export async function loadVisibleMeter(
   return row;
 }
 
+/**
+ * Load a meter the caller may change (see `mayManageMeter`). A meter the
+ * caller cannot see stays `not_found`; one they see but may not change is
+ * `permission_denied`.
+ */
+export async function loadManageableMeter(
+  userId: number,
+  meterId: number,
+): Promise<typeof meters.$inferSelect> {
+  const row = await loadVisibleMeter(userId, meterId);
+  if (!mayManageMeter(userId, row, await loadOwnedGroupIds(userId))) {
+    throw APIError.permissionDenied(
+      "only the meter's owner or an owner of its group can change it",
+    );
+  }
+  return row;
+}
+
 function normalizeType(type: string): MeterType {
   if (!METER_TYPES.includes(type as MeterType)) {
     throw APIError.invalidArgument(
@@ -420,7 +520,12 @@ export async function createMeter(
   const role = normalizeRole(input.role);
   const unit = normalizeUnit(input.unit);
   const decimals = normalizeDecimals(input.decimals);
-  const groupId = await assertGroupAssignable(userId, input.groupId);
+  // Without a choice a meter belongs to the household (#1647); an explicit
+  // null keeps it private.
+  const groupId =
+    input.groupId === undefined
+      ? (await loadHouseholdGroup(userId))?.id ?? null
+      : await assertGroupAssignable(userId, input.groupId);
 
   if (!input.device) {
     throw APIError.invalidArgument("an initial device is required");
@@ -462,7 +567,7 @@ export async function updateMeter(
   meterId: number,
   input: UpdateMeterInput,
 ): Promise<void> {
-  const existing = await loadVisibleMeter(userId, meterId);
+  const existing = await loadManageableMeter(userId, meterId);
   const name = normalizeName(input.name);
   const type = normalizeType(input.type);
   const role = "role" in input ? normalizeRole(input.role) : existing.role;
@@ -487,7 +592,7 @@ export async function updateMeter(
 }
 
 export async function deleteMeter(userId: number, meterId: number): Promise<void> {
-  await loadVisibleMeter(userId, meterId);
+  await loadManageableMeter(userId, meterId);
   await db.delete(meters).where(eq(meters.id, meterId));
 }
 
@@ -495,7 +600,16 @@ export async function getMeterDetail(
   userId: number,
   meterId: number,
 ): Promise<MeterDetail> {
-  const m = await loadVisibleMeter(userId, meterId);
+  const visible = await loadVisibleMeter(userId, meterId);
+  const [m] = await dbAll<MeterWithSharing>(
+    db
+      .select(meterWithSharingColumns)
+      .from(meters)
+      .innerJoin(users, eq(users.id, meters.owner_user_id))
+      .leftJoin(groups, eq(groups.id, meters.group_id))
+      .where(eq(meters.id, visible.id)),
+  );
+  const ownedGroupIds = await loadOwnedGroupIds(userId);
 
   const deviceRows = await dbAll<typeof meterDevices.$inferSelect>(
     db
@@ -557,8 +671,7 @@ export async function getMeterDetail(
     location: m.location,
     notes: m.notes,
     decimals: m.decimals,
-    groupId: m.group_id,
-    ownerUserId: m.owner_user_id,
+    ...sharingFields(userId, m, ownedGroupIds),
     photoPath: m.photo_path,
     createdAt: m.created_at,
     updatedAt: m.updated_at,
@@ -581,7 +694,7 @@ export async function getMeterDetail(
   };
 }
 
-async function loadVisibleDevice(
+async function loadManageableDevice(
   userId: number,
   deviceId: number,
 ): Promise<typeof meterDevices.$inferSelect> {
@@ -589,7 +702,7 @@ async function loadVisibleDevice(
     db.select().from(meterDevices).where(eq(meterDevices.id, deviceId)),
   );
   if (!device) throw APIError.notFound("meter device not found");
-  await loadVisibleMeter(userId, device.meter_id);
+  await loadManageableMeter(userId, device.meter_id);
   return device;
 }
 
@@ -622,7 +735,7 @@ export async function updateDevice(
   deviceId: number,
   input: UpdateDeviceInput,
 ): Promise<void> {
-  const device = await loadVisibleDevice(userId, deviceId);
+  const device = await loadManageableDevice(userId, deviceId);
   const installedAt = toIso(input.installedAt, "installedAt");
   const removedAt = input.removedAt ? toIso(input.removedAt, "removedAt") : null;
   if (removedAt && new Date(removedAt).getTime() < new Date(installedAt).getTime()) {
@@ -652,7 +765,7 @@ export async function updateDevice(
 }
 
 export async function deleteNewestDevice(userId: number, deviceId: number): Promise<void> {
-  const device = await loadVisibleDevice(userId, deviceId);
+  const device = await loadManageableDevice(userId, deviceId);
   const newest = await loadNewestDevice(device.meter_id);
   if (!newest || newest.id !== device.id) {
     throw APIError.failedPrecondition("only the newest device can be deleted");
@@ -680,7 +793,7 @@ export async function replaceDevice(
   meterId: number,
   input: ReplaceDeviceInput,
 ): Promise<{ newDeviceId: number }> {
-  await loadVisibleMeter(userId, meterId);
+  await loadManageableMeter(userId, meterId);
 
   const swapAt = toIso(input.swapAt, "swapAt");
   const finalValue = input.finalValue;

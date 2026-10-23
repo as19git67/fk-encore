@@ -1898,6 +1898,13 @@
       "when": 1788990000000,
       "tag": "0270_ai_pick_taste_model",
       "breakpoints": true
+    },
+    {
+      "idx": 271,
+      "version": "7",
+      "when": 1789080000000,
+      "tag": "0271_meter_household",
+      "breakpoints": true
     }
   ]
 }

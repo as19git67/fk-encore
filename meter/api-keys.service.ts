@@ -12,7 +12,7 @@ import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import { meterApiKeys, meterDevices } from "../db/schema";
-import { loadVisibleMeter } from "./meter.service";
+import { loadManageableMeter } from "./meter.service";
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -40,7 +40,7 @@ export async function createApiKey(
   meterId: number,
   name: string,
 ): Promise<CreateApiKeyResult> {
-  await loadVisibleMeter(userId, meterId);
+  await loadManageableMeter(userId, meterId);
 
   const trimmed = (name ?? "").trim();
   if (!trimmed) throw APIError.invalidArgument("name must not be empty");
@@ -76,7 +76,7 @@ export async function listApiKeys(
   userId: number,
   meterId: number,
 ): Promise<ApiKeyDto[]> {
-  await loadVisibleMeter(userId, meterId);
+  await loadManageableMeter(userId, meterId);
 
   const rows = await dbAll<typeof meterApiKeys.$inferSelect>(
     db
@@ -105,7 +105,7 @@ export async function disableApiKey(
   );
   if (!key) throw APIError.notFound("api key not found");
 
-  await loadVisibleMeter(userId, key.meter_id);
+  await loadManageableMeter(userId, key.meter_id);
 
   if (key.disabled_at) return;
 
@@ -124,7 +124,7 @@ export async function deleteApiKey(
   );
   if (!key) throw APIError.notFound("api key not found");
 
-  await loadVisibleMeter(userId, key.meter_id);
+  await loadManageableMeter(userId, key.meter_id);
   await db.delete(meterApiKeys).where(eq(meterApiKeys.id, keyId));
 }
 

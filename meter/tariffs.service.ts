@@ -6,6 +6,7 @@ import {
   meterElectricityTariffs,
   type MeterElectricityTariffKind,
 } from "../db/schema";
+import { resolveSettingsScope, tariffScopeWhere } from "./household.service";
 
 export type ElectricityTariffKind = MeterElectricityTariffKind;
 export type ElectricityTariffUnit =
@@ -214,12 +215,17 @@ function mapTariff(row: typeof meterElectricityTariffs.$inferSelect): Electricit
   };
 }
 
+/**
+ * The tariffs and assumptions that apply to `userId`: their household's when
+ * they belong to one (#1647), otherwise their own.
+ */
 export async function listElectricityTariffs(userId: number): Promise<ElectricityTariff[]> {
+  const scope = await resolveSettingsScope(userId);
   const rows = await dbAll<typeof meterElectricityTariffs.$inferSelect>(
     db
       .select()
       .from(meterElectricityTariffs)
-      .where(eq(meterElectricityTariffs.owner_user_id, userId))
+      .where(tariffScopeWhere(scope))
       .orderBy(
         asc(meterElectricityTariffs.kind),
         asc(meterElectricityTariffs.valid_from),
@@ -231,8 +237,9 @@ export async function listElectricityTariffs(userId: number): Promise<Electricit
 }
 
 /**
- * Matches meter_electricity_tariffs_unique_idx: same kind, validity date,
- * unit and name (blank name folded together) already exists for this owner.
+ * Matches meter_electricity_tariffs_unique_idx (or its household twin): same
+ * kind, validity date, unit and name (blank name folded together) already
+ * exists for this owner or household.
  * The frontend has the localized kind labels and turns this into a proper
  * message; this fallback text only matters for callers without that map.
  */
@@ -248,12 +255,14 @@ export async function createElectricityTariff(
   input: UpsertElectricityTariffInput,
 ): Promise<ElectricityTariff> {
   assertTariff(input);
+  const scope = await resolveSettingsScope(userId);
   try {
     const row = await dbInsertReturning<typeof meterElectricityTariffs.$inferSelect>(
       db
         .insert(meterElectricityTariffs)
         .values({
           owner_user_id: userId,
+          group_id: scope.kind === "household" ? scope.groupId : null,
           kind: input.kind,
           valid_from: parseValidFrom(input.validFrom),
           amount: String(input.amount),
@@ -288,7 +297,9 @@ export async function updateElectricityTariff(
     db
       .select()
       .from(meterElectricityTariffs)
-      .where(and(eq(meterElectricityTariffs.id, id), eq(meterElectricityTariffs.owner_user_id, userId))),
+      .where(
+        and(eq(meterElectricityTariffs.id, id), tariffScopeWhere(await resolveSettingsScope(userId))),
+      ),
   );
   if (!existing) throw APIError.notFound("tariff not found");
 
@@ -322,10 +333,11 @@ export async function updateElectricityTariff(
 }
 
 export async function deleteElectricityTariff(userId: number, id: number): Promise<void> {
+  const scope = await resolveSettingsScope(userId);
   const result = await dbExec(
     db
       .delete(meterElectricityTariffs)
-      .where(and(eq(meterElectricityTariffs.id, id), eq(meterElectricityTariffs.owner_user_id, userId))),
+      .where(and(eq(meterElectricityTariffs.id, id), tariffScopeWhere(scope))),
   );
   if (result.changes === 0) throw APIError.notFound("tariff not found");
 }
@@ -346,7 +358,7 @@ async function findExistingImportEntry(userId: number, entry: TariffNaturalKey) 
       .from(meterElectricityTariffs)
       .where(
         and(
-          eq(meterElectricityTariffs.owner_user_id, userId),
+          tariffScopeWhere(await resolveSettingsScope(userId)),
           eq(meterElectricityTariffs.kind, entry.kind),
           eq(meterElectricityTariffs.valid_from, validFrom),
           eq(meterElectricityTariffs.unit, entry.unit),

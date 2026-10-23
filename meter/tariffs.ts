@@ -16,6 +16,7 @@ import {
   type TariffImportResult,
   type UpsertElectricityTariffInput,
 } from "./tariffs.service";
+import { resolveSettingsScope } from "./household.service";
 
 function requireUser(permission: string): number {
   const auth = getAuthData();
@@ -26,13 +27,22 @@ function requireUser(permission: string): number {
 
 interface ListTariffsResponse {
   tariffs: ElectricityTariff[];
+  /** Whose tariffs these are: the household's (#1647) or the caller's own. */
+  scope: { kind: "personal" | "household"; householdName: string | null };
 }
 
 export const listTariffs = api(
   { expose: true, method: "GET", path: "/meters/tariffs/electricity", auth: true },
   async (): Promise<ListTariffsResponse> => {
     const userId = requireUser("meters.view");
-    return { tariffs: await listElectricityTariffs(userId) };
+    const scope = await resolveSettingsScope(userId);
+    return {
+      tariffs: await listElectricityTariffs(userId),
+      scope: {
+        kind: scope.kind,
+        householdName: scope.kind === "household" ? scope.groupName : null,
+      },
+    };
   },
 );
 
