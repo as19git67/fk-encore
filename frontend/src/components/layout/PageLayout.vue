@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useSlots, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useSlots, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { STACK_TARGET_ID, formatDocumentTitle } from './pageLayout'
 import type { AnchorResolution } from './pageLayout'
-import { clearListAnchor, focusListAnchor, takeListAnchor } from '../../utils/listAnchor'
+import {
+  anchorSaveMark,
+  anchorSavedSince,
+  clearListAnchor,
+  focusListAnchor,
+  leavingAnchor,
+  saveListAnchor,
+  takeListAnchor,
+} from '../../utils/listAnchor'
 import type { ListAnchor } from '../../utils/listAnchor'
 import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory'
 
@@ -94,6 +102,7 @@ const props = withDefaults(
 
 const slots = useSlots()
 const route = useRoute()
+const router = useRouter()
 
 const contentEl = ref<HTMLElement | null>(null)
 
@@ -169,6 +178,43 @@ watch(
     if (ready) void restorePosition()
   },
 )
+
+// ── Remember the row on the way out ─────────────────────────────────────────
+// A list names the row it opens with `saveListAnchor`. Not every way out
+// passes through that code: the split view's "Öffnen" sits in the pane, a row
+// can hold a link, the user can leave through the menu. So when the page is
+// left for another one and the view did not save an anchor during this visit,
+// the row the user was on is saved here — see `leavingAnchor` for which.
+
+const visitMark = anchorSaveMark()
+let lastTouched: string | null = null
+
+function noteTouched(event: Event) {
+  const row = (event.target as Element | null)?.closest?.<HTMLElement>('[data-anchor]')
+  if (row && contentEl.value?.contains(row)) lastTouched = row.dataset.anchor ?? null
+}
+
+function rememberLeavingRow() {
+  const root = contentEl.value
+  if (!root || anchorSavedSince(restoreKey.value, visitMark)) return
+  const anchor = leavingAnchor(root, lastTouched)
+  if (anchor) saveListAnchor(restoreKey.value, anchor)
+}
+
+let removeLeaveGuard: (() => void) | undefined
+onMounted(() => {
+  contentEl.value?.addEventListener('focusin', noteTouched)
+  contentEl.value?.addEventListener('pointerdown', noteTouched)
+  removeLeaveGuard = router?.beforeEach((to, from) => {
+    // A filter or sort change rewrites the query of the same page: still here.
+    if (to.path !== from.path) rememberLeavingRow()
+  })
+})
+onBeforeUnmount(() => {
+  removeLeaveGuard?.()
+  contentEl.value?.removeEventListener('focusin', noteTouched)
+  contentEl.value?.removeEventListener('pointerdown', noteTouched)
+})
 
 defineExpose({ contentEl })
 </script>

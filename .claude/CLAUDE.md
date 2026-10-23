@@ -1273,6 +1273,13 @@ Wo der Nutzer war, merkt sich die App an einer Stelle (Issue #1279):
   `resolveAnchor` nur, wenn sie mehr tut (Hervorheben) oder wenn ein
   virtuelles Raster die Zelle erst erzeugen muss; dann scrollt die View selbst
   und meldet `true`.
+- Verlässt der Nutzer die Seite auf einem anderen Weg (der Knopf „Öffnen“
+  im Vorschaubereich der Split-Ansicht, ein Link in der Zeile, das Menü)
+  und die View hat in diesem Besuch kein Anchor gespeichert, speichert
+  `PageLayout` selbst die Zeile, auf der er war (`leavingAnchor`): die mit
+  dem Fokus, sonst die mit `aria-current="true"`, sonst die zuletzt
+  angeklickte. Eine Liste mit „aktueller Zeile“ setzt deshalb
+  `aria-current="true"` an die Zeile mit `data-anchor`.
 - Den Scroll-Offset schreibt der Router beim Verlassen und `PageLayout` stellt
   ihn nur bei Zurück/Vorwärts her. Keine View ruft `useScrollRestore` —
   das Composable gibt es nicht mehr.

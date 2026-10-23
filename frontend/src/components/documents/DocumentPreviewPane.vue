@@ -24,6 +24,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
 import PdfViewer from '../PdfViewer.vue'
 import FileButton from '../collections/FileButton.vue'
+import { waitForPendingQueryUpdate } from '../../utils/routeQueryUpdate'
 import { useDocSelectionStore } from '../../stores/documents/selection'
 import {
   fetchDocumentBytes,
@@ -126,9 +127,15 @@ function scrollToDetails() {
   body.scrollTo({ top: anchor.offsetTop - body.offsetTop, behavior: 'smooth' })
 }
 
-function openFullDetail() {
+async function openFullDetail() {
   if (props.documentId == null) return
-  router.push({ name: 'dokumente-detail', params: { id: props.documentId } })
+  const id = props.documentId
+  // A search or filter typed just before still writes the URL asynchronously;
+  // a write landing after this push would replace the entry the way back
+  // returns to, and the list would come back unfiltered. The row itself is
+  // remembered by PageLayout on the way out (it is the list's current row).
+  await waitForPendingQueryUpdate(router)
+  router.push({ name: 'dokumente-detail', params: { id } })
 }
 
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {

@@ -276,4 +276,47 @@ describe('PageLayout restore', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
     expect(spies.scrollTo).toHaveBeenCalledWith({ top: 900, behavior: 'instant' })
   })
+
+  describe('on the way out', () => {
+    function rows() {
+      return {
+        default: () => [
+          h('div', { 'data-anchor': 'document:1' }, [h('button', { id: 'r1' }, 'Eins')]),
+          h('div', { 'data-anchor': 'document:2', 'aria-current': 'true' }, 'Zwei'),
+          h('button', { id: 'pane' }, 'Öffnen'),
+        ],
+      }
+    }
+
+    it('remembers the current row when the page is left from elsewhere', async () => {
+      const router = makeRouter()
+      await router.push('/dokumente')
+      await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' }, rows())
+      ;(document.getElementById('pane') as HTMLElement).focus()
+
+      await router.push('/finanzen/konto/1')
+      expect(takeListAnchor('dokumente')).toEqual({ kind: 'document', id: 2 })
+    })
+
+    it('leaves an anchor the view saved itself alone', async () => {
+      const router = makeRouter()
+      await router.push('/dokumente')
+      await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' }, rows())
+      ;(document.getElementById('r1') as HTMLElement).focus()
+      saveListAnchor('dokumente', { kind: 'collection', id: 5 })
+
+      await router.push('/finanzen/konto/1')
+      expect(takeListAnchor('dokumente')).toEqual({ kind: 'collection', id: 5 })
+    })
+
+    it('saves nothing while only the query of the page changes', async () => {
+      const router = makeRouter()
+      await router.push('/dokumente')
+      await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' }, rows())
+
+      await router.push('/dokumente?q=steuer')
+      expect(takeListAnchor('dokumente')).toBeNull()
+    })
+  })
 })
+
