@@ -1302,6 +1302,7 @@ export function backfillFaceSharpness(afterPhotoId?: number) {
 export interface FaceLandmarksBackfillResult {
   photos_scanned: number
   faces_updated: number
+  faces_remeasured: number
   faces_unmatched: number
   photos_failed: number
   /** Cursor for the next batch; null once the pass is complete. */

@@ -315,6 +315,13 @@ export const faces = pgTable("faces", {
   // only: where "closed" begins is decided by the replay, not stored here.
   eye_aspect: real("eye_aspect"),
   eye_aspect_68: real("eye_aspect_68"),
+  // Raw mouth shape from the same landmarks (photo/face-eyes.ts mouthShape):
+  // width over the eye distance and corner lift over the mouth width, per
+  // model. Stand-ins for a smile until the diagnosis shows they track one.
+  mouth_width: real("mouth_width"),
+  mouth_lift: real("mouth_lift"),
+  mouth_width_68: real("mouth_width_68"),
+  mouth_lift_68: real("mouth_lift_68"),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 
