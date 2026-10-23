@@ -6,7 +6,8 @@ tools and the direct-debits endpoint; the chat page in the web app; write
 actions as proposals the user confirms; follow-up questions on earlier
 results and generated conversation titles; word positions, redacted
 document bundles and grouped transaction reports; letters from selected
-context). The benchmark has not yet been run on the production GPU.
+context). The benchmark ran on the production GPU on 2026-10-16; the
+results are in the stage 1 section.
 Tracking issue #1524, stages #1525–#1534; stage 8 (iOS) has its own plan
 later.
 
