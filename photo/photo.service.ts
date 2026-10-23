@@ -182,7 +182,15 @@ import {
   type FaceSharpnessMeasurement,
   type GrayImage,
 } from "./face-sharpness";
-import { matchDetections, measureFaceEyes, type RawFaceLandmarks } from "./face-eyes";
+import {
+  matchDetections,
+  measureFaceEyes,
+  MIN_EYE_FACE_PIXELS,
+  ratioColumns,
+  ratiosFromStored,
+  type RawFaceLandmarks,
+  type StoredFaceLandmarks,
+} from "./face-eyes";
 
 console.log("[boot] photo/photo.service.ts: all imports resolved");
 
@@ -760,8 +768,7 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
             sharpness: sharpnessPerFace[i]?.score ?? null,
             sharpness_variance: sharpnessPerFace[i]?.variance ?? null,
             landmarks: eyes.landmarks ? JSON.stringify(eyes.landmarks) : null,
-            eye_aspect: eyes.eyeAspect,
-            eye_aspect_68: eyes.eyeAspect68,
+            ...ratioColumns(eyes),
           })
           .returning()
       );
@@ -7279,10 +7286,13 @@ export async function backfillFaceSharpnessLogic(opts?: {
 const FACE_LANDMARKS_BATCH_PHOTOS = 25;
 
 export interface FaceLandmarksBackfillResult {
-  /** Photos re-detected in this batch. */
+  /** Photos visited in this batch. */
   photos_scanned: number;
-  /** Faces that received landmarks. */
+  /** Faces that received landmarks (re-detected). */
   faces_updated: number;
+  /** Faces that already had landmarks and were only re-measured from them,
+   *  for ratios added later (the mouth shape). No detector run. */
+  faces_remeasured: number;
   /** Stored faces the re-detection did not find again (IoU below
    *  MATCH_MIN_IOU). They keep NULL; their face row is never replaced. */
   faces_unmatched: number;
@@ -7290,7 +7300,7 @@ export interface FaceLandmarksBackfillResult {
   photos_failed: number;
   /** Cursor for the next batch, or null when the pass is complete. */
   next_photo_id: number | null;
-  /** Faces still without landmarks beyond the cursor. */
+  /** Faces still owing landmarks or a ratio beyond the cursor. */
   remaining_faces: number;
 }
 
@@ -7304,6 +7314,12 @@ export interface FaceLandmarksBackfillResult {
  * overlap and only the landmark columns are updated: a forced rescan would
  * delete the rows and with them every person assignment and "ignored" flag.
  *
+ * Faces that already have landmarks but lack a ratio added later (the mouth
+ * shape, migration 0273) are re-measured from the stored points instead —
+ * no detector run, so that part costs next to nothing. Faces below
+ * MIN_EYE_FACE_PIXELS never get those ratios and are left out of it, or every
+ * pass would visit them again.
+ *
  * Batched by photo, resumable via `afterPhotoId` like the sharpness backfill.
  */
 export async function backfillFaceLandmarksLogic(opts?: {
@@ -7313,29 +7329,68 @@ export async function backfillFaceLandmarksLogic(opts?: {
   const limit = Math.max(1, Math.min(opts?.limit ?? FACE_LANDMARKS_BATCH_PHOTOS, 200));
   const afterPhotoId = opts?.afterPhotoId ?? 0;
   const missing = isNull(faces.landmarks);
+  // Needs `photos` joined: the size limit is in detector pixels.
+  const stale = sql`(${faces.landmarks} IS NOT NULL
+    AND ${faces.mouth_lift} IS NULL AND ${faces.mouth_lift_68} IS NULL
+    AND ${photos.width} IS NOT NULL
+    AND COALESCE((${faces.bbox}::jsonb->>'width')::float, 0) * ${photos.width} >= ${MIN_EYE_FACE_PIXELS})`;
+  const needed = or(missing, stale)!;
 
-  const photoRows = await dbAll<{ id: number; filename: string; external_path: string | null }>(
-    db.select({ id: photos.id, filename: photos.filename, external_path: photos.external_path })
+  const photoRows = await dbAll<{
+    id: number;
+    filename: string;
+    external_path: string | null;
+    width: number | null;
+    height: number | null;
+  }>(
+    db.select({
+      id: photos.id,
+      filename: photos.filename,
+      external_path: photos.external_path,
+      width: photos.width,
+      height: photos.height,
+    })
       .from(photos)
       .innerJoin(faces, eq(faces.photo_id, photos.id))
-      .where(and(missing, gt(photos.id, afterPhotoId)))
+      .where(and(needed, gt(photos.id, afterPhotoId)))
       .groupBy(photos.id)
       .orderBy(photos.id)
       .limit(limit),
   );
 
   let facesUpdated = 0;
+  let facesRemeasured = 0;
   let facesUnmatched = 0;
   let photosFailed = 0;
   let lastPhotoId = afterPhotoId;
 
   for (const photo of photoRows) {
     lastPhotoId = photo.id;
-    const faceRows = await dbAll<{ id: number; bbox: string }>(
-      db.select({ id: faces.id, bbox: faces.bbox })
+    const rows = await dbAll<{ id: number; bbox: string; landmarks: string | null }>(
+      db.select({ id: faces.id, bbox: faces.bbox, landmarks: faces.landmarks })
         .from(faces)
-        .where(and(eq(faces.photo_id, photo.id), missing)),
+        .innerJoin(photos, eq(photos.id, faces.photo_id))
+        .where(and(eq(faces.photo_id, photo.id), needed)),
     );
+
+    for (const row of rows) {
+      if (row.landmarks == null || photo.width == null || photo.height == null) continue;
+      try {
+        const ratios = ratiosFromStored(
+          JSON.parse(row.landmarks) as StoredFaceLandmarks,
+          JSON.parse(row.bbox) as FaceBBox,
+          photo.width,
+          photo.height,
+        );
+        if (!ratios) continue;
+        await dbExec(db.update(faces).set(ratioColumns(ratios)).where(eq(faces.id, row.id)));
+        facesRemeasured++;
+      } catch (err) {
+        console.warn(`[backfill-face-landmarks] face ${row.id}: stored landmarks unreadable:`, (err as Error).message);
+      }
+    }
+
+    const faceRows = rows.filter((row) => row.landmarks == null);
     if (faceRows.length === 0) continue;
 
     const filePath = getPhotoDiskPath(photo);
@@ -7384,8 +7439,7 @@ export async function backfillFaceLandmarksLogic(opts?: {
           db.update(faces)
             .set({
               landmarks: JSON.stringify(eyes.landmarks),
-              eye_aspect: eyes.eyeAspect,
-              eye_aspect_68: eyes.eyeAspect68,
+              ...ratioColumns(eyes),
             })
             .where(eq(faces.id, faceRows[i].id)),
         );
@@ -7410,12 +7464,14 @@ export async function backfillFaceLandmarksLogic(opts?: {
     : await dbFirst<{ c: number }>(
         db.select({ c: sql<number>`COUNT(*)::int` })
           .from(faces)
-          .where(and(missing, gt(faces.photo_id, lastPhotoId))),
+          .innerJoin(photos, eq(photos.id, faces.photo_id))
+          .where(and(needed, gt(faces.photo_id, lastPhotoId))),
       );
 
   return {
     photos_scanned: photoRows.length,
     faces_updated: facesUpdated,
+    faces_remeasured: facesRemeasured,
     faces_unmatched: facesUnmatched,
     photos_failed: photosFailed,
     next_photo_id: exhausted ? null : lastPhotoId,

@@ -23,6 +23,12 @@
  * Only raw ratios are stored. Where "closed" ends and "open" begins is a
  * calibration question for the replay, not a constant to guess here — the
  * same lesson as `faces.sharpness_variance`.
+ *
+ * The same landmarks also describe the mouth. Two raw measures stand in for
+ * a smile (`mouthShape`): how wide the mouth is relative to the distance
+ * between the eyes, and how far the corners sit above the middle of the
+ * lips. Neither is a smile detector on its own; whether they track the
+ * user's choice is again for the diagnosis to show.
  */
 
 import type { FaceBBox } from "../db/types";
@@ -45,7 +51,7 @@ export interface StoredFaceLandmarks {
   lm68: Point[] | null;
 }
 
-/** Faces narrower than this (detector pixels) get no eye measurement: the
+/** Faces narrower than this (detector pixels) get no eye or mouth measurement: the
  *  landmark models work on a 192 px crop, and below ~48 px the eyelid points
  *  are interpolation, not observation. NULL, deliberately not a number. */
 export const MIN_EYE_FACE_PIXELS = 48;
@@ -56,6 +62,10 @@ export const MIN_EYE_FACE_PIXELS = 48;
  *  The order of points inside a range is not documented, which is why
  *  `eyeOpennessFromContour` does not depend on it. */
 const EYE_RANGES_106: Array<[number, number]> = [[33, 42], [87, 96]];
+
+const MOUTH_RANGE_106: [number, number] = [52, 71];
+/** Outer (48–59) and inner (60–67) lip contour of the 68-point layout. */
+const MOUTH_RANGE_68: [number, number] = [48, 67];
 
 /** Eye contours in the 68-point (iBUG 300-W) layout: corner, two upper lid
  *  points, corner, two lower lid points — in that order. */
@@ -160,6 +170,77 @@ export function eyeAspect68(points: Point[]): number | null {
   return (values[0] + values[1]) / 2;
 }
 
+const centroid = (points: Point[]): Point => {
+  let x = 0;
+  let y = 0;
+  for (const p of points) {
+    x += p[0];
+    y += p[1];
+  }
+  return [x / points.length, y / points.length];
+};
+
+export interface MouthShape {
+  /** Mouth width (corner to corner along the eye line) over the distance
+   *  between the eye centres. A smile widens the mouth. */
+  width: number;
+  /** Height of the mouth corners above the middle of the lips, across the
+   *  eye line, over the mouth width. Positive: corners raised. */
+  lift: number;
+}
+
+/**
+ * Raw mouth shape in the face's own frame, independent of point order.
+ *
+ * The eye line gives the face's horizontal axis, so a tilted head neither
+ * widens nor lifts the mouth. The corners are the two mouth points furthest
+ * apart along that axis; "middle of the lips" is the centroid of all mouth
+ * points. Returns null for degenerate input.
+ */
+export function mouthShape(mouth: Point[], eyeA: Point, eyeB: Point): MouthShape | null {
+  if (mouth.length < 4) return null;
+  // Point the axis to the image's right so "down" is +v on an upright face.
+  const [left, right] = eyeA[0] <= eyeB[0] ? [eyeA, eyeB] : [eyeB, eyeA];
+  const interocular = dist(left, right);
+  if (!(interocular > 1e-6)) return null;
+  const ux = (right[0] - left[0]) / interocular;
+  const uy = (right[1] - left[1]) / interocular;
+  const [cx, cy] = centroid(mouth);
+  let minU = Infinity;
+  let maxU = -Infinity;
+  let vAtMin = 0;
+  let vAtMax = 0;
+  for (const [x, y] of mouth) {
+    const dx = x - cx;
+    const dy = y - cy;
+    const u = dx * ux + dy * uy;
+    const v = -dx * uy + dy * ux;
+    if (u < minU) {
+      minU = u;
+      vAtMin = v;
+    }
+    if (u > maxU) {
+      maxU = u;
+      vAtMax = v;
+    }
+  }
+  const width = maxU - minU;
+  if (!(width > 1e-6)) return null;
+  return { width: width / interocular, lift: -(vAtMin + vAtMax) / 2 / width };
+}
+
+function mouth106(points: Point[]): MouthShape | null {
+  if (points.length !== 106) return null;
+  const [a, b] = EYE_RANGES_106.map(([from, to]) => centroid(points.slice(from, to + 1)));
+  return mouthShape(points.slice(MOUTH_RANGE_106[0], MOUTH_RANGE_106[1] + 1), a, b);
+}
+
+function mouth68(points: Point[]): MouthShape | null {
+  if (points.length !== 68) return null;
+  const [a, b] = EYES_68.map((eye) => centroid(eye.map((i) => points[i])));
+  return mouthShape(points.slice(MOUTH_RANGE_68[0], MOUTH_RANGE_68[1] + 1), a, b);
+}
+
 export interface FaceEyeMeasurement {
   /** Normalised landmarks for `faces.landmarks`, or null when the service
    *  returned none (an older service build). */
@@ -168,7 +249,13 @@ export interface FaceEyeMeasurement {
   eyeAspect: number | null;
   /** EAR from the 68-point model; null below the size limit. */
   eyeAspect68: number | null;
+  /** `mouthShape` from either model; null below the size limit. */
+  mouth: MouthShape | null;
+  mouth68: MouthShape | null;
 }
+
+/** The ratios alone, for re-measuring landmarks already in the database. */
+export type FaceLandmarkRatios = Omit<FaceEyeMeasurement, "landmarks">;
 
 const round4 = (v: number) => Math.round(v * 10000) / 10000;
 
@@ -201,14 +288,49 @@ export function measureFaceEyes(
           lm68: normalise(lm68, imageWidth, imageHeight),
         }
       : null;
+  return { landmarks, ...ratiosFromPixels(lm106, lm68, faceWidthPx) };
+}
+
+const roundShape = (m: MouthShape | null): MouthShape | null =>
+  m == null ? null : { width: round4(m.width), lift: round4(m.lift) };
+
+function ratiosFromPixels(
+  lm106: Point[] | null,
+  lm68: Point[] | null,
+  faceWidthPx: number,
+): FaceLandmarkRatios {
   const measurable = faceWidthPx >= MIN_EYE_FACE_PIXELS;
   const r106 = measurable && lm106 ? eyeAspect106(lm106) : null;
   const r68 = measurable && lm68 ? eyeAspect68(lm68) : null;
   return {
-    landmarks,
     eyeAspect: r106 == null ? null : round4(r106),
     eyeAspect68: r68 == null ? null : round4(r68),
+    mouth: roundShape(measurable && lm106 ? mouth106(lm106) : null),
+    mouth68: roundShape(measurable && lm68 ? mouth68(lm68) : null),
   };
+}
+
+/**
+ * Re-measure from `faces.landmarks` without running the detector again —
+ * for ratios added after a face already had its landmarks stored.
+ * `imageWidth`/`imageHeight` must be the detector's image size, which the
+ * scan writes to `photos.width`/`height`. The stored coordinates are rounded
+ * to four decimals, a few hundredths of a pixel on a 12 MP photo.
+ */
+export function ratiosFromStored(
+  stored: StoredFaceLandmarks,
+  bbox: FaceBBox,
+  imageWidth: number,
+  imageHeight: number,
+): FaceLandmarkRatios | null {
+  if (!(imageWidth > 0) || !(imageHeight > 0)) return null;
+  const toPixels = (pts: Point[] | null) =>
+    pts ? pts.map(([x, y]) => [x * imageWidth, y * imageHeight] as Point) : null;
+  return ratiosFromPixels(
+    toPixels(asPoints(stored.lm106, 106)),
+    toPixels(asPoints(stored.lm68, 68)),
+    bbox.width * imageWidth,
+  );
 }
 
 /** Intersection over union of two normalised boxes. */
@@ -256,4 +378,17 @@ export function matchDetections(
     usedDetections.add(p.d);
   }
   return result;
+}
+
+/** The `faces` columns a measurement writes — one place, so the scan, the
+ *  backfill and the re-measurement cannot drift apart. */
+export function ratioColumns(r: FaceLandmarkRatios) {
+  return {
+    eye_aspect: r.eyeAspect,
+    eye_aspect_68: r.eyeAspect68,
+    mouth_width: r.mouth?.width ?? null,
+    mouth_lift: r.mouth?.lift ?? null,
+    mouth_width_68: r.mouth68?.width ?? null,
+    mouth_lift_68: r.mouth68?.lift ?? null,
+  };
 }

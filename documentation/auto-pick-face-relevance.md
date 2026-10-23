@@ -391,7 +391,7 @@ formula change:**
   narrower than `MIN_EYE_FACE_PIXELS` (48) keep `NULL`. Only raw ratios are
   stored; where "closed" begins is for the replay to decide.
 - Measured during the scan and for existing data via
-  `POST /photos/backfill-face-landmarks` (button "Augen-Landmarken
+  `POST /photos/backfill-face-landmarks` (button "Gesichtslandmarken
   nachtragen" under Fotos › Einstellungen › Wartung). The backfill
   re-detects and matches by box overlap (`matchDetections`, IoU ≥ 0.5)
   instead of a forced rescan, which would delete the face rows and every
@@ -402,7 +402,16 @@ formula change:**
 
 **Next:** run the backfill, then the diagnosis. Only if a landmark ratio
 beats CLIP there does it go into the replay with re-learned weights.
-Mouth corners for a smile signal are in the same stored landmarks.
+**Smile — data collection, without any formula change** (migration
+`0273_face_mouth_shape.sql`): `mouthShape` in `photo/face-eyes.ts` measures,
+in the face's own frame (eye line as horizontal axis), the mouth width over
+the eye distance (`faces.mouth_width`) and how far the corners sit above the
+centroid of the lips, over the mouth width (`faces.mouth_lift`); the same
+pair from the 68-point model (`_68`). Filled during the scan; the landmark
+backfill re-measures faces that already have landmarks from the stored
+points without re-detection. Section 3b of `diagnose-eyes-open.mjs` checks
+both against the user's decisions, with chance (50 %) as the baseline since
+there is no existing smile signal.
 
 ## 7. Validation: offline replay is mandatory, not optional
 

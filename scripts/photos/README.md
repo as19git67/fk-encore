@@ -223,7 +223,7 @@ berechnet `photo/face-eyes.ts` zwei Rohwerte: `faces.eye_aspect`
 (klassisches Eye Aspect Ratio). Beide bleiben gespeichert, weil vorher nicht
 feststeht, welches Modell einem sich schließenden Lid folgt.
 
-**Voraussetzung:** Backfill „Augen-Landmarken nachtragen" (Fotos ›
+**Voraussetzung:** Backfill „Gesichtslandmarken nachtragen" (Fotos ›
 Einstellungen › Wartung, `POST /photos/backfill-face-landmarks`). Er lässt
 die Gesichtserkennung erneut laufen und ordnet die Treffer über die
 Box-Überlappung den gespeicherten Gesichtern zu; Personenzuordnungen bleiben
@@ -239,6 +239,13 @@ Mittelwert über die Gesichter, nicht das Minimum.
 ```bash
 POSTGRES_DATABASE=encore node scripts/photos/diagnose-eyes-open.mjs
 ```
+
+Seit Migration `0273` wertet derselbe Report auch den Mund aus
+(Abschnitt 3b): `faces.mouth_lift` (Hebung der Mundwinkel über die
+Lippenmitte) und `faces.mouth_width` (Mundbreite zum Augenabstand), je
+Modell. Es gibt kein heutiges Lächeln-Signal; Maßstab ist der Zufall (50 %).
+Gesichter, die schon Landmarken haben, bekommen die Mundwerte beim selben
+Backfill aus den gespeicherten Punkten nachgerechnet, ohne neue Erkennung.
 
 **Das Skript verweigert das Urteil** unter 90 % Abdeckung oder 30
 entschiedenen Paaren. Ein „besser als CLIP" ändert noch nichts an

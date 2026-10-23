@@ -122,6 +122,7 @@ async function handleBackfillFaceSharpness() {
 const faceLandmarksProgress = ref<{
   photos_scanned: number
   faces_updated: number
+  faces_remeasured: number
   faces_unmatched: number
   photos_failed: number
   remaining_faces: number
@@ -136,6 +137,7 @@ async function handleBackfillFaceLandmarks() {
   const totals = {
     photos_scanned: 0,
     faces_updated: 0,
+    faces_remeasured: 0,
     faces_unmatched: 0,
     photos_failed: 0,
     remaining_faces: 0,
@@ -147,6 +149,7 @@ async function handleBackfillFaceLandmarks() {
       const batch = await backfillFaceLandmarks(cursor)
       totals.photos_scanned += batch.photos_scanned
       totals.faces_updated += batch.faces_updated
+      totals.faces_remeasured += batch.faces_remeasured
       totals.faces_unmatched += batch.faces_unmatched
       totals.photos_failed += batch.photos_failed
       totals.remaining_faces = batch.remaining_faces
@@ -286,7 +289,8 @@ function pct(v: number | undefined | null): string {
 
     <Message v-if="faceLandmarksProgress" severity="info" :closable="false" class="data-management-group__item">
       Gesichtslandmarken nachgetragen: {{ faceLandmarksProgress.faces_updated }} Gesichter in
-      {{ faceLandmarksProgress.photos_scanned }} Fotos
+      {{ faceLandmarksProgress.photos_scanned }} Fotos, aus gespeicherten Punkten nachgerechnet:
+      {{ faceLandmarksProgress.faces_remeasured }}
       (nicht wiedergefunden: {{ faceLandmarksProgress.faces_unmatched }}, fehlgeschlagen:
       {{ faceLandmarksProgress.photos_failed }}).
       <span v-if="!faceLandmarksProgress.done">
@@ -296,8 +300,8 @@ function pct(v: number | undefined | null): string {
     <Button class="data-management-group__item"
       icon="pi pi-eye"
       outlined
-      label="Augen-Landmarken nachtragen"
-      v-tooltip.top="'Lässt die Gesichtserkennung über Fotos mit älteren Gesichtern noch einmal laufen und speichert die Gesichtspunkte samt Augenöffnung je Gesicht. Personenzuordnungen bleiben erhalten. Dauert etwa eine Sekunde pro Foto.'"
+      label="Gesichtslandmarken nachtragen"
+      v-tooltip.top="'Lässt die Gesichtserkennung über Fotos mit älteren Gesichtern noch einmal laufen und speichert die Gesichtspunkte samt Augenöffnung und Mundform je Gesicht. Gesichter mit schon gespeicherten Punkten werden nur nachgerechnet. Personenzuordnungen bleiben erhalten. Dauert etwa eine Sekunde pro Foto.'"
       :loading="faceLandmarksLoading"
       :disabled="faceLandmarksLoading || faceSharpnessLoading || dimensionsLoading || aiPickLoading || groupingLoading || isActive"
       @click="handleBackfillFaceLandmarks"

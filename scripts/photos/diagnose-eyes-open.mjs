@@ -9,6 +9,9 @@
  * Neu: `faces.eye_aspect` (106-Punkte-Modell) und `faces.eye_aspect_68`
  * (68-Punkte-Modell), je Foto prominenzgewichtet gemittelt wie die
  * Gesichtsschärfe in diagnose-face-sharpness-variance.mjs.
+ * Dazu der Mund (Migration 0273): `mouth_lift` / `mouth_width` je Modell als
+ * Ersatz für ein Lächeln. Dafür gibt es kein heutiges Signal; Maßstab ist
+ * der Zufall (Abschnitt 3b).
  *
  * Gemessen wird paarweise in geprüften Gruppen: ein behaltenes gegen ein
  * ausgeblendetes Foto. Ein Signal „entscheidet" ein Paar, wenn sich seine
@@ -21,7 +24,7 @@
  * diesen Paaren nicht ausschlaggebend". Aussagekräftig ist der Unterschied
  * zwischen den Signalen und die Quote bei großen Unterschieden.
  *
- * Voraussetzung: der Backfill „Augen-Landmarken nachtragen" (Fotos ›
+ * Voraussetzung: der Backfill „Gesichtslandmarken nachtragen" (Fotos ›
  * Einstellungen › Wartung, `POST /photos/backfill-face-landmarks`) ist durch.
  *
  * READ-ONLY. Ausschließlich SELECT-Abfragen. Report nach
@@ -109,7 +112,7 @@ async function main() {
   const pool = new Pool({ connectionString: CONNECTION_STRING });
   const userFilter = ONLY_USER != null ? [ONLY_USER] : [];
 
-  out(`# Augen offen: Landmarken gegen CLIP`);
+  out(`# Augen offen und Lächeln: Landmarken an den Nutzerentscheidungen`);
   out();
   out(`Erzeugt: ${new Date().toISOString()}`);
   out(`Datenbank: \`${CONNECTION_STRING.replace(/:[^:@]*@/, ":***@")}\``);
@@ -191,6 +194,7 @@ async function main() {
                     WHERE pc.photo_id = gm.photo_id AND pc.user_id = pg.user_id
                       AND pc.status = 'hidden') AS hidden,
            f.bbox, f.eye_aspect, f.eye_aspect_68,
+           f.mouth_width, f.mouth_lift, f.mouth_width_68, f.mouth_lift_68,
            (ufa.person_id IS NOT NULL) AS known
       FROM photo_groups pg
       JOIN photo_group_members gm ON gm.group_id = pg.id
@@ -217,7 +221,16 @@ async function main() {
     } catch {
       area = 0;
     }
-    ph.faces.push({ area, known: r.known === true, a106: r.eye_aspect, a68: r.eye_aspect_68 });
+    ph.faces.push({
+      area,
+      known: r.known === true,
+      a106: r.eye_aspect,
+      a68: r.eye_aspect_68,
+      mw106: r.mouth_width,
+      ml106: r.mouth_lift,
+      mw68: r.mouth_width_68,
+      ml68: r.mouth_lift_68,
+    });
   }
 
   const weighted = (faces, key) => {
@@ -240,6 +253,10 @@ async function main() {
       clip: p.clip,
       g106: weighted(p.faces, "a106"),
       g68: weighted(p.faces, "a68"),
+      mw106: weighted(p.faces, "mw106"),
+      ml106: weighted(p.faces, "ml106"),
+      mw68: weighted(p.faces, "mw68"),
+      ml68: weighted(p.faces, "ml68"),
     }));
     const kept = photos.filter((p) => !p.hidden);
     const hidden = photos.filter((p) => p.hidden);
@@ -295,6 +312,41 @@ async function main() {
   );
   out();
 
+  // ── 3b. Lächeln ─────────────────────────────────────────────────────────
+  //
+  // Für den Mund gibt es kein heutiges Signal, gegen das verglichen werden
+  // könnte. Maßstab ist deshalb der Zufall (50 %): ein Signal, das ein Paar
+  // nur in Richtung des Nutzers entscheidet, wenn es zufällig passt, trägt
+  // nichts.
+  const MOUTH_SIGNALS = [
+    { key: "ml106", label: "Mundwinkel-Hebung 106 (`mouth_lift`)" },
+    { key: "mw106", label: "Mundbreite 106 (`mouth_width`)" },
+    { key: "ml68", label: "Mundwinkel-Hebung 68 (`mouth_lift_68`)" },
+    { key: "mw68", label: "Mundbreite 68 (`mouth_width_68`)" },
+  ];
+  const mouthResults = MOUTH_SIGNALS.map((sig) => {
+    const subset = pairs.filter((p) => p.k[sig.key] != null && p.h[sig.key] != null);
+    return { sig, e: evaluate(subset, sig.key) };
+  });
+  out(`## 3b. Lächeln (behalten gegen ausgeblendet)`);
+  out();
+  table(
+    ["Signal", "Paare", "entschieden", "Treffer", "Treffer bei großem Unterschied"],
+    mouthResults.map(({ sig, e }) => [
+      sig.label,
+      e.n,
+      `${e.decided} (${pct(e.decided, e.n)})`,
+      pct(e.hits, e.decided),
+      pct(e.strongHits, e.strong),
+    ]),
+  );
+  out(
+    `Ohne Vergleichssignal ist der Maßstab 50 %. Ein Lächeln ist seltener ` +
+      `der Grund für die Wahl als offene Augen; schon wenige Prozentpunkte ` +
+      `darüber bei großem Unterschied wären ein Befund.`,
+  );
+  out();
+
   // ── 4. Urteil ───────────────────────────────────────────────────────────
   out(`## 4. Urteil`);
   out();
@@ -322,6 +374,20 @@ async function main() {
         (rGeo > rClip && geo.decided >= clip.decided * 0.5
           ? `**Besser als CLIP** — Kandidat für den Replay mit neuen Gewichten.`
           : `**Nicht besser als CLIP** — bleibt außerhalb der Formel.`),
+    );
+  }
+  for (const { sig, e } of mouthResults) {
+    if (e.decided < 30) {
+      out(`- ${sig.label}: **kein Urteil**, nur ${e.decided} entschiedene Paare.`);
+      continue;
+    }
+    const strongRate = e.strong > 0 ? e.strongHits / e.strong : 0;
+    out(
+      `- ${sig.label}: trifft ${pct(e.hits, e.decided)}, bei großem ` +
+        `Unterschied ${pct(e.strongHits, e.strong)}. ` +
+        (strongRate >= 0.55
+          ? `**Über dem Zufall** — Kandidat für den Replay.`
+          : `**Nicht über dem Zufall** — bleibt außerhalb der Formel.`),
     );
   }
   out();
