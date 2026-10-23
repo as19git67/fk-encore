@@ -117,6 +117,17 @@ describe('module user roles', () => {
     expect(landingPath((p) => granted.has(p))).toBe('/dokumente')
   })
 
+  it('grant the assistant only through its own role (#1648)', () => {
+    for (const role of Object.keys(MODULE_ROLES)) {
+      expect(permissionsOf(role).has('module.assistant'), role).toBe(false)
+    }
+    const granted = permissionsOf('Finance User', 'Assistent User')
+    expect(visibleModules(granted).map((m) => m.id)).toEqual(expect.arrayContaining(['finanzen', 'assistent']))
+    expect(landingPath((p) => granted.has(p))).toBe('/finanzen')
+    const alone = permissionsOf('Assistent User')
+    expect(landingPath((p) => alone.has(p))).toBe('/assistent')
+  })
+
   it('leave a user without a module role on the profile', () => {
     const granted = permissionsOf()
     expect(visibleModules(granted)).toHaveLength(0)

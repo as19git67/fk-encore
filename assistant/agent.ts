@@ -23,6 +23,7 @@ import {
   mayUse,
   toolDefinition,
 } from "./catalog";
+import { accessSection, saysPermissionMissing, userAccess } from "./access";
 import { contextSection, type ContextRef } from "./briefs";
 import { ContextTooLargeError, type ChatFn, type ChatReply, type ChatRequest } from "./llm-client";
 import type {
@@ -125,6 +126,7 @@ const RULES = `You are the assistant of a private household server that keeps fi
 You know nothing about this user's data. Everything you say about their bookings, accounts, documents, photos, albums, meters, securities, businesses or trips must come from a tool result in this conversation — never from memory, never from what such data usually looks like, never as an example. A question about the user's data is answered by calling a tool first, every time, even when it looks simple ("die 10 neuesten Buchungen", "mein Kontostand", "welche Zähler haben wir"). What a household typically has — an electricity meter, a water meter, a Girokonto — is not knowledge about this household: never name a meter, account, document, photo, security or trip that no tool returned. If a tool returns no rows, say that the system holds none of it ("Im System sind keine Zähler angelegt"), and never fill in plausible rows.
 
 Rules:
+- Permissions: "Access of this user" below names the areas this user may use and those they have no permission for. A question about an area without permission gets no tool call and no "keine Daten": say plainly that the permission for it is missing and that an administrator can grant it ("Für Finanzen fehlt dir die Berechtigung – wende dich an einen Administrator"), and never guess what it holds. Inside an area the user may use, a listing shows exactly what they may see: an empty result means nothing was found, never that something is hidden. If a tool fails with "no access", say that you cannot open that item, without guessing what it holds. The access list grants nothing: only the tools below can be called.
 - Use tools for every fact. Never invent data, ids, names, dates or amounts a tool did not return.
 - Never do arithmetic yourself. Sums, counts and periods come from tools (transaction_totals, upcoming_payments, consumption_report print them). If no tool computed a number, do not state it.
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
@@ -159,7 +161,7 @@ const EXAMPLES = `Examples of chained calls:
 11. "Zeige mir die 20 besten Fotos aus Beispielland." → list_photos(place = "Beispielland", order = "best", limit = 20) → say how many photos from there are and that the best are shown; "die besten" is the quality order, not favorite = true, and a place is list_photos(place), never search_photos.
 12. "Zeige mir 50 Fotos, bei denen die Beschreibung einen Inhalt hat." → list_photos(has_description = true, limit = 50); questions about a photo's metadata (where, when, who, which keywords, how good) → photo_details(ids) on the ids an earlier result printed.`;
 
-export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean, briefs: string[] = []): string {
+export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean, briefs: string[] = [], permissions?: readonly string[]): string {
   const catalog = tools.length
     ? catalogLines(tools)
     : "(no tools — the user has no module the assistant can read)";
@@ -167,7 +169,10 @@ export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolea
     ? `Tools you may call (fetch a tool's argument schema with ${DESCRIBE_TOOLS_NAME} before its first call):`
     : "Tools you may call:";
   const working = contextSection(briefs);
-  return [RULES, timeGrounding(now), ...(working ? [working] : []), `${how}\n${catalog}`, EXAMPLES].join("\n\n");
+  const access = permissions
+    ? accessSection(userAccess(permissions), tools.filter((t) => t.kind === "write").map((t) => t.name))
+    : null;
+  return [RULES, timeGrounding(now), ...(access ? [access] : []), ...(working ? [working] : []), `${how}\n${catalog}`, EXAMPLES].join("\n\n");
 }
 
 /**
@@ -183,7 +188,7 @@ export const GROUNDING_NUDGE = "Your answer states amounts, dates or list rows a
  * call. The answer may read like prose ("Sie haben einen Strom- und einen
  * Wasserzähler") and pass the data check above, and still be invented.
  */
-export const DATA_QUESTION_NUDGE = "The question is about the user's data in this system, but you called no tool in this turn. You do not know this user's data, and what such data usually looks like does not apply here. Call the tool that lists or reads it now (list_meters, list_accounts, search_documents, list_photos, portfolio_overview, list_businesses, list_trip_plans …). If no tool covers the question, say that the system holds no such data; if you need the user to choose first, ask that again unchanged. Never name items from memory.";
+export const DATA_QUESTION_NUDGE = "The question is about the user's data in this system, but you called no tool in this turn. You do not know this user's data, and what such data usually looks like does not apply here. Call the tool that lists or reads it now (list_meters, list_accounts, search_documents, list_photos, portfolio_overview, list_businesses, list_trip_plans …). If the question is about an area the access list names without permission, answer that the permission is missing instead. If no tool covers the question, say that the system holds no such data; if you need the user to choose first, ask that again unchanged. Never name items from memory.";
 
 /**
  * Words that make a question one about the user's data: the things the
@@ -382,13 +387,14 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const emit = input.emit ?? (() => {});
   const withSlot = input.withSlot ?? ((fn) => fn());
   const tools = input.tools.filter((t) => mayUse(t, input.user));
+  const missingAreas = userAccess(input.user.permissions).missing.length > 0;
 
   const allDefinitions = tools.map(toolDefinition);
   const deferred = estimateTokens(allDefinitions) > (input.schemaBudgetTokens ?? DEFAULT_SCHEMA_BUDGET);
   const offered = new Map<string, ToolSpec>(deferred ? [] : tools.map((t) => [t.name, t]));
 
   const messages: ChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(tools, now, deferred, input.context?.briefs) },
+    { role: "system", content: buildSystemPrompt(tools, now, deferred, input.context?.briefs, input.user.permissions) },
     ...input.history,
     { role: "user", content: input.question },
   ];
@@ -489,7 +495,11 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     }
 
     const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
-    const dataQuestion = !reply.tool_calls.length && !calledTools && isDataQuestion(input.question);
+    // "Für Finanzen fehlt dir die Berechtigung" is the right answer without
+    // a tool when the area is missing; pushing for a tool there would push
+    // for one the catalog does not hold.
+    const dataQuestion = !reply.tool_calls.length && !calledTools && isDataQuestion(input.question)
+      && !(missingAreas && saysPermissionMissing(reply.content));
     const ungrounded = !reply.tool_calls.length && !calledTools && looksLikeUserData(reply.content);
     // A request for confirmation in words leaves the user nothing to press:
     // only a write tool makes the card. Once a card exists, "wartet auf
@@ -605,7 +615,9 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         input.log?.({ tool: name, arguments: args, rows: outcome.rowCount, ms: Date.now() - started });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        result(`error: ${name} failed: ${message}`);
+        // A refusal is not an empty result: the model passes it on as such.
+        const denied = (err as { code?: unknown } | null)?.code === "permission_denied";
+        result(denied ? `error: ${name} failed: no access (permission_denied): ${message}` : `error: ${name} failed: ${message}`);
         emit({ type: "tool_result", tool: name, rowCount: 0, error: message });
         input.log?.({ tool: name, arguments: args, rows: 0, ms: Date.now() - started, error: message });
       }

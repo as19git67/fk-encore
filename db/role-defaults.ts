@@ -12,6 +12,7 @@ export const defaultRoles = [
   { name: "Finance User", description: "Access to the finance module" },
   { name: "Label User", description: "Access to the label printing module" },
   { name: "Zähler User", description: "Access to the utility meters module" },
+  { name: "Assistent User", description: "Access to the assistant chat" },
 ];
 
 export const allPermissions = [
@@ -80,8 +81,6 @@ export const rolePermissionsMap: Record<string, string[]> = {
   User: ["users.read"],
   "Photo User": [
     "module.photos",
-    // The assistant answers over every module the user has (#1528).
-    "module.assistant",
     "photos.view",
     "photos.upload",
     "photos.delete",
@@ -90,8 +89,6 @@ export const rolePermissionsMap: Record<string, string[]> = {
   ],
   "Dokumente User": [
     "module.documents",
-    // The assistant answers over every module the user has (#1528).
-    "module.assistant",
     "documents.view",
     "documents.upload",
     "documents.edit",
@@ -101,23 +98,21 @@ export const rolePermissionsMap: Record<string, string[]> = {
   ],
   "Finance User": [
     "module.finance",
-    // The assistant answers over every module the user has (#1528).
-    "module.assistant",
     "finance.view",
     "finance.accounts.manage",
   ],
   "Label User": [
     "module.label",
-    // The assistant answers over every module the user has (#1528).
-    "module.assistant",
     "label.view",
     "label.print",
   ],
   "Zähler User": [
     "module.meters",
-    // The assistant answers over every module the user has (#1528).
-    "module.assistant",
     "meters.view",
     "meters.read_entry",
   ],
+  // The assistant is granted on its own (#1648): a module role no longer
+  // brings it along, so an admin can give someone a module without the chat
+  // or take the chat away without the module.
+  "Assistent User": ["module.assistant"],
 };

@@ -156,6 +156,18 @@ describe("running a case", () => {
     });
     expect(run.score).toMatchObject({ tool_hit: true, args_hit: false, passed: false, missing: ["upcoming_payments"] });
   });
+
+  it("runs a case with its own permissions and wants the missing one named", async () => {
+    const c = caseById("balance-without-finance");
+    const model = scripted([], "Für Finanzen fehlt dir die Berechtigung – wende dich an einen Administrator.");
+    const run = await runBenchCase(c, { chat: model, tools, user });
+    expect(run.score.passed).toBe(true);
+    const offered = ((model.mock.calls[0]![0] as ChatRequest).tools ?? []).map((t) => (t as { function: { name: string } }).function.name);
+    expect(offered).not.toContain("list_accounts");
+
+    const wrong = await runBenchCase(c, { chat: scripted([], "Im System sind keine Konten angelegt."), tools, user });
+    expect(wrong.score).toMatchObject({ passed: false, missing: ["answer matching /berechtigung/"] });
+  });
 });
 
 describe("benchmark runs", () => {
