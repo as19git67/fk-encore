@@ -698,6 +698,12 @@ async function openDocument(doc: DocumentSummary) {
  */
 async function resolveListAnchor(anchor: ListAnchor | null): Promise<HTMLElement | null> {
   if (!anchor) return null
+  // In the split view the pane follows the current row, which the reload just
+  // reset to the first one. The row the user left from is the current one
+  // again — otherwise focus sits on it while the pane shows another document.
+  if (anchor.kind === 'document' && isSplit.value && items.value.some((d) => d.id === anchor.id)) {
+    activeDocId.value = anchor.id
+  }
   // One more tick than PageLayout waits: the rows render from `items`, which
   // the filter watcher can still be rewriting.
   await nextTick()
@@ -993,6 +999,7 @@ onMounted(async () => {
           'grid-card--selected': isSelected(doc.id),
           'grid-card--active': isSplit && activeDocId === doc.id,
         }"
+        :aria-current="isSplit && activeDocId === doc.id ? 'true' : undefined"
         tabindex="0"
         @click="openDocument(doc)"
         @keydown.enter="openDocument(doc)"

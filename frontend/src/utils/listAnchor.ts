@@ -23,6 +23,13 @@ const LEGACY_DOCUMENTS_KEY = 'documents.listFocus'
 const LEGACY_DOCUMENTS_ID_KEY = 'documents.listFocusId'
 
 /**
+ * Counts every `saveListAnchor`, so `PageLayout` can tell whether the view
+ * named the row itself during this visit (see `anchorSavedSince`).
+ */
+let saveSeq = 0
+const lastSaveSeq = new Map<string, number>()
+
+/**
  * The row to return to. `kind` separates the row types a single list shows
  * (`document` and `collection` in the document list, `transaction` in the
  * account, …) and picks the marker attribute the row carries.
@@ -49,6 +56,16 @@ export function anchorSelector(anchor: ListAnchor): string {
   return `[data-anchor="${anchorKey(anchor.kind, anchor.id)}"]`
 }
 
+/** The anchor a row carries in `data-anchor`, or null when it carries none. */
+export function parseAnchorKey(value: string | null | undefined): ListAnchor | null {
+  if (!value) return null
+  const at = value.lastIndexOf(':')
+  if (at <= 0) return null
+  const kind = value.slice(0, at)
+  const id = Number(value.slice(at + 1))
+  return isUsableKind(kind) && isUsableId(id) ? { kind, id } : null
+}
+
 /**
  * The anchor key of one Sammelmappe's document list. Shared by the folder,
  * which saves it when a document is opened, and the document page, which
@@ -65,11 +82,22 @@ export function collectionAnchorKey(collectionId: number): string {
  */
 export function saveListAnchor(routeKey: string, anchor: ListAnchor): void {
   if (!isUsableId(anchor.id) || !isUsableKind(anchor.kind)) return
+  lastSaveSeq.set(routeKey, ++saveSeq)
   try {
     sessionStorage.setItem(PREFIX + routeKey, JSON.stringify(anchor))
   } catch {
     /* private mode, quota — the scroll offset still gets us close */
   }
+}
+
+/** A mark to hand `anchorSavedSince` later: "has anything been saved since now?" */
+export function anchorSaveMark(): number {
+  return saveSeq
+}
+
+/** Whether `saveListAnchor` ran for this key after `mark` was taken. */
+export function anchorSavedSince(routeKey: string, mark: number): boolean {
+  return (lastSaveSeq.get(routeKey) ?? -1) > mark
 }
 
 function parseAnchor(raw: string | null): ListAnchor | null {
@@ -128,6 +156,33 @@ export function clearListAnchor(routeKey: string, legacyKey?: 'documents'): void
   } catch {
     /* nothing stored, nothing to lose */
   }
+}
+
+/**
+ * The row a user is leaving from, for a list that did not name one itself
+ * when it navigated away — the split view's pane button, a link in a row, a
+ * menu entry. In this order:
+ *
+ *  1. the row holding keyboard focus (the user is on it right now),
+ *  2. the row marked `aria-current="true"` (the split view's current row,
+ *     which the arrow keys move without moving focus),
+ *  3. the row the user last clicked or focused (`lastTouched`, a
+ *     `data-anchor` value), as long as it is still in the list.
+ */
+export function leavingAnchor(root: ParentNode, lastTouched: string | null): ListAnchor | null {
+  const active = typeof document !== 'undefined' ? document.activeElement : null
+  if (active instanceof Element && root.contains(active)) {
+    const row = active.closest<HTMLElement>('[data-anchor]')
+    if (row && root.contains(row)) {
+      const anchor = parseAnchorKey(row.dataset.anchor)
+      if (anchor) return anchor
+    }
+  }
+  const current = root.querySelector<HTMLElement>('[data-anchor][aria-current="true"]')
+  const fromCurrent = parseAnchorKey(current?.dataset.anchor)
+  if (fromCurrent) return fromCurrent
+  const touched = parseAnchorKey(lastTouched)
+  return touched && root.querySelector(anchorSelector(touched)) ? touched : null
 }
 
 /**
