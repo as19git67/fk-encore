@@ -26,7 +26,7 @@ import {
   getConversation,
 } from "./assistant";
 import { HAND_TOOLS } from "./catalog";
-import { CONSENT_NUDGE } from "./agent";
+import { CONSENT_NUDGE, REVISION_NUDGE } from "./agent";
 import type { ToolContext } from "./types";
 
 const PERMS = [
@@ -129,6 +129,33 @@ describe("write tools", () => {
     // With the card there, asking for confirmation is the right answer and is not sent back.
     expect(vi.mocked(chat)).toHaveBeenCalledTimes(3);
     expect(clients.finance.batchTag).not.toHaveBeenCalled();
+  });
+
+  it("a correction claimed in words is sent back, so the corrected card appears under the answer", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 5 }, { id: 6 }] });
+    const conversation = await createConversation({});
+    vi.mocked(chat)
+      .mockResolvedValueOnce(toolCall("create_album", { name: "Sommer", photos: { favorite: true } }))
+      .mockResolvedValueOnce(text("Ich habe das Album „Sommer“ vorgeschlagen."));
+    await ask({ id: conversation.id, message: "Leg ein Album mit meinen Favoriten an." });
+
+    vi.mocked(chat)
+      .mockResolvedValueOnce(text("Ich habe das Album angepasst, es heißt jetzt „Sommer 2025“."))
+      .mockResolvedValueOnce(toolCall("create_album", { name: "Sommer 2025", photos: { favorite: true } }))
+      .mockResolvedValueOnce(text("Das Album heißt jetzt „Sommer 2025“; die neue Karte wartet auf „Ausführen“."));
+    const res = await ask({ id: conversation.id, message: "Nenn es lieber Sommer 2025." });
+
+    const nudged = vi.mocked(chat).mock.calls[3][0];
+    expect(nudged.messages.at(-1)).toEqual({ role: "user", content: REVISION_NUDGE });
+    expect(res.blocks.find((b) => b.kind === "proposal")?.rows[0]).toMatchObject({ tool: "create_album", status: "pending" });
+    expect(await db.select().from(assistantProposal)).toHaveLength(2);
+  });
+
+  it("an answer about an earlier card is not sent back when nothing was proposed before", async () => {
+    const conversation = await createConversation({});
+    vi.mocked(chat).mockResolvedValueOnce(text("Ich habe nichts geändert."));
+    await ask({ id: conversation.id, message: "Hallo" });
+    expect(vi.mocked(chat)).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a selection that names no photos", async () => {

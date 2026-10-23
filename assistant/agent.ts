@@ -140,7 +140,7 @@ Rules:
 - Businesses (Betriebe): a leased farm, a PV system or a trade is a business in the register with its fixed assets (Anlagegüter), their depreciation (AfA) and, for a farm, its parcels (Flurstücke) with lessee and rent. "Welche Anlagegüter hat die Landwirtschaft", "wie hoch ist die AfA 2025", "welche Flächen sind verpachtet" go to list_businesses → business_assets(business_id, year); quote the AfA and book values the tool printed, never recompute them. "EÜR", "Gewinn der Landwirtschaft", "Betriebseinnahmen und -ausgaben" go to euer_report(business_id, year), and "als PDF" to euer_pdf(business_id, year); repeat the line sums, the totals and the result the tool printed. "Ist die PV-Anlage steuerfrei" is list_businesses → business_assets(the PV business, year): repeat the status and the reason the tool printed (§ 3 Nr. 72 EStG, up to 30 kWp from 2022), never decide it yourself. "Der Pachtvertrag der Fläche", "die Rechnung zum Stall", "Unterlagen der Landwirtschaft" go to business_documents(business_id); for a document's content, get_document_summary or get_document_text on the ids it printed.
 - Tax: documents carry a tax-relevant flag, a tax year and Anlagen (tax sections); bookings carry a tax-relevant flag. "Steuer 2025" questions go to tax_documents(year) and list_transactions(tax_relevant = true, from/to = that year); "alle Unterlagen für die Steuer 2025 in eine Mappe" is tax_return_bundle(year = 2025); "hilf mir beim Ausfüllen" is tax_worksheet(year), as PDF tax_worksheet_pdf(year). Never judge tax relevance yourself, and never compute a tax figure: repeat the sums the worksheet printed (bookings, businesses, depot, and the values by form field with their Zeile and Kennzahl). A document's figure exists only as a value by form field: state it with its line and Kennzahl and say when it is still unconfirmed; for anything not listed there, point to the document.
 - When the user answers an offer you made ("Soll ich eines davon genauer ansehen?" → "ja"), act on the rows of your previous answer — their ids are in the earlier tool results — with get_document_summary(ids = …) or get_document_text; never search again for them.
-- Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
+- Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. To correct an earlier proposal (another layout, other text, other photos), call the write tool again with the changed arguments: that makes a new card under your answer, while the earlier card stays as it was and cannot be changed. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
 - For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and the closing formula ("Mit freundlichen Grüßen") — the server signs it with the user's name. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result, and put everything the user asks to have mentioned into the letter text itself, not only into your reply. Write dates in letters as DD.MM.YYYY. Before you leave the recipient's address or a customer, member or contract number open, look for it in the user's documents from that sender (search_documents, then get_document_text). Where the letter still needs a fact you do not have, write a gap that names it in double brackets, e.g. [[Mitgliedsnummer]], instead of guessing. The card cannot run while a gap is left, so when there are gaps, name them in plain words and say they have to be filled in on the card before "Ausführen" works; never write the bracket syntax itself into your reply. Documents the user wants enclosed ("mit dem Vertrag als Anlage") go into attachment_document_ids by the ids a tool returned; without them the letter has no enclosures unless there is a working set.
 - To keep something as a document ("speichere das als Dokument", "mach eine Notiz daraus", "fasse das Gespräch als Dokument zusammen") call create_text_document with a title and the complete text in Markdown, written from the tool results and answers of this conversation; never invent facts for it. A text document's Markdown is read back with get_document_text.
 - When a table helps (a few rows compared by the same columns), write it as a Markdown table: a header row, then a separator row like |---|---:|, one row per line. The app shows it as a real table. Never draw tables with +---+, box characters or spaces, and never put a table in a code block.
@@ -226,6 +226,27 @@ const CONSENT_RE = /bestätig|\bconfirm/i;
 
 export function asksForConsent(text: string | null): boolean {
   return !!text && CONSENT_RE.test(text);
+}
+
+/**
+ * Sent back when the model says it changed or proposed something in a turn
+ * where no write tool ran: an earlier card stays as it was, so the user would
+ * look for the "corrected" one above their own question and find the old one.
+ */
+export const REVISION_NUDGE = "You said you changed or proposed something, but no write tool ran in this turn. An earlier card cannot change: a correction is a new call of the write tool with the changed arguments, and that puts a new card under your answer. If the user asked for a change, call the write tool now. Otherwise answer without saying that something was changed or proposed.";
+
+/** An answer that reports a change or a proposal as made ("Ich habe die Collage angepasst"). */
+const CLAIMS_CHANGE_RE = /(?<!\p{L})(?:angepasst|korrigiert|geändert|aktualisiert|überarbeitet|neu erstellt|erneut erstellt|vorgeschlagen|updated|adjusted|corrected|changed|revised|proposed)(?!\p{L})/iu;
+
+export function claimsChange(text: string | null): boolean {
+  return !!text && CLAIMS_CHANGE_RE.test(text);
+}
+
+/** An earlier turn of the conversation ended with a proposal card. */
+function proposedEarlier(history: ChatMessage[], writeTools: Set<string>): boolean {
+  return history.some((m) =>
+    (m.role === "tool" && typeof m.content === "string" && /Proposal #\d+ created|\[earlier proposal #\d+/.test(m.content))
+    || (m.role === "assistant" && !!m.tool_calls?.some((c) => writeTools.has(c.function.name))));
 }
 
 /** Sent with the forced last round when its answer was a tool call written as text. */
@@ -435,6 +456,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   /** One push from "bitte bestätigen" in words to the card; never twice. */
   let consentNudged = false;
   const mayPropose = tools.some((t) => t.kind === "write");
+  let revisionNudged = false;
 
   const historyTurns = input.history.filter((m) => m.role === "user").length;
   const usage: ContextUsage = {
@@ -507,10 +529,17 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     // deine Bestätigung" is the right answer.
     const asksConsent = !reply.tool_calls.length && !consentNudged && mayPropose
       && !blocks.some((b) => b.kind === "proposal") && asksForConsent(reply.content);
-    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded || asksConsent)) {
+    // "Ich habe die Collage angepasst" after a correction, with no new card
+    // behind it: the card the user sees is the old one above their question.
+    const claimsRevision = !reply.tool_calls.length && !revisionNudged && mayPropose
+      && !blocks.some((b) => b.kind === "proposal") && claimsChange(reply.content)
+      && proposedEarlier(messages.slice(0, questionIndex), new Set(tools.filter((t) => t.kind === "write").map((t) => t.name)));
+    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision)) {
       // Not kept in the transcript: the draft was never the answer.
-      const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE : DATA_QUESTION_NUDGE;
+      const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE
+        : claimsRevision ? REVISION_NUDGE : DATA_QUESTION_NUDGE;
       if (text === CONSENT_NUDGE) consentNudged = true;
+      if (text === REVISION_NUDGE) revisionNudged = true;
       nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: text }];
       emit({ type: "retract" });
       continue;

@@ -160,4 +160,35 @@ describe('AssistantMessage copy', () => {
     createApp({ render: () => h(AssistantMessage, { role: 'assistant', content: 'Halb', pending: true }) }).use(PrimeVue).mount(el)
     expect(el.querySelector('button[aria-label="Beitrag kopieren"]')).toBeNull()
   })
+
+  it('says it is still thinking between two rounds, once every step is done', () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    createApp({ render: () => h(AssistantMessage, {
+      role: 'assistant', content: '', pending: true,
+      steps: [{ tool: 'search_photos', label: 'Fotos nach Inhalt suchen', done: true, rowCount: 12 }],
+    }) }).use(PrimeVue).mount(el)
+    expect(el.querySelector('.text--waiting')?.textContent).toContain('Denkt nach')
+  })
+
+  it('shows no waiting line while a step runs, the spinner on the step says it', () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    createApp({ render: () => h(AssistantMessage, {
+      role: 'assistant', content: '', pending: true,
+      steps: [{ tool: 'search_photos', label: 'Fotos nach Inhalt suchen', done: false }],
+    }) }).use(PrimeVue).mount(el)
+    expect(el.querySelector('.text--waiting')).toBeNull()
+  })
+
+  it('keeps the lists of the rounds in between back until the answer is there', () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    createApp({ render: () => h(AssistantMessage, {
+      role: 'assistant', content: '', pending: true, blocks: [docs('search_documents', [1, 2])],
+      steps: [{ tool: 'search_documents', label: 'Dokumente durchsuchen', done: true, rowCount: 2 }],
+    }) }).use(PrimeVue).component('RouterLink', RouterLink).mount(el)
+    expect(el.querySelector('.blocks')).toBeNull()
+    expect(mount([docs('search_documents', [1, 2])]).querySelector('.blocks')).not.toBeNull()
+  })
 })
