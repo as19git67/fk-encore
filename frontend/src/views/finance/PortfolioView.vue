@@ -16,6 +16,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
 import PortfolioReview from '../../components/finance/PortfolioReview.vue'
 import PortfolioPerformance from '../../components/finance/PortfolioPerformance.vue'
+import PortfolioAnalysis from '../../components/finance/PortfolioAnalysis.vue'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import { useSort } from '../../composables/useSort'
 import type { FilterChip } from '../../components/layout/listToolbar'
@@ -864,6 +865,8 @@ onBeforeUnmount(() => {
           </table>
         </ScrollX>
       </section>
+
+      <PortfolioAnalysis :accounts="accountIds" :closed="includeClosedDepots" />
 
       <!-- ── Per year ─────────────────────────────────────────────── -->
       <section v-if="portfolio.years.length > 0" class="pf-section" aria-labelledby="pf-years-heading">

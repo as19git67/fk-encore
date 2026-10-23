@@ -40,6 +40,7 @@ import {
   formatSignedPercent,
   gainSign,
   priceOriginLabel,
+  SAVINGS_PLAN_INTERVAL_LABELS,
 } from '../../utils/financeFormat'
 
 /**
@@ -531,6 +532,22 @@ function transactionCash(tx: PortfolioTransaction): string {
         :position="position.key"
       />
 
+      <!-- ── Savings plans ──────────────────────────────────────────── -->
+      <section v-if="data.savings_plans?.length" class="pp-section" aria-labelledby="pp-plans-heading">
+        <div class="pp-section-head">
+          <h2 id="pp-plans-heading">Sparplan</h2>
+        </div>
+        <ul class="pp-plans">
+          <li v-for="p in data.savings_plans" :key="`${p.account_id}-${p.first}`">
+            {{ formatCurrency(p.amount, currency) }} {{ SAVINGS_PLAN_INTERVAL_LABELS[p.interval] }}
+            · {{ p.account_label }}
+            · {{ p.executions }} Ausführungen seit {{ formatIsoDate(p.first) }}
+            · <template v-if="p.active && p.next">nächste um den {{ formatIsoDate(p.next) }}</template>
+            <template v-else>ruht seit {{ formatIsoDate(p.last) }}</template>
+          </li>
+        </ul>
+      </section>
+
       <!-- ── Chart ────────────────────────────────────────────────── -->
       <section class="pp-section" aria-labelledby="pp-chart-heading">
         <div class="pp-section-head">
@@ -963,6 +980,14 @@ function transactionCash(tx: PortfolioTransaction): string {
 }
 .pp-warn {
   color: var(--p-yellow-500);
+}
+
+.pp-plans {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .pp-chart-wrap {
