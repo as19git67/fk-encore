@@ -229,7 +229,9 @@ berechnet `photo/face-eyes.ts` zwei Rohwerte: `faces.eye_aspect`
 feststeht, welches Modell einem sich schließenden Lid folgt.
 
 **Voraussetzung:** Backfill „Gesichtslandmarken nachtragen" (Fotos ›
-Einstellungen › Wartung, `POST /photos/backfill-face-landmarks`). Er lässt
+Einstellungen › Wartung, `POST /photos/backfill-face-landmarks`). Der Knopf
+legt je betroffenem Foto einen Job `face_landmarks` in die Scan-Queue
+(Fortschritt unter Fotos › Einstellungen › Scan-Queue). Der Job lässt
 die Gesichtserkennung erneut laufen und ordnet die Treffer über die
 Box-Überlappung den gespeicherten Gesichtern zu; Personenzuordnungen bleiben
 unberührt.

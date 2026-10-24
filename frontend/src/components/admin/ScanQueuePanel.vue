@@ -33,6 +33,7 @@ const serviceLabels: Record<string, string> = {
   geocoding: 'Geocoding',
   thumbnail: 'Vorschaubilder',
   text_ocr: 'Texterkennung',
+  face_landmarks: 'Gesichtslandmarken',
 }
 
 // Once the queue has drained the cancel is done: clear the flag so a later

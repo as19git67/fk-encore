@@ -48,6 +48,7 @@ import {
   getPhotoOwnerId,
   getUsersWithPhotoAccess,
   getAlbumIdsForPhoto,
+  backfillPhotoFaceLandmarks,
 } from "./photo.service";
 import { scheduleRecapsRebuild } from "./recaps.service";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
@@ -91,6 +92,7 @@ const POLL_INTERVAL_MS = 30_000; // fallback poll when idle
 const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
   embedding: "embedding",
   face_detection: "insightface",
+  face_landmarks: "insightface",
   // face_assignment has no external dependency — it only reads from the local DB
   // landmark: retired (Epic #383). No active jobs of this kind are enqueued.
   quality: "embedding",
@@ -100,6 +102,7 @@ const SERVICE_DEPENDENCY: Partial<Record<ScanService, ExternalServiceName>> = {
 const AI_MODEL_MAP: Partial<Record<ScanService, AiModel>> = {
   embedding: "embedding",
   face_detection: "insightface",
+  face_landmarks: "insightface",
   // landmark: retired (Epic #383).
   quality: "embedding",
 };
@@ -124,6 +127,8 @@ const EXPENSIVE_SERVICES: Partial<Record<ScanService, true>> = {
   // Recognition is a remote CPU pass on a full photo; it holds a DB slot
   // while it waits, so it steps aside under event-loop pressure like the rest.
   text_ocr: true,
+  // Re-runs the face detector on the full photo, like face_detection.
+  face_landmarks: true,
 };
 
 /**
@@ -387,6 +392,9 @@ class ScanWorker {
       case "thumbnail":
         await indexPhotoThumbnails(job.photo_id);
         break;
+      case "face_landmarks":
+        await backfillPhotoFaceLandmarks(job.photo_id);
+        break;
       case "text_ocr": {
         const { indexPhotoText, PhotoOcrUnavailableError } = await import("./photo-ocr.service");
         try {
@@ -560,6 +568,9 @@ const poiDetectionWorker = new ScanWorker("poi_detection", 1);
 // Text OCR: one job at a time, because the OCR service runs its inference
 // through a single slot anyway — a second worker would only collect 503s.
 const textOcrWorker = new ScanWorker("text_ocr", 1);
+// Facial-landmark backfill: one photo at a time, behind face_detection for
+// the same detector (it only ever runs at backfill priority anyway).
+const faceLandmarksWorker = new ScanWorker("face_landmarks", 1);
 const libraryScanWorker = new LibraryScanWorker();
 
 /** Wake all workers to check for new work. Non-blocking. */
@@ -572,6 +583,7 @@ export function triggerWorkers(): void {
   geocodingWorker.tick();
   thumbnailWorker.tick();
   poiDetectionWorker.tick();
+  faceLandmarksWorker.tick();
   libraryScanWorker.tick();
 }
 
@@ -590,6 +602,7 @@ const ALL_WORKERS: Array<{ stop(): void; start(): void; inFlight(): number }> = 
   thumbnailWorker,
   poiDetectionWorker,
   textOcrWorker,
+  faceLandmarksWorker,
   libraryScanWorker,
 ];
 
@@ -642,6 +655,7 @@ export async function startWorkers(): Promise<void> {
       faceWorker.tick();
       // Also wake face_assignment — new detections may be available
       faceAssignWorker.tick();
+      faceLandmarksWorker.tick();
     }
     // `landmark` external service retired (Epic #383).
   });
@@ -655,9 +669,10 @@ export async function startWorkers(): Promise<void> {
   thumbnailWorker.start();
   poiDetectionWorker.start();
   textOcrWorker.start();
+  faceLandmarksWorker.start();
   libraryScanWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), poi_detection(c=1), text_ocr(c=1), library_scan(c=1)`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), poi_detection(c=1), text_ocr(c=1), face_landmarks(c=1), library_scan(c=1)`,
   );
 }
 

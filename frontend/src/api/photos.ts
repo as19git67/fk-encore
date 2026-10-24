@@ -501,6 +501,7 @@ export interface ScanQueueServiceStatus {
     | 'thumbnail'
     | 'poi_detection'
     | 'text_ocr'
+    | 'face_landmarks'
   pending: number
   processing: number
   failed: number
@@ -1300,22 +1301,18 @@ export function backfillFaceSharpness(afterPhotoId?: number) {
 }
 
 export interface FaceLandmarksBackfillResult {
-  photos_scanned: number
-  faces_updated: number
-  faces_remeasured: number
-  faces_unmatched: number
-  photos_failed: number
-  /** Cursor for the next batch; null once the pass is complete. */
-  next_photo_id: number | null
-  remaining_faces: number
+  /** Photos put into the scan queue by this call (already queued ones are skipped). */
+  photos_enqueued: number
+  /** Faces still owing landmarks or a ratio, queued or not. */
+  faces_pending: number
 }
 
-/** One batch of the facial-landmark backfill (eye openness). Resumable —
- *  feed `next_photo_id` back in until it returns null. */
-export function backfillFaceLandmarks(afterPhotoId?: number) {
+/** Queue the facial-landmark backfill (eyes, mouth). Runs in the
+ *  background as the scan-queue service `face_landmarks`. */
+export function backfillFaceLandmarks() {
   return apiFetch<FaceLandmarksBackfillResult>('/photos/backfill-face-landmarks', {
     method: 'POST',
-    body: JSON.stringify(afterPhotoId != null ? { afterPhotoId } : {}),
+    body: JSON.stringify({}),
   })
 }
 

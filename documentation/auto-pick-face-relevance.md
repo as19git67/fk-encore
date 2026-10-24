@@ -392,8 +392,10 @@ formula change:**
   stored; where "closed" begins is for the replay to decide.
 - Measured during the scan and for existing data via
   `POST /photos/backfill-face-landmarks` (button "Gesichtslandmarken
-  nachtragen" under Fotos › Einstellungen › Wartung). The backfill
-  re-detects and matches by box overlap (`matchDetections`, IoU ≥ 0.5)
+  nachtragen" under Fotos › Einstellungen › Wartung). The button queues
+  one `face_landmarks` scan-queue job per photo that owes something (migration
+  0275), so the work runs in the background and shows on the scan-queue page.
+  The job re-detects and matches by box overlap (`matchDetections`, IoU ≥ 0.5)
   instead of a forced rescan, which would delete the face rows and every
   person assignment with them.
 - `scripts/photos/diagnose-eyes-open.mjs` compares both ratios with the

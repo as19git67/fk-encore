@@ -7,6 +7,7 @@ import { exiftool } from "exiftool-vendored";
 import { eq, and, or, sql, inArray, notInArray, ilike, isNull, isNotNull, desc, gt, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, enqueuePoiDetectionForMissingMatches, enqueuePoiDetectionForEmptyMatches, DeferJobError } from "./scan-queue";
+import { notifyScanQueueChanged } from "./scan-queue-events";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
 import { isUnderPressure } from "./event-loop-pressure";
 import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, THUMBNAIL_PREWARM_WIDTHS } from "./scan-config";
@@ -7302,14 +7303,7 @@ export async function backfillFaceSharpnessLogic(opts?: {
   };
 }
 
-/** Photos per round-trip of the landmark backfill. Unlike the sharpness
- *  backfill this re-runs the face detector (CPU, roughly a second per photo
- *  with every buffalo_l model), so batches stay small. */
-const FACE_LANDMARKS_BATCH_PHOTOS = 25;
-
-export interface FaceLandmarksBackfillResult {
-  /** Photos visited in this batch. */
-  photos_scanned: number;
+export interface FaceLandmarksPhotoResult {
   /** Faces that received landmarks (re-detected). */
   faces_updated: number;
   /** Faces that already had landmarks and were only re-measured from them,
@@ -7318,47 +7312,80 @@ export interface FaceLandmarksBackfillResult {
   /** Stored faces the re-detection did not find again (IoU below
    *  MATCH_MIN_IOU). They keep NULL; their face row is never replaced. */
   faces_unmatched: number;
-  /** Photos whose file could not be read or the detector failed on. */
-  photos_failed: number;
-  /** Cursor for the next batch, or null when the pass is complete. */
-  next_photo_id: number | null;
-  /** Faces still owing landmarks or a ratio beyond the cursor. */
-  remaining_faces: number;
+}
+
+export interface FaceLandmarksBackfillEnqueueResult {
+  /** Photos put into the `face_landmarks` queue by this call. */
+  photos_enqueued: number;
+  /** Faces still owing landmarks or a ratio, queued or not. */
+  faces_pending: number;
 }
 
 /**
- * Backfill `faces.landmarks` and the eye-openness ratios for faces scanned
- * before the columns existed — Etappe 5 of
- * documentation/auto-pick-face-relevance.md.
+ * Faces that owe the landmark backfill something: no landmarks yet, or
+ * landmarks without a ratio added later (the mouth shape, migration 0273).
+ * Needs `photos` joined: the size limit is in detector pixels, and faces
+ * below MIN_EYE_FACE_PIXELS never get those ratios — without the limit
+ * every pass would visit them again.
+ */
+function faceLandmarksNeeded() {
+  const stale = sql`(${faces.landmarks} IS NOT NULL
+    AND ${faces.mouth_lift} IS NULL AND ${faces.mouth_lift_68} IS NULL
+    AND ${photos.width} IS NOT NULL
+    AND COALESCE((${faces.bbox}::jsonb->>'width')::float, 0) * ${photos.width} >= ${MIN_EYE_FACE_PIXELS})`;
+  return or(isNull(faces.landmarks), stale)!;
+}
+
+/**
+ * Start the backfill of `faces.landmarks` and the eye and mouth ratios for
+ * faces scanned before the columns existed — Etappe 5 of
+ * documentation/auto-pick-face-relevance.md. Queues one `face_landmarks`
+ * job per photo that owes something, at backfill priority, so the work
+ * runs in the background and shows up in the scan queue. Photos already
+ * queued are skipped, so pressing the button twice queues nothing twice.
+ */
+export async function enqueueFaceLandmarksBackfill(): Promise<FaceLandmarksBackfillEnqueueResult> {
+  const needed = faceLandmarksNeeded();
+  const inserted = await db.execute(sql`
+    INSERT INTO photo_scan_queue (photo_id, user_id, service, status, priority, force)
+    SELECT DISTINCT ${faces.photo_id}, NULL::int, 'face_landmarks'::scan_service, 'pending'::scan_status, 3, false
+      FROM ${faces}
+      JOIN ${photos} ON ${photos.id} = ${faces.photo_id}
+     WHERE ${needed}
+    ON CONFLICT DO NOTHING
+  `);
+  const photosEnqueued = (inserted as { rowCount?: number }).rowCount ?? 0;
+  const pending = await dbFirst<{ c: number }>(
+    db.select({ c: sql<number>`COUNT(*)::int` })
+      .from(faces)
+      .innerJoin(photos, eq(photos.id, faces.photo_id))
+      .where(needed),
+  );
+  if (photosEnqueued > 0) {
+    notifyScanQueueChanged();
+    triggerWorkers();
+  }
+  return { photos_enqueued: photosEnqueued, faces_pending: pending?.c ?? 0 };
+}
+
+/**
+ * The `face_landmarks` queue job: landmarks and ratios for one photo.
  *
  * The landmarks are not in the database, so the photo goes through the face
  * detector again. The new detections are matched to the stored rows by box
  * overlap and only the landmark columns are updated: a forced rescan would
  * delete the rows and with them every person assignment and "ignored" flag.
  *
- * Faces that already have landmarks but lack a ratio added later (the mouth
- * shape, migration 0273) are re-measured from the stored points instead —
- * no detector run, so that part costs next to nothing. Faces below
- * MIN_EYE_FACE_PIXELS never get those ratios and are left out of it, or every
- * pass would visit them again.
+ * Faces that already have landmarks but lack a ratio added later are
+ * re-measured from the stored points instead — no detector run, so that
+ * part costs next to nothing.
  *
- * Batched by photo, resumable via `afterPhotoId` like the sharpness backfill.
+ * Throws when the file cannot be read or the detector fails, so the queue
+ * marks the job failed (or defers it on a detector timeout).
  */
-export async function backfillFaceLandmarksLogic(opts?: {
-  afterPhotoId?: number;
-  limit?: number;
-}): Promise<FaceLandmarksBackfillResult> {
-  const limit = Math.max(1, Math.min(opts?.limit ?? FACE_LANDMARKS_BATCH_PHOTOS, 200));
-  const afterPhotoId = opts?.afterPhotoId ?? 0;
-  const missing = isNull(faces.landmarks);
-  // Needs `photos` joined: the size limit is in detector pixels.
-  const stale = sql`(${faces.landmarks} IS NOT NULL
-    AND ${faces.mouth_lift} IS NULL AND ${faces.mouth_lift_68} IS NULL
-    AND ${photos.width} IS NOT NULL
-    AND COALESCE((${faces.bbox}::jsonb->>'width')::float, 0) * ${photos.width} >= ${MIN_EYE_FACE_PIXELS})`;
-  const needed = or(missing, stale)!;
-
-  const photoRows = await dbAll<{
+export async function backfillPhotoFaceLandmarks(photoId: number): Promise<FaceLandmarksPhotoResult> {
+  const result: FaceLandmarksPhotoResult = { faces_updated: 0, faces_remeasured: 0, faces_unmatched: 0 };
+  const photo = await dbFirst<{
     id: number;
     filename: string;
     external_path: string | null;
@@ -7373,132 +7400,98 @@ export async function backfillFaceLandmarksLogic(opts?: {
       height: photos.height,
     })
       .from(photos)
-      .innerJoin(faces, eq(faces.photo_id, photos.id))
-      .where(and(needed, gt(photos.id, afterPhotoId)))
-      .groupBy(photos.id)
-      .orderBy(photos.id)
-      .limit(limit),
+      .where(eq(photos.id, photoId)),
+  );
+  if (!photo) return result;
+
+  const rows = await dbAll<{ id: number; bbox: string; landmarks: string | null }>(
+    db.select({ id: faces.id, bbox: faces.bbox, landmarks: faces.landmarks })
+      .from(faces)
+      .innerJoin(photos, eq(photos.id, faces.photo_id))
+      .where(and(eq(faces.photo_id, photo.id), faceLandmarksNeeded())),
   );
 
-  let facesUpdated = 0;
-  let facesRemeasured = 0;
-  let facesUnmatched = 0;
-  let photosFailed = 0;
-  let lastPhotoId = afterPhotoId;
-
-  for (const photo of photoRows) {
-    lastPhotoId = photo.id;
-    const rows = await dbAll<{ id: number; bbox: string; landmarks: string | null }>(
-      db.select({ id: faces.id, bbox: faces.bbox, landmarks: faces.landmarks })
-        .from(faces)
-        .innerJoin(photos, eq(photos.id, faces.photo_id))
-        .where(and(eq(faces.photo_id, photo.id), needed)),
-    );
-
-    for (const row of rows) {
-      if (row.landmarks == null || photo.width == null || photo.height == null) continue;
-      try {
-        const ratios = ratiosFromStored(
-          JSON.parse(row.landmarks) as StoredFaceLandmarks,
-          JSON.parse(row.bbox) as FaceBBox,
-          photo.width,
-          photo.height,
-        );
-        if (!ratios) continue;
-        await dbExec(db.update(faces).set(ratioColumns(ratios)).where(eq(faces.id, row.id)));
-        facesRemeasured++;
-      } catch (err) {
-        console.warn(`[backfill-face-landmarks] face ${row.id}: stored landmarks unreadable:`, (err as Error).message);
-      }
-    }
-
-    const faceRows = rows.filter((row) => row.landmarks == null);
-    if (faceRows.length === 0) continue;
-
-    const filePath = getPhotoDiskPath(photo);
-    let tempPath: string | null = null;
+  for (const row of rows) {
+    if (row.landmarks == null || photo.width == null || photo.height == null) continue;
     try {
-      let processingPath = filePath;
-      const ext = path.extname(photo.filename).toLowerCase();
-      if (ext === ".heic" || ext === ".heif") {
-        tempPath = path.join(UPLOAD_DIR, `temp_landmarks_${photo.id}_${Date.now()}.jpg`);
-        await fs.promises.writeFile(tempPath, await convertHeicToJpeg(filePath));
-        processingPath = tempPath;
-      }
-      const detected = await callInsightFaceDetect(processingPath);
-      const w = detected.width;
-      const h = detected.height;
-      if (!(w > 0) || !(h > 0)) throw new Error("detector reported no image size");
-      const detectedBoxes: FaceBBox[] = detected.faces.map((f) => ({
-        x: f.bbox[0] / w,
-        y: f.bbox[1] / h,
-        width: (f.bbox[2] - f.bbox[0]) / w,
-        height: (f.bbox[3] - f.bbox[1]) / h,
-      }));
-      const storedBoxes: Array<FaceBBox | null> = faceRows.map((row) => {
-        try {
-          return JSON.parse(row.bbox) as FaceBBox;
-        } catch {
-          return null;
-        }
-      });
-      const matches = matchDetections(storedBoxes, detectedBoxes);
-      for (let i = 0; i < faceRows.length; i++) {
-        const di = matches[i];
-        if (di == null) {
-          facesUnmatched++;
-          continue;
-        }
-        const f = detected.faces[di];
-        const eyes = measureFaceEyes(f as RawFaceLandmarks, f.bbox[2] - f.bbox[0], w, h);
-        if (!eyes.landmarks) {
-          // Service build without landmarks — nothing to store, and a
-          // sentinel would hide the face from the next pass.
-          facesUnmatched++;
-          continue;
-        }
-        await dbExec(
-          db.update(faces)
-            .set({
-              landmarks: JSON.stringify(eyes.landmarks),
-              ...ratioColumns(eyes),
-            })
-            .where(eq(faces.id, faceRows[i].id)),
-        );
-        facesUpdated++;
-      }
-    } catch (err) {
-      photosFailed++;
-      console.warn(
-        `[backfill-face-landmarks] photo ${photo.id} (${filePath}) failed:`,
-        (err as Error).message,
+      const ratios = ratiosFromStored(
+        JSON.parse(row.landmarks) as StoredFaceLandmarks,
+        JSON.parse(row.bbox) as FaceBBox,
+        photo.width,
+        photo.height,
       );
-    } finally {
-      if (tempPath) {
-        try { await fs.promises.unlink(tempPath); } catch (_e) { /* ignore */ }
-      }
+      if (!ratios) continue;
+      await dbExec(db.update(faces).set(ratioColumns(ratios)).where(eq(faces.id, row.id)));
+      result.faces_remeasured++;
+    } catch (err) {
+      console.warn(`[face-landmarks] face ${row.id}: stored landmarks unreadable:`, (err as Error).message);
     }
   }
 
-  const exhausted = photoRows.length < limit;
-  const remainingRow = exhausted
-    ? { c: 0 }
-    : await dbFirst<{ c: number }>(
-        db.select({ c: sql<number>`COUNT(*)::int` })
-          .from(faces)
-          .innerJoin(photos, eq(photos.id, faces.photo_id))
-          .where(and(needed, gt(faces.photo_id, lastPhotoId))),
-      );
+  const faceRows = rows.filter((row) => row.landmarks == null);
+  if (faceRows.length === 0) return result;
 
-  return {
-    photos_scanned: photoRows.length,
-    faces_updated: facesUpdated,
-    faces_remeasured: facesRemeasured,
-    faces_unmatched: facesUnmatched,
-    photos_failed: photosFailed,
-    next_photo_id: exhausted ? null : lastPhotoId,
-    remaining_faces: remainingRow?.c ?? 0,
-  };
+  const filePath = getPhotoDiskPath(photo);
+  let tempPath: string | null = null;
+  try {
+    let processingPath = filePath;
+    const ext = path.extname(photo.filename).toLowerCase();
+    if (ext === ".heic" || ext === ".heif") {
+      tempPath = path.join(UPLOAD_DIR, `temp_landmarks_${photo.id}_${Date.now()}.jpg`);
+      await fs.promises.writeFile(tempPath, await convertHeicToJpeg(filePath));
+      processingPath = tempPath;
+    }
+    const detected = await callInsightFaceDetect(processingPath);
+    const w = detected.width;
+    const h = detected.height;
+    if (!(w > 0) || !(h > 0)) throw new Error("detector reported no image size");
+    const detectedBoxes: FaceBBox[] = detected.faces.map((f) => ({
+      x: f.bbox[0] / w,
+      y: f.bbox[1] / h,
+      width: (f.bbox[2] - f.bbox[0]) / w,
+      height: (f.bbox[3] - f.bbox[1]) / h,
+    }));
+    const storedBoxes: Array<FaceBBox | null> = faceRows.map((row) => {
+      try {
+        return JSON.parse(row.bbox) as FaceBBox;
+      } catch {
+        return null;
+      }
+    });
+    const matches = matchDetections(storedBoxes, detectedBoxes);
+    for (let i = 0; i < faceRows.length; i++) {
+      const di = matches[i];
+      if (di == null) {
+        result.faces_unmatched++;
+        continue;
+      }
+      const f = detected.faces[di];
+      const eyes = measureFaceEyes(f as RawFaceLandmarks, f.bbox[2] - f.bbox[0], w, h);
+      if (!eyes.landmarks) {
+        // Service build without landmarks — nothing to store, and a
+        // sentinel would hide the face from the next pass.
+        result.faces_unmatched++;
+        continue;
+      }
+      await dbExec(
+        db.update(faces)
+          .set({
+            landmarks: JSON.stringify(eyes.landmarks),
+            ...ratioColumns(eyes),
+          })
+          .where(eq(faces.id, faceRows[i].id)),
+      );
+      result.faces_updated++;
+    }
+  } finally {
+    if (tempPath) {
+      try { await fs.promises.unlink(tempPath); } catch (_e) { /* ignore */ }
+    }
+  }
+  if (result.faces_unmatched > 0) {
+    console.log(`[face-landmarks] photo ${photo.id}: ${result.faces_unmatched} stored face(s) not found again`);
+  }
+  return result;
 }
 
 /**
