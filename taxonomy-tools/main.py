@@ -1,6 +1,7 @@
 """taxonomy-tools sidecar — runs the offline taxonomy scripts on demand.
 
-Exposes four tools (diagnose, cloud-audit, cloud-teacher, scoreboard) as
+Exposes five tools (diagnose, cloud-audit, cloud-teacher, cloud-teacher-revert,
+scoreboard) as
 FastAPI endpoints. Each spawns the underlying script as a subprocess and
 streams its stdout/stderr back as Server-Sent Events, so the admin frontend
 can show a live log.
@@ -46,6 +47,7 @@ class ToolName(str, Enum):
     diagnose = "diagnose"
     cloud_audit = "cloud-audit"
     cloud_teacher = "cloud-teacher"
+    cloud_teacher_revert = "cloud-teacher-revert"
     scoreboard = "scoreboard"
 
 
@@ -57,6 +59,9 @@ class ToolName(str, Enum):
 # The "--name=value" form below already covers that, so this is the second
 # lock rather than the only one.
 LABEL_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]{0,39}$")
+
+# cloud-teacher-revert: document ids as typed into the admin form.
+REVERT_IDS_RE = re.compile(r"^[0-9,\s]{0,4000}$")
 
 
 class RunOptions(BaseModel):
@@ -73,6 +78,10 @@ class RunOptions(BaseModel):
     # cloud-audit only: set False to ignore an existing checkpoint and draw a
     # fresh sample. Default (None) resumes whatever is on disk.
     resume: bool | None = None
+    # cloud-teacher-revert only: take back every label of the latest run below
+    # this confidence, plus these document ids (comma-separated).
+    revert_below: float | None = Field(None, gt=0, le=1)
+    revert_ids: str | None = Field(None, pattern=REVERT_IDS_RE.pattern)
 
 
 _locks: dict[ToolName, asyncio.Lock] = {t: asyncio.Lock() for t in ToolName}
@@ -135,6 +144,24 @@ def _build_command(tool: ToolName, opts: RunOptions) -> list[str]:
         return ["python3", f"{SCRIPTS_DIR}/cloud_audit.py"]
     elif tool == ToolName.cloud_teacher:
         return ["python3", f"{SCRIPTS_DIR}/cloud_teacher.py"]
+    elif tool == ToolName.cloud_teacher_revert:
+        # Works on the labels file of the latest cloud-teacher run: it is the
+        # only record of what the local model had before the teacher wrote.
+        out_dir = Path(SCRIPTS_DIR) / "out"
+        labels = _latest_dated(out_dir, "cloud_teacher_labels.json") if out_dir.is_dir() else None
+        if labels is None:
+            raise HTTPException(400, "no cloud_teacher_labels.json found — run cloud-teacher first")
+        ids = ",".join(x for x in re.split(r"[,\s]+", opts.revert_ids or "") if x)
+        if opts.revert_below is None and not ids:
+            raise HTTPException(400, "cloud-teacher-revert needs revert_below or revert_ids")
+        cmd = ["python3", f"{SCRIPTS_DIR}/cloud_teacher_revert.py", str(labels)]
+        if opts.revert_below is not None:
+            cmd += [f"--below={opts.revert_below}"]
+        if ids:
+            cmd += [f"--ids={ids}"]
+        if opts.dry_run:
+            cmd += ["--dry-run"]
+        return cmd
     elif tool == ToolName.scoreboard:
         # Unlike the others this one takes arguments rather than environment
         # variables, because the label is part of the output filename and the

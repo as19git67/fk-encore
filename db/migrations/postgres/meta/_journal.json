@@ -1919,6 +1919,13 @@
       "when": 1789260000000,
       "tag": "0273_face_mouth_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 274,
+      "version": "7",
+      "when": 1789350000000,
+      "tag": "0274_sender_rule_imports",
+      "breakpoints": true
     }
   ]
 }

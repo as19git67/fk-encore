@@ -15,6 +15,11 @@ export interface RunToolOptions {
    * currently active model before measuring. Can take a long time — the
    * whole reference sample is re-run through the classification pipeline. */
   reclassify_reference?: boolean
+  /** cloud-teacher-revert only: take back the latest teacher run's labels
+   * below this confidence. */
+  revert_below?: number
+  /** cloud-teacher-revert only: additional document ids, comma-separated. */
+  revert_ids?: string
 }
 
 export interface ToolStatus {

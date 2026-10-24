@@ -32,6 +32,8 @@ interface ToolConfig {
     scoreboard_label: string
     compare_with: string
     reclassify_reference: boolean
+    revert_below: number | null
+    revert_ids: string
   }
 }
 
@@ -51,13 +53,15 @@ const tools = ref<ToolConfig[]>([
       scoreboard_label: '',
       compare_with: '',
       reclassify_reference: false,
+      revert_below: null,
+      revert_ids: '',
     },
   },
   {
     name: 'cloud-audit',
     label: 'Cloud Audit',
     description:
-      'Claude klassifiziert eine Stichprobe und wird mit dem lokalen Qwen verglichen. Read-only.',
+      'Claude klassifiziert eine Stichprobe und wird mit dem lokalen Modell verglichen. Read-only.',
     options: {
       dry_run: false,
       batch: null,
@@ -68,6 +72,8 @@ const tools = ref<ToolConfig[]>([
       scoreboard_label: '',
       compare_with: '',
       reclassify_reference: false,
+      revert_below: null,
+      revert_ids: '',
     },
   },
   {
@@ -85,6 +91,29 @@ const tools = ref<ToolConfig[]>([
       scoreboard_label: '',
       compare_with: '',
       reclassify_reference: false,
+      revert_below: null,
+      revert_ids: '',
+    },
+  },
+  {
+    name: 'cloud-teacher-revert',
+    label: 'Cloud-Teacher-Labels zurücksetzen',
+    description:
+      'Nimmt Labels des letzten Cloud-Teacher-Laufs zurück: alle unter der Konfidenz-Schwelle und die ' +
+      'genannten Dokumente bekommen wieder die Kategorie des lokalen Modells (source=ai). Was inzwischen ' +
+      'jemand geprüft hat, bleibt stehen. Mit Dry Run zuerst ansehen, was sich ändern würde.',
+    options: {
+      dry_run: true,
+      batch: null,
+      sample: null,
+      tax_sample: null,
+      focus_sections: '',
+      focus_categories: '',
+      scoreboard_label: '',
+      compare_with: '',
+      reclassify_reference: false,
+      revert_below: 0.65,
+      revert_ids: '',
     },
   },
   {
@@ -104,6 +133,8 @@ const tools = ref<ToolConfig[]>([
       scoreboard_label: '',
       compare_with: '',
       reclassify_reference: false,
+      revert_below: null,
+      revert_ids: '',
     },
   },
 ])
@@ -244,6 +275,10 @@ async function startTool(tool: ToolConfig) {
   if (tool.options.scoreboard_label) opts.label = tool.options.scoreboard_label.trim()
   if (tool.options.compare_with) opts.compare_with = tool.options.compare_with.trim()
   if (tool.options.reclassify_reference) opts.reclassify_reference = true
+  if (tool.name === 'cloud-teacher-revert') {
+    if (tool.options.revert_below) opts.revert_below = tool.options.revert_below
+    if (tool.options.revert_ids.trim()) opts.revert_ids = tool.options.revert_ids.trim()
+  }
 
   try {
     await runTool(tool.name, opts)
@@ -308,7 +343,22 @@ function clearLog(toolName: string) {
 // click rather than after.
 function canStart(tool: ToolConfig): boolean {
   if (tool.name === 'scoreboard') return tool.options.scoreboard_label.trim().length > 0
+  if (tool.name === 'cloud-teacher-revert') {
+    return !!tool.options.revert_below || /[0-9]/.test(tool.options.revert_ids)
+  }
   return true
+}
+
+// The revert tool writes to the database unless Dry Run is on — its button
+// says what it does rather than a neutral "Starten".
+function startLabel(tool: ToolConfig): string {
+  if (tool.name !== 'cloud-teacher-revert') return 'Starten'
+  return tool.options.dry_run ? 'Vorschau' : 'Zurücksetzen'
+}
+
+function startIcon(tool: ToolConfig): string {
+  if (tool.name !== 'cloud-teacher-revert') return 'pi pi-play'
+  return tool.options.dry_run ? 'pi pi-eye' : 'pi pi-undo'
 }
 
 // Human-readable summary of the options a run was started with, per tool.
@@ -316,8 +366,12 @@ function submittedSummary(tool: ToolConfig): string {
   const o = submittedOptions.value[tool.name]
   if (!o) return ''
   const parts: string[] = []
-  if (tool.name === 'cloud-audit' || tool.name === 'cloud-teacher') {
+  if (tool.name === 'cloud-audit' || tool.name === 'cloud-teacher' || tool.name === 'cloud-teacher-revert') {
     parts.push(`Dry Run: ${o.dry_run ? 'an' : 'aus'}`)
+  }
+  if (tool.name === 'cloud-teacher-revert') {
+    if (o.revert_below) parts.push(`unter Konfidenz ${o.revert_below}`)
+    if (o.revert_ids.trim()) parts.push(`Dokumente: ${o.revert_ids.trim()}`)
   }
   if (tool.name === 'diagnose' && o.sample) parts.push(`Confusion Sample: ${o.sample}`)
   if (tool.name === 'cloud-audit') {
@@ -477,7 +531,10 @@ onUnmounted(() => {
              change its own config, and rendering a disabled ToggleSwitch is
              what made Dry Run appear to reset itself). -->
         <div v-if="!running[tool.name]" class="tool-options">
-          <div v-if="tool.name === 'cloud-audit' || tool.name === 'cloud-teacher'" class="option-row">
+          <div
+            v-if="tool.name === 'cloud-audit' || tool.name === 'cloud-teacher' || tool.name === 'cloud-teacher-revert'"
+            class="option-row"
+          >
             <label>Dry Run</label>
             <ToggleSwitch v-model="tool.options.dry_run" />
           </div>
@@ -544,6 +601,29 @@ onUnmounted(() => {
             />
           </div>
 
+          <div v-if="tool.name === 'cloud-teacher-revert'" class="option-row">
+            <label>Konfidenz unter</label>
+            <InputNumber
+              v-model="tool.options.revert_below"
+              :min="0.01"
+              :max="1"
+              :min-fraction-digits="2"
+              :max-fraction-digits="2"
+              :step="0.05"
+              placeholder="0,65"
+              class="option-input"
+            />
+          </div>
+
+          <div v-if="tool.name === 'cloud-teacher-revert'" class="option-row">
+            <label>Zusätzlich Dokumente</label>
+            <InputText
+              v-model="tool.options.revert_ids"
+              placeholder="Dokument-IDs, z.B. 101, 102"
+              class="option-input"
+            />
+          </div>
+
           <div v-if="tool.name === 'scoreboard'" class="option-row">
             <label>Label</label>
             <InputText
@@ -577,8 +657,8 @@ onUnmounted(() => {
         <div class="tool-actions">
           <Button
             v-if="!running[tool.name]"
-            icon="pi pi-play"
-            label="Starten"
+            :icon="startIcon(tool)"
+            :label="startLabel(tool)"
             size="small"
             :loading="starting[tool.name]"
             :disabled="!!starting[tool.name] || !canStart(tool)"
@@ -604,8 +684,8 @@ onUnmounted(() => {
           />
         </div>
 
-        <!-- Reports -->
-        <div class="tool-reports">
+        <!-- Reports (the revert tool writes none: its log is the record) -->
+        <div v-if="tool.name !== 'cloud-teacher-revert'" class="tool-reports">
           <span class="reports-label">Reports:</span>
           <Button
             v-for="file in reports[tool.name]"

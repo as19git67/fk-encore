@@ -62,6 +62,35 @@ const SV_MELDUNG_KEYWORDS: string[] = [
   "deüv",
 ];
 
+const LIFE_INSURERS: string[] = [
+  "heidelbergerleben",
+  "heidelbergerlebensversicherung",
+  "axalebensversicherung",
+  "mlplebensversicherung",
+];
+
+/** The contract pays out an annuity. */
+const ANNUITY_MARKERS: string[] = [
+  "rentenversicherung",
+  "garantierterente",
+  "monatlicherente",
+  "lebenslangerente",
+  "altersrente",
+  "rentenbeginn",
+];
+
+/** The contract pays out a lump sum. */
+const LUMP_SUM_MARKERS: string[] = [
+  "kapitallebensversicherung",
+  "kapitalversicherung",
+  "ablaufleistung",
+  "erlebensfallleistung",
+];
+
+// Being moved into the database: the seed copies this list into
+// document_sender_rule_overrides once (db/seed-sender-rules.ts, migration
+// 0274), and a follow-up empties it here. New rules go into the table via
+// `/documents/sender-rule-overrides`, not into this file.
 export const SENDER_RULES: readonly SenderRule[] = [
   {
     note: "Familienkasse → Familienleistungen",
@@ -80,14 +109,25 @@ export const SENDER_RULES: readonly SenderRule[] = [
 
   // ── Banks / brokers ─────────────────────────────────────────────────────
   {
+    // The monthly Finanzreport lists giro, call money, card and depot on one
+    // statement — an account statement, not a securities document.
+    note: "Comdirect Finanzreport → Kontoauszüge",
+    senders: ["comdirect"],
+    requireAny: ["finanzreport"],
+    category: "finanzen-kontoauszuege",
+  },
+  {
     note: "Comdirect → Wertpapiere & Dividenden",
     senders: ["comdirect"],
     category: "finanzen-wertpapiere",
   },
   {
     note: "MLP / Commerzbank Darlehens-/Kontoauszüge → Kontoauszüge",
-    senders: ["mlpbank", "mlpbanking", "commerzbank"],
-    requireAny: ["darlehen", "kontoauszug", "rechnungsabschluss", "kontonachweis"],
+    // "darlehenskonto", not "darlehen": a loan contract or payout instruction
+    // from the same bank is a Kredit/Finanzierung document, only the account
+    // statement of the loan account belongs here.
+    senders: ["mlpbank", "mlpbanking", "mlpfinanzdienstleistungen", "commerzbank"],
+    requireAny: ["darlehenskonto", "kontoauszug", "rechnungsabschluss", "kontonachweis"],
     category: "finanzen-kontoauszuege",
   },
   {
@@ -126,9 +166,21 @@ export const SENDER_RULES: readonly SenderRule[] = [
     senders: ["hallesche", "dkvdeutsche", "dkvdeutschekranken"],
     category: "versicherungen-kranken",
   },
+  // Life insurers sell both kinds of contract, and the company name says
+  // "Lebensversicherung" either way. What decides is the benefit: an annuity →
+  // Rentenversicherung, a lump sum → Kapital-Lebensversicherung. A letter that
+  // names neither (a Dynamik notice, a direct-debit note) gets no rule and is
+  // left to the model, which sees the taxonomy hints on both categories.
   {
-    note: "Heidelberger / AXA / MLP Lebensversicherung → Kapital-Lebensversicherung",
-    senders: ["heidelbergerleben", "heidelbergerlebensversicherung", "axalebensversicherung", "mlplebensversicherung"],
+    note: "Lebensversicherer, Leistung als Rente → private Rentenversicherung",
+    senders: LIFE_INSURERS,
+    requireAny: ANNUITY_MARKERS,
+    category: "altersvorsorge-rentenversicherung",
+  },
+  {
+    note: "Lebensversicherer, Leistung als Kapital → Kapital-Lebensversicherung",
+    senders: LIFE_INSURERS,
+    requireAny: LUMP_SUM_MARKERS,
     category: "altersvorsorge-lebensversicherung",
   },
   {
@@ -245,10 +297,10 @@ export function matchSenderRule(
  * types that only a document-type keyword tells apart (a cloud-LLM audit showed
  * the local model consistently confuses these):
  *
- *   - Heidelberger / MLP issue both a Kapital-Lebensversicherung AND a
- *     (Riester/fondsgebundene) Rentenversicherung — the sender rule forces
- *     "altersvorsorge-lebensversicherung", but a §92/§10a/Riester marker means
- *     it is really "altersvorsorge-rentenversicherung".
+ *   - A life insurer issues a Kapital-Lebensversicherung, a (Riester/
+ *     fondsgebundene) Rentenversicherung AND a stand-alone BU policy — a
+ *     §92/§10a/Riester marker or the BU policy name settles it before any
+ *     sender rule looks at the benefit.
  *   - A Kfz-insurer's Kasko/Kraftfahrt policy is a fahrzeug-versicherung, not a
  *     generic Sach-/Personenversicherung.
  *
@@ -270,20 +322,11 @@ export interface ContentRule {
 
 export const CONTENT_RULES: readonly ContentRule[] = [
   {
-    // High-precision Kindergeld document markers. Deliberately no bare
-    // "kindergeld": an Einkommensteuerbescheid or Anlage Kind may mention it
-    // without being a Familienkasse document.
-    note: "Kindergeldbescheid/-akte → Familienleistungen",
-    keywords: [
-      "bescheidüberkindergeld",
-      "kindergeldnummer",
-      "festsetzungdeskindergeldes",
-      "kindergeldfestsetzung",
-    ],
-    category: "familie-familienleistungen",
-  },
-  {
-    // Riester/Rürup and fond-linked pension contracts. The markers below are
+    // Riester/Rürup and fond-linked pension contracts. First on purpose: the
+    // Zulage application asks for the Kindergeldnummer of every child it
+    // claims a Kinderzulage for, so the Kindergeld rule below would otherwise
+    // file every Riester document as a family benefit (2026-10 teacher run).
+    // The markers below are
     // unique to a state-subsidised/annuity pension (never on a plain capital
     // life policy). The excludeAny guards an actual monthly payslip whose body
     // might list a "Riester" deduction line — a payslip carries the brutto/
@@ -310,6 +353,29 @@ export const CONTENT_RULES: readonly ContentRule[] = [
       "nettoverdienst",
     ],
     category: "altersvorsorge-rentenversicherung",
+  },
+  {
+    // High-precision Kindergeld document markers. Deliberately no bare
+    // "kindergeld": an Einkommensteuerbescheid or Anlage Kind may mention it
+    // without being a Familienkasse document.
+    note: "Kindergeldbescheid/-akte → Familienleistungen",
+    keywords: [
+      "bescheidüberkindergeld",
+      "kindergeldnummer",
+      "festsetzungdeskindergeldes",
+      "kindergeldfestsetzung",
+    ],
+    category: "familie-familienleistungen",
+  },
+  {
+    // A stand-alone BU policy. Insurers that also sell pension and life
+    // contracts (the sender rules) cannot tell it apart; the policy name can.
+    // A BU *rider* on a pension contract ("Berufsunfähigkeits-Zusatzversicherung")
+    // normalizes to "berufsunfähigkeitszusatzversicherung" and stays with the
+    // main contract.
+    note: "Berufs-/Erwerbsunfähigkeitsversicherung → BU",
+    keywords: ["berufsunfähigkeitsversicherung", "erwerbsunfähigkeitsversicherung"],
+    category: "versicherungen-berufsunfaehigkeit",
   },
   {
     note: "Kfz-Haftpflicht/Kasko/Kraftfahrtversicherung → Kfz-Versicherung",
