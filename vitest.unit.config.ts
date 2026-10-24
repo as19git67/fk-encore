@@ -8,7 +8,6 @@ export default defineConfig({
     include: [
       "backup/state.test.ts",
       "documents/correspondent.test.ts",
-      "documents/institutions.test.ts",
       "documents/document-filename.test.ts",
       "documents/filesystem-grouping.test.ts",
       "documents/metadata-extract.test.ts",

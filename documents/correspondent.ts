@@ -3,21 +3,20 @@
  *
  * `documents.sender` is free-form text the LLM extracts from a document.
  * It is great for the speaking filename, but far too unstable to use
- * directly as a *folder* name: "Janitos", "Janitos Versicherung AG" and
- * "Janitos AG" would each spawn their own directory. This module maps a
+ * directly as a *folder* name: "Beispiel", "Beispiel Versicherung AG" and
+ * "Beispiel AG" would each spawn their own directory. This module maps a
  * raw sender onto a **stable correspondent identity** so callers can build
  * a deduplicated `<category>/<correspondent>/…` folder tree.
  *
  * Sender resolution order:
  *   1. empty / unrecognisable sender          → `null` (caller falls back)
- *   2. registry hit (known recurring sender)  → canonical `{ slug, display }`
+ *   2. override hit (known recurring sender)  → canonical `{ slug, display }`
  *   3. otherwise                              → slugified raw sender
  *      (accepted long-tail fragmentation for one-off senders)
  *
- * The registry is a plain data table — like `SENDER_RULES` — seeded from the
- * institutions already catalogued in `sender-rules.ts`. It can grow without
- * touching the matching logic. Entries are evaluated top-to-bottom and the
- * FIRST fragment match wins, so keep more specific fragments earlier.
+ * The known senders are the household's data, not code: they live in
+ * document_correspondent_overrides (migration 0131, `correspondent-overrides.ts`,
+ * API `/documents/correspondent-overrides`) and are passed in as `overrides`.
  *
  * Folder-slug composition (`buildCorrespondentFolderSlug`): so that several
  * contracts from the *same* provider don't collapse into one directory, the
@@ -39,18 +38,17 @@
 
 import { normalizeForMatch } from "./sender-rules";
 import { slugifyName } from "./documents.service";
-import { INSTITUTIONS } from "./institutions";
 
 export interface CorrespondentIdentity {
-  /** Filesystem-safe folder segment, e.g. "janitos". */
+  /** Filesystem-safe folder segment, e.g. "beispielversicherung". */
   slug: string;
-  /** Human-readable name for display/UX, e.g. "Janitos". */
+  /** Human-readable name for display/UX, e.g. "Beispielversicherung". */
   display: string;
 }
 
 /**
- * A user-defined correspondent override: when the normalised sender contains
- * `pattern`, force the given identity instead of consulting the registry.
+ * A household correspondent: when the normalised sender contains `pattern`,
+ * use the given identity instead of the slugified sender.
  * If several overrides match, the longest (most specific) pattern wins; equal
  * lengths use the pattern text as a deterministic tie-breaker.
  * Loaded from the DB by `correspondent-overrides.ts` and passed in so this
@@ -62,15 +60,6 @@ export interface CorrespondentOverride {
   slug: string;
   display: string;
 }
-
-/**
- * Known recurring correspondents for this household. Single-sourced from
- * `institutions.ts`, which is kept in lock-step with the sender rules by
- * `institutions.test.ts`. Overly generic senders (e.g. "gemeinde",
- * "bausparkasse") are intentionally absent and fall through to the slugified
- * fallback in `resolveCorrespondent`.
- */
-export const CORRESPONDENT_REGISTRY = INSTITUTIONS;
 
 /**
  * Resolve the canonical correspondent for a raw sender string.
@@ -86,7 +75,6 @@ export function resolveCorrespondent(
   const normalized = normalizeForMatch(sender);
   if (!normalized) return null;
 
-  // User overrides win over the built-in registry.
   if (overrides) {
     let bestMatch: CorrespondentOverride | undefined;
     for (const o of overrides) {
@@ -102,15 +90,9 @@ export function resolveCorrespondent(
     }
   }
 
-  for (const entry of CORRESPONDENT_REGISTRY) {
-    if (entry.fragments.some((frag) => normalized.includes(frag))) {
-      return { slug: entry.slug, display: entry.display };
-    }
-  }
-
   // Long-tail: no known institution. Derive a stable slug from the raw
-  // sender. Some near-duplicate fragmentation is accepted here — the
-  // registry above is the place to unify recurring senders.
+  // sender. Some near-duplicate fragmentation is accepted here — an
+  // override is the place to unify a recurring sender.
   const slug = slugifyName(sender ?? "", 40);
   if (!slug) return null;
   return { slug, display: (sender ?? "").trim() };

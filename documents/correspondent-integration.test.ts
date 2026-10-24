@@ -57,47 +57,60 @@ beforeEach(async () => {
            status, sender, title, doc_date, visibility)
         VALUES
           (${DOC_ID}, ${USER_ID}, ${`sha-${DOC_ID}`}, 'x.pdf', 'application/pdf', 1,
-           ${diskPath}, 'ready', 'Janitos Versicherung AG', 'Hausratversicherung',
+           ${diskPath}, 'ready', 'Musterversicherung Sach AG', 'Hausratversicherung',
            '2026-01-15', 'private')`,
   );
 });
 
+async function addKnownCorrespondent(): Promise<void> {
+  // The household's own correspondent (fictional), as the overrides table
+  // holds it.
+  await db.insert(documentCorrespondentOverrides).values({
+    sender_pattern: "musterversicherung",
+    correspondent_slug: "musterversicherung",
+    correspondent_display: "Musterversicherung",
+  });
+  invalidateCorrespondentOverridesCache();
+}
+
 describe("correspondent — persistence, facet and overrides", () => {
   it("persists the institution correspondent on relocate", async () => {
+    await addKnownCorrespondent();
     await relocateDocument(DOC_ID);
-    expect(await readCorrespondent()).toEqual({ slug: "janitos", display: "Janitos" });
+    expect(await readCorrespondent()).toEqual({ slug: "musterversicherung", display: "Musterversicherung" });
   });
 
   it("surfaces the correspondent in the facet endpoint", async () => {
+    await addKnownCorrespondent();
     await relocateDocument(DOC_ID);
     setAuth(["documents.view"]);
     const res = await listCorrespondents();
-    const janitos = res.items.find((i) => i.slug === "janitos");
-    expect(janitos).toBeDefined();
-    expect(janitos!.display).toBe("Janitos");
-    expect(janitos!.count).toBeGreaterThanOrEqual(1);
+    const known = res.items.find((i) => i.slug === "musterversicherung");
+    expect(known).toBeDefined();
+    expect(known!.display).toBe("Musterversicherung");
+    expect(known!.count).toBeGreaterThanOrEqual(1);
   });
 
-  it("lets a user override win, and reverts when removed", async () => {
+  it("lets a user override win, and reverts to the slugified sender when removed", async () => {
     await relocateDocument(DOC_ID);
-    expect((await readCorrespondent()).slug).toBe("janitos");
+    expect((await readCorrespondent()).slug).toBe("musterversicherung-sach-ag");
 
     setAuth(["documents.manage_taxonomy"]);
     const created = await createCorrespondentOverride({
-      sender_pattern: "Janitos",
+      sender_pattern: "Musterversicherung",
       correspondent_display: "Sonderfall X",
     });
-    expect(created.sender_pattern).toBe("janitos");
+    expect(created.sender_pattern).toBe("musterversicherung");
     expect(created.correspondent_slug).toBe("sonderfall-x");
 
     const list = await listCorrespondentOverrides();
-    expect(list.items.map((o) => o.sender_pattern)).toContain("janitos");
+    expect(list.items.map((o) => o.sender_pattern)).toContain("musterversicherung");
 
     await relocateDocument(DOC_ID);
     expect(await readCorrespondent()).toEqual({ slug: "sonderfall-x", display: "Sonderfall X" });
 
     await deleteCorrespondentOverride({ id: created.id });
     await relocateDocument(DOC_ID);
-    expect((await readCorrespondent()).slug).toBe("janitos");
+    expect((await readCorrespondent()).slug).toBe("musterversicherung-sach-ag");
   });
 });

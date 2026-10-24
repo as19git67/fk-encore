@@ -5120,7 +5120,7 @@ export interface DeleteCorrespondentOverrideRequest {
   id: number;
 }
 
-/** Remove a correspondent override; affected documents revert to the registry. */
+/** Remove a correspondent override; affected documents revert to the slugified sender. */
 export const deleteCorrespondentOverride = api(
   { expose: true, method: "DELETE", path: "/documents/correspondent-overrides/:id", auth: true },
   async (req: DeleteCorrespondentOverrideRequest): Promise<{ deleted: boolean }> => {
@@ -5189,8 +5189,8 @@ export interface CreateSenderRuleOverrideRequest {
 }
 
 /**
- * Create a sender → category rule override. Evaluated before the built-in
- * SENDER_RULES (see sender-rules.ts) the next time a document is classified.
+ * Create a sender → category rule. Applied the next time a document is
+ * classified (see sender-rules.ts).
  */
 export const createSenderRuleOverride = api(
   { expose: true, method: "POST", path: "/documents/sender-rule-overrides", auth: true },
@@ -5240,7 +5240,7 @@ export interface DeleteSenderRuleOverrideRequest {
   id: number;
 }
 
-/** Remove a sender rule override; affected documents fall back to the built-in rules. */
+/** Remove a sender rule; affected documents fall back to the model's category. */
 export const deleteSenderRuleOverride = api(
   { expose: true, method: "DELETE", path: "/documents/sender-rule-overrides/:id", auth: true },
   async (req: DeleteSenderRuleOverrideRequest): Promise<{ deleted: boolean }> => {

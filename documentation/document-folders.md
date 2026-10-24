@@ -155,10 +155,9 @@ the path.
 <sender>[-<product>][-<contract-anchor>]
 ```
 
-- **`<sender>`** — comes from a curated registry of known institutions
-  (`documents/institutions.ts`, e.g. `janitos`, `comdirect`, `barmer`).
-  Unknown senders fall back to a slugified raw name (long tail, slight
-  fragmentation possible — see overrides below).
+- **`<sender>`** — comes from the household's correspondent overrides (see
+  below), e.g. `musterversicherung`, `beispielbank`. Unknown senders fall back
+  to a slugified raw name (long tail, slight fragmentation possible).
 - **`<product>`** — optional, from a keyword table over the **title** of the
   document (`privathaftpflicht`, `hausrat`, `kfz`, `leben`, …). Only the title
   is checked, so that incidental mentions in the body text do not put a
@@ -167,12 +166,12 @@ the path.
   `versicherungsnr:…` or `vertragsnr:…` (`versicherungsnr` takes precedence).
   Appended as soon as present — so that several contracts of the same provider
   and the same line of business do not end up in one folder (e.g. two personal
-  liability policies at Janitos). Deliberately **not** `document_number`: this
+  liability policies at the same insurer). Deliberately **not** `document_number`: this
   field is per document, not per contract (see issue #664 in
   `documents/metadata-extract.ts`).
 
-Examples: `janitos-privathaftpflicht-4711884`, `janitos-hausrat`,
-`comdirect` (sender only, no product/contract recognized). Without a
+Examples: `musterversicherung-privathaftpflicht-4711884`,
+`musterversicherung-hausrat`, `beispielbank` (sender only, no product/contract recognized). Without a
 resolvable sender: the placeholder segment `_ohne-absender`.
 
 ### Persistence
@@ -191,21 +190,14 @@ If the automatic assignment does not fit (e.g. an unknown sender is to be
 merged with an existing correspondent, or a misassignment is to be corrected),
 a user can create a sender pattern → correspondent mapping in the maintenance
 page under „Korrespondenten-Overrides" (correspondent overrides)
-(migration `0131`, `documents/correspondent-overrides.ts`). An override beats
-the built-in registry and takes effect as soon as the affected document is
+(migration `0131`, `documents/correspondent-overrides.ts`). The overrides are
+the only list of known institutions — the code ships none, since this repository
+is public. An override takes effect as soon as the affected document is
 filed again (reclassification or „Dateipfade aktualisieren" (update file
 paths)). If several patterns match, the longest and therefore most specific
 pattern always wins, regardless of the order in the database. Overrides are
 household-wide (not per user) and are cached with a short TTL, so that the
 bulk move does not query per document.
-
-### Single source of known institutions
-
-The correspondent registry is derived from `documents/institutions.ts` instead
-of maintaining its own list. `documents/institutions.test.ts` checks that
-every sender fragment used there is also known in the sender routing rules
-(`documents/sender-rules.ts`) — so the two lists cannot diverge without a test
-failing.
 
 ---
 
@@ -247,7 +239,6 @@ path traversal (`assertPathUnderDocumentsRoot` before every fs operation).
 | `documents/documents.service.ts`  | Path builder (`resolveDocumentDiskPath`, slugifier, …)   |
 | `documents/relocate.ts`           | Physical moves + tax hardlink rebuild + correspondent persistence |
 | `documents/correspondent.ts`      | Sender → correspondent (+ product, contract anchor)      |
-| `documents/institutions.ts`       | Registry of known institutions (single source, section 3a) |
 | `documents/correspondent-overrides.ts` | Loading/cache of the user overrides                    |
 | `documents/visibility.ts`         | Access control (`loadVisibleDocument`, …)             |
 | `documents/groups.ts`             | API endpoints for managing groups                  |
