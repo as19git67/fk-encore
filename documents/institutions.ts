@@ -33,6 +33,10 @@ export interface Institution {
  * "kirchensteueramt") that carry no single-institution identity — those are
  * handled by the slugified fallback in `resolveCorrespondent`.
  */
+// Being moved into the database: the seed copies this list into
+// document_correspondent_overrides once (db/seed-sender-rules.ts), and a
+// follow-up empties it here together with SENDER_RULES. New correspondents go
+// into the table via `/documents/correspondent-overrides`, not into this file.
 export const INSTITUTIONS: readonly Institution[] = [
   // The employer, parish, and other household-specific correspondents are
   // deliberately NOT hard-coded here — this file is public. Configure them
