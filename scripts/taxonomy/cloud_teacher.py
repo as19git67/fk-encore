@@ -4,7 +4,7 @@ als `source='cloud'` in die DB — um den Anteil vertrauenswürdig klassifiziert
 Dokumente zu erhöhen, OHNE manuelle Klassifikation.
 
 Abgrenzung (wichtig): Dies ersetzt NICHT die Produktions-Klassifikation. Das
-lokale Qwen bleibt der Klassifikator für jedes Dokument. Claude läuft nur
+lokale Modell (Gemma 4) bleibt der Klassifikator für jedes Dokument. Claude läuft nur
 gezielt und offline, um dort mehr korrekte Beispiele zu erzeugen, wo das
 Gold-Set heute dünn ist. Siehe documentation/design/cloud-teacher-gold-set.md.
 
@@ -79,7 +79,7 @@ DRY_RUN = (os.environ.get("TEACHER_DRY_RUN", os.environ.get("AUDIT_DRY_RUN", "")
 MAX_RETRIES = int(os.environ.get("TEACHER_MAX_RETRIES", os.environ.get("AUDIT_MAX_RETRIES", "8")))
 REQUEST_DELAY = float(os.environ.get("TEACHER_REQUEST_DELAY", os.environ.get("AUDIT_REQUEST_DELAY", "0")))
 
-# Bekannte Streit-Achsen (§5.1 Punkt 2): dort ist Qwen systematisch schwach.
+# Bekannte Streit-Achsen (§5.1 Punkt 2): dort ist das lokale Modell systematisch schwach.
 # Als Env-Var überschreibbar, weil sich der aktuell strittige Satz verschiebt.
 _DEFAULT_FOCUS = [
     "altersvorsorge-lebensversicherung",
@@ -430,13 +430,13 @@ def _write_report(entries: list[dict]) -> None:
     md.table(["Kennzahl", "Wert"], [
         ["Dokumente gelabelt", len(entries)],
         ["Kategorie geschrieben (source=cloud)", len(cat_written)],
-        ["davon Kategorie geändert ggü. Qwen", len(cat_changed)],
+        ["davon Kategorie geändert ggü. lokalem Modell", len(cat_changed)],
         ["Steuer geschrieben (source=cloud)", len(tax_written)],
     ])
-    md("## Kategorie-Änderungen (Qwen → Cloud)")
+    md("## Kategorie-Änderungen (lokal → Cloud)")
     md()
     md.table(
-        ["Dok-ID", "Qwen", "Cloud", "Conf.", "Begründung"],
+        ["Dok-ID", "Lokal", "Cloud", "Conf.", "Begründung"],
         [[e["doc_id"], e["qwen_slug"], e["cloud_slug"], e["cloud_confidence"],
           e["reasoning"]] for e in sorted(cat_changed, key=lambda x: x["qwen_slug"])],
     )
@@ -528,6 +528,8 @@ def main() -> None:
               f"alle source='cloud'.")
         print(f"[cloud_teacher] Report: {(OUT / f'{_P}cloud_teacher.md').relative_to(c.REPO_ROOT)}")
         print(f"[cloud_teacher] Labels: {(OUT / f'{_P}cloud_teacher_labels.json').relative_to(c.REPO_ROOT)}")
+        print(f"[cloud_teacher] Einzelne Labels zurücknehmen: "
+              f"scripts/taxonomy/cloud_teacher_revert.py <Labels> --below 0.65 [--ids …]")
         print(f"[cloud_teacher] Rücknahme: DELETE FROM document_tax_sections WHERE "
               f"source='cloud'; UPDATE documents SET category_source='ai' WHERE "
               f"category_source='cloud'; danach Reclassify.")
