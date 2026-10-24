@@ -39,8 +39,6 @@ describe("matchSenderRule", () => {
     expect(matchSenderRule({ sender: "comdirect bank AG" })).toBe("finanzen-wertpapiere");
     expect(matchSenderRule({ sender: "HALLESCHE Krankenversicherung" })).toBe("versicherungen-kranken");
     expect(matchSenderRule({ sender: "DKV Deutsche Krankenversicherung" })).toBe("versicherungen-kranken");
-    expect(matchSenderRule({ sender: "Heidelberger Leben" })).toBe("altersvorsorge-lebensversicherung");
-    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG" })).toBe("altersvorsorge-lebensversicherung");
     expect(matchSenderRule({ sender: "Janitos Versicherung AG" })).toBe("versicherungen-sach");
     expect(matchSenderRule({ sender: "Zahnarztpraxis Dr. Kiesewetter" })).toBe("gesundheit-arzt");
     expect(matchSenderRule({ sender: "Caritas-Sozialstation" })).toBe("gesundheit-pflege");
@@ -65,10 +63,50 @@ describe("matchSenderRule", () => {
   });
 
   it("keeps the bank-statement rules from over-grabbing", () => {
-    // MLP Lebensversicherung routes to life insurance (dedicated sender rule).
-    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung" })).toBe(
-      "altersvorsorge-lebensversicherung",
+    // A life insurer's letter is never an account statement.
+    expect(
+      matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung", text: "Kontoauszug" }),
+    ).not.toBe("finanzen-kontoauszuege");
+    // A loan contract or payout instruction is not the loan account's statement.
+    expect(
+      matchSenderRule({ sender: "MLP Banking AG", title: "Zahlungsanweisung", text: "Auszahlung des Darlehens" }),
+    ).toBeNull();
+  });
+
+  it("routes the statement of a depot cash account and the comdirect Finanzreport to Kontoauszüge", () => {
+    expect(
+      matchSenderRule({ sender: "MLP Finanzdienstleistungen AG", title: "Rechnungsabschluss Vermögensdepot-Konto" }),
+    ).toBe("finanzen-kontoauszuege");
+    expect(matchSenderRule({ sender: "comdirect bank AG", title: "Finanzreport Nr. 3" })).toBe(
+      "finanzen-kontoauszuege",
     );
+    expect(matchSenderRule({ sender: "comdirect bank AG", title: "Dividendengutschrift" })).toBe(
+      "finanzen-wertpapiere",
+    );
+  });
+
+  it("files a life insurer's contract by its benefit: annuity or lump sum", () => {
+    expect(
+      matchSenderRule({
+        sender: "Heidelberger Lebensversicherung AG",
+        title: "Dynamiknachtrag",
+        text: "Fondsgebundene Versicherung, garantierte Rente ab Rentenbeginn",
+      }),
+    ).toBe("altersvorsorge-rentenversicherung");
+    expect(
+      matchSenderRule({
+        sender: "MLP Lebensversicherung AG",
+        title: "Erhöhungsnachtrag",
+        text: "Fondsgebundene Lebensversicherung mit Erlebensfallleistung",
+      }),
+    ).toBe("altersvorsorge-lebensversicherung");
+    expect(
+      matchSenderRule({ sender: "AXA Lebensversicherung AG", title: "Standmitteilung", text: "Kapitalversicherung, Ablaufleistung" }),
+    ).toBe("altersvorsorge-lebensversicherung");
+    // Neither benefit named: no rule, the model decides.
+    expect(
+      matchSenderRule({ sender: "Heidelberger Leben", title: "Widerspruch gegen die Dynamik", text: "Beitrag bleibt unverändert" }),
+    ).toBeNull();
   });
 
   it("routes telecom providers to Telekommunikation, but not their shares", () => {
@@ -265,6 +303,24 @@ describe("matchContentRule", () => {
     expect(
       matchContentRule({ title: "Förder Rente invest DWS Premium", text: "" }),
     ).toBe("altersvorsorge-rentenversicherung");
+  });
+
+  it("files a Riester Zulage application under Rentenversicherung although it asks for the Kindergeldnummer", () => {
+    expect(
+      matchContentRule({
+        title: "Antrag auf Altersvorsorgezulage 2023",
+        text: "Dauerzulageverfahren. Kinderzulage: Kindergeldnummer 000FK000000, Familienkasse Beispielstadt",
+      }),
+    ).toBe("altersvorsorge-rentenversicherung");
+  });
+
+  it("routes a stand-alone BU policy, but not a BU rider on a pension contract", () => {
+    expect(
+      matchContentRule({ title: "Erhöhungsnachtrag zum Versicherungsschein", text: "Flexible Berufsunfähigkeitsversicherung" }),
+    ).toBe("versicherungen-berufsunfaehigkeit");
+    expect(
+      matchContentRule({ title: "Nachtrag", text: "Berufsunfähigkeits-Zusatzversicherung zur Rentenversicherung" }),
+    ).toBeNull();
   });
 
   it("does NOT steal an actual monthly payslip that lists a Riester deduction", () => {

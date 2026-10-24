@@ -33,7 +33,12 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-kontoauszuege",
         name: "Kontoauszüge",
-        hint: "Kontoauszüge und Rechnungsabschlüsse von Giro-, Tagesgeld- oder Darlehenskonten (z. B. MLP, Commerzbank).",
+        hint: "Kontoauszüge und Rechnungsabschlüsse von Giro-, Tagesgeld- oder Darlehenskonten, auch Finanzreport. NICHT Kontovertrag, AGB, Karte (→ finanzen-bankvertraege).",
+      },
+      {
+        slug: "finanzen-bankvertraege",
+        name: "Bankverträge & Konten",
+        hint: "Kontoeröffnung (auch Sparbrief/Festgeld), Vereinbarung über AGB und Sonderbedingungen, Online-Banking, elektronisches Postfach, Kreditkarte, Kontoschließung. NICHT Kreditvertrag (→ finanzen-kredite), Kontovollmacht (→ rechtliches-vollmachten).",
       },
       {
         slug: "finanzen-gehalt",
@@ -207,12 +212,12 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "altersvorsorge-lebensversicherung",
         name: "Kapital-Lebensversicherung",
-        hint: "NUR klassische Kapital-Lebensversicherung mit Ablaufleistung/Deckungskapital/Rückkaufswert: Kündigung, Ablauf, Standmitteilung (z. B. HDI-Gerling, CosmosDirekt, AXA Lebensversicherung). NICHT fondsgebundene Rentenversicherung, NICHT Riester/Rürup (→ altersvorsorge-rentenversicherung). Unterscheidung: 'Rentenversicherung' oder 'Zulagenbescheinigung nach §92 EStG' im Text → rentenversicherung; 'Kapital-Lebensversicherung', 'Deckungskapital', 'Rückkaufswert' → hierher.",
+        hint: "NUR klassische Kapital-Lebensversicherung mit Ablaufleistung/Deckungskapital/Rückkaufswert: Kündigung, Ablauf, Standmitteilung. NICHT fondsgebundene Rentenversicherung, NICHT Riester/Rürup (→ altersvorsorge-rentenversicherung). 'Rentenversicherung' oder §92 EStG im Text → rentenversicherung; 'Deckungskapital', 'Rückkaufswert' → hierher. Fondsgebundene LV nach Leistung: Kapital → hierher, Rente → rentenversicherung.",
       },
       {
         slug: "altersvorsorge-rentenversicherung",
         name: "Private Rentenversicherung (inkl. Riester/Rürup)",
-        hint: "Fondsgebundene Rentenversicherung, Riester-Rentenversicherung (§10a EStG, Zulagenbescheinigung nach §92, Grundzulage, Kinderzulage, ZfA), Rürup-/Basisrentenversicherung, Förder Rente invest. Statusreports, Erhöhungsnachträge, Beitragsbescheinigungen (z. B. Heidelberger Leben / MLP balanced invest, Zurich DWS Premium, Allianz KinderPolice). Auch wenn der Absender 'Lebensversicherung AG' heißt — entscheidend ist 'Rentenversicherung' oder 'Riester' im Vertragsinhalt. NICHT Kapital-Lebensversicherung mit Ablaufleistung (→ altersvorsorge-lebensversicherung).",
+        hint: "Fondsgebundene Rentenversicherung, Riester-Rentenversicherung (§10a EStG, Zulagenbescheinigung nach §92, Grundzulage, Kinderzulage, ZfA), Rürup-/Basisrentenversicherung. Statusreports, Erhöhungsnachträge, Beitragsbescheinigungen. Der Absendername 'Lebensversicherung AG' entscheidet nicht, der Vertragsinhalt schon. Riester-Zulageantrag trotz Kindergeldnummer hierher. NICHT Kapital-Lebensversicherung mit Ablaufleistung (→ altersvorsorge-lebensversicherung).",
       },
       {
         slug: "altersvorsorge-betrieblich",
@@ -337,7 +342,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "versicherungen-kranken",
         name: "Private Kranken-/Zusatzversicherung",
-        hint: "Private Kranken-, Pflege- und Krankenzusatzversicherung: Beitragsrechnungen, Beitragsanpassungen, Beitragsbescheinigungen, Leistungsabrechnungen (z. B. HALLESCHE, DKV, R+V Krankenversicherung). Steuerlich Vorsorgeaufwand. NICHT: gesetzliche Krankenkasse (→ gesundheit-kasse), NICHT Lebensversicherung (→ altersvorsorge-lebensversicherung), NICHT Rentenversicherung/Riester (→ altersvorsorge-rentenversicherung), NICHT Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung), NICHT Freistellungsauftrag (→ finanzen-wertpapiere).",
+        hint: "Private Kranken-, Pflege- und Krankenzusatzversicherung: Beitragsrechnungen, Beitragsanpassungen, Beitragsbescheinigungen, Leistungsabrechnungen. Steuerlich Vorsorgeaufwand. NICHT: gesetzliche Krankenkasse (→ gesundheit-kasse), NICHT Lebensversicherung (→ altersvorsorge-lebensversicherung), NICHT Rentenversicherung/Riester (→ altersvorsorge-rentenversicherung), NICHT Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung).",
       },
       {
         slug: "versicherungen-sach",
@@ -392,12 +397,17 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "familie-schule",
         name: "Schule",
-        hint: "Schulische Dokumente aller Art: Schulaufgaben, Klassenarbeiten, Probearbeiten, Leseproben, Arbeitsblätter (Deutsch, Englisch, Französisch, Mathematik), Lernpläne, Testvorbereitungen, Notenbescheide, Bewertungen, Schulferienkalender, Elternbriefe, Anmeldungen, Klassenfahrten, Einwilligungserklärungen. Auch kirchliche Jugendarbeit: Firmvorbereitung, Firm-Orientierungs-Wochenende, Terminpläne für Firmlinge (z. B. Gymnasium, Pfarrei). NICHT Bildungszertifikate (→ bildung-zertifikate).",
+        hint: "Schulische Dokumente aller Art: Schulaufgaben, Klassenarbeiten, Probearbeiten, Leseproben, Arbeitsblätter (Deutsch, Englisch, Französisch, Mathematik), Lernpläne, Testvorbereitungen, Notenbescheide, Bewertungen, Schulferienkalender, Elternbriefe, Anmeldungen, Klassenfahrten, Einwilligungserklärungen. Auch kirchliche Jugendarbeit: Firmvorbereitung, Firm-Orientierungs-Wochenende, Terminpläne für Firmlinge (z. B. Gymnasium, Pfarrei). NICHT Bildungszertifikate (→ bildung-zertifikate), NICHT Kita/Hort (→ familie-kinderbetreuung).",
+      },
+      {
+        slug: "familie-kinderbetreuung",
+        name: "Kinderbetreuung",
+        hint: "Kita, Kindergarten, Hort, Mittagsbetreuung, Tagesmutter: Betreuungsvertrag, Gebühren-/Elternbeitragsbescheid, Jahresbescheinigung. Steuerlich Anlage Kind.",
       },
       {
         slug: "familie-familienleistungen",
         name: "Familienleistungen",
-        hint: "Bescheide und Korrespondenz zu Kindergeld, Kinderzuschlag, Elterngeld und vergleichbaren Familienleistungen, insbesondere von Familienkasse oder Elterngeldstelle. Ein Kindergeldbescheid gehört trotz Formulierungen wie Festsetzung, §70 und EStG NICHT zu finanzen-steuern oder behoerden-steuerbescheid.",
+        hint: "Bescheide und Korrespondenz zu Kindergeld, Kinderzuschlag, Elterngeld und vergleichbaren Familienleistungen, insbesondere von Familienkasse oder Elterngeldstelle. Ein Kindergeldbescheid gehört trotz Formulierungen wie Festsetzung, §70 und EStG NICHT zu finanzen-steuern oder behoerden-steuerbescheid. NICHT Riester-Kinderzulage, NICHT Kita-/Hortgebühren.",
       },
     ],
   },

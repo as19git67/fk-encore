@@ -1260,6 +1260,15 @@ export const documentSenderRuleOverrides = pgTable("document_sender_rule_overrid
   created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// One row per one-time import into document_sender_rule_overrides (migration
+// 0274). The seed copies the built-in SENDER_RULES into the table once, so a
+// rule the household later deletes or edits there is not brought back.
+export const documentSenderRuleImports = pgTable("document_sender_rule_imports", {
+  key: text("key").primaryKey(),
+  rule_count: integer("rule_count").notNull(),
+  imported_at: timestamp("imported_at", { mode: "string" }).notNull().defaultNow(),
+});
+
 // Per-user "Bezugspersonen" — maps a literal name as it appears on
 // documents to a relationship tag (mutter, vater, …). The classify
 // step forwards this list to the LLM so address/recipient matches
