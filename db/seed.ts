@@ -2,7 +2,7 @@ import { hashSync } from "bcryptjs";
 import { eq, and, inArray, notInArray } from "drizzle-orm";
 import * as schema from "./schema";
 import { categoryTaxonomy, flattenTaxonomy } from "../documents/taxonomy";
-import { importBuiltInSenderRules } from "./seed-sender-rules";
+import { importBuiltInCorrespondents, importBuiltInSenderRules } from "./seed-sender-rules";
 import { adminExcludedPermissions, allPermissions, defaultRoles, rolePermissionsMap } from "./role-defaults";
 
 /**
@@ -282,6 +282,9 @@ export async function seed(db: any): Promise<void> {
   //      household's institutions do not belong in the source tree; from
   //      here on document_sender_rule_overrides is where they are kept.
   await importBuiltInSenderRules(db);
+  //      The correspondent registry names the same institutions (folder
+  //      names); it moves into document_correspondent_overrides likewise.
+  await importBuiltInCorrespondents(db);
 
   // --- 7. Initial admin user ---
   const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
