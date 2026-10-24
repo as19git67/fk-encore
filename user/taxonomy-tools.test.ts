@@ -57,6 +57,26 @@ describe("runTool: tool names", () => {
   });
 });
 
+describe("runTool: cloud-teacher-revert", () => {
+  it("passes threshold and ids through to the sidecar", async () => {
+    const calls = stubSidecar();
+    await runTool({ tool: "cloud-teacher-revert", revert_below: 0.65, revert_ids: " 11, 12 ", dry_run: true });
+    expect(calls[0]!.url).toMatch(/\/run\/cloud-teacher-revert$/);
+    expect(calls[0]!.body).toEqual({ dry_run: true, revert_below: 0.65, revert_ids: "11, 12" });
+  });
+
+  it("refuses a run that would select nothing", async () => {
+    stubSidecar();
+    await expect(runTool({ tool: "cloud-teacher-revert", revert_ids: " , " })).rejects.toThrow(/threshold or document ids/);
+  });
+
+  it("refuses ids that are not ids and a threshold outside 0–1", async () => {
+    stubSidecar();
+    await expect(runTool({ tool: "cloud-teacher-revert", revert_ids: "1; drop" })).rejects.toThrow(/revert_ids/);
+    await expect(runTool({ tool: "cloud-teacher-revert", revert_below: 1.5 })).rejects.toThrow(/revert_below/);
+  });
+});
+
 describe("runTool: scoreboard label", () => {
   it("passes the label and the comparison target through", async () => {
     const calls = stubSidecar();

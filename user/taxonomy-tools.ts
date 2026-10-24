@@ -28,7 +28,7 @@ console.log("[boot] user/taxonomy-tools.ts: all imports resolved");
 const SIDECAR_URL =
   process.env.TAXONOMY_TOOLS_SERVICE_URL || "http://taxonomy_tools:8000";
 
-const VALID_TOOLS = ["diagnose", "cloud-audit", "cloud-teacher", "scoreboard"] as const;
+const VALID_TOOLS = ["diagnose", "cloud-audit", "cloud-teacher", "cloud-teacher-revert", "scoreboard"] as const;
 type ToolName = (typeof VALID_TOOLS)[number];
 
 // The sidecar's own /health only knows about its subprocess, so it reports
@@ -45,6 +45,10 @@ const _backgroundAbort = new Map<ToolName, AbortController>();
 // well so a bad value is a 400 from the app rather than a 422 relayed from a
 // service the operator cannot see.
 const LABEL_RE = /^[A-Za-z0-9._-]{1,40}$/;
+
+// cloud-teacher-revert: document ids as typed into the form. Mirrors
+// REVERT_IDS_RE on the sidecar.
+const REVERT_IDS_RE = /^[0-9,\s]{0,4000}$/;
 
 interface RunToolParams {
   tool: string;
@@ -65,6 +69,10 @@ interface RunToolBody {
   // model is currently active before measuring, so the DB reflects that
   // model rather than whichever one classified them last.
   reclassify_reference?: boolean;
+  // cloud-teacher-revert only: take back the latest teacher run's labels
+  // below this confidence, plus these document ids (comma-separated).
+  revert_below?: number;
+  revert_ids?: string;
 }
 
 interface RunToolResponse {
@@ -399,6 +407,22 @@ export const runTool = api(
       body.focus_sections = params.focus_sections;
     if (params.focus_categories !== undefined)
       body.focus_categories = params.focus_categories;
+
+    if (tool === "cloud-teacher-revert") {
+      const below = params.revert_below;
+      if (below !== undefined && !(below > 0 && below <= 1)) {
+        throw APIError.invalidArgument("revert_below must be greater than 0 and at most 1");
+      }
+      const ids = params.revert_ids?.trim() ?? "";
+      if (!REVERT_IDS_RE.test(ids)) {
+        throw APIError.invalidArgument("revert_ids may only contain document ids, commas and spaces");
+      }
+      if (below === undefined && !/[0-9]/.test(ids)) {
+        throw APIError.invalidArgument("give a confidence threshold or document ids to revert");
+      }
+      if (below !== undefined) body.revert_below = below;
+      if (ids) body.revert_ids = ids;
+    }
 
     if (tool === "scoreboard") {
       // Required rather than defaulted: the label is how this measurement is
