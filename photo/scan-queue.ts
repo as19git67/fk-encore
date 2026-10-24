@@ -21,14 +21,14 @@ import { notifyScanQueueChanged } from "./scan-queue-events";
 // landmark jobs — the Grounding-DINO worker has been retired in favour
 // of osm-admin POI detection (Epic #383); the photo_landmarks table has
 // been dropped.
-export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection" | "text_ocr";
+export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection" | "text_ocr" | "face_landmarks";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
 /** Every value of the `scan_service` enum, for runtime validation of
  *  untrusted input (e.g. a `service` query parameter). */
 export const ALL_SCAN_SERVICES: readonly ScanService[] = [
   "embedding", "face_detection", "face_assignment", "landmark",
-  "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr",
+  "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr", "face_landmarks",
 ];
 
 export function isScanService(value: string): value is ScanService {
@@ -40,6 +40,8 @@ export type QueueServiceId = ScanService;
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
   "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr",
+  // Only queued on demand, by the facial-landmark backfill.
+  "face_landmarks",
 ]);
 
 /** Services that run once per user per photo. */
@@ -356,13 +358,13 @@ export async function getQueueStatus(userId: number | null): Promise<QueueStatus
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
-    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail', 'poi_detection', 'text_ocr'))
+    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail', 'poi_detection', 'text_ocr', 'face_landmarks'))
        OR ${faceAssignmentFilter}
     GROUP BY service, status
   `);
 
   const map = new Map<QueueServiceId, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr", "face_landmarks"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 

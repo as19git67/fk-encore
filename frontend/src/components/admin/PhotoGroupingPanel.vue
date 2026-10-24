@@ -11,6 +11,7 @@ import {
   backfillFaceSharpness,
   backfillFaceLandmarks,
   type AiPickWeightsCalibrationResult,
+  type FaceLandmarksBackfillResult,
 } from '../../api/photos'
 import { useScanQueueStatus } from '../../composables/useScanQueueStatus'
 
@@ -117,47 +118,17 @@ async function handleBackfillFaceSharpness() {
 }
 
 // Facial landmarks / eye openness (Etappe 5, documentation/auto-pick-face-relevance.md).
-// Same cursor loop as the sharpness backfill; each batch re-runs the face
-// detector, so it is slower per photo.
-const faceLandmarksProgress = ref<{
-  photos_scanned: number
-  faces_updated: number
-  faces_remeasured: number
-  faces_unmatched: number
-  photos_failed: number
-  remaining_faces: number
-  done: boolean
-} | null>(null)
+// The work runs in the scan queue (service `face_landmarks`); the button only
+// queues it, progress is on Fotos › Einstellungen › Scan-Queue.
+const faceLandmarksResult = ref<FaceLandmarksBackfillResult | null>(null)
 const faceLandmarksLoading = ref(false)
 
 async function handleBackfillFaceLandmarks() {
-  faceLandmarksProgress.value = null
+  faceLandmarksResult.value = null
   aiPickError.value = ''
   faceLandmarksLoading.value = true
-  const totals = {
-    photos_scanned: 0,
-    faces_updated: 0,
-    faces_remeasured: 0,
-    faces_unmatched: 0,
-    photos_failed: 0,
-    remaining_faces: 0,
-    done: false,
-  }
   try {
-    let cursor: number | undefined
-    for (;;) {
-      const batch = await backfillFaceLandmarks(cursor)
-      totals.photos_scanned += batch.photos_scanned
-      totals.faces_updated += batch.faces_updated
-      totals.faces_remeasured += batch.faces_remeasured
-      totals.faces_unmatched += batch.faces_unmatched
-      totals.photos_failed += batch.photos_failed
-      totals.remaining_faces = batch.remaining_faces
-      totals.done = batch.next_photo_id === null
-      faceLandmarksProgress.value = { ...totals }
-      if (batch.next_photo_id === null) break
-      cursor = batch.next_photo_id
-    }
+    faceLandmarksResult.value = await backfillFaceLandmarks()
   } catch (err: any) {
     aiPickError.value = err.message || 'Fehler beim Nachtragen der Gesichtslandmarken'
   } finally {
@@ -287,23 +258,19 @@ function pct(v: number | undefined | null): string {
       @click="handleBackfillFaceSharpness"
     />
 
-    <Message v-if="faceLandmarksProgress" severity="info" :closable="false" class="data-management-group__item">
-      Gesichtslandmarken nachgetragen: {{ faceLandmarksProgress.faces_updated }} Gesichter in
-      {{ faceLandmarksProgress.photos_scanned }} Fotos, aus gespeicherten Punkten nachgerechnet:
-      {{ faceLandmarksProgress.faces_remeasured }}
-      (nicht wiedergefunden: {{ faceLandmarksProgress.faces_unmatched }}, fehlgeschlagen:
-      {{ faceLandmarksProgress.photos_failed }}).
-      <span v-if="!faceLandmarksProgress.done">
-        Noch offen: {{ faceLandmarksProgress.remaining_faces }} Gesichter.
-      </span>
+    <Message v-if="faceLandmarksResult" severity="info" :closable="false" class="data-management-group__item">
+      {{ faceLandmarksResult.photos_enqueued }} Fotos in die Scan-Queue gelegt,
+      {{ faceLandmarksResult.faces_pending }} Gesichter offen. Der Fortschritt steht unter
+      <RouterLink :to="{ name: 'fotos-settings-scan-queue' }">Scan-Queue</RouterLink>
+      („Gesichtslandmarken“).
     </Message>
     <Button class="data-management-group__item"
       icon="pi pi-eye"
       outlined
       label="Gesichtslandmarken nachtragen"
-      v-tooltip.top="'Lässt die Gesichtserkennung über Fotos mit älteren Gesichtern noch einmal laufen und speichert die Gesichtspunkte samt Augenöffnung und Mundform je Gesicht. Gesichter mit schon gespeicherten Punkten werden nur nachgerechnet. Personenzuordnungen bleiben erhalten. Dauert etwa eine Sekunde pro Foto.'"
+      v-tooltip.top="'Lässt die Gesichtserkennung über Fotos mit älteren Gesichtern noch einmal laufen und speichert die Gesichtspunkte samt Augenöffnung und Mundform je Gesicht. Gesichter mit schon gespeicherten Punkten werden nur nachgerechnet. Personenzuordnungen bleiben erhalten. Läuft im Hintergrund in der Scan-Queue, etwa eine Sekunde pro Foto.'"
       :loading="faceLandmarksLoading"
-      :disabled="faceLandmarksLoading || faceSharpnessLoading || dimensionsLoading || aiPickLoading || groupingLoading || isActive"
+      :disabled="faceLandmarksLoading"
       @click="handleBackfillFaceLandmarks"
     />
 

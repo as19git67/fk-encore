@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbInsertReturning } from "../db/adapter";
-import { faces, photos, users } from "../db/schema";
+import { faces, photos, photoScanQueue, users } from "../db/schema";
 import { createUserLogic } from "../user/user.service";
 import { measureFaceEyes, type Point } from "./face-eyes";
-import { backfillFaceLandmarksLogic } from "./photo.service";
+import { backfillPhotoFaceLandmarks, enqueueFaceLandmarksBackfill } from "./photo.service";
 
 /** Synthetic 68-point face in a 400×200 image: open eyes, raised corners. */
 function face68(): Point[] {
@@ -25,11 +25,12 @@ function face68(): Point[] {
   return pts;
 }
 
-describe("backfillFaceLandmarksLogic — re-measuring stored landmarks", () => {
+describe("facial-landmark backfill — queueing and re-measuring", () => {
   let photoId: number;
   const stored = measureFaceEyes({ landmark_3d_68: face68() }, 120, 400, 200);
 
   beforeEach(async () => {
+    await db.delete(photoScanQueue);
     await db.delete(faces);
     await db.delete(photos);
     await db.delete(users);
@@ -57,6 +58,7 @@ describe("backfillFaceLandmarksLogic — re-measuring stored landmarks", () => {
   });
 
   afterAll(async () => {
+    await db.delete(photoScanQueue);
     await db.delete(faces);
     await db.delete(photos);
     await db.delete(users);
@@ -71,19 +73,24 @@ describe("backfillFaceLandmarksLogic — re-measuring stored landmarks", () => {
       eye_aspect_68: stored.eyeAspect68,
     });
 
-    const result = await backfillFaceLandmarksLogic();
-    expect(result.faces_remeasured).toBe(1);
-    expect(result.faces_updated).toBe(0);
-    // The file does not exist, so a detector run would have failed the photo.
-    expect(result.photos_failed).toBe(0);
+    const queued = await enqueueFaceLandmarksBackfill();
+    expect(queued).toEqual({ photos_enqueued: 1, faces_pending: 1 });
+    const jobs = await db.select().from(photoScanQueue).where(eq(photoScanQueue.photo_id, photoId));
+    expect(jobs.map((j) => [j.service, j.status, j.user_id])).toEqual([["face_landmarks", "pending", null]]);
+    // Pressing the button again while the job waits queues nothing twice.
+    expect((await enqueueFaceLandmarksBackfill()).photos_enqueued).toBe(0);
+
+    // The file does not exist, so a detector run would throw.
+    const result = await backfillPhotoFaceLandmarks(photoId);
+    expect(result).toEqual({ faces_updated: 0, faces_remeasured: 1, faces_unmatched: 0 });
 
     const [row] = await db.select().from(faces).where(eq(faces.photo_id, photoId));
     expect(row!.mouth_lift_68).toBeCloseTo(stored.mouth68!.lift, 3);
     expect(row!.mouth_width_68).toBeCloseTo(stored.mouth68!.width, 3);
     expect(row!.eye_aspect_68).toBeCloseTo(stored.eyeAspect68!, 3);
 
-    const second = await backfillFaceLandmarksLogic();
-    expect(second.photos_scanned).toBe(0);
+    await db.delete(photoScanQueue);
+    expect(await enqueueFaceLandmarksBackfill()).toEqual({ photos_enqueued: 0, faces_pending: 0 });
   });
 
   it("leaves faces below the size limit out, so they are not revisited forever", async () => {
@@ -95,7 +102,17 @@ describe("backfillFaceLandmarksLogic — re-measuring stored landmarks", () => {
       landmarks: JSON.stringify(stored.landmarks),
     });
 
-    const result = await backfillFaceLandmarksLogic();
-    expect(result.photos_scanned).toBe(0);
+    expect(await enqueueFaceLandmarksBackfill()).toEqual({ photos_enqueued: 0, faces_pending: 0 });
+  });
+
+  it("queues faces without landmarks, and fails the job when the file is missing", async () => {
+    await db.insert(faces).values({
+      photo_id: photoId,
+      bbox: JSON.stringify({ x: 0.1, y: 0.2, width: 0.3, height: 0.6 }),
+      embedding: JSON.stringify([]),
+    });
+
+    expect(await enqueueFaceLandmarksBackfill()).toEqual({ photos_enqueued: 1, faces_pending: 1 });
+    await expect(backfillPhotoFaceLandmarks(photoId)).rejects.toThrow();
   });
 });
