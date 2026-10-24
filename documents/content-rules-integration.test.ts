@@ -1,15 +1,16 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
-// The classifier returns the sender + category a real Heidelberger Riester
-// status report would get WRONG: sender "Heidelberger Lebensversicherung AG"
-// (which the sender rule forces to altersvorsorge-lebensversicherung) while the
-// text carries an unambiguous Riester marker. The content rule must win.
+// The classifier returns the sender + category a Riester status report from a
+// life insurer would get WRONG: sender "Beispiel Lebensversicherung AG" (which
+// the household's sender rule forces to altersvorsorge-lebensversicherung)
+// while the text carries an unambiguous Riester marker. The content rule must
+// win.
 const AI = {
   category_slug: "altersvorsorge-lebensversicherung",
-  title: "Statusreport Heidelberger Lebensversicherung",
+  title: "Statusreport Beispiel Lebensversicherung",
   doc_date: "2024-06-01",
-  sender: "Heidelberger Lebensversicherung AG",
+  sender: "Beispiel Lebensversicherung AG",
   document_number: null as string | null,
   summary: "Statusreport",
   confidence: 0.95,
@@ -31,14 +32,15 @@ vi.mock("~encore/clients", () => ({
 }));
 
 import db from "../db/database";
-import { documentCategories, documents } from "../db/schema";
+import { documentCategories, documentSenderRuleOverrides, documents } from "../db/schema";
 import { runClassify } from "./document-ops";
+import { invalidateSenderRuleOverridesCache } from "./sender-rule-overrides";
 
 const USER_ID = 990300;
 const DOC_ID = 990390;
 
 const RIESTER_TEXT =
-  "MLP balanced invest — staatlich geförderte Riester-Rentenversicherung. " +
+  "Beispielfonds balanced — staatlich geförderte Riester-Rentenversicherung. " +
   "Zulagenbescheinigung nach § 92 EStG mit Grundzulage und Kinderzulage.";
 
 async function ensureUser(id: number): Promise<void> {
@@ -75,6 +77,9 @@ async function readCatSlug(): Promise<string | null> {
   return c?.slug ?? null;
 }
 
+// The household's sender rule for the insurer (fictional).
+const SENDER_PATTERN = "beispiellebensversicherung";
+
 let lebenId: number;
 let rentenId: number;
 
@@ -82,10 +87,22 @@ beforeEach(async () => {
   await ensureUser(USER_ID);
   lebenId = await categoryId("altersvorsorge-lebensversicherung", "Kapital-Lebensversicherung");
   rentenId = await categoryId("altersvorsorge-rentenversicherung", "Private Rentenversicherung");
+  await db.delete(documentSenderRuleOverrides).where(eq(documentSenderRuleOverrides.sender_pattern, SENDER_PATTERN));
+  await db.insert(documentSenderRuleOverrides).values({
+    note: "Beispiel Lebensversicherung → Kapital-Lebensversicherung",
+    sender_pattern: SENDER_PATTERN,
+    category: "altersvorsorge-lebensversicherung",
+  });
+  invalidateSenderRuleOverridesCache();
+});
+
+afterEach(async () => {
+  await db.delete(documentSenderRuleOverrides).where(eq(documentSenderRuleOverrides.sender_pattern, SENDER_PATTERN));
+  invalidateSenderRuleOverridesCache();
 });
 
 describe("runClassify — content rule beats the sender rule", () => {
-  it("routes a Heidelberger Riester report to Rentenversicherung, not the sender-rule Lebensversicherung", async () => {
+  it("routes a Riester report to Rentenversicherung, not the sender-rule Lebensversicherung", async () => {
     await seedDoc(RIESTER_TEXT);
     await runClassify(DOC_ID);
     expect(await readCatSlug()).toBe("altersvorsorge-rentenversicherung");

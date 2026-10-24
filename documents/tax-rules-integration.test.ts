@@ -9,7 +9,7 @@ const AI = {
   category_slug: "altersvorsorge-rentenversicherung",
   title: "Mitteilung zur Rentenversicherung",
   doc_date: "2024-06-01",
-  sender: "Heidelberger Lebensversicherung AG",
+  sender: "Beispiel Lebensversicherung AG",
   document_number: null as string | null,
   summary: "Mitteilung",
   confidence: 0.95,

@@ -200,7 +200,7 @@ async function relocateDocumentLocked(documentId: number): Promise<string> {
   // the document list can filter/group by it. Written up-front — independent of
   // whether the file ends up moving — so the backfill records the correspondent
   // even for a row whose file is temporarily missing, and so classification
-  // metadata isn't tied to filesystem state. Overrides win over the registry.
+  // metadata isn't tied to filesystem state.
   const overrides = await loadCorrespondentOverrides();
   const corr = resolveCorrespondent(row.sender, overrides);
   if (

@@ -987,7 +987,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // Deterministic CONTENT routing (see content-rules in sender-rules.ts): a
   // document-type keyword (Riester/§92, Kfz-Kasko, Wohngebäude) the small model
   // and the sender-keyed rules can't disambiguate. Highest precedence because
-  // it resolves same-sender ambiguity — e.g. Heidelberger issues both a
+  // it resolves same-sender ambiguity — e.g. a life insurer issues both a
   // Kapital-Lebensversicherung AND a Riester Rentenversicherung, and the sender
   // rule would force the former.
   // The own Einkommensteuererklärung names Riester and Basisrente in its

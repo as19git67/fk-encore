@@ -1246,7 +1246,7 @@ export const documentCorrespondentOverrides = pgTable("document_correspondent_ov
 // Household-global sender → category rule overrides (migration 0141). Lets a
 // user pin household-specific senders (employer, parish, …) to a taxonomy
 // category without hard-coding those institution names in the public source
-// tree. Evaluated before the built-in SENDER_RULES; see
+// tree. The only source of sender rules; see
 // documents/sender-rule-overrides.ts and documents/sender-rules.ts.
 export const documentSenderRuleOverrides = pgTable("document_sender_rule_overrides", {
   id: serial("id").primaryKey(),
@@ -1260,9 +1260,9 @@ export const documentSenderRuleOverrides = pgTable("document_sender_rule_overrid
   created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
-// One row per one-time import into document_sender_rule_overrides (migration
-// 0274). The seed copies the built-in SENDER_RULES into the table once, so a
-// rule the household later deletes or edits there is not brought back.
+// One row per one-time import (migration 0274). The seed once copied the
+// former built-in sender rules and correspondents into the override tables;
+// the import code is gone, the rows stay as a record of when it ran.
 export const documentSenderRuleImports = pgTable("document_sender_rule_imports", {
   key: text("key").primaryKey(),
   rule_count: integer("rule_count").notNull(),

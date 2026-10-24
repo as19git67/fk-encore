@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  CORRESPONDENT_REGISTRY,
   PRODUCT_RULES,
   buildCorrespondentFolderSlug,
   extractContractAnchor,
@@ -8,6 +7,16 @@ import {
   resolveProductSlug,
   type CorrespondentOverride,
 } from "./correspondent";
+
+// The household's correspondents live in document_correspondent_overrides;
+// fictional example data in the same shape.
+const KNOWN: CorrespondentOverride[] = [
+  { pattern: "musterversicherung", slug: "musterversicherung", display: "Musterversicherung" },
+  { pattern: "beispielbank", slug: "beispielbank", display: "Beispielbank" },
+  { pattern: "musterbankbanking", slug: "musterbank", display: "Musterbank" },
+  { pattern: "musterbanklebensversicherung", slug: "musterbank", display: "Musterbank" },
+  { pattern: "prüfstellesüd", slug: "pruefstelle-sued", display: "Prüfstelle Süd" },
+];
 
 describe("resolveCorrespondent", () => {
   it("returns null for empty, null or whitespace-only senders", () => {
@@ -23,60 +32,50 @@ describe("resolveCorrespondent", () => {
   });
 
   it("resolves a known institution to its canonical identity", () => {
-    expect(resolveCorrespondent("Janitos")).toEqual({
-      slug: "janitos",
-      display: "Janitos",
+    expect(resolveCorrespondent("Musterversicherung", KNOWN)).toEqual({
+      slug: "musterversicherung",
+      display: "Musterversicherung",
     });
   });
 
-  it("matches a registry entry even with surrounding legal-form noise", () => {
-    expect(resolveCorrespondent("Janitos Versicherung AG")).toEqual({
-      slug: "janitos",
-      display: "Janitos",
+  it("matches an override even with surrounding legal-form noise", () => {
+    expect(resolveCorrespondent("Musterversicherung Sach AG", KNOWN)).toEqual({
+      slug: "musterversicherung",
+      display: "Musterversicherung",
     });
   });
 
   it("collapses raw-sender variants of the same institution onto one slug", () => {
-    const a = resolveCorrespondent("Janitos");
-    const b = resolveCorrespondent("Janitos Versicherung AG");
-    const c = resolveCorrespondent("JANITOS  Versicherung");
-    expect(a?.slug).toBe("janitos");
-    expect(b?.slug).toBe("janitos");
-    expect(c?.slug).toBe("janitos");
+    const a = resolveCorrespondent("Musterversicherung", KNOWN);
+    const b = resolveCorrespondent("Musterversicherung Sach AG", KNOWN);
+    const c = resolveCorrespondent("MUSTERVERSICHERUNG  Sach", KNOWN);
+    expect(a?.slug).toBe("musterversicherung");
+    expect(b?.slug).toBe("musterversicherung");
+    expect(c?.slug).toBe("musterversicherung");
   });
 
-  it("is case- and punctuation-insensitive for registry matches", () => {
-    expect(resolveCorrespondent("comdirect Bank")?.slug).toBe("comdirect");
-    expect(resolveCorrespondent("COMDIRECT")?.slug).toBe("comdirect");
+  it("is case- and punctuation-insensitive", () => {
+    expect(resolveCorrespondent("beispielbank AG", KNOWN)?.slug).toBe("beispielbank");
+    expect(resolveCorrespondent("BEISPIEL-BANK", KNOWN)?.slug).toBe("beispielbank");
   });
 
-  it("folds umlauts when matching a registry fragment", () => {
-    // "TÜV SÜD" normalises to "tüvsüd", which is the registered fragment.
-    expect(resolveCorrespondent("TÜV SÜD Auto Service GmbH")).toEqual({
-      slug: "tuev-sued",
-      display: "TÜV SÜD",
+  it("folds umlauts when matching a fragment", () => {
+    expect(resolveCorrespondent("Prüfstelle SÜD Auto Service GmbH", KNOWN)).toEqual({
+      slug: "pruefstelle-sued",
+      display: "Prüfstelle Süd",
     });
   });
 
-  it("unifies household-specific senders (e.g. the employer) via DB-backed overrides", () => {
-    // The employer, parish, etc. are NOT hard-coded in the built-in registry
-    // — they're configured as DB-backed correspondent overrides (migration
-    // 0131, see correspondent-overrides.ts) and passed in here.
-    const employerOverrides: CorrespondentOverride[] = [
-      { pattern: "contoso", slug: "arbeitgeber", display: "Arbeitgeber" },
-      { pattern: "ctso", slug: "arbeitgeber", display: "Arbeitgeber" },
-    ];
-    expect(resolveCorrespondent("Contoso Software GmbH", employerOverrides)?.slug).toBe("arbeitgeber");
-    expect(resolveCorrespondent("CTSO", employerOverrides)?.slug).toBe("arbeitgeber");
-    // Without overrides, the built-in registry has no opinion.
-    expect(resolveCorrespondent("Contoso Software GmbH")).not.toEqual(
-      expect.objectContaining({ slug: "arbeitgeber" }),
-    );
+  it("unifies several fragments of one institution", () => {
+    expect(resolveCorrespondent("Musterbank Banking AG", KNOWN)?.slug).toBe("musterbank");
+    expect(resolveCorrespondent("Musterbank Lebensversicherung AG", KNOWN)?.slug).toBe("musterbank");
   });
 
-  it("unifies MLP bank and MLP life-insurance senders", () => {
-    expect(resolveCorrespondent("MLP Banking AG")?.slug).toBe("mlp");
-    expect(resolveCorrespondent("MLP Lebensversicherung AG")?.slug).toBe("mlp");
+  it("knows no institution without overrides: the code ships none", () => {
+    expect(resolveCorrespondent("Musterversicherung Sach AG")).toEqual({
+      slug: "musterversicherung-sach-ag",
+      display: "Musterversicherung Sach AG",
+    });
   });
 
   it("falls back to a slugified sender for unknown institutions", () => {
@@ -100,14 +99,6 @@ describe("resolveCorrespondent", () => {
     expect(out!.slug.length).toBeLessThanOrEqual(40);
   });
 
-  it("lets a user override win over the built-in registry", () => {
-    const overrides = [{ pattern: "janitos", slug: "versicherung-x", display: "Versicherung X" }];
-    expect(resolveCorrespondent("Janitos Versicherung AG", overrides)).toEqual({
-      slug: "versicherung-x",
-      display: "Versicherung X",
-    });
-  });
-
   it("prefers the longest matching override regardless of database order", () => {
     const broadFirst = [
       { pattern: "post", slug: "post-allgemein", display: "Post allgemein" },
@@ -129,42 +120,19 @@ describe("resolveCorrespondent", () => {
     expect(resolveCorrespondent("Stadtwerke", [...overrides].reverse())?.slug).toBe("stadt");
   });
 
-  it("falls back to the registry when no override pattern matches", () => {
-    const overrides = [{ pattern: "allianz", slug: "allianz", display: "Allianz" }];
-    expect(resolveCorrespondent("Janitos", overrides)?.slug).toBe("janitos");
+  it("falls back to the slugified sender when no override pattern matches", () => {
+    const overrides = [{ pattern: "andereversicherung", slug: "andere", display: "Andere" }];
+    expect(resolveCorrespondent("Musterversicherung", overrides)?.slug).toBe("musterversicherung");
   });
 
   it("threads overrides through buildCorrespondentFolderSlug", () => {
-    const overrides = [{ pattern: "janitos", slug: "versicherung-x", display: "Versicherung X" }];
+    const overrides = [{ pattern: "musterversicherung", slug: "versicherung-x", display: "Versicherung X" }];
     expect(
       buildCorrespondentFolderSlug(
-        { sender: "Janitos", title: "Hausratversicherung", tags: [] },
+        { sender: "Musterversicherung", title: "Hausratversicherung", tags: [] },
         overrides,
       ),
     ).toBe("versicherung-x-hausrat");
-  });
-});
-
-describe("CORRESPONDENT_REGISTRY", () => {
-  it("has only lower-case, filesystem-safe slugs", () => {
-    for (const entry of CORRESPONDENT_REGISTRY) {
-      expect(entry.slug).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-    }
-  });
-
-  it("has only pre-normalised fragments (no upper-case, spaces or punctuation)", () => {
-    for (const entry of CORRESPONDENT_REGISTRY) {
-      for (const frag of entry.fragments) {
-        expect(frag).toMatch(/^[a-z0-9äöüß]+$/);
-      }
-    }
-  });
-
-  it("has non-empty fragments and display for every entry", () => {
-    for (const entry of CORRESPONDENT_REGISTRY) {
-      expect(entry.fragments.length).toBeGreaterThan(0);
-      expect(entry.display.length).toBeGreaterThan(0);
-    }
   });
 });
 
@@ -217,45 +185,45 @@ describe("buildCorrespondentFolderSlug", () => {
   it("combines sender, product and contract anchor", () => {
     expect(
       buildCorrespondentFolderSlug({
-        sender: "Janitos Versicherung AG",
+        sender: "Musterversicherung AG",
         title: "Privathaftpflichtversicherung 2024",
         tags: ["versicherungsnr:4711884", "kundennr:99"],
       }),
-    ).toBe("janitos-privathaftpflicht-4711884");
+    ).toBe("musterversicherung-ag-privathaftpflicht-4711884");
   });
 
   it("omits the contract anchor when no contract tag is present", () => {
     expect(
       buildCorrespondentFolderSlug({
-        sender: "Janitos",
+        sender: "Musterversicherung",
         title: "Hausratversicherung",
         tags: [],
       }),
-    ).toBe("janitos-hausrat");
+    ).toBe("musterversicherung-hausrat");
   });
 
   it("falls back to sender-only when neither product nor contract is known", () => {
     expect(
       buildCorrespondentFolderSlug({
-        sender: "comdirect",
+        sender: "Beispielbank",
         title: "Depotauszug",
       }),
-    ).toBe("comdirect");
+    ).toBe("beispielbank");
   });
 
   it("separates two same-Sparte contracts from the same provider by anchor", () => {
     const a = buildCorrespondentFolderSlug({
-      sender: "Janitos",
+      sender: "Musterversicherung",
       title: "Privathaftpflichtversicherung",
       tags: ["versicherungsnr:111"],
     });
     const b = buildCorrespondentFolderSlug({
-      sender: "Janitos",
+      sender: "Musterversicherung",
       title: "Privathaftpflichtversicherung",
       tags: ["versicherungsnr:222"],
     });
-    expect(a).toBe("janitos-privathaftpflicht-111");
-    expect(b).toBe("janitos-privathaftpflicht-222");
+    expect(a).toBe("musterversicherung-privathaftpflicht-111");
+    expect(b).toBe("musterversicherung-privathaftpflicht-222");
     expect(a).not.toBe(b);
   });
 
