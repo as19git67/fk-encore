@@ -7,9 +7,10 @@
  * show, each row opens its object, and `route` opens the list page with the
  * same filters ("In der Liste öffnen").
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ResultBlock } from '../../api/assistant'
 import { getThumbUrl } from '../../api/gallery'
+import { getPhotoDetailsBatch } from '../../api/photos'
 import { anchorKey, saveListAnchor } from '../../utils/listAnchor'
 import { PHOTO_IDS_QUERY_KEY, pinnedPhotoIdsQuery } from '../../utils/photoIdsQuery'
 import Button from 'primevue/button'
@@ -33,7 +34,13 @@ const props = withDefaults(defineProps<{
    * to — the same document can be listed in two blocks of one answer.
    */
   anchorScope?: string
-}>(), { limit: 8, folded: false, anchorScope: undefined })
+  /**
+   * Photos the answer picked by id ("das beste Foto ist Bild 123"). A photo
+   * list shows these instead of the hits it searched through; "Alle Treffer"
+   * shows the rest behind them.
+   */
+  picked?: number[]
+}>(), { limit: 8, folded: false, anchorScope: undefined, picked: () => [] })
 
 const open = ref(!props.folded)
 
@@ -41,7 +48,8 @@ const open = ref(!props.folded)
  * A photo opens in the gallery with the answer's photos as the grid, so
  * previous/next in the viewer move through the answer, not the library.
  */
-const photoSetQuery = computed(() => pinnedPhotoIdsQuery(props.block.rows.map((r) => num(r.id)).filter((id) => id > 0)))
+const photoSetQuery = computed(() => pinnedPhotoIdsQuery(
+  [...new Set([...props.picked, ...props.block.rows.map((r) => num(r.id))])].filter((id) => id > 0)))
 
 /** The marker a row carries so `PageLayout` finds it again on the way back. */
 function anchorFor(r: Row): string | undefined {
@@ -118,11 +126,47 @@ function sentimentClass(v: unknown): string {
   return n < -0.2 ? 'amount amount--out' : n > 0.2 ? 'amount amount--in' : 'amount'
 }
 
-const title = computed(() => TITLES[props.block.kind] ?? 'Ergebnis')
+/**
+ * The picked photos as rows. The block holds only the first hits of the
+ * search, so a pick beyond them is loaded by id; one the user may not see
+ * (or that no longer exists) is left out.
+ */
+const pickedRows = ref<Row[]>([])
+watch(() => (props.block.kind === 'photos' ? props.picked : []), async (ids) => {
+  const inBlock = new Map(props.block.rows.map((r) => [num(r.id), r]))
+  const missing = ids.filter((id) => !inBlock.has(id))
+  const loaded = new Map<number, Row>()
+  if (missing.length) {
+    try {
+      const { photos } = await getPhotoDetailsBatch(missing)
+      for (const p of photos) loaded.set(p.id, { id: p.id, filename: p.filename, taken_at: p.taken_at ?? null })
+    } catch {
+      // Without its thumbnail the pick is still linked in the answer.
+    }
+  }
+  pickedRows.value = ids.flatMap((id) => {
+    const r = inBlock.get(id) ?? loaded.get(id)
+    return r ? [r] : []
+  })
+}, { immediate: true })
+const pickedIds = computed(() => new Set(pickedRows.value.map((r) => num(r.id))))
+const allHits = ref(false)
+/** Only the picks are shown; "Alle Treffer" opens the rest. */
+const picksOnly = computed(() => pickedRows.value.length > 0 && !allHits.value)
+
+const title = computed(() => (picksOnly.value
+  ? pickedRows.value.length === 1 ? 'Ausgewähltes Foto' : 'Ausgewählte Fotos'
+  : TITLES[props.block.kind] ?? 'Ergebnis'))
 const cap = computed(() => (props.block.kind === 'photos' ? Math.max(props.limit, 12) : props.limit))
-const shown = computed<Row[]>(() => props.block.rows.slice(0, cap.value))
+const shown = computed<Row[]>(() => {
+  if (picksOnly.value) return pickedRows.value
+  if (!pickedRows.value.length) return props.block.rows.slice(0, cap.value)
+  // The picks lead, the hits follow without repeating them.
+  const rest = props.block.rows.filter((r) => !pickedIds.value.has(num(r.id)))
+  return [...pickedRows.value, ...rest].slice(0, Math.max(cap.value, pickedRows.value.length))
+})
 const total = computed(() => props.block.total ?? props.block.rows.length)
-const more = computed(() => Math.max(0, total.value - shown.value.length))
+const more = computed(() => (picksOnly.value ? 0 : Math.max(0, total.value - shown.value.length)))
 
 function str(v: unknown): string {
   return v === null || v === undefined ? '' : String(v)
@@ -205,7 +249,8 @@ const analysisGroups = computed(() =>
         <span v-if="block.subtitle" class="block-subtitle">{{ block.subtitle }}</span>
       </span>
       <span class="block-head-end">
-        <span v-if="block.kind !== 'analysis'" class="block-count">{{ total }}</span>
+        <span v-if="picksOnly" class="block-count">aus {{ total }} Treffern</span>
+        <span v-else-if="block.kind !== 'analysis'" class="block-count">{{ total }}</span>
         <Button
           v-if="folded"
           :icon="open ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
@@ -282,14 +327,14 @@ const analysisGroups = computed(() =>
     </ul>
 
     <!-- Photos -->
-    <ul v-else-if="block.kind === 'photos'" class="photos">
+    <ul v-else-if="block.kind === 'photos'" :class="['photos', { 'photos--picks': picksOnly }]">
       <li v-for="r in shown" :key="str(r.id)">
         <RouterLink
-          class="photo scroll-anchor"
+          :class="['photo', 'scroll-anchor', { 'photo--picked': !picksOnly && pickedIds.has(num(r.id)) }]"
           :to="{ name: 'fotos-gallery', query: { photoId: str(r.id), [PHOTO_IDS_QUERY_KEY]: photoSetQuery } }"
           :data-anchor="anchorFor(r)"
           @click="remember(r)"
-          :aria-label="`Foto ${date(r.taken_at) || str(r.id)} öffnen`"
+          :aria-label="`${pickedIds.has(num(r.id)) ? 'Ausgewähltes Foto' : 'Foto'} ${date(r.taken_at) || str(r.id)} öffnen`"
         >
           <img v-if="r.filename" :src="getThumbUrl(str(r.filename), 240)" alt="" loading="lazy" />
           <i v-else class="pi pi-image" aria-hidden="true" />
@@ -505,7 +550,15 @@ const analysisGroups = computed(() =>
 
     </template>
 
-    <footer v-if="open && (more > 0 || block.route)" class="block-foot">
+    <footer v-if="open && (more > 0 || block.route || pickedRows.length)" class="block-foot">
+      <Button
+        v-if="pickedRows.length"
+        :label="allHits ? 'Nur die Auswahl' : `Alle ${total} Treffer`"
+        text
+        size="small"
+        :aria-expanded="allHits"
+        @click="allHits = !allHits"
+      />
       <span v-if="more > 0" class="row-sub">{{ more }} weitere</span>
       <RouterLink v-if="block.route" class="open-list" :to="block.route">
         <i class="pi pi-external-link" aria-hidden="true" />
@@ -698,6 +751,25 @@ a.row:focus-visible,
   background: var(--p-content-hover-background);
   color: var(--p-text-muted-color);
   outline-offset: var(--focus-ring-offset-inset);
+}
+
+/* The picks are what the answer is about: larger than the hits. */
+.photos--picks {
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+}
+
+/* Among all hits the picks keep a frame, drawn over the thumbnail. */
+.photo--picked {
+  position: relative;
+}
+
+.photo--picked::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 3px var(--p-primary-color);
+  pointer-events: none;
 }
 
 .photo img {

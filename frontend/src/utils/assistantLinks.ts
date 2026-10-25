@@ -147,3 +147,21 @@ export function linkEntities(text: string): LinkedText[] {
     return runs
   }
 }
+
+/**
+ * The ids of one kind an answer links to, in the order it names them: the
+ * photo it picked as "das beste", the documents it settled on. The list
+ * under the answer shows these first — the hits of the search are what the
+ * model looked through, not what it answered.
+ */
+export function mentionedIds(text: string, kind: EntityKind): number[] {
+  const prefix = entityPath(kind, '')
+  const ids: number[] = []
+  for (const run of linkEntities(text)) {
+    if (!run.to?.startsWith(prefix)) continue
+    const m = /^(\d+)(?:[&#/]|$)/u.exec(run.to.slice(prefix.length))
+    const id = m ? Number(m[1]) : NaN
+    if (Number.isSafeInteger(id) && id > 0 && !ids.includes(id)) ids.push(id)
+  }
+  return ids
+}
