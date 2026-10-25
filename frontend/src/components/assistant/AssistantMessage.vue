@@ -8,6 +8,7 @@ import Button from 'primevue/button'
 import type { Proposal, ResultBlock } from '../../api/assistant'
 import type { TurnStep } from '../../utils/assistantTurn'
 import { parseBlocks } from '../../utils/assistantMarkdown'
+import { mentionedIds } from '../../utils/assistantLinks'
 import ScrollX from '../layout/ScrollX.vue'
 import AssistantBlock from './AssistantBlock.vue'
 import AssistantInlines from './AssistantInlines.vue'
@@ -90,6 +91,11 @@ const lastOfFamily = computed(() => {
   shownBlocks.value.forEach((b, i) => last.set(family(b.kind), i))
   return last
 })
+// The photos the answer names ("das beste Foto ist Bild 123") are what the
+// reader asked for; the last photo list shows them instead of the first
+// hits of the search, which need not contain them at all.
+const pickedPhotoIds = computed(() => (props.role === 'assistant' && !props.pending ? mentionedIds(props.content, 'photo') : []))
+
 function isFolded(i: number): boolean {
   const b = shownBlocks.value[i]
   return b !== undefined && b.kind !== 'analysis' && lastOfFamily.value.get(family(b.kind)) !== i
@@ -192,6 +198,7 @@ function isFolded(i: number): boolean {
           v-if="b.kind !== 'proposal'"
           :block="b"
           :folded="isFolded(i)"
+          :picked="b.kind === 'photos' && !isFolded(i) ? pickedPhotoIds : undefined"
           :anchor-scope="messageId !== undefined ? `m${messageId}-${i}` : undefined"
         />
       </template>

@@ -6,6 +6,8 @@ import type { ResultBlock } from '../../api/assistant'
 
 vi.mock('../DocumentThumbnail.vue', () => ({ default: defineComponent({ render: () => h('span') }) }))
 vi.mock('../../api/gallery', () => ({ getThumbUrl: (name: string) => `/thumb/${name}` }))
+const getPhotoDetailsBatch = vi.hoisted(() => vi.fn())
+vi.mock('../../api/photos', () => ({ getPhotoDetailsBatch }))
 
 // A RouterLink that renders an anchor: the row's attributes and click land
 // on it like on the real link.
@@ -32,6 +34,7 @@ function mount(blocks: ResultBlock[], messageId?: number, content = 'Antwort'): 
 }
 
 beforeEach(() => {
+  getPhotoDetailsBatch.mockReset()
   document.body.innerHTML = ''
   sessionStorage.clear()
 })
@@ -104,6 +107,44 @@ describe('AssistantMessage photos', () => {
     expect(links).toHaveLength(3)
     expect(JSON.parse(links[1]!.dataset.to!)).toEqual({ name: 'fotos-gallery', query: { photoId: '9', ids: '3,9,27' } })
     expect(links[1]!.dataset.anchor).toBe('photos@m5-0:9')
+  })
+})
+
+describe('AssistantMessage picked photos', () => {
+  const hits = { kind: 'photos', tool: 'list_photos', total: 500, rows: [{ id: 3, filename: 'a.jpg' }, { id: 9, filename: 'b.jpg' }, { id: 27, filename: 'c.jpg' }] } as ResultBlock
+  const thumbs = (el: HTMLElement) => [...el.querySelectorAll<HTMLImageElement>('a.photo img')].map((i) => i.getAttribute('src'))
+
+  it('shows the photo the answer picked instead of the hits, the hits one click away', async () => {
+    const el = mount([hits], 5, 'Das beste Foto ist das Bild mit der ID 9.')
+    await nextTick()
+    expect(el.querySelector('.block-title')?.textContent).toBe('Ausgewähltes Foto')
+    expect(el.querySelector('.block-count')?.textContent).toBe('aus 500 Treffern')
+    expect(thumbs(el)).toEqual(['/thumb/b.jpg'])
+    expect(getPhotoDetailsBatch).not.toHaveBeenCalled()
+
+    const all = [...el.querySelectorAll<HTMLButtonElement>('.block-foot button')].find((b) => b.textContent?.includes('Alle 500 Treffer'))!
+    all.click()
+    await nextTick()
+    expect(thumbs(el)).toEqual(['/thumb/b.jpg', '/thumb/a.jpg', '/thumb/c.jpg'])
+    expect(el.querySelector('a.photo--picked img')?.getAttribute('src')).toBe('/thumb/b.jpg')
+    expect(el.textContent).toContain('497 weitere')
+  })
+
+  it('loads a picked photo that is not among the first hits', async () => {
+    getPhotoDetailsBatch.mockResolvedValueOnce({ photos: [{ id: 42, filename: 'z.jpg', taken_at: '2020-01-01T10:00:00Z' }] })
+    const el = mount([hits], 5, 'Am schönsten sind Foto 42 und Foto 3.')
+    await vi.waitFor(() => expect(thumbs(el)).toEqual(['/thumb/z.jpg', '/thumb/a.jpg']))
+    expect(getPhotoDetailsBatch).toHaveBeenCalledWith([42])
+    expect(el.querySelector('.block-title')?.textContent).toBe('Ausgewählte Fotos')
+    const link = el.querySelector<HTMLElement>('a.photo')!
+    expect(JSON.parse(link.dataset.to!).query.ids).toBe('42,3,9,27')
+  })
+
+  it('keeps the hits when the answer names no photo', async () => {
+    const el = mount([hits], 5, 'Hier sind die Treffer.')
+    await nextTick()
+    expect(thumbs(el)).toEqual(['/thumb/a.jpg', '/thumb/b.jpg', '/thumb/c.jpg'])
+    expect(el.querySelector('.block-title')?.textContent).toBe('Fotos')
   })
 })
 

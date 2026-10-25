@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { linkEntities } from './assistantLinks'
+import { linkEntities, mentionedIds } from './assistantLinks'
 
 describe('linkEntities', () => {
   it('links "Dokument mit der ID …" as one mention', () => {
@@ -71,5 +71,14 @@ describe('linkEntities', () => {
       { text: 'die Rechnung', to: '/dokumente/7' },
       { text: ' oder [hier](https://example.test).' },
     ])
+  })
+})
+
+describe('mentionedIds', () => {
+  it('collects the ids of one kind in the order the answer names them', () => {
+    const text = 'Am besten ist **Foto 12**, danach [das hier](/fotos/galerie?photoId=7&ids=1) und Bilder mit den IDs 5 und 12; dazu Dokument 99.'
+    expect(mentionedIds(text, 'photo')).toEqual([12, 7, 5])
+    expect(mentionedIds(text, 'document')).toEqual([99])
+    expect(mentionedIds('Im Jahr 2020 gab es 300 Fotos.', 'photo')).toEqual([])
   })
 })
