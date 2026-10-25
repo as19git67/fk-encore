@@ -361,7 +361,7 @@ describe("applyKirchensteuerBescheidYearTaxRule", () => {
 
 
 describe("applySecuritiesSettlementTaxRule", () => {
-  // Synthetischer Nachbau einer comdirect-Dividendenabrechnung (keine echten
+  // Synthetischer Nachbau einer Dividendenabrechnung (keine echten
   // personenbezogenen Daten).
   const DIVIDEND_TEXT = `Steuerliche Behandlung: Ausländische Dividende vom 13.08.2026
 Stk. 160 MUSTER INC., WKN / ISIN: 000000 / US0000000000

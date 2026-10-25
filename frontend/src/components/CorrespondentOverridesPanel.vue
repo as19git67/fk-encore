@@ -80,8 +80,8 @@ onMounted(load)
     </p>
 
     <div class="add-row">
-      <InputText v-model="pattern" placeholder="Absender-Muster (z. B. janitos)" />
-      <InputText v-model="display" placeholder="Korrespondent (z. B. Janitos)" />
+      <InputText v-model="pattern" placeholder="Absender-Muster (z. B. musterversicherung)" />
+      <InputText v-model="display" placeholder="Korrespondent (z. B. Musterversicherung)" />
       <Button label="Hinzufügen" icon="pi pi-plus" :loading="saving" @click="add" />
     </div>
 

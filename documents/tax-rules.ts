@@ -322,7 +322,7 @@ export function applyKirchensteuerBescheidYearTaxRule(input: {
  *    bescheinigung zusammen. Genau wie bei den monatlichen Gehaltsabrechnungen
  *    (nur die Lohnsteuerbescheinigung zählt) ist die laufende Depotpost damit
  *    nicht steuerrelevant → `tax_sections = []`, `tax_relevant = false`.
- *    Die comdirect druckt das sogar selbst auf den Beleg: "KEINE
+ *    Manche Bank druckt das sogar selbst auf den Beleg: "KEINE
  *    STEUERBESCHEINIGUNG".
  * 2. JAHRESBESCHEINIGUNG (Jahressteuerbescheinigung, Steuerbescheinigung,
  *    Verlustbescheinigung). Das ist der eigentliche Steuerbeleg → `beleg`,
@@ -337,7 +337,7 @@ export function applyKirchensteuerBescheidYearTaxRule(input: {
  *
  * Das kleine Modell macht bei beiden dieselben Fehler: es hält jede
  * Dividendenabrechnung für einen Steuerbeleg und liest aus dem ausgewiesenen
- * Steuerabzug (KESt, Soli, Kirchensteuer) plus der comdirect-Fußnote „Durch die
+ * Steuerabzug (KESt, Soli, Kirchensteuer) plus der Fußnote „Durch die
  * Berücksichtigung der Kirchensteuer … als Sonderausgabe …" zusätzliche
  * Abzugs-Sektionen (`sonderausgaben`, `vorsorgeaufwand`) heraus — obwohl die
  * Kirchensteuer dort bereits im Abzug verrechnet ist und eine Depotabrechnung
@@ -418,7 +418,7 @@ const SECURITIES_INFORMATIONAL_MARKERS: readonly string[] = [
 ];
 
 /**
- * Ausdrücklicher Negativ-Vermerk auf jeder comdirect-Einzelabrechnung. Er
+ * Ausdrücklicher Negativ-Vermerk auf der Einzelabrechnung mancher Banken. Er
  * enthält das Wort „Steuerbescheinigung" und muss daher vor der Prüfung auf
  * eine Jahresbescheinigung entfernt werden — und beweist zugleich, dass der
  * Beleg KEINE Jahresbescheinigung ist.
@@ -451,7 +451,7 @@ export function applySecuritiesSettlementTaxRule(input: {
     SECURITIES_ANNUAL_CERTIFICATE_MARKERS.some((m) => withoutNegation.includes(m));
 
   // Nur die KAP-Sektionen, Anlage KAP immer dabei: die ausgewiesene
-  // Kirchensteuer und die comdirect-Fußnote machen keinen Sonderausgaben-
+  // Kirchensteuer und die Kirchensteuer-Fußnote machen keinen Sonderausgaben-
   // Nachweis daraus.
   const kapOnly = (): TaxAssignment[] => {
     const kept = input.taxSections.filter((s) => KAP_TAX_SLUGS.has(s.slug));

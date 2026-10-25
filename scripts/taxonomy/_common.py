@@ -97,15 +97,15 @@ _LONGNUM = re.compile(r"\b\d{6,}\b")  # Kunden-/Steuer-/Versichertennummern
 # Grobe Absender-Typisierung (Klarname → Typ), damit der Absender nicht im
 # Klartext die Maschine verlässt, der Typ aber als Signal erhalten bleibt.
 _SENDER_TYPES = [
-    (re.compile(r"bank|comdirect|dkb|\bing\b|sparkasse|volksbank|trade republic|scalable|broker", re.I), "Bank/Broker"),
+    (re.compile(r"bank|dkb|\bing\b|sparkasse|volksbank|trade republic|scalable|broker", re.I), "Bank/Broker"),
     (re.compile(r"versicherung|lebensvers|allianz|axa|huk|kravag|generali", re.I), "Versicherung"),
-    (re.compile(r"krankenkasse|krankenvers|aok|barmer|techniker|hallesche|gesundheitskasse", re.I), "Kranken-/Pflegekasse"),
-    (re.compile(r"finanzamt|kirchensteuer|steueramt|steuerberat|treukontax", re.I), "Finanzamt/Steuer"),
-    (re.compile(r"\barzt\b|\bdr\.? med|klinik|praxis|caritas|sozialstation|pflege", re.I), "Arzt/Pflege"),
+    (re.compile(r"krankenkasse|krankenvers|aok|barmer|techniker|gesundheitskasse", re.I), "Kranken-/Pflegekasse"),
+    (re.compile(r"finanzamt|kirchensteuer|steueramt|steuerberat", re.I), "Finanzamt/Steuer"),
+    (re.compile(r"\barzt\b|\bdr\.? med|klinik|praxis|sozialstation|pflege", re.I), "Arzt/Pflege"),
     (re.compile(r"rentenversicherung|\bdrv\b|versorgung", re.I), "Renten-/Versorgung"),
     (re.compile(r"stadt|gemeinde|landratsamt|behörde|amt\b", re.I), "Behörde"),
     (re.compile(r"gymnasium|schule|hochschule|universität|kita", re.I), "Bildung"),
-    (re.compile(r"stadtwerke|lechwerke|energie|strom|gas|telekom|vodafone", re.I), "Versorger/Telekom"),
+    (re.compile(r"werke\b|energie|strom|gas|telekom|vodafone", re.I), "Versorger/Telekom"),
 ]
 
 
@@ -214,7 +214,7 @@ def scrub_for_teacher(text: str | None, names: list[str]) -> str | None:
     konkrete Personennamen via `scrub_names`), lässt aber — anders als der
     Audit — den *institutionellen* Absender im Klartext: der aufrufende Lehrer
     reduziert den Absender NICHT auf einen Typ (`sender_type`), sondern schickt
-    den echten Institutsnamen (Comdirect, HALLESCHE, Finanzamt) durch diese
+    den echten Institutsnamen (Bank, Krankenversicherer, Finanzamt) durch diese
     Funktion. Institutsnamen sind keine PII und geben Claude ein stärkeres
     Kategorie-Signal bei kaum erhöhtem Privacy-Risiko.
 

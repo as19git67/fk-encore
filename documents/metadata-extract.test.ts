@@ -1059,7 +1059,7 @@ describe("isSubjectPersonSender", () => {
 
   it("does not match a company that merely contains the surname", () => {
     expect(isSubjectPersonSender("Mustermann GmbH", persons)).toBe(false);
-    expect(isSubjectPersonSender("HALLESCHE Krankenversicherung", persons)).toBe(false);
+    expect(isSubjectPersonSender("BEISPIEL Krankenversicherung", persons)).toBe(false);
   });
 
   it("does not match on a lone first name or empty sender", () => {

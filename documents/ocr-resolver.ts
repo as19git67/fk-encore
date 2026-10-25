@@ -326,8 +326,8 @@ export function validateVlmAnswer(
   // the model in visual line order, and comparing the two character by
   // character measures the *ordering* rather than the reading:
   //
-  //   tesseract  Kissing-Mering Raiffeisenbank gTerng eG
-  //   model      Raiffeisenbank / Kissing-Mering eG        (two lines)
+  //   tesseract  Musterstadt-Beispiel Raiffeisenbank gTerng eG
+  //   model      Raiffeisenbank / Musterstadt-Beispiel eG        (two lines)
   //
   // Every word of the model's answer is one Tesseract also read, yet the
   // character distance is 0.64 and the correction was refused. A multi-line

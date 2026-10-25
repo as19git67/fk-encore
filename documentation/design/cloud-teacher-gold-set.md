@@ -64,7 +64,7 @@ pipeline + the deterministic extractors. A "fully correctly classified via
 Claude" is technically not possible with aggressive scrubbing — the scrubbing
 takes away the signals the model would need for it.
 
-**Decision:** Institutional sender names (Comdirect, HALLESCHE, Finanzamt) are
+**Decision:** Institutional sender names (a bank, a health insurer, the tax office) are
 **not** PII and stay in plain text — only personal data is stripped. This gives
 Claude a stronger signal for sender and category assignments, with hardly any
 increased privacy risk. The teacher gets its own, **less aggressive** scrub

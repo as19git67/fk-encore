@@ -811,7 +811,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
   //       abrechnung, Vorabpauschale) ist kein Steuerbeleg — die Bank fasst
   //       alles in der Jahressteuerbescheinigung zusammen. Nur diese Jahres-
   //       bescheinigung bleibt steuerrelevant, und zwar ausschließlich in den
-  //       KAP-Sektionen (die ausgewiesene Kirchensteuer und die comdirect-
+  //       KAP-Sektionen (die ausgewiesene Kirchensteuer und die Kirchensteuer-
   //       Fußnote „… als Sonderausgabe …" verleiten das Modell sonst zu
   //       `sonderausgaben`/`vorsorgeaufwand`).
   {
