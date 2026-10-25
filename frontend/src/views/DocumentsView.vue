@@ -849,8 +849,11 @@ onMounted(async () => {
     <template #notice>
       <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = ''" />
       <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
-      <DocumentScanQueuePanel />
     </template>
+
+    <!-- Not in #notice: expanded with many stuck jobs it is taller than the
+         screen, and the sticky stack would leave nothing to scroll. -->
+    <DocumentScanQueuePanel class="queue-strip" />
 
     <PageSkeleton v-if="loading && items.length === 0" variant="list" :count="8" />
     <EmptyState
@@ -1134,7 +1137,8 @@ onMounted(async () => {
   --page-aside-inset: 0.75rem;
   margin-top: 0.75rem;
 }
-.collection-strip {
+.collection-strip,
+.queue-strip {
   margin-bottom: 12px;
 }
 /* The tile lives in a child component; the flash is this list's own. */

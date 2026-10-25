@@ -220,6 +220,8 @@ onUnmounted(() => {
   text-align: left;
   flex-wrap: wrap;
 }
+/* The panel clips to its rounded corners and the button fills it edge to edge. */
+.queue-summary { outline-offset: var(--focus-ring-offset-inset); }
 .queue-summary:hover { background: var(--p-content-hover-background); }
 .queue-label {
   display: inline-flex;
