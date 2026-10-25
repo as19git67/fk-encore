@@ -83,7 +83,7 @@ async function seedNewDoc(): Promise<void> {
            status, extracted_text, attributes_reviewed)
         VALUES
           (${NEW_DOC}, ${USER_ID}, ${`sha-${NEW_DOC}`}, 'doc.pdf', 'application/pdf', 1,
-           ${`/tmp/doc-${NEW_DOC}.pdf`}, 'classifying', 'neuer text von comdirect', false)`,
+           ${`/tmp/doc-${NEW_DOC}.pdf`}, 'classifying', 'neuer text von beispielbank', false)`,
   );
 }
 

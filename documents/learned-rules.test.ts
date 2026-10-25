@@ -16,9 +16,9 @@ describe("buildLearnedMemory — category", () => {
   it("learns the dominant category once support and share thresholds are met", () => {
     const mem = buildLearnedMemory({
       categories: [
-        { sender: "Comdirect", category_slug: "finanzen-wertpapiere" },
-        { sender: "comdirect", category_slug: "finanzen-wertpapiere" },
-        { sender: "COMDIRECT", category_slug: "finanzen-wertpapiere" },
+        { sender: "Beispielbank", category_slug: "finanzen-wertpapiere" },
+        { sender: "beispielbank", category_slug: "finanzen-wertpapiere" },
+        { sender: "BEISPIELBANK", category_slug: "finanzen-wertpapiere" },
       ],
       taxSections: [],
       tags: [],
@@ -26,7 +26,7 @@ describe("buildLearnedMemory — category", () => {
     });
     // Matching is per normalized sender string (case/punctuation-insensitive),
     // so the three spelling variants collapse to one key.
-    const e = resolveLearned(mem, "Comdirect!");
+    const e = resolveLearned(mem, "Beispielbank!");
     expect(e?.category?.slug).toBe("finanzen-wertpapiere");
     expect(e?.category?.support).toBe(3);
     expect(e?.category?.share).toBe(1);
@@ -111,27 +111,27 @@ describe("buildLearnedMemory — tax / tags / persons", () => {
   });
 
   it("drops tags that only appear on a subset of a sender's docs (dominance filter)", () => {
-    // Simulates the Comdirect scenario: "wertpapierkauf" on 2/6 docs (33%),
+    // Simulates the Beispielbank scenario: "wertpapierkauf" on 2/6 docs (33%),
     // "dividende" on 2/6 docs (33%), "depot" on 5/6 docs (83%).
     // Only "depot" passes the 60% dominance threshold.
     const mem = buildLearnedMemory({
       categories: [],
       taxSections: [],
       tags: [
-        { sender: "Comdirect", tag: "depot", document_id: 1 },
-        { sender: "Comdirect", tag: "depot", document_id: 2 },
-        { sender: "Comdirect", tag: "depot", document_id: 3 },
-        { sender: "Comdirect", tag: "depot", document_id: 4 },
-        { sender: "Comdirect", tag: "depot", document_id: 5 },
-        { sender: "Comdirect", tag: "wertpapierkauf", document_id: 1 },
-        { sender: "Comdirect", tag: "wertpapierkauf", document_id: 2 },
-        { sender: "Comdirect", tag: "dividende", document_id: 3 },
-        { sender: "Comdirect", tag: "dividende", document_id: 4 },
-        { sender: "Comdirect", tag: "sonstiges", document_id: 6 },
+        { sender: "Beispielbank", tag: "depot", document_id: 1 },
+        { sender: "Beispielbank", tag: "depot", document_id: 2 },
+        { sender: "Beispielbank", tag: "depot", document_id: 3 },
+        { sender: "Beispielbank", tag: "depot", document_id: 4 },
+        { sender: "Beispielbank", tag: "depot", document_id: 5 },
+        { sender: "Beispielbank", tag: "wertpapierkauf", document_id: 1 },
+        { sender: "Beispielbank", tag: "wertpapierkauf", document_id: 2 },
+        { sender: "Beispielbank", tag: "dividende", document_id: 3 },
+        { sender: "Beispielbank", tag: "dividende", document_id: 4 },
+        { sender: "Beispielbank", tag: "sonstiges", document_id: 6 },
       ],
       persons: [],
     });
-    expect(resolveLearned(mem, "Comdirect")?.tags).toEqual(["depot"]);
+    expect(resolveLearned(mem, "Beispielbank")?.tags).toEqual(["depot"]);
   });
 
   it("learns subject persons linked at least twice for a sender", () => {

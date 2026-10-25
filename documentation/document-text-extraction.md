@@ -463,9 +463,9 @@ emits the words of such a box in its own reading order, the model in visual
 line order:
 
 ```
-tesseract   Kissing-Mering Raiffeisenbank gTerng eG
+tesseract   Musterstadt-Beispiel Raiffeisenbank gTerng eG
 model       Raiffeisenbank
-            Kissing-Mering eG
+            Musterstadt-Beispiel eG
 ```
 
 Every word of the answer is one Tesseract also read, and the correction of
@@ -681,9 +681,9 @@ against the raw TSV compares the answer with text the pipeline itself no longer
 believes.
 
 ```
-raw (TSV)          Kissing-Mering Raiffeisenbank gTerng eG
-corrected          Raiffeisenbank Kissing-Mering eG
-model's answer     Raiffeisenbank Kissing-Mering eG
+raw (TSV)          Musterstadt-Beispiel Raiffeisenbank gTerng eG
+corrected          Raiffeisenbank Musterstadt-Beispiel eG
+model's answer     Raiffeisenbank Musterstadt-Beispiel eG
 ```
 
 Against the corrected rows that is an exact match; against the raw ones it is

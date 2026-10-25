@@ -143,8 +143,8 @@ sender in the same year with the same title are uploaded.
 ## 3a. Correspondent level
 
 The `sender` extracted by the AI classification is free text and, taken by
-itself, too unstable to serve as a folder name — "Janitos",
-"Janitos Versicherung AG" and "Janitos AG" would otherwise produce three
+itself, too unstable to serve as a folder name — "Musterversicherung",
+"Musterversicherung Sach AG" and "Musterversicherung AG" would otherwise produce three
 different folders. That is why the sender is first mapped to a **stable
 correspondent identity** (`documents/correspondent.ts`) before it flows into
 the path.

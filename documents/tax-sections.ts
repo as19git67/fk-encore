@@ -66,7 +66,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-kap",
     group: "einkuenfte",
     name: "Anlage KAP — Kapitalerträge",
-    hint: "Jahresbelege von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable): Jahressteuerbescheinigung, Steuerbescheinigung, Verlustbescheinigung. Die Erträgnisaufstellung ist nur eine Information der Bank, kein Steuerbeleg (tax_role=bezug). Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher und NICHT in Anlage N. NICHT: einzelne Depotabrechnungen (Dividendengutschrift, Steuerliche Behandlung einer Dividende, Wertpapierabrechnung, Vorabpauschale) — deren Werte stehen gesammelt in der Jahressteuerbescheinigung, sie sind nicht steuerrelevant.",
+    hint: "Jahresbelege von Bank oder Broker (ING, DKB, Trade Republic, Scalable): Jahressteuerbescheinigung, Steuerbescheinigung, Verlustbescheinigung. Die Erträgnisaufstellung ist nur eine Information der Bank, kein Steuerbeleg (tax_role=bezug). Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher und NICHT in Anlage N. NICHT: einzelne Depotabrechnungen (Dividendengutschrift, Steuerliche Behandlung einer Dividende, Wertpapierabrechnung, Vorabpauschale) — deren Werte stehen gesammelt in der Jahressteuerbescheinigung, sie sind nicht steuerrelevant.",
   },
   {
     slug: "anlage-kap-inv",
@@ -182,7 +182,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "vorsorgeaufwand",
     group: "abzuege",
     name: "Anlage Vorsorgeaufwand",
-    hint: "Beitragsbescheinigungen/Beitragsrechnungen zu Personenversicherungen: private Kranken- und Pflegeversicherung (z. B. HALLESCHE, DKV), gesetzliche Krankenkasse, Haftpflicht-, Unfall-, Risikolebens- und Rürup-/Basisrenten-Versicherung; nicht: Sachversicherungen (Wohngebäude-, Hausrat-, Kfz-Kasko, Rechtsschutz), Riester (anlage-av) oder Krankheitsrechnungen (aussergewoehnliche).",
+    hint: "Beitragsbescheinigungen/Beitragsrechnungen zu Personenversicherungen: private Kranken- und Pflegeversicherung, gesetzliche Krankenkasse, Haftpflicht-, Unfall-, Risikolebens- und Rürup-/Basisrenten-Versicherung; nicht: Sachversicherungen (Wohngebäude-, Hausrat-, Kfz-Kasko, Rechtsschutz), Riester (anlage-av) oder Krankheitsrechnungen (aussergewoehnliche).",
   },
   {
     slug: "anlage-av",

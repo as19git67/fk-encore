@@ -53,7 +53,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-bausparen",
         name: "Bausparen",
-        hint: "Bausparverträge: Kontoauszüge, Jahresmeldungen, Zuteilungsmitteilungen (z. B. Wüstenrot Bausparkasse).",
+        hint: "Bausparverträge: Kontoauszüge, Jahresmeldungen, Zuteilungsmitteilungen.",
       },
       {
         slug: "finanzen-kredite",
@@ -68,7 +68,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-wertpapiere",
         name: "Wertpapiere & Dividenden",
-        hint: "Dividendengutschriften, Steuermitteilungen / steuerliche Behandlung zu Wertpapieren (auch 'KEINE STEUERBESCHEINIGUNG'), Erträgnisaufstellungen, Depot- und Wertpapierabrechnungen (Kauf/Verkauf) von Bank oder Broker (z. B. Comdirect). Steuerlich Anlage KAP. NICHT: Einspeisevergütungs-Abrechnungen / Stromeinspeisung von Netzbetreibern für PV-Anlagen (→ wohnen-haus-photovoltaik).",
+        hint: "Dividendengutschriften, Steuermitteilungen / steuerliche Behandlung zu Wertpapieren (auch 'KEINE STEUERBESCHEINIGUNG'), Erträgnisaufstellungen, Depot- und Wertpapierabrechnungen (Kauf/Verkauf) von Bank oder Broker. Steuerlich Anlage KAP. NICHT: Einspeisevergütungs-Abrechnungen / Stromeinspeisung von Netzbetreibern für PV-Anlagen (→ wohnen-haus-photovoltaik).",
       },
       {
         slug: "finanzen-steuern",
@@ -123,7 +123,7 @@ export const categoryTaxonomy: CategorySeed[] = [
           {
             slug: "wohnen-haus-gebaeudeversicherung",
             name: "Gebäudeversicherung",
-            hint: "Wohngebäudeversicherung des selbst bewohnten Hauses: Beitragsrechnungen, Policen, Anpassungen (z. B. DOMCURA, Allianz, Janitos Privatschutz mit Sparte Wohngebäude).",
+            hint: "Wohngebäudeversicherung des selbst bewohnten Hauses: Beitragsrechnungen, Policen, Anpassungen (auch Privatschutz-Pakete mit Sparte Wohngebäude).",
           },
           {
             slug: "wohnen-haus-instandhaltung",
@@ -258,7 +258,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "gesundheit-pflege",
         name: "Pflegeleistungen (Sozialstation)",
-        hint: "Rechnungen/Leistungsnachweise ambulanter Pflege/Sozialstationen (z. B. Caritas-Sozialstation), häusliche Krankenpflege. NICHT: Meldung/Entgeltnachweis zur Sozialversicherung vom Arbeitgeber (→ finanzen-sozialversicherung) — „Sozialstation\" ≠ „Sozialversicherung\". Steuerlich haushaltsnahe Aufwendungen / außergewöhnliche Belastungen.",
+        hint: "Rechnungen/Leistungsnachweise ambulanter Pflege/Sozialstationen, häusliche Krankenpflege. NICHT: Meldung/Entgeltnachweis zur Sozialversicherung vom Arbeitgeber (→ finanzen-sozialversicherung) — „Sozialstation\" ≠ „Sozialversicherung\". Steuerlich haushaltsnahe Aufwendungen / außergewöhnliche Belastungen.",
       },
       {
         slug: "gesundheit-pflegekasse",
@@ -314,12 +314,12 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "vertraege-telekom",
         name: "Telekommunikation",
-        hint: "Telefon, Internet, Mobilfunk, Kabel (z. B. Telekom, Vodafone, LEW TelNet).",
+        hint: "Telefon, Internet, Mobilfunk, Kabel (z. B. Telekom, Vodafone).",
       },
       {
         slug: "vertraege-strom",
         name: "Strom",
-        hint: "Stromliefervertrag, Stromrechnung/Jahresabrechnung für Eigenverbrauch (z. B. Lechwerke/LEW, Stadtwerke, E.ON). NICHT Einspeisevergütung/PV-Abrechnung (→ wohnen-haus-photovoltaik).",
+        hint: "Stromliefervertrag, Stromrechnung/Jahresabrechnung für Eigenverbrauch (z. B. Stadtwerke, E.ON). NICHT Einspeisevergütung/PV-Abrechnung (→ wohnen-haus-photovoltaik).",
       },
       {
         slug: "vertraege-gas",
@@ -329,7 +329,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "vertraege-abos",
         name: "Abonnements",
-        hint: "Mitgliedschaften und Abos: Fitnessstudio, Vereine, Streaming, Zeitschriften (z. B. Clever Fit).",
+        hint: "Mitgliedschaften und Abos: Fitnessstudio, Vereine, Streaming, Zeitschriften.",
       },
     ],
   },
@@ -347,7 +347,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "versicherungen-sach",
         name: "Sach-, Haftpflicht- & Rechtsschutzversicherung",
-        hint: "Rechtsschutz-, Privathaftpflicht-, Hausrat-, Unfallversicherung: Beiträge, Policen, Schadenfälle (z. B. Janitos Privatschutz Haftpflicht; Makler wie Marsh, HVS). Es gibt keine eigene Rechtsschutz-Kategorie — eine Rechtsschutzversicherung gehört immer hierher. NICHT: Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung oder wohnen-versicherung), NICHT Führerschein/Fahrzeugpapiere (→ fahrzeug-papiere).",
+        hint: "Rechtsschutz-, Privathaftpflicht-, Hausrat-, Unfallversicherung: Beiträge, Policen, Schadenfälle (auch Privatschutz-Pakete und Post von Versicherungsmaklern). Es gibt keine eigene Rechtsschutz-Kategorie — eine Rechtsschutzversicherung gehört immer hierher. NICHT: Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung oder wohnen-versicherung), NICHT Führerschein/Fahrzeugpapiere (→ fahrzeug-papiere).",
       },
       {
         slug: "versicherungen-berufsunfaehigkeit",

@@ -731,13 +731,13 @@ describe("decideSpan — the model's answer is in the record", () => {
 
 describe("tokenOverlap", () => {
   it("is order-free", () => {
-    expect(tokenOverlap("Raiffeisenbank\nKissing-Mering eG", "Kissing-Mering Raiffeisenbank gTerng eG")).toBe(1);
+    expect(tokenOverlap("Raiffeisenbank\nMusterstadt-Beispiel eG", "Musterstadt-Beispiel Raiffeisenbank gTerng eG")).toBe(1);
   });
 
   it("counts only the answer's own words", () => {
     // The OCR reading may be longer; what matters is whether the answer is
     // anchored in it, not whether it reproduces all of it.
-    expect(tokenOverlap("eG", "Kissing-Mering Raiffeisenbank gTerng eG")).toBe(1);
+    expect(tokenOverlap("eG", "Musterstadt-Beispiel Raiffeisenbank gTerng eG")).toBe(1);
   });
 
   it("is zero for an answer sharing nothing", () => {
@@ -764,8 +764,8 @@ describe("validateVlmAnswer — multi-line answers", () => {
     // the answer is one Tesseract read; only the order differs, and character
     // distance measures exactly that. It was refused at 0.64.
     const verdict = validateVlmAnswer(
-      "Raiffeisenbank\nKissing-Mering eG",
-      candidates(["tesseract", "Kissing-Mering Raiffeisenbank gTerng eG", 0.84]),
+      "Raiffeisenbank\nMusterstadt-Beispiel eG",
+      candidates(["tesseract", "Musterstadt-Beispiel Raiffeisenbank gTerng eG", 0.84]),
       reasons,
     );
     expect(verdict.ok).toBe(true);

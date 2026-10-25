@@ -1032,7 +1032,7 @@ export const documents = pgTable("documents", {
   sender: text("sender"),
   document_number: text("document_number"),
   // Canonical correspondent identity derived from `sender` (institution level,
-  // e.g. "janitos"/"Janitos"; see documents/correspondent.ts). Persisted so the
+  // e.g. "musterversicherung"/"Musterversicherung"; see documents/correspondent.ts). Persisted so the
   // document list can filter/group by correspondent without re-deriving.
   // Populated by `relocateDocument`, so the "Dateinamen aktualisieren" backfill
   // fills it for the whole corpus (migration 0130).

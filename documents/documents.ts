@@ -5047,9 +5047,9 @@ export const listCorrespondentOverrides = api(
 );
 
 export interface CreateCorrespondentOverrideRequest {
-  /** Free-form sender fragment; normalised server-side (e.g. "Janitos AG" → "janitosag"). */
+  /** Free-form sender fragment; normalised server-side (e.g. "Musterversicherung AG" → "musterversicherungag"). */
   sender_pattern: string;
-  /** Human-readable correspondent name (e.g. "Janitos"). */
+  /** Human-readable correspondent name (e.g. "Musterversicherung"). */
   correspondent_display: string;
   /** Optional explicit slug; derived from the display name when omitted. */
   correspondent_slug?: string;
