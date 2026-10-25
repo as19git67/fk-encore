@@ -39,7 +39,7 @@
      onto `.app-container`; the value here is only the fallback for a page
      rendered outside the app shell (Storybook, tests). */
   --app-navbar-height: 3.5rem;
-  --app-submenu-height: 2.5rem;
+  --app-submenu-height: 2.25rem;
   --app-stack-height: calc(var(--app-navbar-height) + var(--app-submenu-height));
 
   --space-1: 4px;
