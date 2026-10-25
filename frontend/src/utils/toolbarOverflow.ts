@@ -13,6 +13,8 @@
  * @param overflowWidth Pixel width of the overflow toggle button.
  * @param available    Pixel width available for the toolbar row.
  * @param gap          Pixel gap rendered between adjacent items.
+ * @param alwaysOverflow The overflow toggle is shown anyway (some items live
+ *                       only in the menu), so its room is always reserved.
  * @returns Number of leading items to render inline (the rest overflow).
  */
 export function computeVisibleCount(
@@ -20,12 +22,14 @@ export function computeVisibleCount(
   overflowWidth: number,
   available: number,
   gap: number,
+  alwaysOverflow = false,
 ): number {
   // Does everything fit without needing an overflow button at all?
   let totalAll = 0
   itemWidths.forEach((w, i) => {
     totalAll += w + (i > 0 ? gap : 0)
   })
+  if (alwaysOverflow) totalAll += (itemWidths.length > 0 ? gap : 0) + overflowWidth
   if (totalAll <= available) return itemWidths.length
 
   // Otherwise reserve room for the overflow toggle and fit what we can.

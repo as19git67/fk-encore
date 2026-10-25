@@ -53,10 +53,11 @@ import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory
  * the screen.
  *
  * `#back`: the way out sits first, left of the title, on every page that has
- * one. The title then keeps the rest of its line (cut with "…") and the
- * actions take a line of their own below it, starting at the same edge — a
- * page with many actions hands them to `ResponsiveToolbar`, which folds what
- * does not fit into a "more" menu instead of wrapping into a third line.
+ * one. The actions stand on the same line while title and actions fit at
+ * their natural width; otherwise they take one line of their own below it,
+ * starting at the same edge, and the title is cut with "…". A page with
+ * many actions hands them to `ResponsiveToolbar`, which folds what does not
+ * fit into a "more" menu instead of wrapping into a third line.
  */
 
 export type PageScroll = 'page' | 'fill'
@@ -345,16 +346,25 @@ defineExpose({ contentEl })
   align-items: center;
   flex-shrink: 0;
 }
-/* A page with a way out: line one is back + title, the title cut with "…";
-   line two the actions, from the same left edge as the back button. */
+/* A page with a way out: back + title, then the actions — on the same line
+   while both fit at their natural width, otherwise the actions move to one
+   line of their own below, from the same left edge as the back button, and
+   fold what still does not fit into the toolbar's "more" menu. Never a third
+   line. The wrap is decided on natural widths only: the heading by its
+   title, the actions by their buttons (a ResponsiveToolbar takes the width
+   its buttons need, see below), so nothing here depends on the width the
+   other one ends up with. */
 .page-header--back {
-  flex-direction: column;
-  align-items: stretch;
-  flex-wrap: nowrap;
-  gap: var(--space-1);
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0 var(--space-2);
 }
+/* The heading takes what the actions leave on its line (so they stand at
+   the right), but never more than the line, where the title is cut. Growing
+   happens after the line break is decided, so it does not change it. */
 .page-header--back .page-heading {
-  width: 100%;
+  flex: 1 0 auto;
+  max-width: 100%;
 }
 .page-header--back .page-title {
   flex: 1 1 auto;
@@ -365,9 +375,21 @@ defineExpose({ contentEl })
   overflow-wrap: normal;
 }
 .page-header--back .page-actions {
-  width: 100%;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
   margin-left: 0;
   justify-content: flex-start;
+}
+.page-header--back .page-actions > :deep(*) {
+  flex-shrink: 0;
+}
+/* The toolbar asks for the width of all its buttons, and on a line too
+   short for that it is the one that gives way: it folds into its menu. */
+.page-header--back .page-actions > :deep(.responsive-toolbar) {
+  flex: 0 1 auto;
+  width: var(--responsive-toolbar-natural, auto);
+  max-width: none;
+  min-width: 0;
 }
 .page-header--back .page-actions:empty {
   display: none;
@@ -419,6 +441,12 @@ defineExpose({ contentEl })
   min-width: 0;
   margin-inline: auto;
 }
+/* A title row at the top of the stack brings its own height (its buttons),
+   so the app's stack drops its padding above and below it (App.vue); what
+   follows it keeps a little room to the stack's bottom edge. */
+.page-stack:has(> .page-header--sticky ~ :not(:empty)) {
+  padding-bottom: var(--space-2);
+}
 /* Without the app shell the block sits above the header, looking the same. */
 .page-stack--inline {
   padding: var(--space-2) 0;
@@ -451,8 +479,9 @@ defineExpose({ contentEl })
     font-size: var(--text-2xl);
   }
   /* On a phone the actions stay beside the title rather than wrapping under
-     it, so the sticky row costs one line; the title gives way. */
-  .page-header--sticky {
+     it, so the sticky row costs one line; the title gives way. A page with a
+     way out wraps its actions as above instead. */
+  .page-header--sticky:not(.page-header--back) {
     flex-wrap: nowrap;
   }
   .page-header--sticky .page-title {

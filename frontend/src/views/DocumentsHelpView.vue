@@ -146,6 +146,10 @@ function goBack() {
       </p>
 
       <h3>Aktionen in der Kopfzeile</h3>
+      <p>
+        „Neu klassifizieren“ und „OCR erzwingen“ stehen immer im Menü
+        <strong>⋮</strong> am Ende der Kopfzeile.
+      </p>
       <ul>
         <li>
           <strong>Neu klassifizieren</strong> – startet die KI-Analyse erneut

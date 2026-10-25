@@ -33,6 +33,12 @@ describe('computeVisibleCount', () => {
     // Single item, no leading gap: 90 + gap(10) + toggle(30) = 130 ≤ 130
     expect(computeVisibleCount([90, 90], 30, 130, 10)).toBe(1)
   })
+
+  it('reserves the toggle even when every item fits, if the menu is shown anyway', () => {
+    // 100 + 10 + 100 = 210 would fit 240, but not with gap + toggle (250).
+    expect(computeVisibleCount([100, 100], 30, 250, 10, true)).toBe(2)
+    expect(computeVisibleCount([100, 100], 30, 240, 10, true)).toBe(1)
+  })
 })
 
 describe('continuesOscillation', () => {

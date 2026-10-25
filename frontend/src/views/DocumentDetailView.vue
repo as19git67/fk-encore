@@ -18,7 +18,6 @@ import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import SelectButton from 'primevue/selectbutton'
 import Chip from 'primevue/chip'
-import Popover from 'primevue/popover'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useConfirm } from 'primevue/useconfirm'
 import { isIosLike, printPdfBlob } from '../utils/printPdf'
@@ -218,11 +217,7 @@ const textPanelOptions = [
   { label: 'Text', value: 'text' },
   { label: 'PDF', value: 'pdf' },
 ]
-const helpPopover = ref<InstanceType<typeof Popover> | null>(null)
-
-function toggleHelp(event: Event) {
-  helpPopover.value?.toggle(event)
-}
+const helpOpen = ref(false)
 
 const form = ref({
   title: '' as string,
@@ -875,9 +870,11 @@ function goBack() {
 }
 
 /**
- * The page's own actions, most used first: on a phone the row folds from the
- * end into the "more" menu, so deleting is the first to go and the help
- * stays beside it. A running request turns its icon into a spinner.
+ * The page's own actions, most used first: the row folds from the end into
+ * the "more" menu, so help and deleting are the first to go. Classifying
+ * again and forcing OCR are rarely needed and always live in that menu, so
+ * they never hop between the row and the menu with the width. A running
+ * request turns its icon into a spinner.
  */
 const headerActions = computed<ToolbarItem[]>(() => {
   const d = doc.value
@@ -893,17 +890,6 @@ const headerActions = computed<ToolbarItem[]>(() => {
       title: 'Text bearbeiten',
       text: true,
       command: () => void router.push({ name: 'dokumente-text-bearbeiten', params: { id: d.id } }),
-    })
-  }
-  if (canEdit) {
-    items.push({
-      key: 'reclassify',
-      icon: busy('pi pi-refresh', saving.value),
-      label: 'Klassifizieren',
-      title: 'Neu klassifizieren',
-      text: true,
-      disabled: saving.value,
-      command: () => void onReclassify(),
     })
   }
   items.push(
@@ -952,17 +938,13 @@ const headerActions = computed<ToolbarItem[]>(() => {
       command: () => void onToggleTeacherRequested(),
     })
   }
-  if (canEdit && !isTextDocument.value) {
-    items.push({
-      key: 'force-ocr',
-      icon: 'pi pi-eye',
-      label: 'OCR',
-      title: 'OCR erzwingen',
-      text: true,
-      disabled: saving.value,
-      command: () => void onReclassify({ forceOcr: true }),
-    })
-  }
+  items.push({
+    key: 'help',
+    icon: 'pi pi-question-circle',
+    title: 'Hilfe zu den Aktionen',
+    text: true,
+    command: () => { helpOpen.value = true },
+  })
   if (auth.hasPermission('documents.delete')) {
     items.push({
       key: 'delete',
@@ -971,6 +953,28 @@ const headerActions = computed<ToolbarItem[]>(() => {
       severity: 'danger',
       text: true,
       command: onDelete,
+    })
+  }
+  if (canEdit) {
+    items.push({
+      key: 'reclassify',
+      icon: busy('pi pi-refresh', saving.value),
+      title: 'Neu klassifizieren',
+      text: true,
+      menuOnly: true,
+      disabled: saving.value,
+      command: () => void onReclassify(),
+    })
+  }
+  if (canEdit && !isTextDocument.value) {
+    items.push({
+      key: 'force-ocr',
+      icon: 'pi pi-eye',
+      title: 'OCR erzwingen',
+      text: true,
+      menuOnly: true,
+      disabled: saving.value,
+      command: () => void onReclassify({ forceOcr: true }),
     })
   }
   return items
@@ -1043,136 +1047,67 @@ onBeforeUnmount(() => {
       <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
     </template>
 
+    <!-- One flat row: basket navigation, "Ablegen", then the toolbar, which
+         takes the width of its buttons and folds into its menu when the
+         line is shorter (PageLayout). -->
     <template #actions>
-      <div class="detail-actions">
-        <div
-          v-if="inCollection"
-          class="basket-nav"
-          :aria-label="`Navigation durch die Sammelmappe ${sourceCollection?.title ?? ''}`"
-        >
-          <Button
-            icon="pi pi-chevron-left"
-            text
-            rounded
-            :disabled="!collectionPrev"
-            aria-label="Vorheriges Dokument der Sammelmappe"
-            v-tooltip.bottom="'Vorheriges Dokument der Sammelmappe'"
-            @click="collectionPrev && goCollectionDoc(collectionPrev.id)"
-          />
-          <span class="basket-nav-pos" :title="sourceCollection?.title">
-            <i class="pi pi-folder" /> {{ collectionPosition }}&hairsp;/&hairsp;{{ collectionTotal }}
-          </span>
-          <Button
-            icon="pi pi-chevron-right"
-            text
-            rounded
-            :disabled="!collectionNext"
-            aria-label="Nächstes Dokument der Sammelmappe"
-            v-tooltip.bottom="'Nächstes Dokument der Sammelmappe'"
-            @click="collectionNext && goCollectionDoc(collectionNext.id)"
-          />
-        </div>
-        <div v-else-if="inBasket" class="basket-nav" aria-label="Navigation durch den Basket">
-          <Button
-            icon="pi pi-chevron-left"
-            text
-            rounded
-            :disabled="!basketPrev"
-            aria-label="Vorheriges Dokument im Basket"
-            v-tooltip.bottom="'Vorheriges Dokument im Basket'"
-            @click="basketPrev && goBasketDoc(basketPrev.id)"
-          />
-          <span class="basket-nav-pos">
-            <i class="pi pi-shopping-cart" /> {{ basketPosition }}&hairsp;/&hairsp;{{ basketTotal }}
-          </span>
-          <Button
-            icon="pi pi-chevron-right"
-            text
-            rounded
-            :disabled="!basketNext"
-            aria-label="Nächstes Dokument im Basket"
-            v-tooltip.bottom="'Nächstes Dokument im Basket'"
-            @click="basketNext && goBasketDoc(basketNext.id)"
-          />
-        </div>
-          <FileButton
-            v-if="doc"
-            :members="[{ entity_type: 'document', entity_id: doc.id }]"
-            :basket="docBasket"
-            :dossier-seed="dossierRuleSeed"
-          />
-          <ResponsiveToolbar class="detail-toolbar" :items="headerActions" />
-          <Button
-            icon="pi pi-question-circle"
-            aria-label="Hilfe zu den Aktionen"
-            text
-            class="help-trigger"
-            @click="toggleHelp"
-          />
-          <Popover ref="helpPopover">
-            <div class="help-flyout">
-              <h3 class="help-flyout__title">Aktionen</h3>
-              <ul class="help-flyout__list">
-                <li>
-                  <i class="pi pi-arrow-left" aria-hidden="true" />
-                  <div>
-                    <strong>Zurück</strong>
-                    <span>Zur Dokumentenliste zurückkehren.</span>
-                  </div>
-                </li>
-                <li>
-                  <i class="pi pi-file-import" aria-hidden="true" />
-                  <div>
-                    <strong>Ablegen</strong>
-                    <span>Dokument in den Basket oder eine Sammelmappe legen bzw. wieder herausnehmen — der Basket dient auch als Navigationsliste.</span>
-                  </div>
-                </li>
-                <li v-if="auth.hasPermission('documents.edit')">
-                  <i class="pi pi-refresh" aria-hidden="true" />
-                  <div>
-                    <strong>Neu klassifizieren</strong>
-                    <span>KI analysiert Kategorie, Datum, Absender und Zusammenfassung erneut.</span>
-                  </div>
-                </li>
-                <li v-if="auth.hasPermission('documents.edit')">
-                  <i class="pi pi-eye" aria-hidden="true" />
-                  <div>
-                    <strong>OCR erzwingen</strong>
-                    <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
-                  </div>
-                </li>
-                <li>
-                  <i class="pi pi-download" aria-hidden="true" />
-                  <div>
-                    <strong>Herunterladen</strong>
-                    <span>Dokument als Datei speichern — mit durchsuchbarer Textebene. Bei reinen Scans wird die Textebene bei Bedarf per OCR erzeugt.</span>
-                  </div>
-                </li>
-                <li>
-                  <i class="pi pi-print" aria-hidden="true" />
-                  <div>
-                    <strong>Drucken</strong>
-                    <span>Öffnet den Druckdialog des Browsers mit dem PDF. Auf iPhone und iPad über das Teilen-Menü („Drucken“).</span>
-                  </div>
-                </li>
-                <li>
-                  <i class="pi pi-ellipsis-v" aria-hidden="true" />
-                  <div>
-                    <strong>Weitere Aktionen</strong>
-                    <span>Was nicht mehr in die Zeile passt, steht im Menü am Zeilenende.</span>
-                  </div>
-                </li>
-                <li v-if="auth.hasPermission('documents.delete')">
-                  <i class="pi pi-trash" aria-hidden="true" />
-                  <div>
-                    <strong>Löschen</strong>
-                    <span>Dokument dauerhaft entfernen.</span>
-                  </div>
-                </li>
-              </ul>
-            </div>
-          </Popover>
+      <div
+        v-if="inCollection"
+        class="basket-nav"
+        :aria-label="`Navigation durch die Sammelmappe ${sourceCollection?.title ?? ''}`"
+      >
+        <Button
+          icon="pi pi-chevron-left"
+          text
+          rounded
+          :disabled="!collectionPrev"
+          aria-label="Vorheriges Dokument der Sammelmappe"
+          v-tooltip.bottom="'Vorheriges Dokument der Sammelmappe'"
+          @click="collectionPrev && goCollectionDoc(collectionPrev.id)"
+        />
+        <span class="basket-nav-pos" :title="sourceCollection?.title">
+          <i class="pi pi-folder" /> {{ collectionPosition }}&hairsp;/&hairsp;{{ collectionTotal }}
+        </span>
+        <Button
+          icon="pi pi-chevron-right"
+          text
+          rounded
+          :disabled="!collectionNext"
+          aria-label="Nächstes Dokument der Sammelmappe"
+          v-tooltip.bottom="'Nächstes Dokument der Sammelmappe'"
+          @click="collectionNext && goCollectionDoc(collectionNext.id)"
+        />
       </div>
+      <div v-else-if="inBasket" class="basket-nav" aria-label="Navigation durch den Basket">
+        <Button
+          icon="pi pi-chevron-left"
+          text
+          rounded
+          :disabled="!basketPrev"
+          aria-label="Vorheriges Dokument im Basket"
+          v-tooltip.bottom="'Vorheriges Dokument im Basket'"
+          @click="basketPrev && goBasketDoc(basketPrev.id)"
+        />
+        <span class="basket-nav-pos">
+          <i class="pi pi-shopping-cart" /> {{ basketPosition }}&hairsp;/&hairsp;{{ basketTotal }}
+        </span>
+        <Button
+          icon="pi pi-chevron-right"
+          text
+          rounded
+          :disabled="!basketNext"
+          aria-label="Nächstes Dokument im Basket"
+          v-tooltip.bottom="'Nächstes Dokument im Basket'"
+          @click="basketNext && goBasketDoc(basketNext.id)"
+        />
+      </div>
+      <FileButton
+        v-if="doc"
+        :members="[{ entity_type: 'document', entity_id: doc.id }]"
+        :basket="docBasket"
+        :dossier-seed="dossierRuleSeed"
+      />
+      <ResponsiveToolbar class="detail-toolbar" :items="headerActions" />
     </template>
 
     <template #notice>
@@ -1792,6 +1727,67 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <Dialog v-model:visible="helpOpen" class="dialog-sm" modal header="Aktionen">
+      <ul class="help-flyout__list">
+        <li>
+          <i class="pi pi-arrow-left" aria-hidden="true" />
+          <div>
+            <strong>Zurück</strong>
+            <span>Zur Dokumentenliste zurückkehren.</span>
+          </div>
+        </li>
+        <li>
+          <i class="pi pi-file-import" aria-hidden="true" />
+          <div>
+            <strong>Ablegen</strong>
+            <span>Dokument in den Basket oder eine Sammelmappe legen bzw. wieder herausnehmen — der Basket dient auch als Navigationsliste.</span>
+          </div>
+        </li>
+        <li>
+          <i class="pi pi-download" aria-hidden="true" />
+          <div>
+            <strong>Herunterladen</strong>
+            <span>Dokument als Datei speichern — mit durchsuchbarer Textebene. Bei reinen Scans wird die Textebene bei Bedarf per OCR erzeugt.</span>
+          </div>
+        </li>
+        <li>
+          <i class="pi pi-print" aria-hidden="true" />
+          <div>
+            <strong>Drucken</strong>
+            <span>Öffnet den Druckdialog des Browsers mit dem PDF. Auf iPhone und iPad über das Teilen-Menü („Drucken“).</span>
+          </div>
+        </li>
+        <li>
+          <i class="pi pi-ellipsis-v" aria-hidden="true" />
+          <div>
+            <strong>Weitere Aktionen</strong>
+            <span>Im Menü am Zeilenende: was nicht mehr in die Zeile passt, und immer „Neu klassifizieren“ und „OCR erzwingen“.</span>
+          </div>
+        </li>
+        <li v-if="auth.hasPermission('documents.edit')">
+          <i class="pi pi-refresh" aria-hidden="true" />
+          <div>
+            <strong>Neu klassifizieren</strong>
+            <span>KI analysiert Kategorie, Datum, Absender und Zusammenfassung erneut.</span>
+          </div>
+        </li>
+        <li v-if="auth.hasPermission('documents.edit')">
+          <i class="pi pi-eye" aria-hidden="true" />
+          <div>
+            <strong>OCR erzwingen</strong>
+            <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
+          </div>
+        </li>
+        <li v-if="auth.hasPermission('documents.delete')">
+          <i class="pi pi-trash" aria-hidden="true" />
+          <div>
+            <strong>Löschen</strong>
+            <span>Dokument dauerhaft entfernen.</span>
+          </div>
+        </li>
+      </ul>
+    </Dialog>
+
     <Dialog
       class="dialog-sm"
       :visible="printFile !== null"
@@ -1891,24 +1887,6 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 
-/* Basket navigation, filing and the action buttons: the second line of the
-   page header, under back + title. The toolbar takes what is left of the
-   line and folds the rest into its "more" menu; help stays last. */
-.detail-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-}
-.detail-actions > :not(.detail-toolbar) {
-  flex-shrink: 0;
-}
-.detail-toolbar {
-  flex: 1 1 0;
-  min-width: 0;
-}
 .basket-nav {
   display: inline-flex;
   align-items: center;
@@ -1945,17 +1923,6 @@ onBeforeUnmount(() => {
 }
 .linked-tx-btn { flex: 1; justify-content: flex-start; }
 
-.help-flyout {
-  max-width: min(22rem, 90vw);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.help-flyout__title {
-  margin: 0;
-  font-size: var(--text-lg);
-  color: var(--p-text-color);
-}
 .help-flyout__list {
   list-style: none;
   margin: 0;
@@ -1985,19 +1952,6 @@ onBeforeUnmount(() => {
   color: var(--p-text-muted-color);
   font-size: var(--text-base);
   line-height: 1.35;
-}
-
-/* On phones the labelled actions (Klassifizieren / OCR / Vormerken /
-   Wiedervorlage) drop their words so more of them fit before the "more"
-   menu takes over. The toolbar's measuring row sits in the same subtree, so
-   it measures the same icon-only buttons. */
-@media (max-width: 639px) {
-  .detail-actions :deep(.p-button-label) {
-    display: none;
-  }
-  .detail-actions :deep(.p-button) {
-    padding: 0.45rem 0.55rem;
-  }
 }
 
 .info-text { text-align: center; margin-top: 4rem; color: var(--p-text-muted-color); }

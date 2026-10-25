@@ -11,6 +11,13 @@ import { computeVisibleCount, continuesOscillation } from '../utils/toolbarOverf
  * icon-only button). `title` is used both for the hover tooltip *and* as the
  * label inside the overflow dropdown — so icon-only buttons still read
  * sensibly once they collapse into the menu.
+ *
+ * When a button shows its words is decided here, the same on every page:
+ * from `sm` up an inline button shows icon + `label`; below `sm` (a phone
+ * held upright) every inline button is icon only, its name stays in the
+ * tooltip and in `aria-label`, so more of them fit before the "more" menu
+ * takes over. The menu always lists icon + `title`. No view hides labels
+ * on its own.
  */
 export interface ToolbarItem {
   key: string
@@ -26,6 +33,11 @@ export interface ToolbarItem {
   itemClass?: string
   /** Greyed out and unclickable, inline as well as in the overflow menu. */
   disabled?: boolean
+  /**
+   * Never inline, always in the overflow menu — for actions rarely needed,
+   * so they do not hop between the row and the menu with the width.
+   */
+  menuOnly?: boolean
   command: () => void
 }
 
@@ -39,11 +51,14 @@ const menuRef = ref<InstanceType<typeof Menu> | null>(null)
 
 // How many of `props.items` are rendered inline. The rest spill into the
 // overflow menu. Starts optimistic (all visible) and is corrected on mount.
-const visibleCount = ref(props.items.length)
+const inlineItems = computed(() => props.items.filter((item) => !item.menuOnly))
+const menuOnlyItems = computed(() => props.items.filter((item) => item.menuOnly))
+
+const visibleCount = ref(inlineItems.value.length)
 const naturalWidth = ref(0)
 
-const visibleItems = computed(() => props.items.slice(0, visibleCount.value))
-const overflowItems = computed(() => props.items.slice(visibleCount.value))
+const visibleItems = computed(() => inlineItems.value.slice(0, visibleCount.value))
+const overflowItems = computed(() => [...inlineItems.value.slice(visibleCount.value), ...menuOnlyItems.value])
 
 const moreLabel = 'Weitere Aktionen'
 
@@ -101,8 +116,10 @@ function recompute() {
   if (!container || !measure) return
 
   const children = Array.from(measure.children) as HTMLElement[]
+  const alwaysOverflow = menuOnlyItems.value.length > 0
   if (children.length <= 1) {
-    apply(props.items.length)
+    naturalWidth.value = alwaysOverflow ? Math.ceil(children[0]?.offsetWidth ?? 0) : 0
+    apply(inlineItems.value.length)
     return
   }
 
@@ -116,12 +133,15 @@ function recompute() {
   // The width every item needs inline. The measurement row does not depend
   // on the container, so a parent may cap the toolbar at it without a loop
   // (`max-width: var(--responsive-toolbar-natural)`) and hand the rest of
-  // the row to whatever sits beside it.
+  // the row to whatever sits beside it. A toggle that is shown anyway
+  // (menu-only items) is part of that width.
   naturalWidth.value = Math.ceil(
-    itemWidths.reduce((sum, w) => sum + w, 0) + gap * Math.max(0, itemWidths.length - 1),
+    itemWidths.reduce((sum, w) => sum + w, 0) +
+      gap * Math.max(0, itemWidths.length - 1) +
+      (alwaysOverflow ? gap + overflowWidth : 0),
   )
 
-  apply(computeVisibleCount(itemWidths, overflowWidth, container.clientWidth, gap))
+  apply(computeVisibleCount(itemWidths, overflowWidth, container.clientWidth, gap, alwaysOverflow))
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -142,7 +162,7 @@ onBeforeUnmount(() => {
 // Recompute whenever the set of items (or their labels) changes — toggling a
 // button's label, e.g. "Auswählen" ⇄ "Auswahl beenden", changes its width.
 watch(
-  () => props.items.map((i) => `${i.key}:${i.label ?? ''}`).join('|'),
+  () => props.items.map((i) => `${i.key}:${i.label ?? ''}:${i.menuOnly ? 'menu' : ''}`).join('|'),
   () => {
     // A different set of items is a fresh layout question, so any earlier
     // freeze is lifted.
@@ -171,7 +191,7 @@ watch(
       :text="item.text"
       :disabled="item.disabled"
       :class="['responsive-toolbar__item', item.itemClass]"
-      :aria-label="item.label ? undefined : item.title"
+      :aria-label="item.title"
       v-tooltip.bottom="item.title"
       @click="item.command"
     />
@@ -194,7 +214,7 @@ watch(
          without a layout feedback loop. -->
     <div ref="measureRef" class="responsive-toolbar__measure" aria-hidden="true">
       <Button
-        v-for="item in items"
+        v-for="item in inlineItems"
         :key="`measure-${item.key}`"
         :icon="item.icon"
         :label="item.label || undefined"
@@ -238,6 +258,18 @@ watch(
 
 .responsive-toolbar__item {
   flex-shrink: 0;
+}
+
+/* Below sm the inline buttons drop their words (see the top of the file).
+   The measuring row sits in the same subtree, so it measures the same
+   icon-only buttons. */
+@media (max-width: 639px) {
+  .responsive-toolbar__item :deep(.p-button-label) {
+    display: none;
+  }
+  .responsive-toolbar__item :deep(.p-button-icon) {
+    margin: 0;
+  }
 }
 
 /* Off-layout measurement row — never visible, never interactive, but laid

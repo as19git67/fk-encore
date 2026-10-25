@@ -560,10 +560,6 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
 </template>
 
 <style scoped>
-.cd-header-toolbar {
-  flex: 1 1 0;
-  min-width: 0;
-}
 .cd-filter {
   display: flex;
   flex-wrap: wrap;

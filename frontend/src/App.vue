@@ -463,6 +463,13 @@ body {
   display: none;
 }
 
+/* A detail page's title row is made of buttons that bring their own height;
+   padding above and below it only costs the content room (PageLayout keeps
+   a little below whatever follows the title row). */
+.module-subheaders:has(> .page-stack > .page-header--sticky:first-child) {
+  padding-block: 0;
+}
+
 .navbar-start {
   display: flex;
   align-items: center;
