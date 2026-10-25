@@ -1910,45 +1910,66 @@ export const updateDocument = api(
 
     const existing = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
 
+    // The detail page sends the whole form on every save, so a field counts
+    // only when its value differs from what is stored. Otherwise saving a
+    // note re-sends the AI's own title, category etc. and pins them all.
     const patch: Partial<typeof documents.$inferInsert> = {};
-    if (req.title !== undefined) patch.title = req.title?.trim() || null;
-    if (req.doc_date !== undefined) patch.doc_date = req.doc_date?.trim() || null;
-    if (req.sender !== undefined) patch.sender = req.sender?.trim() || null;
-    if (req.document_number !== undefined) patch.document_number = req.document_number?.trim() || null;
-    if (req.summary !== undefined) patch.summary = req.summary?.trim() || null;
+    const setText = (key: "title" | "doc_date" | "sender" | "document_number" | "summary", raw: string | null | undefined) => {
+      if (raw === undefined) return;
+      const value = raw?.trim() || null;
+      if (value !== (existing[key] ?? null)) patch[key] = value;
+    };
+    setText("title", req.title);
+    setText("doc_date", req.doc_date);
+    setText("sender", req.sender);
+    setText("document_number", req.document_number);
+    setText("summary", req.summary);
     if (req.reference_numbers !== undefined) {
-      patch.reference_numbers = parseUserReferenceNumbers(req.reference_numbers);
+      const next = parseUserReferenceNumbers(req.reference_numbers);
+      // Compared without `source`: re-sending the AI's numbers unchanged
+      // must keep them as they are, not turn them into user entries.
+      const key = (list: ReadonlyArray<{ kind: string; normalized: string }>) =>
+        list.map((r) => `${r.kind}:${r.normalized}`).sort().join("|");
+      if (key(next) !== key(existing.reference_numbers ?? [])) {
+        patch.reference_numbers = next;
+      }
     }
 
     if (req.category_slug !== undefined) {
-      if (req.category_slug === null || req.category_slug === "") {
-        patch.category_id = null;
-      } else {
+      let categoryId: number | null = null;
+      if (req.category_slug !== null && req.category_slug !== "") {
         const cat = await dbFirst<{ id: number }>(
           db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, req.category_slug)),
         );
         if (!cat) throw APIError.invalidArgument(`unknown category slug: ${req.category_slug}`);
-        patch.category_id = cat.id;
+        categoryId = cat.id;
       }
-      // Mirrors cloud_teacher.py writing category_source='cloud' alongside
-      // category_id: whoever sets the category value owns its provenance, so
-      // the "Kategorie-Quelle" filter reflects a hand-picked category as
-      // "Manuell" rather than stale "Cloud Teacher"/"KI".
-      patch.category_source = "user";
+      if (categoryId !== (existing.category_id ?? null)) {
+        patch.category_id = categoryId;
+        // Mirrors cloud_teacher.py writing category_source='cloud' alongside
+        // category_id: whoever sets the category value owns its provenance, so
+        // the "Kategorie-Quelle" filter reflects a hand-picked category as
+        // "Manuell" rather than stale "Cloud Teacher"/"KI".
+        patch.category_source = "user";
+      }
     }
 
     if (req.document_type !== undefined) {
       if (req.document_type === null || req.document_type === "") {
-        patch.document_type = null;
-        patch.document_type_confidence = null;
+        if (existing.document_type !== null) {
+          patch.document_type = null;
+          patch.document_type_confidence = null;
+        }
       } else {
         if (!isValidDocumentTypeSlug(req.document_type)) {
           throw APIError.invalidArgument(`unknown document type: ${req.document_type}`);
         }
-        patch.document_type = req.document_type;
-        // A human-picked type is certain; the confidence column mirrors that so
-        // the value reads the same as a strong classifier hit.
-        patch.document_type_confidence = 1;
+        if (req.document_type !== existing.document_type) {
+          patch.document_type = req.document_type;
+          // A human-picked type is certain; the confidence column mirrors that so
+          // the value reads the same as a strong classifier hit.
+          patch.document_type_confidence = 1;
+        }
       }
     }
 
@@ -1973,7 +1994,10 @@ export const updateDocument = api(
     // Notes are independent metadata: applied after `attributesChanged` is
     // computed so editing only the notes neither pins the AI attributes nor
     // triggers a file relocate.
-    if (req.notes !== undefined) patch.notes = req.notes?.trim() || null;
+    if (req.notes !== undefined) {
+      const notes = req.notes?.trim() || null;
+      if (notes !== (existing.notes ?? null)) patch.notes = notes;
+    }
 
     // A hand-edit is the user's fix for a failed pipeline run. The classify
     // step fails hard on a single unusable value (see llm-client.ts), which

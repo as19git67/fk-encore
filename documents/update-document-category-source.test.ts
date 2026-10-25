@@ -38,9 +38,19 @@ async function ensureCategory(): Promise<number> {
   return row!.id;
 }
 
+const OTHER_CATEGORY_SLUG = "udcs-andere-kategorie";
+
+async function ensureOtherCategory(): Promise<void> {
+  await db
+    .insert(documentCategories)
+    .values({ slug: OTHER_CATEGORY_SLUG, name: "UDCS Andere Kategorie" })
+    .onConflictDoNothing({ target: documentCategories.slug });
+}
+
 async function seedDocument(categorySource: "ai" | "cloud" | "user"): Promise<void> {
   await db.delete(documents).where(eq(documents.id, DOC_ID));
   const catId = await ensureCategory();
+  await ensureOtherCategory();
   const diskPath = path.join(DOCUMENTS_DIR, `u${USER_ID}`, "_inbox", "2026-01", `x-${DOC_ID}.pdf`);
   await db.execute(
     sql`INSERT INTO documents
@@ -73,10 +83,49 @@ describe("updateDocument — category_source provenance", () => {
   it("marks the category 'user'-owned when a human sets category_slug", async () => {
     await seedDocument("ai");
 
-    await updateDocument({ id: DOC_ID, category_slug: TEST_CATEGORY_SLUG });
+    await updateDocument({ id: DOC_ID, category_slug: OTHER_CATEGORY_SLUG });
 
     const row = await readDoc();
     expect(row.categorySource).toBe("user");
+    expect(row.attributesReviewed).toBe(true);
+  });
+
+  it("keeps the AI in charge when the form is saved with only a new note", async () => {
+    await seedDocument("ai");
+
+    // The detail page sends every field on save, unchanged ones included.
+    await updateDocument({
+      id: DOC_ID,
+      title: "Alter Titel",
+      sender: "Alte Quelle",
+      doc_date: null,
+      document_number: null,
+      summary: null,
+      reference_numbers: [],
+      category_slug: TEST_CATEGORY_SLUG,
+      document_type: null,
+      notes: "nur eine Notiz",
+    });
+
+    const row = await readDoc();
+    expect(row.categorySource).toBe("ai");
+    expect(row.attributesReviewed).toBe(false);
+    const [notes] = await db.select({ notes: documents.notes }).from(documents).where(eq(documents.id, DOC_ID));
+    expect(notes!.notes).toBe("nur eine Notiz");
+  });
+
+  it("pins the attributes when a re-sent form changes one of them", async () => {
+    await seedDocument("ai");
+
+    await updateDocument({
+      id: DOC_ID,
+      title: "Neuer Titel",
+      sender: "Alte Quelle",
+      category_slug: TEST_CATEGORY_SLUG,
+    });
+
+    const row = await readDoc();
+    expect(row.categorySource).toBe("ai");
     expect(row.attributesReviewed).toBe(true);
   });
 
