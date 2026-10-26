@@ -6,6 +6,7 @@
 import { finance } from "~encore/clients";
 import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
+import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
 import { parseAmountBound, parseDirection, type TransactionCriteria } from "../../finance/transaction-conditions";
 import { parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
 
@@ -89,10 +90,34 @@ export const listAccounts: ToolSpec = {
   },
 };
 
+/** What a booking list is ranked by, in the words of the tool and of the finance service (`sortBy` of GET /finance/transactions). */
+const RANK_FIELDS = {
+  booking_date: { description: "booking date", sortBy: "date" },
+  amount: { description: "absolute amount ('die größte Buchung')", sortBy: "amount" },
+} satisfies Record<string, RankField & { sortBy: "date" | "amount" }>;
+
+const GROUPS = {
+  month: "YYYY-MM",
+  quarter: "YYYY-Qn",
+  year: "YYYY",
+  account: "id",
+  counterparty: "as written",
+} as const;
+type TransactionGroup = keyof typeof GROUPS;
+
+/** Rows the service is asked for when the result is grouped: the most it returns. */
+const GROUPED_CAP = 500;
+
+function groupKey(t: TransactionView, by: TransactionGroup): string | undefined {
+  if (by === "account") return String(t.account_id);
+  if (by === "counterparty") return t.counterparty?.trim() || undefined;
+  return dateKey(t.booking_date, by);
+}
+
 export const listTransactions: ToolSpec = {
   name: "list_transactions",
   kind: "read",
-  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first. For 'Ausgaben' (expenses, spending) set direction \"out\", for 'Einnahmen' (income) \"in\"; only 'Buchungen' without either word lists both. For sums use transaction_totals.",
+  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first, or by amount (rank_by, direction), optionally the first of every month, quarter, year, account or counterparty (group_by). For 'Ausgaben' (expenses, spending) set direction \"out\", for 'Einnahmen' (income) \"in\"; only 'Buchungen' without either word lists both. For sums use transaction_totals.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -107,13 +132,17 @@ export const listTransactions: ToolSpec = {
       tax_relevant: { type: "boolean", description: "only bookings flagged as relevant for the tax return (true) or not flagged (false)" },
       amount_min: { type: "number", description: "smallest absolute amount in the account currency, inclusive; 100 matches a 100 expense and a 100 credit" },
       amount_max: { type: "number", description: "largest absolute amount, inclusive" },
-      limit: { type: "integer", description: "rows to return, at most 50 (default 25)" },
+      ...rankProperties(RANK_FIELDS, "booking_date"),
+      ...groupProperties(GROUPS),
+      limit: { type: "integer", description: "rows to return, at most 50 (default 25); with group_by: groups shown" },
     },
   },
   async run(args) {
     const limit = int(args.limit, { min: 1, max: 50 }) ?? 25;
     const tags = Array.isArray(args.tags) ? args.tags.filter((t): t is string => typeof t === "string") : [];
     const direction = parseDirection(args.direction);
+    const ranking = parseRanking(args, RANK_FIELDS, "booking_date");
+    const grouping = parseGrouping(args, GROUPS);
     const res = await (finance.listTransactions({
       q: str(args.q),
       from: isoDate(args.from),
@@ -124,9 +153,17 @@ export const listTransactions: ToolSpec = {
       amountMin: parseAmountBound(args.amount_min),
       amountMax: parseAmountBound(args.amount_max),
       direction,
-      limit,
+      sortBy: RANK_FIELDS[ranking.field].sortBy,
+      sortDir: ranking.direction,
+      limit: grouping ? GROUPED_CAP : limit,
     })) as unknown as { items: TransactionView[]; total: number };
-    const rows = res.items;
+    const groups = grouping ? groupRows(res.items, (t) => groupKey(t, grouping.by), grouping.perGroup) : undefined;
+    const rows = groups ? groups.flatMap((g) => g.rows.map((t) => ({ ...t, group: g.key }))) : res.items.map((t) => ({ ...t, group: undefined as string | undefined }));
+    const rowCap = groups ? Math.min(rows.length, limit * grouping!.perGroup) : limit;
+    const total = groups ? rows.length : res.total;
+    const groupedCapNote = groups && res.total > res.items.length
+      ? ` Only the first ${res.items.length} of ${res.total} bookings in this order were grouped; a group outside them is missing.`
+      : "";
     // The transaction list is per account, so only a search within one
     // account has a list page showing the same set — and a heading naming
     // the account and its balance, as the list page has; the page takes the
@@ -143,28 +180,29 @@ export const listTransactions: ToolSpec = {
       : undefined;
     return {
       text: table(
-        ["id", "date", "amount", "counterparty", "purpose", "tags", "tax"],
-        rows.map((t) => [t.id, t.booking_date.slice(0, 10), money(t.amount), t.counterparty, t.purpose, (t.tags ?? []).map((x) => x.name).join(","), t.is_tax_relevant ? "yes" : ""]),
+        [...(groups ? ["group"] : []), "id", "date", "amount", "counterparty", "purpose", "tags", "tax"],
+        rows.map((t) => [...(groups ? [t.group] : []), t.id, t.booking_date.slice(0, 10), money(t.amount), t.counterparty, t.purpose, (t.tags ?? []).map((x) => x.name).join(","), t.is_tax_relevant ? "yes" : ""]),
         {
-          total: res.total, cap: limit,
+          total, cap: rowCap,
           note: [
             account ? `Account: ${account.label}, balance ${balanceText(account)}.` : undefined,
             direction === "out" ? "Only money out (Ausgaben)." : direction === "in" ? "Only money in (Einnahmen)." : undefined,
+            `${rankNote(ranking, grouping, groups?.length ?? 0)}.${groupedCapNote}`,
             "Amounts in EUR; negative = money out. Do not add these up yourself — use transaction_totals for sums.",
           ].filter(Boolean).join(" "),
         },
       ),
-      digest: digestOf("list_transactions", res.total, rows.map((t) => t.id)),
+      digest: digestOf("list_transactions", total, rows.map((t) => t.id)),
       rowCount: rows.length,
       // Only the rows fetched: a follow-up acts on what the user saw.
       ref: { type: "transaction", ids: rows.map((t) => t.id) },
       block: {
         kind: "transactions",
         tool: "list_transactions",
-        total: res.total,
+        total,
         route,
         subtitle,
-        rows: rows.map((t) => ({
+        rows: rows.slice(0, rowCap).map((t) => ({
           id: t.id, booking_date: t.booking_date.slice(0, 10), amount: t.amount, counterparty: t.counterparty, purpose: t.purpose,
         })),
       },

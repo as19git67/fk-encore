@@ -8,6 +8,7 @@ import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { taxWorksheet } from "./tax";
 import { findInDocuments } from "./text-boxes";
+import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
 
@@ -15,7 +16,37 @@ interface Category { id: number; slug: string; name: string; parent_id: number |
 interface DocumentSummary {
   id: number; title: string | null; original_filename?: string; doc_date: string | null;
   sender?: string | null; correspondent_display?: string | null; category_slug?: string | null;
-  reference_numbers?: unknown;
+  reference_numbers?: unknown; uploaded_at?: string | null; size_bytes?: number;
+}
+
+/**
+ * What a document list is ranked by: the search's relevance, or a field the
+ * documents service sorts by (`sort_by` of GET /documents and /documents/search).
+ */
+const RANK_FIELDS = {
+  relevance: { description: "match of q (needs q)", sortBy: undefined },
+  doc_date: { description: "document date", sortBy: "doc_date" },
+  uploaded_at: { description: "date added", sortBy: "uploaded_at" },
+  size_bytes: { description: "file size ('das größte')", sortBy: "size_bytes" },
+} satisfies Record<string, RankField & { sortBy: string | undefined }>;
+type DocumentRankField = keyof typeof RANK_FIELDS;
+
+const GROUPS = {
+  year: "of the document date",
+  month: "YYYY-MM",
+  correspondent: "sender",
+  category: "slug",
+} as const;
+type DocumentGroup = keyof typeof GROUPS;
+
+/** Rows the service is asked for when the result is grouped: every group needs its first row. */
+const GROUPED_SEARCH_CAP = 100;
+const GROUPED_LIST_CAP = 200;
+
+function groupKey(d: DocumentSummary, by: DocumentGroup): string | undefined {
+  if (by === "year" || by === "month") return dateKey(d.doc_date, by);
+  if (by === "correspondent") return d.correspondent_display ?? d.sender ?? undefined;
+  return d.category_slug ?? undefined;
 }
 interface DocumentDetail extends DocumentSummary {
   summary?: string | null; tags?: string[]; document_type?: string | null;
@@ -90,13 +121,13 @@ export const searchDocuments: ToolSpec = {
   name: "search_documents",
   kind: "read",
   refines: true,
-  summary: "Document search by what the documents are about, optionally narrowed to the sender organisation (correspondent), a category slug and a document date range; ranked by relevance unless sort says otherwise. Put the sender (an insurer, a bank, an authority) into correspondent, not into q.",
+  summary: "Documents by what they are about (q), optionally narrowed to the sender organisation (correspondent), a category slug and a document date range; ranked by relevance, date or size (rank_by, direction), optionally the first of every year, month, sender or category (group_by). Without q it lists by the filters alone. Put the sender (an insurer, a bank, an authority) into correspondent, not into q.",
   permissions: DOCUMENTS,
   source: "hand",
   parameters: {
     type: "object",
     properties: {
-      q: { type: "string", description: "what the documents are about — the subject, not the sender" },
+      q: { type: "string", description: "what the documents are about — the subject, not the sender; leave out to list by the other arguments alone" },
       correspondent: { type: "string", description: "the sender organisation as the user names it ('TK', 'Stadtwerke'); matched against the known correspondents, else against the sender line" },
       mode: {
         type: "string",
@@ -107,60 +138,74 @@ export const searchDocuments: ToolSpec = {
       tax_relevant: { type: "boolean", description: "only documents flagged as relevant for the tax return (true) or not flagged (false); for one tax year use tax_documents instead" },
       date_from: { type: "string", description: "document date from, YYYY-MM-DD" },
       date_to: { type: "string", description: "document date to, YYYY-MM-DD" },
-      limit: { type: "integer", description: "at most 25 (default 15)" },
-      sort: {
-        type: "string",
-        enum: ["relevance", "date_desc", "date_asc"],
-        description: "relevance (default), or by document date — newest or oldest first. Use it when the user asks for a date order: the rows shown next to your answer follow this order, not your text.",
-      },
+      limit: { type: "integer", description: "at most 25 (default 15); with group_by: groups shown" },
+      ...rankProperties(RANK_FIELDS, "relevance"),
+      ...groupProperties(GROUPS),
     },
-    required: ["q"],
   },
   async run(args) {
     const q = str(args.q);
-    if (!q) throw new Error("q is required");
     const category = str(args.category);
     const dateFrom = isoDate(args.date_from);
     const dateTo = isoDate(args.date_to);
     const limit = int(args.limit, { min: 1, max: 25 }) ?? 15;
-    const sort = str(args.sort);
-    const byDate = sort === "date_desc" || sort === "date_asc";
-    const sortDir = sort === "date_asc" ? "asc" : "desc";
+    const grouping = parseGrouping(args, GROUPS);
+    // Without q there is no relevance: such a list is in date order unless told otherwise.
+    const ranking = parseRanking(args, RANK_FIELDS, q ? "relevance" : "doc_date");
+    if (ranking.field === "relevance" && !q) throw new Error("rank_by relevance needs q; give q, or rank by doc_date, uploaded_at or size_bytes");
+    const sortBy = RANK_FIELDS[ranking.field].sortBy;
     const mode = str(args.mode) ?? "hybrid";
     if (!SEARCH_MODES.includes(mode)) throw new Error(`mode must be one of ${SEARCH_MODES.join(", ")}`);
     const who = await resolveCorrespondent(str(args.correspondent));
     const taxRelevant = bool(args.tax_relevant);
-    const res = await (documents.searchDocumentsEndpoint({
-      q, mode, category, date_from: dateFrom, date_to: dateTo, limit,
+    const common = {
+      category, date_from: dateFrom, date_to: dateTo,
       correspondent: who.slug, sender: who.sender, tax_relevant: taxRelevant,
-      sort_by: byDate ? "doc_date" : undefined, sort_dir: byDate ? sortDir : undefined,
-    })) as unknown as { items: DocumentSummary[] };
-    const rows = res.items;
+      sort_by: sortBy, sort_dir: sortBy ? ranking.direction : undefined,
+    };
+    let rows: DocumentSummary[];
+    let total: number | undefined;
+    if (q) {
+      const res = await (documents.searchDocumentsEndpoint({
+        ...common, q, mode, limit: grouping ? GROUPED_SEARCH_CAP : limit,
+      })) as unknown as { items: DocumentSummary[] };
+      rows = res.items;
+    } else {
+      const res = await (documents.listDocuments({
+        ...common, limit: grouping ? GROUPED_LIST_CAP : limit,
+      })) as unknown as { items: DocumentSummary[]; total: number };
+      rows = res.items;
+      total = res.total;
+    }
+    const groups = grouping ? groupRows(rows, (d) => groupKey(d, grouping.by), grouping.perGroup) : undefined;
+    const shown = groups ? groups.flatMap((g) => g.rows.map((d) => ({ ...d, group: g.key }))) : rows.map((d) => ({ ...d, group: undefined as string | undefined }));
+    const rowCap = groups ? Math.min(shown.length, limit * grouping!.perGroup) : limit;
+    const sizeColumn = ranking.field === "size_bytes";
     const modeNote = mode === "fts" ? "Word match only" : mode === "semantic" ? "By meaning" : "Ranked by relevance";
+    const orderNote = ranking.field === "relevance"
+      ? `${modeNote}; the list may hold near misses — say which ones fit.`
+      : `${rankNote(ranking, grouping, groups?.length ?? 0)}${q ? "; the list may hold near misses — say which ones fit" : ""}.`;
+    const capNote = groups && q ? ` Only the ${GROUPED_SEARCH_CAP} best matches were grouped.` : groups && total !== undefined && total > rows.length ? ` Only the first ${rows.length} of ${total} were grouped.` : "";
     return {
       text: table(
-        ["id", "date", "title", "from", "category"],
-        rows.map((d) => [d.id, d.doc_date?.slice(0, 10), docTitle(d), d.correspondent_display ?? d.sender, d.category_slug]),
+        [...(groups ? ["group"] : []), "id", "date", ...(sizeColumn ? ["size_bytes"] : []), "title", "from", "category"],
+        shown.map((d) => [...(groups ? [d.group] : []), d.id, d.doc_date?.slice(0, 10), ...(sizeColumn ? [d.size_bytes] : []), docTitle(d), d.correspondent_display ?? d.sender, d.category_slug]),
         {
-          cap: limit,
-          note: [
-            who.note,
-            byDate
-              ? `Sorted by document date, ${sortDir === "asc" ? "oldest" : "newest"} first; the list may hold near misses — say which ones fit.`
-              : `${modeNote}; the list may hold near misses — say which ones fit.`,
-          ].filter(Boolean).join(" "),
+          cap: rowCap,
+          total: groups ? shown.length : total,
+          note: [who.note, orderNote + capNote].filter(Boolean).join(" "),
         },
       ),
-      digest: digestOf("search_documents", rows.length, rows.map((d) => d.id)),
-      rowCount: rows.length,
-      ref: { type: "document", ids: rows.map((d) => d.id) },
+      digest: digestOf("search_documents", shown.length, shown.map((d) => d.id)),
+      rowCount: shown.length,
+      ref: { type: "document", ids: shown.map((d) => d.id) },
       block: {
         kind: "documents",
         tool: "search_documents",
-        rows: rows.map((d) => ({
+        rows: shown.slice(0, rowCap).map((d) => ({
           id: d.id, title: docTitle(d), doc_date: d.doc_date, from: d.correspondent_display ?? d.sender ?? null, category: d.category_slug ?? null,
         })),
-        route: `/dokumente${query({ q, category, correspondent: who.slug, sender: who.sender, dateFrom, dateTo, sortBy: byDate ? "doc_date" : undefined, sortDir: byDate ? sortDir : undefined })}`,
+        route: `/dokumente${query({ q, category, correspondent: who.slug, sender: who.sender, dateFrom, dateTo, sortBy, sortDir: sortBy ? ranking.direction : undefined })}`,
       },
     };
   },

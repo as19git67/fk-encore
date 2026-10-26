@@ -122,6 +122,25 @@ async function insertTag(
 
 // ================= LIST =================
 
+describe("finance/transactions — list (order)", () => {
+  it("ranks by the absolute amount on request, largest first, the date breaking ties", async () => {
+    const { a } = await createAccounts();
+    const small = await insertTx(a, { booking_date: "2026-09-10", amount: "-80.00" });
+    const credit = await insertTx(a, { booking_date: "2026-09-03", amount: "1250.00" });
+    const expense = await insertTx(a, { booking_date: "2026-08-03", amount: "-1250.00" });
+    setAuth("1", ["finance.view", "finance.admin"]);
+
+    const byDate = await listTransactions({ accountId: a });
+    expect(byDate.items.map((i) => i.id)).toEqual([small, credit, expense]);
+
+    const largest = await listTransactions({ accountId: a, sortBy: "amount" });
+    expect(largest.items.map((i) => i.id)).toEqual([credit, expense, small]);
+
+    const smallest = await listTransactions({ accountId: a, sortBy: "amount", sortDir: "asc" });
+    expect(smallest.items.map((i) => i.id)).toEqual([small, expense, credit]);
+  });
+});
+
 describe("finance/transactions — list (ACL filter)", () => {
   it("returns only transactions on accounts the caller has ACL for", async () => {
     const { a, b } = await createAccounts();

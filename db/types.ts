@@ -364,6 +364,12 @@ export interface Photo {
    */
   has_known_face?: boolean;
   /**
+   * The value the list was ranked by when `sortBy` named a metric that is
+   * not a column of the photo (favourites of every viewer, comments, how
+   * well a person's face shows); absent for the date order.
+   */
+  rank_value?: number;
+  /**
    * Portrait, landscape or square, from the stored pixel dimensions. Null
    * while the dimensions are unknown (the "Bildmaße nachtragen" backfill has
    * not run for this photo yet).
