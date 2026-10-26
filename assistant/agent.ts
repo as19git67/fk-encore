@@ -28,7 +28,7 @@ import { argumentError, checkArguments } from "./arguments";
 import { AREAS, AREA_IDS, areaById, homeOf, toolsOfArea, type Area, type AreaId } from "./areas/index";
 import { route, type RoutingStage } from "./router";
 import { contextSection, type ContextRef } from "./briefs";
-import { ContextTooLargeError, type ChatFn, type ChatReply, type ChatRequest } from "./llm-client";
+import { ContextTooLargeError, type ChatFn, type ChatReply, type ChatRequest, type ForcedTool } from "./llm-client";
 import type {
   AssistantUser,
   ChatMessage,
@@ -89,16 +89,17 @@ export function budgetForWindow(window: number): number {
 /**
  * Up to this size every schema goes along with every request; past it the
  * model gets the one-line catalog and fetches schemas with describe_tools.
- * The full catalog of a user with every module is about 9600 tokens (47
- * tools, ranking and grouping on the three list tools included); the
- * budget leaves room for a few more before a round goes to fetching —
- * the router with area packages (ki-assistent.md) is what brings it down
- * again. A deployment with a small
+ * The full catalog of a user with every module is about 10,400 tokens (49
+ * tools, ranking and grouping on the three list tools and the photo book
+ * included); the budget leaves room for a few more before a round goes to
+ * fetching — and only a turn with every area in play sends the full
+ * catalog, since the router (assistent-wegfindung.md) offers the areas'
+ * tools. A deployment with a small
  * context window lowers it through the environment — and raises
  * ASSISTANT_CONTEXT_TOKENS along with the model's window, since the
  * schemas count against that budget on every round.
  */
-const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "10000", 10);
+const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "11000", 10);
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -151,6 +152,95 @@ export function areaPackage(area: Area, tools: ToolSpec[]): string {
   return parts.filter((p): p is string => !!p).join("\n\n");
 }
 
+// ─── the plan of a multi-step question (stage 3 of assistent-wegfindung.md) ──
+
+export const WRITE_PLAN_NAME = "write_plan";
+/** What the plan call may spend on generation: a few short lines of JSON. */
+const PLAN_TOKENS = 320;
+/**
+ * Let the model think before it plans. Off by default; set to try whether a
+ * short reasoning block ahead of the plan buys more right first tools than
+ * it costs in latency (the benchmark measures both).
+ */
+const PLAN_THINKING = process.env.ASSISTANT_PLAN_THINKING === "1";
+const PLAN_STEPS_MIN = 1;
+const PLAN_STEPS_MAX = 4;
+
+export interface PlanStep {
+  tool: string;
+  goal: string;
+  done: boolean;
+}
+
+/**
+ * The tool the plan call is bound to: the grammar allows only steps that
+ * name a tool offered this turn, so the plan cannot name a road that does
+ * not exist. It stays in the catalog of the turn so the tool list, and
+ * with it the cached prompt prefix, is the same in every round.
+ */
+export function writePlanDefinition(toolNames: string[]): unknown {
+  return toolDefinition({
+    name: WRITE_PLAN_NAME,
+    summary: `The steps that answer the question, in the order they build on each other; ${PLAN_STEPS_MIN} to ${PLAN_STEPS_MAX} steps, each one tool call (one step when one call answers it). Written once, before the first tool.`,
+    parameters: {
+      type: "object",
+      properties: {
+        steps: {
+          type: "array",
+          minItems: PLAN_STEPS_MIN,
+          maxItems: PLAN_STEPS_MAX,
+          items: {
+            type: "object",
+            properties: {
+              tool: { type: "string", enum: toolNames },
+              goal: { type: "string", description: "what this step finds or makes, in a few words" },
+            },
+            required: ["tool", "goal"],
+          },
+        },
+      },
+      required: ["steps"],
+    },
+  });
+}
+
+/** The steps the model wrote, or null when the reply holds no usable plan. */
+export function parsePlan(reply: ChatReply, allowed: Set<string>): PlanStep[] | null {
+  const call = reply.tool_calls.find((c) => c.function.name === WRITE_PLAN_NAME);
+  if (!call) return null;
+  const args = parseArguments(call.function.arguments);
+  if (!args || !Array.isArray(args.steps)) return null;
+  const steps: PlanStep[] = [];
+  for (const raw of args.steps) {
+    const step = raw as { tool?: unknown; goal?: unknown } | null;
+    if (!step || typeof step.tool !== "string" || !allowed.has(step.tool)) continue;
+    steps.push({ tool: step.tool, goal: typeof step.goal === "string" ? step.goal.trim().slice(0, 120) : "", done: false });
+    if (steps.length === PLAN_STEPS_MAX) break;
+  }
+  return steps.length >= PLAN_STEPS_MIN ? steps : null;
+}
+
+/** The plan as the model reads it back: a checklist and the next step. */
+export function planText(steps: PlanStep[]): string {
+  const lines = steps.map((s, i) => `[${s.done ? "x" : " "}] ${i + 1}. ${s.tool}${s.goal ? ` — ${s.goal}` : ""}`);
+  return `Plan:\n${lines.join("\n")}\n${planStatus(steps)}`;
+}
+
+/** What is next: the first open step, or the answer once every step is done. */
+export function planStatus(steps: PlanStep[]): string {
+  const next = steps.findIndex((s) => !s.done);
+  if (next < 0) return "Every planned step is done: answer now from the results above.";
+  const step = steps[next]!;
+  const done = steps.filter((s) => s.done).length;
+  return `${done ? `Plan: ${done} of ${steps.length} steps done. ` : ""}Next: step ${next + 1}, ${step.tool}${step.goal ? ` — ${step.goal}` : ""}. Call it now; when every step is done, answer. Skip a step only when the results above already cover it.`;
+}
+
+/** Sent back once when the model answers with planned steps still open. */
+export function planNudge(steps: PlanStep[]): string {
+  const open = steps.map((s, i) => ({ s, i })).filter(({ s }) => !s.done).map(({ s, i }) => `step ${i + 1}, ${s.tool}${s.goal ? ` — ${s.goal}` : ""}`);
+  return `Your plan has steps not done yet: ${open.join("; ")}. Call the next one now. Only if the results above already answer the whole question, repeat your answer unchanged.`;
+}
+
 /**
  * What holds in every area. The rules of one area (photos, tax, businesses,
  * letters …) live with the area in `areas/` and reach the model only when the
@@ -168,6 +258,7 @@ Rules:
 - The tools below are those of the areas this question seems to need. When it needs another area, call ${SWITCH_AREA_NAME}(area) first: that adds the area's rules and tools for this turn. Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
+- When ${WRITE_PLAN_NAME} is among the tools, the question needs several steps: the first call writes the plan, every later round follows it step by step, and the plan's own status after each result says what comes next.
 - A tool result with no rows says which filter to loosen and how many rows that brings: call the tool again once with that filter dropped before you tell the user nothing exists. A tool error names the argument and the allowed values: fix that argument and call again; never repeat the same call, and never answer as if the call had worked. When a tool finds nothing even so, say so plainly and name the criteria.
 - Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. To correct an earlier proposal (another layout, other text, other photos), call the write tool again with the changed arguments: that makes a new card under your answer, while the earlier card stays as it was and cannot be changed. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
@@ -398,6 +489,8 @@ export interface TurnResult {
   /** The areas in play at the end of the turn, and how the first ones were decided. */
   areas: AreaId[];
   routing: RoutingStage;
+  /** The plan of a multi-step question, with what got done (stage 3); absent when none was asked for or written. */
+  plan?: PlanStep[];
 }
 
 /**
@@ -591,23 +684,76 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     ).length);
     return reply;
   };
-  for (let round = 1; round <= maxRounds && answer === null; round++) {
-    input.signal?.throwIfAborted();
-    rounds = round;
-    const last = round === maxRounds;
+  /** The tools of a round: the meta tools, the plan tool once a plan exists, and what is offered. */
+  const roundDefinitions = (withPlan = plan !== null): unknown[] => {
     // describe_tools stands in for every schema not sent along: those of a
     // deferred catalog, and those of the areas not in play.
     const describable = deferred || offered.size < tools.length;
-    const definitions = [
+    return [
       ...(describable ? [describeToolsDefinition] : []),
       ...(switchable().length ? [switchAreaDefinition] : []),
+      ...(withPlan ? [planDefinition] : []),
       ...[...offered.values()].map(toolDefinition),
     ];
-    // The previous round's results stay whole; older ones may shrink.
-    const budget = currentBudget();
-    const shift = fitContext(messages, digests, budget, { protectFrom: lastRoundStart, questionIndex }, estimateTokens(definitions));
+  };
+  /** Shrinks the conversation to the budget before a request with these definitions. */
+  const fit = (definitions: unknown[], protectFrom = lastRoundStart, factor = 1): void => {
+    const shift = fitContext(messages, digests, Math.floor(currentBudget() * factor), { protectFrom, questionIndex }, estimateTokens(definitions));
     questionIndex -= shift;
     lastRoundStart -= shift;
+  };
+
+  // The plan of a multi-step question (stage 3 of assistent-wegfindung.md):
+  // one call bound to write_plan before the first tool, with the tools of
+  // round 1 alongside so the steps name roads that exist. The plan enters
+  // the transcript as a tool round of its own, and its status after every
+  // result says which step comes next. The plan tool stays in the catalog
+  // for the rest of the turn, so the tool list — and with it the cached
+  // prompt prefix — is the same in every round.
+  let plan: PlanStep[] | null = null;
+  let planRounds = 0;
+  let planNudged = false;
+  const planNames = firstTools.map((t) => t.name);
+  const planDefinition = writePlanDefinition(planNames);
+  if (routing.needsPlan && planNames.length >= 2 && maxRounds > 2) {
+    input.signal?.throwIfAborted();
+    const definitions = roundDefinitions(true);
+    fit(definitions);
+    try {
+      const reply = await send({
+        messages: [...messages],
+        tools: definitions,
+        tool_choice: { type: "function", function: { name: WRITE_PLAN_NAME } } satisfies ForcedTool,
+        max_tokens: PLAN_TOKENS,
+        ...(PLAN_THINKING ? { thinking: true } : {}),
+      });
+      planRounds = 1;
+      plan = parsePlan(reply, new Set(planNames));
+      const call = reply.tool_calls.find((c) => c.function.name === WRITE_PLAN_NAME);
+      if (plan && call) {
+        lastRoundStart = messages.length;
+        messages.push({ role: "assistant", content: null, tool_calls: [call] });
+        messages.push({ role: "tool", tool_call_id: call.id, content: planText(plan) });
+        // What the plan shrinks to in a later turn's history.
+        const digest = `[plan of this turn: ${plan.map((s) => s.tool).join(" → ")}]`;
+        digests.set(call.id, digest);
+        toolResults[call.id] = { digest };
+      } else {
+        plan = null;
+      }
+    } catch (err) {
+      // No room for the plan: the loop runs without one and shrinks on its own.
+      if (!(err instanceof ContextTooLargeError)) throw err;
+    }
+  }
+
+  for (let round = 1; round <= maxRounds && answer === null; round++) {
+    input.signal?.throwIfAborted();
+    rounds = planRounds + round;
+    const last = round === maxRounds;
+    const definitions = roundDefinitions();
+    // The previous round's results stay whole; older ones may shrink.
+    fit(definitions);
 
     const request = {
       messages: [...messages, ...(nudge ?? [])],
@@ -622,11 +768,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       if (!(err instanceof ContextTooLargeError)) throw err;
       // The estimate was optimistic. Shrink everything that can shrink and
       // try this round once more.
-      const cut = fitContext(
-        messages, digests, Math.floor(budget * 0.6), { protectFrom: messages.length, questionIndex }, estimateTokens(definitions),
-      );
-      questionIndex -= cut;
-      lastRoundStart -= cut;
+      fit(definitions, messages.length, 0.6);
       request.messages = [...messages, ...(nudge ?? [])];
       reply = await send(request);
     }
@@ -648,12 +790,17 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     const claimsRevision = !reply.tool_calls.length && !revisionNudged && mayPropose
       && !blocks.some((b) => b.kind === "proposal") && claimsChange(reply.content)
       && proposedEarlier(messages.slice(0, questionIndex), new Set(tools.filter((t) => t.kind === "write").map((t) => t.name)));
-    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision)) {
+    // An answer with planned steps still open: the plan was the model's
+    // own, so it is sent back to it once.
+    const planOpen = !reply.tool_calls.length && plan !== null && !planNudged && plan.some((s) => !s.done)
+      && !(missingAreas && saysPermissionMissing(reply.content));
+    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision || planOpen)) {
       // Not kept in the transcript: the draft was never the answer.
       const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE
-        : claimsRevision ? REVISION_NUDGE : DATA_QUESTION_NUDGE;
+        : claimsRevision ? REVISION_NUDGE : planOpen ? planNudge(plan!) : DATA_QUESTION_NUDGE;
       if (text === CONSENT_NUDGE) consentNudged = true;
       if (text === REVISION_NUDGE) revisionNudged = true;
+      if (planOpen && !fakeCall && !ungrounded && !asksConsent && !claimsRevision) planNudged = true;
       nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: text }];
       emit({ type: "retract" });
       continue;
@@ -699,6 +846,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
 
     lastRoundStart = messages.length;
     messages.push({ role: "assistant", content: reply.content, tool_calls: reply.tool_calls });
+    /** The tools that ran this round without an error, for the plan. */
+    const ranOk: string[] = [];
     for (const call of reply.tool_calls) {
       input.signal?.throwIfAborted();
       const name = call.function.name;
@@ -723,6 +872,10 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           offered.set(t.name, t);
         }
         result([text, ...added].join("\n\n"));
+        continue;
+      }
+      if (name === WRITE_PLAN_NAME && plan) {
+        result(`The plan is written; follow it.\n${planText(plan)}`);
         continue;
       }
       if (name === SWITCH_AREA_NAME) {
@@ -795,6 +948,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           blocks.push(outcome.block);
         }
         result(withHint(outcome, args));
+        ranOk.push(name);
         emit({ type: "tool_result", tool: name, rowCount: outcome.rowCount, block: outcome.block });
         input.log?.({ tool: name, arguments: args, rows: outcome.rowCount, ms: Date.now() - started });
       } catch (err) {
@@ -807,6 +961,17 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         emit({ type: "tool_result", tool: name, rowCount: 0, error: message });
         input.log?.({ tool: name, arguments: args, rows: 0, ms: Date.now() - started, error: message });
       }
+    }
+    if (plan) {
+      // Tick off the steps whose tool ran, and tell the model what is next
+      // at the end of this round's last result — appended, so the earlier
+      // messages and the cached prefix stay as they were.
+      for (const name of ranOk) {
+        const step = plan.find((s) => !s.done && s.tool === name);
+        if (step) step.done = true;
+      }
+      const tail = messages[messages.length - 1]!;
+      if (tail.role === "tool") messages[messages.length - 1] = { ...tail, content: `${tail.content}\n\n${planStatus(plan)}` };
     }
   }
 
@@ -822,5 +987,6 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   return {
     answer: final, blocks, transcript, rounds, toolResults, context: usage,
     areas: AREA_IDS.filter((id) => active.has(id)), routing: routing.stage,
+    ...(plan ? { plan } : {}),
   };
 }

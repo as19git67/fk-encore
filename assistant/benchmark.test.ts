@@ -45,6 +45,11 @@ function scripted(calls: Array<{ tool: string; args: Record<string, unknown> }>,
   let next = 0;
   return vi.fn(async (req: ChatRequest): Promise<ChatReply> => {
     const offered = new Set((req.tools ?? []).map((t) => (t as { function: { name: string } }).function.name));
+    // A plan call (stage 3): the steps are the calls still to come.
+    if (typeof req.tool_choice === "object" && req.tool_choice.function.name === "write_plan") {
+      const steps = calls.slice(next).map((x) => ({ tool: x.tool, goal: x.tool }));
+      return { content: null, finish_reason: "tool_calls", tool_calls: [{ id: "plan", type: "function", function: { name: "write_plan", arguments: JSON.stringify({ steps }) } }] };
+    }
     const call = calls[next];
     if (!call || req.tool_choice === "none") return { content: answer, tool_calls: [], finish_reason: "stop" };
     const [name, args] = offered.has(call.tool) ? [call.tool, call.args] : ["describe_tools", { names: [call.tool] }];
@@ -111,6 +116,20 @@ describe("scoring", () => {
     ]);
     expect(s).toMatchObject({ empty_follow_rate: 0.75, error_fix_rate: 1 });
     expect(summarize([{ rounds_ms: [100], error: null, score: pass }])).toMatchObject({ empty_follow_rate: null, error_fix_rate: null });
+  });
+
+  it("summarizes the plan of multi-area cases (stage 3)", () => {
+    const pass = { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] };
+    const fail = { ...pass, passed: false, args_hit: false, missing: ["x"] };
+    const s = summarize([
+      { rounds_ms: [100, 100, 100], error: null, score: pass, routing: "keywords", areas: ["finance", "documents"], plan_asked: true, plan: ["search_documents", "list_transactions"] },
+      { rounds_ms: [100, 100, 100, 100, 100], error: null, score: fail, routing: "keywords", areas: ["meters", "documents"], plan_asked: true },
+      { rounds_ms: [100, 100], error: null, score: pass, routing: "keywords", areas: ["photos"], plan_asked: true, plan: ["list_photos", "create_album"] },
+      // Every area in play is no decision for two areas.
+      { rounds_ms: [100], error: null, score: pass, routing: "all", areas: ["finance", "documents", "photos"] },
+    ]);
+    expect(s).toMatchObject({ plan_asked: 3, planned: 2, multi_area_pass_rate: 0.5, median_rounds_multi_area: 4 });
+    expect(summarize([{ rounds_ms: [100], error: null, score: pass }])).toMatchObject({ plan_asked: 0, planned: 0, multi_area_pass_rate: null, median_rounds_multi_area: null });
   });
 
   it("counts empty results followed by another call, and errors followed by a corrected call", () => {
@@ -219,6 +238,37 @@ describe("running a case", () => {
     expect(result).toContain('{"rows":[]}');
     expect(result).toContain("without the period 2026-09-01..2026-09-30: 1");
     expect(String(afterTools[1]!.messages.at(-1)!.content)).toContain("RE-2026-0101");
+  });
+
+  it("a multi-area case gets a plan call first, follows it, and records the plan (stage 3)", async () => {
+    const c = caseById("multi-invoices-paid");
+    let next = 0;
+    const calls = [
+      { tool: "search_documents", args: { correspondent: "Musterfirma Haustechnik" } },
+      { tool: "list_transactions", args: { q: "Musterfirma Haustechnik" } },
+    ];
+    const model = vi.fn(async (req: ChatRequest): Promise<ChatReply> => {
+      const forced = typeof req.tool_choice === "object" ? req.tool_choice.function.name : null;
+      if (forced === "write_plan") {
+        return { content: null, finish_reason: "tool_calls", tool_calls: [{ id: "p", type: "function", function: { name: "write_plan", arguments: JSON.stringify({ steps: calls.map((x) => ({ tool: x.tool, goal: x.tool })) }) } }] };
+      }
+      const call = calls[next++];
+      if (!call) return { content: "Zwei Rechnungen, eine bezahlt.", tool_calls: [], finish_reason: "stop" };
+      return { content: null, finish_reason: "tool_calls", tool_calls: [{ id: `c${next}`, type: "function", function: { name: call.tool, arguments: JSON.stringify(call.args) } }] };
+    });
+    const run = await runBenchCase(c, { chat: model, tools, user });
+    expect(run.error).toBeNull();
+    expect(run.score.passed).toBe(true);
+    expect(run).toMatchObject({ areas: ["finance", "documents"], routing: "keywords", plan_asked: true, plan: ["search_documents", "list_transactions"], plan_done: 2 });
+    // The plan call, the two tool rounds and the answer; the router decided by keywords, so no model call there.
+    expect(run.rounds).toBe(4);
+    const requests = model.mock.calls.map((x) => x[0] as ChatRequest);
+    expect(requests[0]!.tool_choice).toEqual({ type: "function", function: { name: "write_plan" } });
+    expect(String(requests[2]!.messages.at(-1)!.content)).toContain("Next: step 2, list_transactions");
+    // A one-area case without chain words asks for no plan.
+    const plain = await runBenchCase(caseById("bookings-by-counterparty"), { chat: scripted([{ tool: "list_transactions", args: { q: "Musterhandel", from: "2026-09-01", to: "2026-09-30" } }]), tools, user });
+    expect(plain).toMatchObject({ plan_asked: false });
+    expect(plain.plan).toBeUndefined();
   });
 
   it("a refused call counts as a tool error, and the corrected call as its correction", async () => {

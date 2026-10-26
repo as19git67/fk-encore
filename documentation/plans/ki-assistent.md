@@ -481,7 +481,7 @@ behind it.
        `photos.view` check: the client name Encore generates for the
        hyphenated `trip-planner` service could not be checked without the
        Encore CLI.
-     Schemas: up to `ASSISTANT_SCHEMA_BUDGET_TOKENS` (10000) every tool's
+     Schemas: up to `ASSISTANT_SCHEMA_BUDGET_TOKENS` (11000) every tool's
      schema goes along; past it the model gets the one-line catalog and
      `describe_tools`. The context budget follows the model's window
      (`n_ctx`, which llm-service names in a closing `context` chunk of every

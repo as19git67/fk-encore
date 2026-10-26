@@ -275,6 +275,49 @@ these parameters as given.
   benchmark case for no second gain. Merging tool pairs: none overlaps
   enough; the lines in the summaries do the work.
 
+### Stage 3 (implemented)
+
+- **The router flags the question** (`Routing.needsPlan` in
+  `assistant/router.ts`): two areas in play (not "every area", which is no
+  decision), chain words in the question (`hasChainWords`: "und dann",
+  "danach", "anschließend", "erst … dann", "und mach/leg/füge …", "and
+  then"), or the model's own `needs_plan` on `choose_areas`.
+- **One plan call before the first tool** (`assistant/agent.ts`): bound to
+  the tool `write_plan` (`tool_choice` names it, so the grammar allows
+  nothing else), with the tools of round 1 alongside so the steps name
+  roads that exist — the step's `tool` is an enum of those names, 1 to 4
+  steps, each with a goal in a few words (one step when one call answers
+  a question that two areas or chain words flagged). The same mechanism as the
+  router's `choose_areas`, so it runs on both llm-service backends; the
+  plain `response_format` the stage table asked for now passes through
+  `/chat` as well (server and inproc, only without tools) for the checker
+  of stage 5. `ASSISTANT_PLAN_THINKING=1` lets the model think before the
+  plan, with the plan's small budget (320 tokens) — off until the benchmark
+  shows it pays.
+- **The plan is a tool round of the transcript**: the model's `write_plan`
+  call and a tool result with the checklist (`[ ] 1. search_documents — die
+  Rechnungen …`) and the next step. The plan tool stays in every round's
+  tool list, so the list — and the cached prompt prefix — is the same from
+  the plan call on. After each round the loop ticks off the steps whose
+  tool ran without error and appends the status to that round's last tool
+  result ("Plan: 1 of 2 steps done. Next: step 2, list_transactions — …"),
+  appended rather than rewritten so earlier messages stay cached. An
+  answer with steps still open goes back once (`planNudge`), then stands:
+  the model may skip a step whose results it already has. No usable plan
+  (no step naming an offered tool) means the loop runs as before.
+- **Measured**: `CaseRun.plan_asked`, `plan` (tools), `plan_done`; the
+  summary has `plan_asked`, `planned`, `multi_area_pass_rate` (cases with
+  two or more areas by the router) and `median_rounds_multi_area` (the
+  plan call counts as a round), the page two tiles and the plan in the
+  road column. Three cases: `multi-invoices-paid` (documents + finance),
+  `multi-consumption-and-bill` (meters + documents),
+  `chain-photos-into-album` (one area, chain words). The scripted model of
+  the benchmark tests answers a plan call with the calls still to come.
+- Also in this PR: the schema budget rises from 10000 to 11000 tokens —
+  the photo-book tool took the full catalog (49 tools, about 10,400
+  estimated tokens) past it, so a turn with every area in play went to
+  `describe_tools` first; only such turns send the full catalog.
+
 ### Stage 6, part 2 (open)
 
 - A benchmark mode against a synthetic test database, so that search,
@@ -286,7 +329,20 @@ these parameters as given.
 
 | Date | Model | Stage | Cases | Pass rate | First tool | Median rounds | Median prompt tokens (round 1) | Nudges |
 |---|---|---|---|---|---|---|---|---|
-| | | baseline | | | | | | |
+| 2026-10-26 | Gemma-4-26B-A4B QAT UD-Q4_K_XL (CUDA, server backend, 30k ctx) | 6 + 1 (stage 2 not yet deployed) | 68 | 85 % (58) | 97 % | 3 | 5,116 | 16 |
+
+The run of 2026-10-26 is the first with the path metrics; there is no
+measured run from before the router. Router stages of that run: 62 cases by
+keywords, 3 by the model, 1 inherited, 2 all areas. Of the ten failures,
+four are argument misses (`position_news` with the name instead of the
+key, `add_photos_to_album` with ids typed by hand instead of
+`from_previous_result`, `list_photos` without `direction: "asc"` for
+"fewest", `render_letter` without the figures the case expects in the body),
+three are a stop after 0 rows
+(`insurer-documents-by-subject`, `beach-photos`, `rule-folder-by-month`) —
+the case of stage 2 —, two skip a tool (`securities-in-depot` without
+`list_accounts`, `property-purchase` without `list_transactions`), one
+chooses `list_photos` over `search_photos`.
 
 ## Risks and what is left out on purpose
 

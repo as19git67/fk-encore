@@ -53,6 +53,11 @@ export interface BenchSummary {
   /** Tools written for the model (stage 2): empty results followed by another call, errors followed by a corrected call. */
   empty_follow_rate?: number | null
   error_fix_rate?: number | null
+  /** The plan of multi-step questions (stage 3): cases asked for a plan, cases that got one, pass rate and rounds of the multi-area cases. */
+  plan_asked?: number
+  planned?: number
+  multi_area_pass_rate?: number | null
+  median_rounds_multi_area?: number | null
 }
 
 export type BenchStatus = 'running' | 'done' | 'failed' | 'cancelled'
@@ -93,6 +98,10 @@ export interface BenchCaseRun {
   empty_followed?: number
   tool_errors?: number
   errors_corrected?: number
+  /** Stage 3: the router asked for a plan; the planned tools and how many steps got done. */
+  plan_asked?: boolean
+  plan?: string[]
+  plan_done?: number
 }
 
 /** One call of the turn behind an answer the user judged: never the rows it returned. */
