@@ -9,6 +9,7 @@ import type { ToolSpec } from "../types";
 import { taxWorksheet } from "./tax";
 import { findInDocuments } from "./text-boxes";
 import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
+import { loosenHint, periodLabel, type Probe, type ProbeCount } from "./hints";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
 
@@ -117,6 +118,46 @@ async function resolveCorrespondent(name: string | undefined): Promise<{ slug?: 
   return { sender: name, note: `No known correspondent matches "${name}"; filtered on the sender line instead.` };
 }
 
+/** The filters a document query shares between the search and the list. */
+interface DocumentQuery {
+  q?: string;
+  mode: string;
+  category?: string;
+  date_from?: string;
+  date_to?: string;
+  correspondent?: string;
+  sender?: string;
+  tax_relevant?: boolean;
+}
+
+/** Documents the same query finds without one filter: the list's total, or a capped page of the search. */
+async function documentCount(query: DocumentQuery): Promise<ProbeCount> {
+  const { q, mode, ...filters } = query;
+  if (q) {
+    const page = 25;
+    const res = (await documents.searchDocumentsEndpoint({ ...filters, q, mode, limit: page })) as unknown as { items: unknown[] };
+    return { n: res.items.length, atLeast: res.items.length >= page };
+  }
+  const res = (await documents.listDocuments({ ...filters, limit: 1 })) as unknown as { total: number };
+  return { n: res.total };
+}
+
+/** Nothing found: each filter dropped in turn, and the word search widened to meaning (stage 2 of assistent-wegfindung.md). */
+async function emptyDocumentsHint(query: DocumentQuery, correspondentName: string | undefined): Promise<string> {
+  const probes: Probe[] = [];
+  if (query.q) {
+    probes.push({ label: `q ${JSON.stringify(query.q)}`, count: () => documentCount({ ...query, q: undefined }) });
+    if (query.mode === "fts") probes.push({ label: "mode fts (hybrid instead)", count: () => documentCount({ ...query, mode: "hybrid" }) });
+  }
+  if (query.correspondent || query.sender) {
+    probes.push({ label: `correspondent ${JSON.stringify(correspondentName ?? query.correspondent ?? query.sender)}`, count: () => documentCount({ ...query, correspondent: undefined, sender: undefined }) });
+  }
+  if (query.category) probes.push({ label: `category ${query.category}`, count: () => documentCount({ ...query, category: undefined }) });
+  if (query.date_from || query.date_to) probes.push({ label: periodLabel(query.date_from, query.date_to), count: () => documentCount({ ...query, date_from: undefined, date_to: undefined }) });
+  if (query.tax_relevant !== undefined) probes.push({ label: `tax_relevant ${query.tax_relevant}`, count: () => documentCount({ ...query, tax_relevant: undefined }) });
+  return loosenHint("documents", probes);
+}
+
 export const searchDocuments: ToolSpec = {
   name: "search_documents",
   kind: "read",
@@ -177,6 +218,7 @@ export const searchDocuments: ToolSpec = {
       rows = res.items;
       total = res.total;
     }
+    const hint = rows.length ? undefined : await emptyDocumentsHint({ ...common, q, mode }, str(args.correspondent));
     const groups = grouping ? groupRows(rows, (d) => groupKey(d, grouping.by), grouping.perGroup) : undefined;
     const shown = groups ? groups.flatMap((g) => g.rows.map((d) => ({ ...d, group: g.key }))) : rows.map((d) => ({ ...d, group: undefined as string | undefined }));
     const rowCap = groups ? Math.min(shown.length, limit * grouping!.perGroup) : limit;
@@ -198,6 +240,7 @@ export const searchDocuments: ToolSpec = {
       ),
       digest: digestOf("search_documents", shown.length, shown.map((d) => d.id)),
       rowCount: shown.length,
+      hint,
       ref: { type: "document", ids: shown.map((d) => d.id) },
       block: {
         kind: "documents",

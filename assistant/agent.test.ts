@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding, withHint } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -188,7 +188,7 @@ describe("the loop", () => {
     const { fn, requests } = scripted([calls(["latest_readings", { meter_id: 99 }]), answer("Den Zähler gibt es nicht.")]);
     const events: TurnEvent[] = [];
     await runTurn({ user: USER, history: [], question: "Stand?", tools: catalogFor(USER), chat: fn, now: NOW, emit: (e) => events.push(e) });
-    expect((requests[1].messages.at(-1) as { content: string }).content).toBe("error: latest_readings failed: meter not found");
+    expect((requests[1].messages.at(-1) as { content: string }).content).toBe("error: latest_readings failed: meter not found. Fix what it names and call again, or use another tool; do not repeat the same call.");
     expect(events.find((e) => e.type === "tool_result")).toMatchObject({ error: "meter not found" });
   });
 
@@ -527,7 +527,9 @@ describe("what the benchmark caught", () => {
       answer("Keine Buchungen 2019."),
     ]);
     await runTurn({ user: USER, history: [], question: "2019?", tools: catalogFor(USER), chat: fn, now: NOW });
-    expect(clients.finance.listTransactions).toHaveBeenCalledTimes(1);
+    // One list call and its one probe (the period dropped); the repeat ran nothing.
+    expect(clients.finance.listTransactions).toHaveBeenCalledTimes(2);
+    expect(String(requests[1]!.messages.at(-1)!.content)).toContain("No bookings match the period 2019-01-01..2019-12-31 (without it: 0, which is everything)");
     expect(String(requests[2]!.messages.at(-1)!.content)).toContain("you already called list_transactions");
   });
 
@@ -782,5 +784,72 @@ describe("the router and the area packages (stage 1 of assistent-wegfindung.md)"
     expect(names(requests[0]!)).toContain("list_photos");
     expect(names(requests[0]!)).not.toContain("list_meters");
     expect(res.routing).toBe("inherited");
+  });
+});
+
+describe("tools written for the model (stage 2 of assistent-wegfindung.md)", () => {
+  it("refuses a call whose arguments do not fit the schema, names the argument, and runs the corrected call", async () => {
+    clients.finance.listPortfolioTransactions.mockResolvedValue({ items: [], total: 0, sums: { net_amount: "0", fees: "0", taxes: "0" } });
+    const { fn, requests } = scripted([
+      calls(["depot_transactions", { kind: "purchase", from: "2025" }]),
+      calls(["depot_transactions", { kind: "buy", from: "2025-01-01" }]),
+      answer("Keine Käufe 2025."),
+    ]);
+    const events: TurnEvent[] = [];
+    const logged: Array<{ tool: string; error?: string }> = [];
+    await runTurn({
+      user: USER, history: [], question: "Welche Wertpapiere habe ich 2025 gekauft?", tools: catalogFor(USER), chat: fn, now: NOW,
+      emit: (e) => events.push(e), log: (e) => logged.push({ tool: e.tool, error: e.error }),
+    });
+    const refused = String(requests[1]!.messages.at(-1)!.content);
+    expect(refused).toBe('error: depot_transactions was not run: kind must be one of buy, sell, in, out, dividend, split, corp_action, tax; got "purchase"; from must be a day, YYYY-MM-DD; got "2025". For the year 2025 use 2025-01-01. Call depot_transactions again with the corrected arguments.');
+    // Nothing ran for the refused call; the corrected one did.
+    expect(clients.finance.listPortfolioTransactions).toHaveBeenCalledTimes(1);
+    expect(clients.finance.listPortfolioTransactions).toHaveBeenCalledWith(expect.objectContaining({ kind: "buy", from: "2025-01-01" }));
+    expect(events.filter((e) => e.type === "tool_result")).toMatchObject([{ rowCount: 0, error: expect.stringContaining("kind must be one of") }, { rowCount: 0 }]);
+    expect(logged).toEqual([{ tool: "depot_transactions", error: expect.stringContaining("purchase") }, { tool: "depot_transactions", error: undefined }]);
+  });
+
+  it("an unknown argument names the one most likely meant", async () => {
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { acount_id: 1 }]),
+      answer("Hm."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "Buchungen?", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(String(requests[1]!.messages.at(-1)!.content)).toContain("unknown argument acount_id; did you mean account_id?");
+    expect(clients.finance.listTransactions).not.toHaveBeenCalled();
+  });
+
+  it("a list tool with no rows says which filter to loosen and what that brings", async () => {
+    clients.finance.listTransactions
+      .mockResolvedValueOnce({ items: [], total: 0 })  // the call
+      .mockResolvedValueOnce({ items: [], total: 412 }) // without q
+      .mockResolvedValueOnce({ items: [], total: 3 });  // without the period
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { q: "Flug", from: "2026-09-01", to: "2026-09-30" }]),
+      answer("Im September keine Flüge."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "Flüge im September?", tools: catalogFor(USER), chat: fn, now: NOW });
+    const text = String(requests[1]!.messages.at(-1)!.content);
+    expect(text).toContain("(0 rows)");
+    expect(text).toContain('No bookings match. The same call with one filter dropped: without q "Flug": 412; without the period 2026-09-01..2026-09-30: 3. Call again with the one filter dropped that keeps what the user asked for');
+    // The probes ask for one row each, the query otherwise unchanged.
+    expect(clients.finance.listTransactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ q: undefined, from: "2026-09-01", limit: 1 }));
+    expect(clients.finance.listTransactions).toHaveBeenNthCalledWith(3, expect.objectContaining({ q: "Flug", from: undefined, to: undefined, limit: 1 }));
+  });
+
+  it("a result with no rows and no hint of its own gets the loop's hint, but only when the call had filters", () => {
+    const empty = { text: "(0 rows)", digest: "d", rowCount: 0 };
+    expect(withHint(empty, { q: "x" })).toBe(`(0 rows)\n\n${EMPTY_RESULT_HINT}`);
+    expect(withHint(empty, {})).toBe("(0 rows)");
+    expect(withHint(empty, { tags: [], q: "" })).toBe("(0 rows)");
+    expect(withHint({ ...empty, hint: "own hint" }, {})).toBe("(0 rows)\n\nown hint");
+    expect(withHint({ text: "rows", digest: "d", rowCount: 2 }, { q: "x" })).toBe("rows");
+  });
+
+  it("the general rules tell the model to act on the hint and on an error", () => {
+    const prompt = buildSystemPrompt(catalogFor(USER), NOW, false);
+    expect(prompt).toContain("call the tool again once with that filter dropped before you tell the user nothing exists");
+    expect(prompt).toContain("A tool error names the argument and the allowed values: fix that argument and call again");
   });
 });

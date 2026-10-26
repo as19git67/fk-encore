@@ -83,6 +83,12 @@ export interface ToolOutcome {
   rowCount: number;
   /** The set a follow-up may refer to with `from_previous_result`. */
   ref?: ResultRef;
+  /**
+   * What to do with this result, after `text`: on no rows, which filter to
+   * loosen and what that brings (`tools/hints.ts`). A result without one
+   * and without rows gets the loop's general hint.
+   */
+  hint?: string;
 }
 
 export interface ToolContext {

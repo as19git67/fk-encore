@@ -353,6 +353,45 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_transactions: { rows: [{ id: 9001, date: "2026-09-05", counterparty: "Musterhandel GmbH", amount: -23.9 }], total: -23.9, count: 1 } },
   },
   {
+    // Stage 2 of assistent-wegfindung.md: the empty result says which filter
+    // shut the rows out; the right road is one more call with that filter
+    // dropped (the sender is the question, the month was the guess).
+    id: "empty-then-loosen-period",
+    title: "Leeres Ergebnis, dann Filter lockern",
+    question: "Was habe ich im September an die Musterfirma Haustechnik gezahlt?",
+    expect: [
+      { tool: "list_transactions", args: { q: { $contains: "musterfirma" }, from: "2026-09-01" } },
+      { tool: "list_transactions", args: { q: { $contains: "musterfirma" }, from: { $absent: true }, to: { $absent: true } } },
+    ],
+    answerMatches: "august|2026-08|12\\.08\\.|nicht im september|keine .*september",
+    results: {
+      list_transactions: {
+        $sequence: [
+          {
+            rows: [],
+            hint: 'No bookings match. The same call with one filter dropped: without q "Musterfirma Haustechnik": 212; without the period 2026-09-01..2026-09-30: 1. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.',
+          },
+          { rows: [{ id: 9101, date: "2026-08-12", counterparty: "Musterfirma Haustechnik GmbH", purpose: "Rechnung RE-2026-0101", amount: -120.5 }], total: -120.5, count: 1 },
+        ],
+      },
+    },
+  },
+  {
+    // The hint says that no single filter brings rows: the right road is
+    // telling the user so, not a second search with the same arguments.
+    id: "empty-nothing-to-loosen",
+    title: "Leeres Ergebnis ohne lockerbaren Filter",
+    question: "Welche Buchungen von Beispielreisen gab es?",
+    expect: [{ tool: "list_transactions", args: { q: { $contains: "beispielreisen" } } }],
+    answerMatches: "keine|nicht gefunden|nichts",
+    results: {
+      list_transactions: {
+        rows: [],
+        hint: 'No bookings match q "Beispielreisen" (without it: 212, which is everything). Tell the user nothing matches; search once more only with another spelling or a broader word the user\'s own wording allows. Do not repeat the same call.',
+      },
+    },
+  },
+  {
     id: "latest-bookings",
     title: "Neueste Buchungen nicht erfinden",
     question: "Zeige mir die 10 neuesten Buchungen.",

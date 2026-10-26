@@ -718,3 +718,72 @@ describe("business_documents", () => {
     expect(out.block?.rows.map((r) => [r.id, r.subtitle])).toEqual([[71, "Fläche Musterfeld Flst. 12/3"], [72, "Anlagegut Stall"]]);
   });
 });
+
+describe("what an empty list says (stage 2 of assistent-wegfindung.md)", () => {
+  it("list_transactions without any filter: the user has no bookings, nothing to loosen", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const out = await tool("list_transactions").run({}, ctx());
+    expect(out.hint).toBe("No bookings at all: no filter was set, so the user has none. Say so; do not search again.");
+    expect(clients.finance.listTransactions).toHaveBeenCalledTimes(1);
+  });
+
+  it("list_transactions probes every filter the call set, side by side, and survives a failing probe", async () => {
+    clients.finance.listTransactions
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [], total: 9 })   // without account_id
+      .mockRejectedValueOnce(new Error("boom"))          // without tags
+      .mockResolvedValueOnce({ items: [], total: 0 })   // without direction
+      .mockResolvedValueOnce({ items: [], total: 2 });  // without the amount range
+    const out = await tool("list_transactions").run({ account_id: 1, tags: ["Reise"], direction: "out", amount_min: 500 }, ctx());
+    expect(out.hint).toBe("No bookings match. The same call with one filter dropped: without account_id 1: 9; without tags Reise: unknown; without direction out: 0; without the amount range: 2. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.");
+    expect(clients.finance.listTransactions).toHaveBeenCalledTimes(5);
+    expect(clients.finance.listTransactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ accountId: undefined, tagsCsv: "Reise", limit: 1 }));
+  });
+
+  it("list_transactions with rows has no hint", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 5, account_id: 1, booking_date: "2026-10-10", amount: "-12.00", counterparty: "Beispiel Markt", purpose: "Einkauf" }], total: 1 });
+    const out = await tool("list_transactions").run({ q: "Markt" }, ctx());
+    expect(out.hint).toBeUndefined();
+    expect(clients.finance.listTransactions).toHaveBeenCalledTimes(1);
+  });
+
+  it("search_documents counts the list without q, the search without the sender, and the word search as hybrid", async () => {
+    clients.documents.listCorrespondents.mockResolvedValue({ items: [{ slug: "beispiel-versicherung", display: "Beispiel Versicherung", count: 12 }] });
+    clients.documents.searchDocumentsEndpoint
+      .mockResolvedValueOnce({ items: [] })                                   // the call
+      .mockResolvedValueOnce({ items: Array.from({ length: 25 }, (_, i) => ({ id: i })) }) // hybrid instead of fts
+      .mockResolvedValueOnce({ items: [{ id: 1 }, { id: 2 }] });             // without the sender
+    clients.documents.listDocuments.mockResolvedValue({ items: [], total: 12 }); // without q
+    const out = await tool("search_documents").run({ q: "Gesundheitsdividende", mode: "fts", correspondent: "Beispiel Versicherung" }, ctx());
+    expect(out.hint).toBe('No documents match. The same call with one filter dropped: without q "Gesundheitsdividende": 12; without mode fts (hybrid instead): 25+; without correspondent "Beispiel Versicherung": 2. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.');
+    expect(clients.documents.searchDocumentsEndpoint).toHaveBeenNthCalledWith(2, expect.objectContaining({ mode: "hybrid", correspondent: "beispiel-versicherung", limit: 25 }));
+    expect(clients.documents.searchDocumentsEndpoint).toHaveBeenNthCalledWith(3, expect.objectContaining({ mode: "fts", correspondent: undefined, sender: undefined }));
+    expect(clients.documents.listDocuments).toHaveBeenCalledWith(expect.objectContaining({ correspondent: "beispiel-versicherung", limit: 1 }));
+  });
+
+  it("search_documents with one filter says that dropping it is everything", async () => {
+    clients.documents.listDocuments.mockResolvedValueOnce({ items: [], total: 0 }).mockResolvedValueOnce({ items: [], total: 300 });
+    const out = await tool("search_documents").run({ category: "versicherung" }, ctx());
+    expect(out.hint).toBe("No documents match category versicherung (without it: 300, which is everything). Tell the user nothing matches; search once more only with another spelling or a broader word the user's own wording allows. Do not repeat the same call.");
+  });
+
+  it("list_photos probes the filters and the hidden photos, with a capped count", async () => {
+    clients.photo.listPhotos
+      .mockResolvedValueOnce({ photos: [] })                                           // the call
+      .mockResolvedValueOnce({ photos: Array.from({ length: 201 }, (_, i) => ({ id: i })) }) // without the period
+      .mockResolvedValueOnce({ photos: [{ id: 1 }, { id: 2 }, { id: 3 }] })            // without the place
+      .mockResolvedValueOnce({ photos: [{ id: 9 }] });                                 // hidden included
+    const out = await tool("list_photos").run({ place: "Beispielland", date_from: "2024-01-01", date_to: "2024-12-31" }, ctx());
+    expect(out.hint).toBe('No photos match. The same call with one filter dropped: without the period 2024-01-01..2024-12-31: 200+; without place "Beispielland": 3; without hidden photos left out (hidden include instead): 1. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.');
+    expect(clients.photo.listPhotos).toHaveBeenNthCalledWith(2, expect.objectContaining({ dateFrom: undefined, dateTo: undefined, locationText: "Beispielland", limit: 201 }));
+    expect(clients.photo.listPhotos).toHaveBeenNthCalledWith(4, expect.objectContaining({ hiddenMode: "include", locationText: "Beispielland" }));
+  });
+
+  it("list_photos narrowing an earlier result says to search all photos instead", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 50 }] });
+    const out = await tool("list_photos").run({ from_previous_result: true, place: "Beispielstadt" }, { ...ctx(), previous: () => [1, 2, 3] });
+    expect(out.rowCount).toBe(0);
+    expect(out.hint).toContain("No photos of the previous result match these filters. To search all photos instead, call again without from_previous_result");
+    expect(clients.photo.listPhotos).toHaveBeenCalledTimes(1);
+  });
+});
