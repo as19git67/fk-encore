@@ -13,6 +13,7 @@ import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
 import type { JsonSchema, RefType, ToolContext } from "../types";
 import { createPhotoCollage } from "./collage";
+import { createPhotoBookTool } from "./photo-book";
 import { HIDDEN_PARAM, hiddenOf } from "./photos";
 import { renderLetter } from "./letters";
 import { createTextDocument } from "./text-documents";
@@ -747,6 +748,7 @@ export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   addPhotosToAlbum,
   setPhotoFavorite,
   createPhotoCollage,
+  createPhotoBookTool,
   createDocumentFollowUp,
   tagTransactions,
   createCollection,

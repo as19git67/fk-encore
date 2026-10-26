@@ -17,6 +17,7 @@ import {
   albumPhotos,
   albumShares,
   albums,
+  collectionMembers,
   photoBook,
   photoBookCaption,
   photoBookChapter,
@@ -27,7 +28,9 @@ import {
   type PhotoBookSettings,
   type PhotoBookSource,
   type PhotoBookTextSource,
+  type PhotoBookWeights,
 } from "../db/schema";
+import { loadReadableCollection } from "../documents/collection-access";
 import { accessiblePhotoCondition, accessiblePhotoConditionFor } from "./photo-file-access";
 import { aestheticScoreSql } from "./photo.filters";
 import {
@@ -53,6 +56,7 @@ import {
   type PhotoBookFormat,
   type RectMm,
 } from "./photo-book-layout";
+import { cleanWeights, hasWeights, keepSeriesPicks, loadSeries, loadSubjectShares, weightedScore } from "./photo-book-subjects";
 
 /** A book holds at most this many photos; the narrowing keeps the best. */
 export const MAX_BOOK_PHOTOS = 600;
@@ -199,6 +203,10 @@ export interface PhotoBookNarrowing {
   aestheticMin?: number | null;
   withoutRecognisableFaces?: boolean;
   maxPhotos?: number | null;
+  /** -1 (fewer) .. 1 (more) per subject (stage 4). */
+  weights?: PhotoBookWeights | null;
+  /** A series of near-duplicates contributes only its pick (stage 4); on by default. */
+  groupPicksOnly?: boolean;
 }
 
 interface PhotoRow {
@@ -234,9 +242,45 @@ async function assertAlbumVisible(userId: number, albumId: number): Promise<void
 }
 
 /**
+ * The photos of a collection or the basket (stage 5): its photos and the
+ * photos of its albums the owner may see. The owner must be able to read the
+ * collection; every photo still passes the access check of the selection.
+ */
+async function collectionPhotoIds(userId: number, collectionId: number): Promise<number[]> {
+  await loadReadableCollection(userId, collectionId, false);
+  return collectionMemberPhotoIds(userId, collectionId);
+}
+
+async function collectionMemberPhotoIds(userId: number, collectionId: number): Promise<number[]> {
+  const rows = await dbAll<{ entity_type: string; entity_id: number }>(
+    db.select({ entity_type: collectionMembers.entity_type, entity_id: collectionMembers.entity_id })
+      .from(collectionMembers)
+      .where(and(eq(collectionMembers.collection_id, collectionId), inArray(collectionMembers.entity_type, ["photo", "album"]))),
+  );
+  const ids = new Set(rows.filter((r) => r.entity_type === "photo").map((r) => Number(r.entity_id)));
+  const albumIds = rows.filter((r) => r.entity_type === "album").map((r) => Number(r.entity_id));
+  if (albumIds.length) {
+    const visible = await dbAll<{ id: number }>(
+      db.select({ id: albums.id }).from(albums).where(and(
+        inArray(albums.id, albumIds),
+        sql`(${albums.user_id} = ${userId} OR EXISTS (SELECT 1 FROM ${albumShares} s WHERE s.album_id = ${albums.id} AND s.user_id = ${userId}))`,
+      )),
+    );
+    if (visible.length) {
+      const inAlbums = await dbAll<{ photo_id: number }>(
+        db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(inArray(albumPhotos.album_id, visible.map((a) => a.id))),
+      );
+      for (const r of inAlbums) ids.add(r.photo_id);
+    }
+  }
+  return [...ids];
+}
+
+/**
  * The photos a book built from `source` holds for `userId`: visible to them,
  * pictures (no videos), not hidden by them, through the narrowing, in
- * chronological order.
+ * chronological order. Subject weights move the scores the narrowing keeps
+ * the best by; a series of near-duplicates gives only its pick.
  */
 export async function selectBookPhotos(userId: number, source: PhotoBookSource): Promise<BookPhoto[]> {
   const conds: SQL[] = [
@@ -248,6 +292,11 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
     if (!source.album_id) throw APIError.invalidArgument("album_id is required");
     await assertAlbumVisible(userId, source.album_id);
     conds.push(sql`EXISTS (SELECT 1 FROM ${albumPhotos} ap WHERE ap.photo_id = ${photos.id} AND ap.album_id = ${source.album_id})`);
+  } else if (source.kind === "collection") {
+    if (!source.collection_id) throw APIError.invalidArgument("collection_id is required");
+    const ids = await collectionPhotoIds(userId, source.collection_id);
+    if (!ids.length) return [];
+    conds.push(inArray(photos.id, ids));
   } else {
     const ids = [...new Set(source.photo_ids ?? [])].filter((n) => Number.isInteger(n) && n > 0);
     if (!ids.length) return [];
@@ -270,7 +319,7 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
       city: photos.location_city,
     }).from(photos).where(and(...conds)),
   );
-  const list: BookPhoto[] = rows.map((r) => ({
+  let list: BookPhoto[] = rows.map((r) => ({
     id: r.id,
     takenAt: r.taken_at,
     width: r.width,
@@ -278,6 +327,13 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
     score: photoScore(r.aesthetic, r.quality),
     city: r.city,
   }));
+  if (hasWeights(source.weights) && list.length) {
+    const shares = await loadSubjectShares(list.map((p) => p.id));
+    list = list.map((p) => ({ ...p, score: weightedScore(p.score, shares.get(p.id), source.weights) }));
+  }
+  if (source.group_picks_only === true && list.length > 1) {
+    list = keepSeriesPicks(list, await loadSeries(userId, list.map((p) => p.id)));
+  }
   const max = source.max_photos && source.max_photos > 0 ? Math.min(source.max_photos, MAX_BOOK_PHOTOS) : MAX_BOOK_PHOTOS;
   return limitPhotos(list, max);
 }
@@ -330,9 +386,10 @@ export interface CreatePhotoBookInput extends PhotoBookNarrowing {
   title: string;
   subtitle?: string | null;
   format?: PhotoBookFormat;
-  /** A selection; or `albumId`. */
+  /** A selection; or `albumId`, or `collectionId` (a collection or the basket). */
   photoIds?: number[];
   albumId?: number;
+  collectionId?: number;
 }
 
 export async function createPhotoBook(userId: number, input: CreatePhotoBookInput): Promise<number> {
@@ -340,15 +397,35 @@ export async function createPhotoBook(userId: number, input: CreatePhotoBookInpu
   if (!title) throw APIError.invalidArgument("title is required");
   const format = input.format ?? "a4-landscape";
   if (!isPhotoBookFormat(format)) throw APIError.invalidArgument(`unknown format ${String(format)}`);
-  if (!input.albumId && !input.photoIds?.length) throw APIError.invalidArgument("photoIds or albumId is required");
+  if (!input.albumId && !input.collectionId && !input.photoIds?.length) {
+    throw APIError.invalidArgument("photoIds, albumId or collectionId is required");
+  }
 
+  // The basket changes all the time: a book made from it keeps the photos it
+  // held then, so "Neu verteilen" does not pull in what was added since.
+  let collectionId = input.collectionId;
+  let photoIds = input.photoIds;
+  if (collectionId && !input.albumId) {
+    const col = await loadReadableCollection(userId, collectionId, false);
+    if (col.kind === "basket") {
+      photoIds = await collectionMemberPhotoIds(userId, collectionId);
+      collectionId = undefined;
+      if (!photoIds.length) throw APIError.failedPrecondition("no photos left after narrowing");
+    }
+  }
   const source: PhotoBookSource = {
-    kind: input.albumId ? "album" : "photos",
-    ...(input.albumId ? { album_id: input.albumId } : { photo_ids: [...new Set(input.photoIds)] }),
+    kind: input.albumId ? "album" : collectionId ? "collection" : "photos",
+    ...(input.albumId
+      ? { album_id: input.albumId }
+      : collectionId
+        ? { collection_id: collectionId }
+        : { photo_ids: [...new Set(photoIds)] }),
     quality_min: percent(input.qualityMin),
     aesthetic_min: percent(input.aestheticMin),
     without_recognisable_faces: !!input.withoutRecognisableFaces,
     max_photos: input.maxPhotos && input.maxPhotos > 0 ? Math.min(input.maxPhotos, MAX_BOOK_PHOTOS) : null,
+    weights: cleanWeights(input.weights),
+    group_picks_only: input.groupPicksOnly !== false,
   };
   const list = await selectBookPhotos(userId, source);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");

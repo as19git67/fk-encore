@@ -17,6 +17,7 @@ import AddToCollectionDialog from '../components/collections/AddToCollectionDial
 import ExportDialog from '../components/collections/ExportDialog.vue'
 import ShareLinkDialog from '../components/collections/ShareLinkDialog.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
+import PhotoBookCreateDialog from '../components/photobook/PhotoBookCreateDialog.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useListSelection } from '../composables/useListSelection'
 import { decodeMember, encodeMember, groupedSelectionActions, type TypeAction } from '../utils/collectionActions'
@@ -153,6 +154,9 @@ const exportOpen = ref(false)
 const shareOpen = ref(false)
 const albumDialogPhotoIds = ref<number[]>([])
 const albumDialogOpen = ref(false)
+/** A photo book of the selected photos, or (no ids) of the whole collection. */
+const bookOpen = ref(false)
+const bookPhotoIds = ref<number[] | null>(null)
 
 /** Run one batch action, say what it did, and show the folder as it is now. */
 async function runAction(work: () => Promise<unknown>, done: string) {
@@ -234,6 +238,15 @@ const typeActions: Partial<Record<CollectionEntityType, TypeAction[]>> = {
       run: (ids) => {
         albumDialogPhotoIds.value = ids
         albumDialogOpen.value = true
+      },
+    },
+    {
+      key: 'photo-book',
+      title: 'Fotobuch gestalten',
+      icon: 'pi pi-print',
+      run: (ids) => {
+        bookPhotoIds.value = ids
+        bookOpen.value = true
       },
     },
   ],
@@ -390,6 +403,21 @@ const headerActions = computed<ToolbarItem[]>(() => {
       text: true,
       disabled: busy.value,
       command: () => void makeAlbum(),
+    })
+  }
+  if ((d.counts.photo ?? 0) + (d.counts.album ?? 0) > 0) {
+    items.push({
+      key: 'photo-book',
+      icon: 'pi pi-print',
+      label: 'Fotobuch gestalten',
+      title: 'Fotobuch aus der Sammelmappe gestalten',
+      severity: 'secondary',
+      text: true,
+      disabled: busy.value,
+      command: () => {
+        bookPhotoIds.value = null
+        bookOpen.value = true
+      },
     })
   }
   return items
@@ -554,6 +582,13 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
       @added="(p) => (info = `${p.count} in „${p.name}“ gelegt.`)"
     />
     <PhotoAlbumDialog v-model:visible="albumDialogOpen" :photo-ids="albumDialogPhotoIds" />
+    <PhotoBookCreateDialog
+      v-if="detail"
+      v-model:visible="bookOpen"
+      :photo-ids="bookPhotoIds ?? undefined"
+      :collection-id="bookPhotoIds ? undefined : detail.id"
+      :default-title="detail.name"
+    />
     <ExportDialog v-model:visible="exportOpen" :collection-id="detail?.id ?? null" :name="detail?.name ?? ''" />
     <ShareLinkDialog v-model:visible="shareOpen" :collection-id="detail?.id ?? null" :name="detail?.name ?? ''" />
   </PageLayout>

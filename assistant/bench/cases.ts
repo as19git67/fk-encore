@@ -813,4 +813,18 @@ export const BENCH_CASES: BenchCase[] = [
     }],
     results: { create_text_document: PROPOSAL("Textdokument „Stromverbrauch 2025“ ablegen") },
   },
+
+  // ── photo books (fotobuch.md, stage 5) ──────────────────────────────────
+  {
+    id: "followup-photo-book",
+    title: "Rückfrage: Fotobuch aus den früheren Fotos, eingegrenzt im Werkzeug",
+    question: "Mach daraus ein Fotobuch mit höchstens 80 Bildern und mehr Landschaft.",
+    history: PHOTO_HISTORY,
+    previous: { photo: [1201, 1202, 1203] },
+    firstTools: ["create_photo_book"],
+    expect: [{ tool: "create_photo_book", args: { title: { $present: true }, from_previous_result: true, max_photos: 80 } }],
+    results: {
+      create_photo_book: PROPOSAL("Fotobuch „Sommer 2025“ aus 3 Fotos gestalten (A4 quer, höchstens 80 Fotos, mehr Landschaft)"),
+    },
+  },
 ];

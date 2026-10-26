@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * "Fotobuch gestalten": builds a photo book from a selection or an album
- * (documentation/plans/fotobuch.md) and opens it. The narrowing — quality,
- * aesthetics, no recognisable faces, at most N photos — happens once, here;
- * the book keeps it and "Neu verteilen" applies it again.
+ * "Fotobuch gestalten": builds a photo book from a selection, an album, a
+ * collection or the basket (documentation/plans/fotobuch.md) and opens it.
+ * The narrowing — quality, aesthetics, no recognisable faces, at most N
+ * photos, more or fewer of a subject, one photo per series — happens once,
+ * here; the book keeps it and "Neu verteilen" applies it again.
  */
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -14,13 +15,24 @@ import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
-import { PHOTO_BOOK_FORMATS, createPhotoBook, type PhotoBookFormat } from '../../api/photoBooks'
+import SelectButton from 'primevue/selectbutton'
+import {
+  PHOTO_BOOK_FORMATS,
+  PHOTO_BOOK_SUBJECTS,
+  createPhotoBook,
+  type PhotoBookFormat,
+  type PhotoBookSubject,
+  type PhotoBookWeights,
+} from '../../api/photoBooks'
 
 const props = defineProps<{
   visible: boolean
-  /** A selection; or `albumId`. */
+  /** A selection; or `albumId`, or `collectionId` (a collection or the basket). */
   photoIds?: number[]
   albumId?: number
+  collectionId?: number
+  /** How the source reads in the lead ("Aus dem Basket."); a default per source otherwise. */
+  sourceLabel?: string
   defaultTitle?: string
 }>()
 
@@ -37,6 +49,13 @@ const aestheticMin = ref<number | null>(50)
 const withoutFaces = ref(false)
 const useMax = ref(false)
 const maxPhotos = ref<number | null>(120)
+const seriesPicks = ref(true)
+const weights = ref<Record<PhotoBookSubject, number>>({ people: 0, landscape: 0, nature: 0, buildings: 0 })
+const WEIGHT_OPTIONS = [
+  { label: 'Weniger', value: -1 },
+  { label: 'Normal', value: 0 },
+  { label: 'Mehr', value: 1 },
+]
 const creating = ref(false)
 const error = ref('')
 
@@ -47,7 +66,9 @@ watch(() => props.visible, (open) => {
 })
 
 const sourceText = computed(() => {
+  if (props.sourceLabel) return props.sourceLabel
   if (props.albumId) return 'Aus allen Fotos des Albums.'
+  if (props.collectionId) return 'Aus den Fotos und Alben der Sammelmappe.'
   const n = props.photoIds?.length ?? 0
   return n === 1 ? 'Aus dem gewählten Foto.' : `Aus den ${n} gewählten Fotos.`
 })
@@ -57,10 +78,18 @@ async function create() {
   creating.value = true
   error.value = ''
   try {
+    const weighted: PhotoBookWeights = {}
+    for (const s of PHOTO_BOOK_SUBJECTS) if (weights.value[s.id]) weighted[s.id] = weights.value[s.id]
     const book = await createPhotoBook({
       title: title.value.trim(),
       format: format.value,
-      ...(props.albumId ? { albumId: props.albumId } : { photoIds: props.photoIds ?? [] }),
+      ...(props.albumId
+        ? { albumId: props.albumId }
+        : props.collectionId
+          ? { collectionId: props.collectionId }
+          : { photoIds: props.photoIds ?? [] }),
+      weights: Object.keys(weighted).length ? weighted : null,
+      groupPicksOnly: seriesPicks.value,
       qualityMin: useQuality.value ? qualityMin.value : null,
       aestheticMin: useAesthetic.value ? aestheticMin.value : null,
       withoutRecognisableFaces: withoutFaces.value,
@@ -126,6 +155,27 @@ async function create() {
         <InputNumber v-model="maxPhotos" :min="1" :max="600" suffix=" Fotos" :disabled="!useMax" aria-label="Höchstzahl der Fotos" class="pbc-number" />
       </div>
       <p class="pbc-hint">Mit Mindestwerten fallen Fotos ohne Bewertung heraus. Bei einer Höchstzahl bleiben die am besten bewerteten.</p>
+      <div class="pbc-row">
+        <Checkbox v-model="seriesPicks" binary input-id="pbc-series" />
+        <label for="pbc-series">Aus Serien ähnlicher Fotos nur das beste</label>
+      </div>
+    </fieldset>
+
+    <fieldset class="pbc-narrow pbc-weights">
+      <legend>Gewichten (optional)</legend>
+      <p class="pbc-hint">Mehr oder weniger von einem Motiv: das ändert, welche Fotos bei einer Höchstzahl bleiben und welche groß stehen.</p>
+      <div v-for="s in PHOTO_BOOK_SUBJECTS" :key="s.id" class="pbc-weight">
+        <span :id="`pbc-w-${s.id}`" class="pbc-weight-label">{{ s.label }}</span>
+        <SelectButton
+          v-model="weights[s.id]"
+          :options="WEIGHT_OPTIONS"
+          option-label="label"
+          option-value="value"
+          :allow-empty="false"
+          size="small"
+          :aria-labelledby="`pbc-w-${s.id}`"
+        />
+      </div>
     </fieldset>
 
     <template #footer>
@@ -159,6 +209,19 @@ async function create() {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+.pbc-weights {
+  margin-top: var(--space-3);
+}
+.pbc-weight {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pbc-weight-label {
+  min-width: 8rem;
 }
 .pbc-narrow legend {
   padding: 0 var(--space-1);

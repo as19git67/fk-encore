@@ -72,10 +72,23 @@ export interface PhotoBookSettings {
   captions: boolean
 }
 
+export type PhotoBookSubject = 'people' | 'landscape' | 'nature' | 'buildings'
+export type PhotoBookWeights = Partial<Record<PhotoBookSubject, number>>
+
+export const PHOTO_BOOK_SUBJECTS: { id: PhotoBookSubject; label: string }[] = [
+  { id: 'people', label: 'Personen' },
+  { id: 'landscape', label: 'Landschaft' },
+  { id: 'nature', label: 'Natur' },
+  { id: 'buildings', label: 'Bauwerke' },
+]
+
 export interface PhotoBookSource {
-  kind: 'photos' | 'album'
+  kind: 'photos' | 'album' | 'collection'
   photo_ids?: number[]
   album_id?: number
+  collection_id?: number
+  weights?: PhotoBookWeights | null
+  group_picks_only?: boolean
   quality_min?: number | null
   aesthetic_min?: number | null
   without_recognisable_faces?: boolean
@@ -128,12 +141,17 @@ export interface CreatePhotoBookPayload {
   format?: PhotoBookFormat
   photoIds?: number[]
   albumId?: number
+  collectionId?: number
   /** 0..100 */
   qualityMin?: number | null
   /** 0..100 */
   aestheticMin?: number | null
   withoutRecognisableFaces?: boolean
   maxPhotos?: number | null
+  /** -1 (fewer) .. 1 (more) per subject. */
+  weights?: PhotoBookWeights | null
+  /** A series of near-duplicates gives only its pick. */
+  groupPicksOnly?: boolean
 }
 
 export interface UpdatePhotoBookPayload {

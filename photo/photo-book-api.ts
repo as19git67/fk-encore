@@ -2,7 +2,7 @@
  * Photo books — endpoints (documentation/plans/fotobuch.md, issue #1729).
  *
  * GET    /photo-books                          the caller's books
- * POST   /photo-books                          build one from photos or an album
+ * POST   /photo-books                          build one from photos, an album, a collection or the basket
  * GET    /photo-books/:id                      the book for the editor
  * PATCH  /photo-books/:id                      title, format, cover, print settings
  * POST   /photo-books/:id/rebuild              lay it out again from its source
@@ -26,7 +26,7 @@ import * as fs from "fs";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import type { PhotoBookSettings } from "../db/schema";
+import type { PhotoBookSettings, PhotoBookWeights } from "../db/schema";
 import type { PhotoBookFormat } from "./photo-book-layout";
 import {
   acceptPhotoBookChapterSuggestion,
@@ -82,15 +82,20 @@ export interface CreatePhotoBookRequest {
   title: string;
   subtitle?: string | null;
   format?: PhotoBookFormat;
-  /** A selection; or `albumId`. */
+  /** A selection; or `albumId`, or `collectionId` (a collection or the basket). */
   photoIds?: number[];
   albumId?: number;
+  collectionId?: number;
   /** 0..100 */
   qualityMin?: number | null;
   /** 0..100 */
   aestheticMin?: number | null;
   withoutRecognisableFaces?: boolean;
   maxPhotos?: number | null;
+  /** -1 (fewer) .. 1 (more) per subject. */
+  weights?: PhotoBookWeights | null;
+  /** A series of near-duplicates contributes only its pick; on by default. */
+  groupPicksOnly?: boolean;
 }
 
 export const createPhotoBookApi = api(

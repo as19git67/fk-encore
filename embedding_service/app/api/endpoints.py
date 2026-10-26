@@ -66,6 +66,9 @@ from app.models.schemas import (
     TasteScoreResponse,
     TasteTrainResponse,
     TextSearchRequest,
+    ZeroShotRequest,
+    ZeroShotResponse,
+    ZeroShotScore,
 )
 from app.services.embedding_service import clip_embedder_class, dino_embedder_class
 from app.services.similar_groups import find_similar_groups
@@ -462,6 +465,40 @@ async def taste_score(request: TasteScoreRequest, db: DbDep) -> TasteScoreRespon
         scores.append(TasteScore(photo_id=pid, value=float(vector @ weights)))
     found = {s.photo_id for s in scores}
     return TasteScoreResponse(scores=scores, missing=[pid for pid in request.photo_ids if pid not in found])
+
+
+@router.post("/zero-shot/score", response_model=ZeroShotResponse, tags=["quality"])
+async def zero_shot_score(request: ZeroShotRequest, db: DbDep) -> ZeroShotResponse:
+    """Each photo's share of every label (softmax over the labels) from its stored CLIP vector."""
+    import numpy as np
+    from fastapi.concurrency import run_in_threadpool
+
+    from app.services import zero_shot
+
+    rows = await repository.get_clip_embeddings(db, request.photo_ids)
+    if not rows:
+        return ZeroShotResponse(scores=[], missing=list(request.photo_ids))
+    try:
+        clip_embedder = clip_embedder_class().get_instance(
+            model_name=settings.clip_model_name, pretrained=settings.clip_pretrained
+        )
+        labels = await run_in_threadpool(
+            zero_shot.label_vectors, clip_embedder.embed_text, [l.prompts for l in request.labels]
+        )
+        images = np.asarray([v for _, v in rows], dtype=np.float64)
+        shares = zero_shot.subject_probabilities(images, labels)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Zero-shot scoring failed")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Zero-shot error") from exc
+    keys = [l.key for l in request.labels]
+    scores = [
+        ZeroShotScore(photo_id=pid, values={k: round(float(shares[i, j]), 4) for j, k in enumerate(keys)})
+        for i, (pid, _) in enumerate(rows)
+    ]
+    found = {s.photo_id for s in scores}
+    return ZeroShotResponse(scores=scores, missing=[pid for pid in request.photo_ids if pid not in found])
 
 
 # ---------------------------------------------------------------------------

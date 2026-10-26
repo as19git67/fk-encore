@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -299,4 +299,24 @@ class TasteScore(BaseModel):
 
 class TasteScoreResponse(BaseModel):
     scores: List[TasteScore]
+    missing: List[str]
+
+
+class ZeroShotLabel(BaseModel):
+    key: str = Field(..., min_length=1, max_length=40)
+    prompts: List[str] = Field(..., min_length=1, max_length=8)
+
+
+class ZeroShotRequest(BaseModel):
+    photo_ids: List[str] = Field(..., min_length=1, max_length=2000)
+    labels: List[ZeroShotLabel] = Field(..., min_length=2, max_length=12)
+
+
+class ZeroShotScore(BaseModel):
+    photo_id: str
+    values: Dict[str, float] = Field(..., description="Share of each label, summing to 1")
+
+
+class ZeroShotResponse(BaseModel):
+    scores: List[ZeroShotScore]
     missing: List[str]
