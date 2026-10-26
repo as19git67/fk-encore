@@ -121,6 +121,8 @@ def _sse_payloads(text: str) -> list[str]:
             {"role": "tool", "tool_call_id": "c1", "content": "[]"}], "tools": TOOLS}, "not valid JSON"),
         ({"messages": [QUESTION], "tools": [{"type": "function", "function": {"name": "has space"}}]}, "invalid tool name"),
         ({"messages": [QUESTION], "max_tokens": 0}, "max_tokens"),
+        ({"messages": [QUESTION], "tools": TOOLS, "response_format": {"type": "json_object", "schema": {}}}, "without tools"),
+        ({"messages": [QUESTION], "response_format": {"type": "grammar"}}, "response_format.type"),
     ],
 )
 def test_rejects_malformed_requests(use_llm, body, fragment):
@@ -216,6 +218,20 @@ def test_inproc_without_tools_is_plain_chat(use_llm):
     assert "response_format" not in llm.calls[0]
 
 
+PLAN_FORMAT = {"type": "json_object", "schema": {"type": "object", "properties": {"steps": {"type": "array"}}, "required": ["steps"]}}
+
+
+def test_inproc_response_format_binds_a_plain_reply(use_llm):
+    llm = FakeInproc(['{"steps": ["a", "b"]}'])
+    client = use_llm(llm)
+
+    body = client.post("/chat", json={"messages": [QUESTION], "response_format": PLAN_FORMAT}).json()
+
+    # The grammar is the caller's, the reply its JSON text.
+    assert llm.calls[0]["response_format"] == PLAN_FORMAT
+    assert json.loads(body["message"]["content"]) == {"steps": ["a", "b"]}
+
+
 @pytest.mark.parametrize(
     "raw",
     ['{"tool": "drop_tables", "arguments": {}}', '{"tool": "list_photos", "arguments": [1]}', "{}", "not json"],
@@ -271,6 +287,21 @@ def test_server_tool_call_is_checked_and_passed_on(use_llm):
     assert payload["tools"][0]["function"]["name"] == "list_photos"
     assert payload["tool_choice"] == "auto"
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "response_format" not in payload
+
+
+def test_server_passes_response_format_and_thinking_through(use_llm):
+    llm = FakeServer(message={"role": "assistant", "content": '{"steps": ["a", "b"]}'})
+    client = use_llm(llm)
+
+    resp = client.post("/chat", json={"messages": [QUESTION], "response_format": PLAN_FORMAT, "thinking": True, "max_tokens": 300})
+
+    assert resp.status_code == 200
+    assert json.loads(resp.json()["message"]["content"]) == {"steps": ["a", "b"]}
+    payload = llm.payloads[0]
+    assert payload["response_format"] == PLAN_FORMAT
+    assert payload["chat_template_kwargs"] == {"enable_thinking": True}
+    assert payload["max_tokens"] == 300
 
 
 def test_server_passes_tool_history_through_in_openai_shape(use_llm):

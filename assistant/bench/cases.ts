@@ -866,4 +866,57 @@ export const BENCH_CASES: BenchCase[] = [
       create_photo_book: PROPOSAL("Fotobuch „Sommer 2025“ aus 3 Fotos gestalten (A4 quer, höchstens 80 Fotos, mehr Landschaft)"),
     },
   },
+
+  // ── multi-step questions (assistent-wegfindung.md, stage 3) ─────────────
+  // Two areas, or a chain in words: the router flags the question, the loop
+  // asks for a plan first and follows it. A case passes when every step's
+  // tool ran; the summary counts these cases apart (multi_area_pass_rate).
+  {
+    id: "multi-invoices-paid",
+    title: "Zwei Bereiche: Rechnungen eines Absenders und ihre Zahlungen",
+    question: "Welche Rechnungen der Musterfirma Haustechnik liegen vor, und sind sie alle bezahlt?",
+    firstTools: ["search_documents", "list_transactions", "list_correspondents"],
+    expect: [
+      { tool: "search_documents" },
+      { tool: "list_transactions", args: { q: { $contains: "musterfirma" } } },
+    ],
+    results: {
+      search_documents: { rows: [
+        { id: 201, title: "Rechnung Heizungswartung", date: "2026-09-02", from: "Musterfirma Haustechnik GmbH", amount: "120,50 €" },
+        { id: 202, title: "Rechnung Ersatzteil", date: "2026-09-09", from: "Musterfirma Haustechnik GmbH", amount: "89,90 €" },
+      ], total: 2 },
+      list_transactions: { rows: [
+        { id: 9, date: "2026-09-10", amount: -120.5, counterparty: "Musterfirma Haustechnik GmbH", purpose: "RE-2026-0101" },
+      ], total: 1 },
+    },
+  },
+  {
+    id: "multi-consumption-and-bill",
+    title: "Zwei Bereiche: Stromverbrauch und die Rechnung dazu",
+    question: "Wie viel Strom haben wir 2025 verbraucht, und wo ist die Stromrechnung dazu?",
+    firstTools: ["list_meters", "consumption_report", "search_documents"],
+    expect: [
+      { tool: "consumption_report", args: { meter_id: 3, from: "2025-01-01", to: "2025-12-31" } },
+      { tool: "search_documents", args: { q: { $contains: "strom" } } },
+    ],
+    results: {
+      list_meters: METERS,
+      consumption_report: { meter_id: 3, consumption: 3412, unit: "kWh", formula: "reading 2025-12-31 minus reading 2025-01-01" },
+      search_documents: { rows: [{ id: 310, title: "Stromrechnung 2025", date: "2026-02-03", from: "Stadtwerke Musterstadt" }], total: 1 },
+    },
+  },
+  {
+    id: "chain-photos-into-album",
+    title: "Kette in Worten: Fotos suchen und dann ins Album legen",
+    question: "Such die Fotos aus Musterstadt von 2025 raus und leg sie dann in ein Album.",
+    firstTools: ["list_photos"],
+    expect: [
+      { tool: "list_photos", args: { place: { $contains: "musterstadt" }, date_from: "2025-01-01" } },
+      { tool: "create_album", args: { name: { $present: true } } },
+    ],
+    results: {
+      list_photos: { ids: [1301, 1302, 1303], total: 27, note: "27 photos; ids truncated" },
+      create_album: PROPOSAL("Album „Musterstadt 2025“ anlegen und 27 Fotos hinzufügen"),
+    },
+  },
 ];

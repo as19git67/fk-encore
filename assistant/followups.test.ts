@@ -107,6 +107,8 @@ describe("follow-up questions", () => {
     // with photos outside the previous result too.
     clients.photo.listPhotos.mockResolvedValueOnce({ photos: [PHOTOS[0], PHOTOS[2], { id: 99, filename: "x.jpg" }] });
     vi.mocked(chat)
+      // "und mach daraus" chains two steps: the loop asks for a plan first.
+      .mockResolvedValueOnce(toolCall("write_plan", { steps: [{ tool: "list_photos", goal: "nur München" }, { tool: "create_album", goal: "das Album" }] }, "c-plan"))
       .mockResolvedValueOnce(toolCall("list_photos", { from_previous_result: true, place: "münchen" }, "c-narrow"))
       .mockResolvedValueOnce(toolCall("create_album", { name: "München 2025", from_previous_result: true }, "c-album"))
       .mockResolvedValueOnce(text("Album vorgeschlagen."));

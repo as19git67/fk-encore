@@ -96,6 +96,8 @@ beforeEach(async () => {
 async function draftFromInvoices(): Promise<{ conversationId: number; proposal: ProposalRow }> {
   const conversation = await createConversation({ context: CONTEXT });
   vi.mocked(chat)
+    // Three areas in play (writing, documents, finance): the loop asks for a plan first.
+    .mockResolvedValueOnce(toolCall("write_plan", { steps: [{ tool: "render_letter", goal: "the letter" }] }))
     .mockResolvedValueOnce(toolCall("render_letter", {
       recipient: "Musterfirma Haustechnik GmbH\nBeispielstraße 1\n12345 Musterstadt",
       subject: "Ihre Rechnungen RE-2026-0001, RE-2026-0002 und RE-2026-0003",

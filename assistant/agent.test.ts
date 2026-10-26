@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding, withHint } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -41,6 +41,11 @@ function calls(...list: Array<[string, Record<string, unknown>]>): ChatReply {
 
 function answer(text: string): ChatReply {
   return { content: text, tool_calls: [], finish_reason: "stop" };
+}
+
+/** The plan call's reply: the steps as the model writes them. */
+function planReply(steps: Array<[string, string]>): ChatReply {
+  return calls([WRITE_PLAN_NAME, { steps: steps.map(([tool, goal]) => ({ tool, goal })) }]);
 }
 
 beforeEach(() => {
@@ -587,6 +592,7 @@ describe("Abbrechen", () => {
       return { meters: [] };
     });
     const { fn } = scripted([
+      planReply([["list_meters", "die Zähler"], ["list_accounts", "die Konten"]]),
       calls(["list_meters", {}], ["list_accounts", {}]),
       answer("Keine Zähler."),
     ]);
@@ -598,7 +604,7 @@ describe("Abbrechen", () => {
     })).rejects.toThrow();
 
     // The running tool finishes; the next one and the next round never start.
-    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledTimes(2);
     expect(clients.finance.listAccounts).not.toHaveBeenCalled();
     expect(events.map((e) => e.type)).toEqual(["tool_start", "tool_result"]);
   });
@@ -851,5 +857,130 @@ describe("tools written for the model (stage 2 of assistent-wegfindung.md)", () 
     const prompt = buildSystemPrompt(catalogFor(USER), NOW, false);
     expect(prompt).toContain("call the tool again once with that filter dropped before you tell the user nothing exists");
     expect(prompt).toContain("A tool error names the argument and the allowed values: fix that argument and call again");
+  });
+});
+
+describe("the plan of a multi-step question (stage 3 of assistent-wegfindung.md)", () => {
+  const names = (req: ChatRequest) => (req.tools ?? []).map((t) => (t as { function: { name: string } }).function.name);
+  const QUESTION = "Welche Rechnungen der Musterfirma Haustechnik liegen vor, und sind sie alle bezahlt?";
+
+  function invoicesAndBookings() {
+    clients.documents.listCorrespondents.mockResolvedValue({ items: [] });
+    clients.documents.listDocuments.mockResolvedValue({ items: [{ id: 201, title: "Rechnung Heizungswartung", doc_date: "2026-09-02", correspondent_display: "Musterfirma Haustechnik" }], total: 1 });
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 9, booking_date: "2026-09-10", amount: "-120.50", counterparty: "Musterfirma Haustechnik", purpose: "RE-2026-0101" }], total: 1 });
+  }
+
+  it("asks for a plan first, bound to write_plan and the round-1 tools, then follows it and ticks off the steps", async () => {
+    invoicesAndBookings();
+    const { fn, requests } = scripted([
+      planReply([["search_documents", "die Rechnungen der Musterfirma"], ["list_transactions", "die Zahlungen an sie"]]),
+      calls(["search_documents", { correspondent: "Musterfirma Haustechnik" }]),
+      calls(["list_transactions", { q: "Musterfirma Haustechnik" }]),
+      answer("Eine Rechnung, bezahlt am 10.09.2026."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: QUESTION, tools: catalogFor(USER), chat: fn, now: NOW });
+
+    // The plan call: forced to write_plan, the real tools alongside, a small budget.
+    const planCall = requests[0]!;
+    expect(planCall.tool_choice).toEqual({ type: "function", function: { name: WRITE_PLAN_NAME } });
+    expect(planCall.max_tokens).toBe(320);
+    expect(names(planCall)).toContain("search_documents");
+    expect(names(planCall)).toContain("list_transactions");
+    expect(names(planCall)).toContain(WRITE_PLAN_NAME);
+    expect(planCall.messages.at(-1)).toEqual({ role: "user", content: QUESTION });
+    const planTool = planCall.tools!.find((t) => (t as { function: { name: string } }).function.name === WRITE_PLAN_NAME);
+    const schema = (planTool as { function: { parameters: { properties: { steps: { items: { properties: { tool: { enum: string[] } } } } } } } }).function.parameters.properties.steps.items.properties.tool.enum;
+    expect(schema).toContain("search_documents");
+    expect(schema).not.toContain("list_meters");
+
+    // Round 1 reads the plan as a tool round; the tool list is the same as the plan call's.
+    const round1 = requests[1]!;
+    expect(names(round1)).toEqual(names(planCall));
+    expect(round1.tool_choice).toBe("auto");
+    const planMessage = round1.messages.at(-1)!;
+    expect(planMessage.role).toBe("tool");
+    expect(String(planMessage.content)).toBe("Plan:\n[ ] 1. search_documents — die Rechnungen der Musterfirma\n[ ] 2. list_transactions — die Zahlungen an sie\nNext: step 1, search_documents — die Rechnungen der Musterfirma. Call it now; when every step is done, answer. Skip a step only when the results above already cover it.");
+    // After step 1 the result ends with the ticked plan and the next step.
+    const afterStep1 = String(requests[2]!.messages.at(-1)!.content);
+    expect(afterStep1).toContain("Rechnung Heizungswartung");
+    expect(afterStep1).toMatch(/\n\nPlan: 1 of 2 steps done\. Next: step 2, list_transactions — die Zahlungen an sie\. Call it now/);
+    const afterStep2 = String(requests[3]!.messages.at(-1)!.content);
+    expect(afterStep2).toMatch(/\n\nEvery planned step is done: answer now from the results above\.$/);
+    expect(res.rounds).toBe(4);
+    expect(res.plan).toEqual([
+      { tool: "search_documents", goal: "die Rechnungen der Musterfirma", done: true },
+      { tool: "list_transactions", goal: "die Zahlungen an sie", done: true },
+    ]);
+    // The plan round is part of the transcript, like any tool round, with a digest for later turns.
+    const planCallId = res.transcript.find((m) => m.role === "assistant" && m.tool_calls?.[0]?.function.name === WRITE_PLAN_NAME)!.tool_calls![0]!.id;
+    expect(res.toolResults[planCallId]).toEqual({ digest: "[plan of this turn: search_documents → list_transactions]" });
+  });
+
+  it("an answer with steps still open is sent back once, then accepted", async () => {
+    invoicesAndBookings();
+    const { fn, requests } = scripted([
+      planReply([["search_documents", "Rechnungen"], ["list_transactions", "Zahlungen"]]),
+      calls(["search_documents", { correspondent: "Musterfirma Haustechnik" }]),
+      answer("Eine Rechnung liegt vor."),
+      answer("Eine Rechnung liegt vor; ob sie bezahlt ist, habe ich nicht geprüft."),
+    ]);
+    const events: TurnEvent[] = [];
+    const res = await runTurn({ user: USER, history: [], question: QUESTION, tools: catalogFor(USER), chat: fn, now: NOW, emit: (e) => events.push(e) });
+    expect(String(requests[3]!.messages.at(-1)!.content)).toBe("Your plan has steps not done yet: step 2, list_transactions — Zahlungen. Call the next one now. Only if the results above already answer the whole question, repeat your answer unchanged.");
+    expect(events.filter((e) => e.type === "retract")).toHaveLength(1);
+    expect(res.answer).toBe("Eine Rechnung liegt vor; ob sie bezahlt ist, habe ich nicht geprüft.");
+    expect(res.plan).toMatchObject([{ done: true }, { done: false }]);
+  });
+
+  it("runs without a plan when the model writes none usable, and for a one-area question without chain words", async () => {
+    invoicesAndBookings();
+    // Unknown tools in the steps: no plan, the loop goes on as before.
+    const { fn, requests } = scripted([
+      planReply([["nope", "y"]]),
+      calls(["search_documents", { correspondent: "Musterfirma Haustechnik" }]),
+      answer("Eine Rechnung."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: QUESTION, tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(res.plan).toBeUndefined();
+    expect(names(requests[1]!)).not.toContain(WRITE_PLAN_NAME);
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: QUESTION });
+    expect(res.rounds).toBe(3);
+
+    const single = scripted([calls(["list_meters", {}]), answer("Zwei Zähler.")]);
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
+    const r2 = await runTurn({ user: USER, history: [], question: "Welche Zähler haben wir?", tools: catalogFor(USER), chat: single.fn, now: NOW });
+    expect(single.requests[0]!.tool_choice).toBe("auto");
+    expect(r2.plan).toBeUndefined();
+  });
+
+  it("a second write_plan call is answered with the plan, not run", async () => {
+    invoicesAndBookings();
+    const { fn, requests } = scripted([
+      planReply([["search_documents", "Rechnungen"], ["list_transactions", "Zahlungen"]]),
+      calls([WRITE_PLAN_NAME, { steps: [] }]),
+      calls(["search_documents", {}], ["list_transactions", {}]),
+      answer("Fertig."),
+    ]);
+    await runTurn({ user: USER, history: [], question: QUESTION, tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(String(requests[2]!.messages.at(-1)!.content)).toMatch(/^The plan is written; follow it\.\nPlan:/);
+  });
+
+  it("parses the steps strictly and writes them back as a checklist", () => {
+    const allowed = new Set(["a", "b", "c", "d", "e"]);
+    const reply = (steps: unknown) => calls([WRITE_PLAN_NAME, { steps }]);
+    expect(parsePlan(reply([{ tool: "a", goal: "one" }, { tool: "zz" }, { tool: "b", goal: 3 }]), allowed)).toEqual([
+      { tool: "a", goal: "one", done: false }, { tool: "b", goal: "", done: false },
+    ]);
+    expect(parsePlan(reply([{ tool: "a", goal: "one" }]), allowed)).toHaveLength(1);
+    expect(parsePlan(reply([{ tool: "zz", goal: "one" }]), allowed)).toBeNull();
+    expect(parsePlan(reply("a, b"), allowed)).toBeNull();
+    expect(parsePlan(answer("plan: a then b"), allowed)).toBeNull();
+    expect(parsePlan(reply(["a", "b", "c", "d", "e"].map((tool) => ({ tool, goal: tool }))), allowed)).toHaveLength(4);
+    const steps = [{ tool: "a", goal: "one", done: true }, { tool: "b", goal: "", done: false }];
+    expect(planText(steps)).toBe("Plan:\n[x] 1. a — one\n[ ] 2. b\nPlan: 1 of 2 steps done. Next: step 2, b. Call it now; when every step is done, answer. Skip a step only when the results above already cover it.");
+    expect(planStatus(steps.map((s) => ({ ...s, done: true })))).toBe("Every planned step is done: answer now from the results above.");
+    expect(planNudge(steps)).toContain("step 2, b.");
+    const def = writePlanDefinition(["a", "b"]) as { function: { parameters: { properties: { steps: { minItems: number; maxItems: number } } } } };
+    expect(def.function.parameters.properties.steps).toMatchObject({ minItems: 1, maxItems: 4 });
   });
 });
