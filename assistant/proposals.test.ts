@@ -18,7 +18,9 @@ import { __resetRateLimiterForTests } from "../user/rateLimiter";
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { chat, type ChatReply } from "./llm-client";
 import { __resetLiveTurnsForTests } from "./live";
+import { isSummaryRequest } from "./summary";
 import {
+  __settleSummariesForTests,
   ask,
   createConversation,
   discardAssistantProposal,
@@ -134,7 +136,8 @@ describe("write tools", () => {
     expect(second.messages.at(-1)).toEqual({ role: "user", content: CONSENT_NUDGE });
     expect(res.blocks.find((b) => b.kind === "proposal")?.rows[0]).toMatchObject({ tool: "tag_transactions", status: "pending" });
     // With the card there, asking for confirmation is the right answer and is not sent back.
-    expect(vi.mocked(chat)).toHaveBeenCalledTimes(4);
+    // (The turn's summary, written after the answer, is a call of its own.)
+    expect(vi.mocked(chat).mock.calls.filter((c) => !isSummaryRequest(c[0]))).toHaveLength(4);
     expect(clients.finance.batchTag).not.toHaveBeenCalled();
   });
 
@@ -145,6 +148,8 @@ describe("write tools", () => {
       .mockResolvedValueOnce(toolCall("create_album", { name: "Sommer", photos: { favorite: true } }))
       .mockResolvedValueOnce(text("Ich habe das Album „Sommer“ vorgeschlagen."));
     await ask({ id: conversation.id, message: "Leg ein Album mit meinen Favoriten an." });
+    // The summary of that turn runs after its answer; let it take its (unscripted) call before the next script.
+    await __settleSummariesForTests();
 
     vi.mocked(chat)
       .mockResolvedValueOnce(text("Ich habe das Album angepasst, es heißt jetzt „Sommer 2025“."))
@@ -152,7 +157,8 @@ describe("write tools", () => {
       .mockResolvedValueOnce(text("Das Album heißt jetzt „Sommer 2025“; die neue Karte wartet auf „Ausführen“."));
     const res = await ask({ id: conversation.id, message: "Nenn es lieber Sommer 2025." });
 
-    const nudged = vi.mocked(chat).mock.calls[3][0];
+    const rounds = vi.mocked(chat).mock.calls.map((c) => c[0]).filter((r) => !isSummaryRequest(r));
+    const nudged = rounds[3];
     expect(nudged.messages.at(-1)).toEqual({ role: "user", content: REVISION_NUDGE });
     expect(res.blocks.find((b) => b.kind === "proposal")?.rows[0]).toMatchObject({ tool: "create_album", status: "pending" });
     expect(await db.select().from(assistantProposal)).toHaveLength(2);

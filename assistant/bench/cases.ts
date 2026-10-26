@@ -13,6 +13,7 @@
  */
 
 import type { ChatMessage, RefType } from "../types";
+import { summarizedTurn as replaySummarized, summaryNote } from "../summary";
 
 export const BENCH_TODAY = "2026-10-15";
 
@@ -114,6 +115,28 @@ const METER_HISTORY = earlierTurn(
   "[earlier result of consumption_report: meter 3, 2025-01-01..2025-12-31, total 3.412 kWh]",
   "Der Zähler „Strom Haus“ zeigt für 2025 einen Verbrauch von 3.412 kWh.",
 );
+
+/**
+ * An older turn as the assistant replays it once its summary is written
+ * (stage 4 of assistent-wegfindung.md): the question, then the summary with
+ * the note of the tools behind it — no tool calls, no rows.
+ */
+function summarizedTurn(question: string, summary: string, tools: Array<{ tool: string; digest: string | null }>): ChatMessage[] {
+  return replaySummarized(question, summary, summaryNote(tools));
+}
+
+/**
+ * Two turns back the user asked for the hardware-store bookings; that turn
+ * is a summary by now, the meter question after it went whole.
+ */
+const OLDER_BOOKINGS_HISTORY: ChatMessage[] = [
+  ...summarizedTurn(
+    "Zeig mir die Buchungen vom Baumarkt im September.",
+    "Gefragt waren die Buchungen beim Baumarkt im September 2026. Es gab drei Buchungen über zusammen 412,30 €, die größte am 12.09.2026 über 250,00 €.",
+    [{ tool: "list_transactions", digest: "[earlier result of list_transactions: 3 rows, ids 9401,9402,9403]" }],
+  ),
+  ...METER_HISTORY,
+];
 
 const PROPOSAL = (summary: string) => ({ proposal: { id: 1, summary, status: "pending — the user confirms on the card" } });
 
@@ -681,6 +704,32 @@ export const BENCH_CASES: BenchCase[] = [
     previous: { transaction: [9401, 9402, 9403] },
     expect: [{ tool: "tag_transactions", args: { add: { $contains: "renovierung" } } }],
     results: { tag_transactions: PROPOSAL("Bei 3 Buchungen „Renovierung“ setzen") },
+  },
+
+  // ── follow-ups on an older, summarized turn (assistent-wegfindung.md, stage 4) ──
+  {
+    id: "older-turn-tag-bookings",
+    title: "Rückfrage auf eine ältere Runde, die nur als Zusammenfassung vorliegt: Tag vorschlagen",
+    question: "Gib den Baumarkt-Buchungen von vorhin den Tag Renovierung.",
+    history: OLDER_BOOKINGS_HISTORY,
+    previous: { transaction: [9401, 9402, 9403] },
+    expect: [{ tool: "tag_transactions", args: { from_previous_result: true, add: { $contains: "renovierung" } } }],
+    results: { tag_transactions: PROPOSAL("Bei 3 Buchungen „Renovierung“ setzen") },
+  },
+  {
+    id: "older-turn-largest-booking",
+    title: "Rückfrage auf eine ältere Runde: die Buchungen aus der Zusammenfassung neu lesen, nicht aus ihr antworten",
+    question: "Welche der Baumarkt-Buchungen war die größte, und wann war sie?",
+    history: OLDER_BOOKINGS_HISTORY,
+    previous: { transaction: [9401, 9402, 9403] },
+    expect: [{ tool: "list_transactions", args: { q: { $contains: "baumarkt" }, rank_by: "amount" } }],
+    results: {
+      list_transactions: { rows: [
+        { id: 9402, date: "2026-09-12", amount: "-250.00", counterparty: "Baumarkt Musterstadt", purpose: "Fliesen" },
+        { id: 9401, date: "2026-09-03", amount: "-98.40", counterparty: "Baumarkt Musterstadt", purpose: "Farbe" },
+        { id: 9403, date: "2026-09-27", amount: "-63.90", counterparty: "Baumarkt Musterstadt", purpose: "Schrauben" },
+      ], total: 3 },
+    },
   },
 
   // ── follow-ups (stage 5) ────────────────────────────────────────────────

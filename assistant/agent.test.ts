@@ -53,6 +53,14 @@ beforeEach(() => {
   vi.mocked(listPlans).mockReset();
 });
 
+describe("the note under a replayed summary (stage 4 of assistent-wegfindung.md)", () => {
+  it("counts as a tool note when the model copies it, and is stripped from an answer", () => {
+    const note = "[summary of an earlier turn; tools then: list_transactions (3 rows). Follow-ups on those rows use from_previous_result.]";
+    expect(looksLikeFakeToolCall(`Drei Buchungen.\n\n${note}`)).toBe(true);
+    expect(cleanAnswer(`Drei Buchungen.\n\n${note}\n\nMehr nicht.`)).toBe("Drei Buchungen.\n\nMehr nicht.");
+  });
+});
+
 describe("the example questions of #1524", () => {
   it("Lastschriften diesen Monat → upcoming_payments(channel direct_debit)", async () => {
     clients.finance.listUpcomingDebits.mockResolvedValue({

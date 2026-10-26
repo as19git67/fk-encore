@@ -129,6 +129,8 @@ export interface BenchSummary {
   multi_area_pass_rate: number | null;
   /** Median rounds of those cases, the plan call included; null without any. */
   median_rounds_multi_area: number | null;
+  /** Pass rate of the cases that come with earlier turns, the measure of stage 4 (history as summaries); null without any. */
+  follow_up_pass_rate: number | null;
 }
 
 export interface CaseRunSummaryInput {
@@ -145,6 +147,7 @@ export interface CaseRunSummaryInput {
   areas?: string[];
   plan_asked?: boolean;
   plan?: string[];
+  follow_up?: boolean;
 }
 
 function rate(part: number, whole: number): number | null {
@@ -170,6 +173,7 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
   const judged = runs.filter((r) => typeof r.score.first_tool_hit === "boolean");
   // A case of two or more areas, as the router decided them (every area in play is no decision).
   const multi = runs.filter((r) => r.routing && r.routing !== "all" && (r.areas?.length ?? 0) >= 2);
+  const followUps = runs.filter((r) => r.follow_up);
   return {
     cases: runs.length,
     passed: runs.filter((r) => r.score.passed).length,
@@ -195,5 +199,6 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
     planned: runs.filter((r) => r.plan).length,
     multi_area_pass_rate: rate(multi.filter((r) => r.score.passed).length, multi.length),
     median_rounds_multi_area: median(multi.filter((r) => r.rounds_ms.length).map((r) => r.rounds_ms.length)),
+    follow_up_pass_rate: rate(followUps.filter((r) => r.score.passed).length, followUps.length),
   };
 }

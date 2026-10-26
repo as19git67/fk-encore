@@ -18,7 +18,10 @@ import { __resetRateLimiterForTests } from "../user/rateLimiter";
 import { clients, resetClients } from "./clients.test-helper";
 import { chat, LlmServiceUnavailableError, type ChatReply } from "./llm-client";
 import { __resetLiveTurnsForTests } from "./live";
+import { isRouterRequest } from "./router";
+import { isSummaryRequest, SUMMARIZE_TURN_NAME } from "./summary";
 import {
+  __settleSummariesForTests,
   ask,
   cancelAssistantTurn,
   createConversation,
@@ -26,6 +29,7 @@ import {
   getConversation,
   listConversations,
   watchTurn,
+  WHOLE_TURNS,
   type StreamEvent,
 } from "./assistant";
 
@@ -50,6 +54,27 @@ function toolCall(name: string, args: Record<string, unknown>): ChatReply {
 
 function text(content: string): ChatReply {
   return { content, tool_calls: [], finish_reason: "stop" };
+}
+
+/**
+ * Plays `replies` to the loop's rounds in order, and answers every summary
+ * call (which runs after the answer, so its place in the order is not fixed)
+ * with `summary` — a summary tool call, or null for an unusable reply.
+ */
+function scriptWithSummaries(replies: ChatReply[], summary: string | null = "Zusammenfassung der Runde: es ging um die Zähler, gefunden wurde keiner.") {
+  const queue = [...replies];
+  vi.mocked(chat).mockImplementation(async (req) => {
+    // The router's model stage (a question without keywords) chooses nothing: every area stays in play.
+    if (isRouterRequest(req)) return text("");
+    if (isSummaryRequest(req)) {
+      return summary === null
+        ? text("kein Werkzeugaufruf")
+        : toolCall(SUMMARIZE_TURN_NAME, { summary });
+    }
+    const next = queue.shift();
+    if (!next) throw new Error("script ran out");
+    return next;
+  });
 }
 
 beforeEach(async () => {
@@ -112,15 +137,22 @@ describe("asking", () => {
 
   it("replays earlier turns with their tool calls and each result whole", async () => {
     clients.meter.listMeters.mockResolvedValue({ meters: [] });
-    vi.mocked(chat)
-      .mockResolvedValueOnce(toolCall("list_meters", {}))
-      .mockResolvedValueOnce(text("Keine Zähler."))
-      .mockResolvedValueOnce(text("Immer noch keine."));
+    scriptWithSummaries([toolCall("list_meters", {}), text("Keine Zähler."), text("Immer noch keine.")]);
     const conv = await createConversation({});
     await ask({ id: conv.id, message: "Welche Zähler gibt es?" });
+    await __settleSummariesForTests();
     await ask({ id: conv.id, message: "Und jetzt?" });
 
-    const third = vi.mocked(chat).mock.calls[2][0];
+    // The summary of the first turn was written after its answer, onto the answer row.
+    const [answerRow] = await db.select().from(assistantMessage).where(eq(assistantMessage.content, "Keine Zähler."));
+    expect(answerRow.summary).toMatch(/^Zusammenfassung der Runde/);
+    // The summary call saw the turn as it happened, bound to its tool.
+    const summaryCall = vi.mocked(chat).mock.calls.map((c) => c[0]).find(isSummaryRequest)!;
+    expect(summaryCall.messages.map((m) => m.role)).toEqual(["system", "user", "assistant", "tool", "assistant"]);
+    expect(summaryCall.tool_choice).toEqual({ type: "function", function: { name: SUMMARIZE_TURN_NAME } });
+
+    // One turn back is still "whole": the second question sees the tool round, not the summary.
+    const third = vi.mocked(chat).mock.calls.map((c) => c[0]).filter((r) => !isSummaryRequest(r))[2];
     const replayed = third.messages.slice(1);
     expect(replayed.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant", "user"]);
     const call = replayed[1] as { tool_calls: Array<{ id: string; function: { name: string } }> };
@@ -135,8 +167,51 @@ describe("asking", () => {
     // The second answer records how full the window got and what it still saw.
     const detail = await getConversation({ id: conv.id });
     expect(detail.messages[1].context_usage).toMatchObject({ historyTurns: 0, earlierTurns: 0 });
-    expect(detail.messages[3].context_usage).toMatchObject({ historyTurns: 1, keptTurns: 1, earlierTurns: 1, used: null });
+    expect(detail.messages[3].context_usage).toMatchObject({ historyTurns: 1, keptTurns: 1, earlierTurns: 1, used: null, summarizedTurns: 0 });
     expect(detail.messages[0].context_usage).toBeNull();
+  });
+
+  it("replays an older turn as question and summary once newer turns cover it (stage 4)", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [{ id: 3, name: "Strom Haus" }] });
+    const conv = await createConversation({});
+    // WHOLE_TURNS + 1 turns with a tool call each, every summary written before the next question.
+    const script: ChatReply[] = [];
+    for (let i = 0; i <= WHOLE_TURNS; i++) script.push(toolCall("list_meters", {}), text(`Antwort ${i}: ein Zähler.`));
+    script.push(text("Danke fürs Nachsehen."));
+    scriptWithSummaries(script, "Gefragt war nach den Zählern des Haushalts; gefunden wurde einer, Strom Haus.");
+    for (let i = 0; i <= WHOLE_TURNS; i++) {
+      await ask({ id: conv.id, message: `Frage ${i}: welche Zähler?` });
+      await __settleSummariesForTests();
+    }
+    await ask({ id: conv.id, message: "Danke." });
+
+    const last = vi.mocked(chat).mock.calls.map((c) => c[0]).filter((r) => !isSummaryRequest(r)).at(-1)!;
+    const replayed = last.messages.slice(1, -1);
+    // The oldest turn: question and summary, with the note of the tools behind it; no tool round.
+    expect(replayed[0]).toEqual({ role: "user", content: "Frage 0: welche Zähler?" });
+    expect(replayed[1]).toMatchObject({ role: "assistant" });
+    const summaryText = (replayed[1] as { content: string }).content;
+    expect(summaryText).toContain("Gefragt war nach den Zählern");
+    expect(summaryText).toContain("[summary of an earlier turn; tools then: list_meters (1 row). Follow-ups on those rows use from_previous_result.]");
+    expect(replayed[2]).toEqual({ role: "user", content: "Frage 1: welche Zähler?" });
+    // The newer turns went whole: question, tool call, result, answer.
+    expect(replayed.slice(2).map((m) => m.role)).toEqual(Array(WHOLE_TURNS).fill(["user", "assistant", "tool", "assistant"]).flat());
+    const detail = await getConversation({ id: conv.id });
+    expect(detail.messages.at(-1)!.context_usage).toMatchObject({ historyTurns: WHOLE_TURNS + 1, keptTurns: WHOLE_TURNS + 1, summarizedTurns: 1 });
+  });
+
+  it("a turn without a tool call gets no summary and replays as it is; an unusable summary reply changes nothing", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
+    scriptWithSummaries([text("Hallo!"), toolCall("list_meters", {}), text("Keine Zähler.")], null);
+    const conv = await createConversation({});
+    await ask({ id: conv.id, message: "Hallo" });
+    await __settleSummariesForTests();
+    await ask({ id: conv.id, message: "Welche Zähler gibt es?" });
+    await __settleSummariesForTests();
+    const summaryCalls = vi.mocked(chat).mock.calls.map((c) => c[0]).filter(isSummaryRequest);
+    expect(summaryCalls).toHaveLength(1);
+    const answers = await db.select().from(assistantMessage).where(eq(assistantMessage.role, "assistant"));
+    expect(answers.every((m) => m.summary === null)).toBe(true);
   });
 
   it("a busy model is 'unavailable', and nothing is stored", async () => {

@@ -229,6 +229,13 @@ KV cache is usually *cheaper* for these models, not more expensive: a 48-layer
 A3B-class model with 4 KV heads × 128 dims spends ~96 KiB/token against
 Qwen3-14B's 160 KiB, i.e. ~1.7 GiB at `LLM_CTX=18000` instead of ~2.8 GiB.
 
+For the assistant (stage 4 of `documentation/plans/assistent-wegfindung.md`)
+the question is whether a larger window pays: with Gemma 4 26B-A4B at
+`LLM_CTX=30000`, `LLM_KV_TYPE=q8_0` (needs `LLM_FLASH_ATTN=1`) halves the KV
+cache and makes room for a window around 45k. Run the KI-Benchmark page once
+at each setting and compare `median_ms_per_round` and `p90_ms_per_round`
+against the pass rate before keeping the larger window.
+
 Budget the host side too: the offloaded experts are resident memory, not page
 cache, and `documents/llm-client.ts` gives up on a classification after
 `LLM_SERVICE_TIMEOUT_MS` (default 120 s) — raise it, and keep it below

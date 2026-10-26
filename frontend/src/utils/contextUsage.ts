@@ -38,6 +38,8 @@ export function contextMeter(u: ContextUsage): ContextMeter {
   ]
   if (earlier > 0) parts.push(`${u.keptTurns} von ${earlier} früheren Fragen im Blick`)
   if (u.digested > 0) parts.push(`${u.digested} Ergebnis${u.digested === 1 ? '' : 'se'} gekürzt`)
+  const summarized = u.summarizedTurns ?? 0
+  if (summarized > 0) parts.push(`${summarized} ältere als Zusammenfassung`)
 
   const sentences = [
     `Die letzte Antwort hat ${percent} % des Kontexts belegt (${parts[0]}).`,
@@ -47,6 +49,9 @@ export function contextMeter(u: ContextUsage): ContextMeter {
   }
   if (u.digested > 0) {
     sentences.push(`${u.digested} ältere Ergebnis${u.digested === 1 ? '' : 'se'} nur als Kurzfassung, um Platz zu schaffen.`)
+  }
+  if (summarized > 0) {
+    sentences.push(`${summarized} ältere Frage${summarized === 1 ? '' : 'n'} nur als Zusammenfassung ihrer Antwort.`)
   }
   return {
     share,

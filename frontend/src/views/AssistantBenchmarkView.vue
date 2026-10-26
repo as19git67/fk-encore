@@ -124,6 +124,7 @@ function roadText(r: BenchCaseRun): string {
   if (r.tool_errors) parts.push(`${r.errors_corrected ?? 0}/${r.tool_errors} Fehler korrigiert`)
   if (r.plan) parts.push(`Plan ${r.plan_done ?? 0}/${r.plan.length}: ${r.plan.join(' → ')}`)
   else if (r.plan_asked) parts.push('Plan erbeten, keiner geschrieben')
+  if (r.follow_up) parts.push('Rückfrage')
   if (r.prompt_tokens_first) parts.push(`${r.prompt_tokens_first} Tokens`)
   return parts.join(' · ')
 }
@@ -387,6 +388,7 @@ function remove(run: BenchRunSummary) {
           <div class="tile"><dt>Leere Ergebnisse weiterverfolgt</dt><dd>{{ percent(selected.summary.empty_follow_rate) }}</dd></div>
           <div class="tile"><dt>Fehler korrigiert</dt><dd>{{ percent(selected.summary.error_fix_rate) }}</dd></div>
           <div class="tile"><dt>Mehrbereichsfälle bestanden</dt><dd>{{ percent(selected.summary.multi_area_pass_rate) }}</dd></div>
+          <div class="tile"><dt>Rückfragen bestanden</dt><dd>{{ percent(selected.summary.follow_up_pass_rate) }}</dd></div>
           <div class="tile">
             <dt>Mit Plan</dt>
             <dd>{{ selected.summary.planned ?? '–' }} / {{ selected.summary.plan_asked ?? '–' }} (Runden-Median {{ selected.summary.median_rounds_multi_area ?? '–' }})</dd>

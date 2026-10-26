@@ -4684,6 +4684,12 @@ export const assistantMessage = pgTable(
     result_ref: jsonb("result_ref").$type<{ type: "photo" | "document" | "transaction"; ids: number[] }>(),
     /** Answer rows: how full the model's window got in this turn (assistant/types.ts ContextUsage). */
     context_usage: jsonb("context_usage").$type<Record<string, unknown>>(),
+    /**
+     * Answer rows: the model's summary of the turn, written after the answer
+     * (assistant/summary.ts). Older turns are replayed as question and
+     * summary instead of their tool rounds. Null until written.
+     */
+    summary: text("summary"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("assistant_message_by_conversation").on(table.conversation_id, table.id)],

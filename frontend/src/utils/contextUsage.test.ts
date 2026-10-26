@@ -8,6 +8,13 @@ const base: ContextUsage = {
 }
 
 describe('contextMeter', () => {
+  it('names the older turns that went as summaries (stage 4)', () => {
+    const m = contextMeter({ ...base, historyTurns: 5, keptTurns: 5, earlierTurns: 5, summarizedTurns: 2 })
+    expect(m.parts).toEqual(['12.000 von 30.000 Tokens', '5 von 5 früheren Fragen im Blick', '2 ältere als Zusammenfassung'])
+    expect(m.description).toContain('2 ältere Fragen nur als Zusammenfassung ihrer Antwort.')
+    expect(m.warn).toBe(false)
+  })
+
   it('measures the model count against its window', () => {
     const m = contextMeter(base)
     expect(m.percent).toBe(40)

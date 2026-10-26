@@ -33,6 +33,7 @@ import {
 } from "./proposals";
 import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
 import { fallbackTitle, suggestTitle } from "./titles";
+import { summarizedTurn, summarizeTurn, summaryNote } from "./summary";
 import type { ChatMessage, ContextUsage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
@@ -45,6 +46,14 @@ const MAX_QUESTION_LENGTH = 4000;
  */
 const HISTORY_TURNS = 50;
 /**
+ * The newest earlier turns go along as they happened — question, tool calls
+ * with their results, answer — so a follow-up can still read the rows. Older
+ * turns go as question and the model's summary of the turn (stage 4 of
+ * assistent-wegfindung.md), once that is written; until then, or when the
+ * turn called no tool, they go whole as well.
+ */
+export const WHOLE_TURNS = 3;
+/**
  * ai-queue priority: someone is waiting for this answer, so it goes before
  * every other model job, a running batch classification included. The whole
  * turn runs in this lane, so a tool that asks the model is not queued as
@@ -53,6 +62,8 @@ const HISTORY_TURNS = 50;
 const SLOT_PRIORITY = AI_PRIORITY.assistant;
 /** Naming a conversation can wait behind other work. */
 const TITLE_SLOT_PRIORITY = AI_PRIORITY.idle;
+/** The summary of a turn should be there before the next question, so it goes before batch work but after anyone waiting. */
+const SUMMARY_SLOT_PRIORITY = AI_PRIORITY.background;
 
 function currentUser() {
   const auth = getAuthData();
@@ -230,11 +241,14 @@ export interface AskResponse {
  * behind its answer with what each found, and the answer. Replayed as real
  * tool calls rather than a note in the answer — a model that saw "[tools
  * behind this answer: …]" in earlier answers wrote such notes itself instead
- * of calling the tool. Results go along whole, so a follow-up can still read
- * the rows an earlier answer was based on; `digests` holds the one-line form
- * each shrinks to when the window runs short, the oldest first.
+ * of calling the tool. The newest `WHOLE_TURNS` go along whole, so a
+ * follow-up can still read the rows an earlier answer was based on; an older
+ * turn with a summary goes as its question and that summary (stage 4 of
+ * assistent-wegfindung.md). `digests` holds the one-line form each whole
+ * result shrinks to when the window runs short, the oldest first;
+ * `summarized` says how many turns went as summaries.
  */
-export async function history(conversationId: number): Promise<{ messages: ChatMessage[]; digests: Record<string, string> }> {
+export async function history(conversationId: number): Promise<{ messages: ChatMessage[]; digests: Record<string, string>; summarized: number }> {
   const rows = (await db
     .select({
       role: assistantMessage.role,
@@ -242,53 +256,74 @@ export async function history(conversationId: number): Promise<{ messages: ChatM
       tool_calls: assistantMessage.tool_calls,
       tool_call_id: assistantMessage.tool_call_id,
       digest: assistantMessage.digest,
+      summary: assistantMessage.summary,
     })
     .from(assistantMessage)
     .where(eq(assistantMessage.conversation_id, conversationId))
     .orderBy(desc(assistantMessage.id))
     .limit(HISTORY_TURNS * 12)).reverse();
 
-  const turns: ChatMessage[][] = [];
+  interface Turn {
+    messages: ChatMessage[];
+    /** The model's summary on the answer row, when written. */
+    summary: string | null;
+    /** The tools of the turn with their digests, for the summary's note. */
+    tools: Array<{ tool: string; digest: string | null }>;
+  }
+  const turns: Turn[] = [];
   const digests: Record<string, string> = {};
-  let turn: ChatMessage[] | null = null;
-  let open = new Set<string>();
+  let turn: Turn | null = null;
+  let open = new Map<string, string>();
   // Every call gets its result before the next message, even one whose row is missing.
   const closeCalls = () => {
-    for (const id of open) turn?.push({ role: "tool", tool_call_id: id, content: "[no result kept]" });
-    open = new Set();
+    for (const id of open.keys()) turn?.messages.push({ role: "tool", tool_call_id: id, content: "[no result kept]" });
+    open = new Map();
   };
   for (const m of rows) {
     if (m.role === "user") {
       closeCalls();
-      turn = m.content ? [{ role: "user", content: m.content }] : null;
+      turn = m.content ? { messages: [{ role: "user", content: m.content }], summary: null, tools: [] } : null;
       if (turn) turns.push(turn);
     } else if (!turn) {
       continue; // the fetched window began inside a turn
     } else if (m.role === "tool") {
       if (!m.tool_call_id || !open.has(m.tool_call_id)) continue;
+      const name = open.get(m.tool_call_id)!;
       open.delete(m.tool_call_id);
-      turn.push({ role: "tool", tool_call_id: m.tool_call_id, content: m.content ?? m.digest ?? "[no result kept]" });
+      turn.messages.push({ role: "tool", tool_call_id: m.tool_call_id, content: m.content ?? m.digest ?? "[no result kept]" });
       if (m.digest) digests[m.tool_call_id] = m.digest;
+      turn.tools.push({ tool: name, digest: m.digest ?? null });
     } else if (m.tool_calls) {
       closeCalls();
-      turn.push({
+      turn.messages.push({
         role: "assistant",
         content: null,
         tool_calls: m.tool_calls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: c.arguments } })),
       });
-      for (const c of m.tool_calls) open.add(c.id);
+      for (const c of m.tool_calls) open.set(c.id, c.name);
     } else if (m.content) {
       closeCalls();
-      turn.push({ role: "assistant", content: m.content });
+      turn.messages.push({ role: "assistant", content: m.content });
+      turn.summary = m.summary ?? null;
     }
   }
   closeCalls();
   // Only turns that ended in an answer; a failed turn has nothing to build on.
   const complete = turns.filter((t) => {
-    const last = t.at(-1)!;
+    const last = t.messages.at(-1)!;
     return last.role === "assistant" && !("tool_calls" in last && last.tool_calls);
+  }).slice(-HISTORY_TURNS);
+  let summarized = 0;
+  const messages = complete.flatMap((t, i) => {
+    const old = i < complete.length - WHOLE_TURNS;
+    if (!old || !t.summary) return t.messages;
+    summarized++;
+    const question = (t.messages[0] as { content: string }).content;
+    // The digests of a summarized turn are not in the request; nothing to shrink.
+    for (const m of t.messages) if (m.role === "tool") delete digests[m.tool_call_id];
+    return summarizedTurn(question, t.summary, summaryNote(t.tools));
   });
-  return { messages: complete.slice(-HISTORY_TURNS).flat(), digests };
+  return { messages, digests, summarized };
 }
 
 /** Questions asked in the conversation so far, answered or not. */
@@ -408,8 +443,9 @@ export const ask = api(
         }),
       }));
 
-      const contextUsage: ContextUsage = { ...result.context, earlierTurns };
+      const contextUsage: ContextUsage = { ...result.context, earlierTurns, summarizedTurns: earlier.summarized };
       const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults, contextUsage);
+      summarizeLater(conversation.id, messageId, result.transcript);
       const fallback = fallbackTitle(question);
       await db
         .update(assistantConversation)
@@ -499,6 +535,34 @@ function nameConversation(id: number, question: string, fallback: string): void 
 /** Waits for titles still being made; for tests. */
 export async function __settleTitlesForTests(): Promise<void> {
   await Promise.all([...naming]);
+}
+
+const summarizing = new Set<Promise<void>>();
+
+/**
+ * The summary of the turn just answered (stage 4 of assistent-wegfindung.md),
+ * written onto its answer row after the answer has gone out. Only a turn
+ * that called a tool gets one: an answer without tools is already its own
+ * summary. A failure leaves the row as it is; the turn then replays whole.
+ */
+function summarizeLater(conversationId: number, messageId: number, transcript: ChatMessage[]): void {
+  if (!transcript.some((m) => m.role === "assistant" && m.tool_calls?.length)) return;
+  const job = withAiSlot("llm", SUMMARY_SLOT_PRIORITY, "assistant-summary", () => summarizeTurn(chat, transcript))
+    .then(async (summary) => {
+      if (!summary) return;
+      await db
+        .update(assistantMessage)
+        .set({ summary })
+        .where(and(eq(assistantMessage.id, messageId), eq(assistantMessage.conversation_id, conversationId)));
+    })
+    .catch((err) => log.warn("assistant turn summary failed", { conversation_id: conversationId, error: String(err) }))
+    .finally(() => summarizing.delete(job));
+  summarizing.add(job);
+}
+
+/** Waits for summaries still being written; for tests. */
+export async function __settleSummariesForTests(): Promise<void> {
+  await Promise.all([...summarizing]);
 }
 
 // ── proposals ─────────────────────────────────────────────────────────────
