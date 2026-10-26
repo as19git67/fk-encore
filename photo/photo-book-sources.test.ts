@@ -23,7 +23,10 @@ import {
   cleanWeights,
   combineShares,
   keepSeriesPicks,
+  setSimilarPairsLoader,
   setZeroShotScorer,
+  similarityWindows,
+  thinSimilar,
   weightedScore,
 } from "./photo-book-subjects";
 import { createPhotoBook, getPhotoBookView, rebuildPhotoBook } from "./photo-book.service";
@@ -63,6 +66,23 @@ describe("photo book subjects", () => {
   });
 });
 
+describe("photo book look-alikes", () => {
+  it("compares only photos taken close together", () => {
+    const at = (id: number, takenAt: string | null) => ({ ...photo(id), takenAt });
+    expect(similarityWindows([
+      at(1, "2024-06-01 10:00:00"), at(2, "2024-06-01 10:30:00"), at(3, "2024-06-01 18:00:00"),
+      at(4, "2024-06-01 19:00:00"), at(5, null), at(6, "2024-06-03 10:00:00"),
+    ])).toEqual([[1, 2], [3, 4]]);
+  });
+
+  it("keeps the best of photos that look alike, also across a chain", () => {
+    const list = [photo(1, 40), photo(2, 90), photo(3, 60), photo(4, 50)];
+    // 2 ~ 1, 1 ~ 3: 2 stays, 1 goes, 3 is not like 2 and stays; 4 alone.
+    expect(thinSimilar(list, [{ a: 1, b: 2 }, { a: 1, b: 3 }]).map((p) => p.id)).toEqual([2, 3, 4]);
+    expect(thinSimilar(list, [])).toHaveLength(4);
+  });
+});
+
 describe("photo book sources and weighting", () => {
   let user: { id: number };
   let other: { id: number };
@@ -83,7 +103,10 @@ describe("photo book sources and weighting", () => {
     other = await createUserLogic({ email: "book-src-o@test.com", name: "O", password: "pw" });
   });
 
-  afterEach(() => setZeroShotScorer(null));
+  afterEach(() => {
+    setZeroShotScorer(null);
+    setSimilarPairsLoader(null);
+  });
 
   let seq = 0;
   async function upload(owner: number, takenAt: string, values: Partial<typeof photos.$inferInsert> = {}) {
@@ -158,6 +181,22 @@ describe("photo book sources and weighting", () => {
     const picks = await createPhotoBook(user.id, { title: "Serie", photoIds: [a.id, b.id, c.id] });
     expect(bookIds(await getPhotoBookView(user.id, picks))).toEqual([b.id, c.id].sort((x, y) => x - y));
     const all = await createPhotoBook(user.id, { title: "Alle", photoIds: [a.id, b.id, c.id], groupPicksOnly: false });
+    expect(bookIds(await getPhotoBookView(user.id, all))).toHaveLength(3);
+  });
+
+  it("leaves out photos that look like a better one, unless asked for all", async () => {
+    const best = await upload(user.id, "2024-06-01 10:00:00", { ai_quality_score: 0.9 });
+    const alike = await upload(user.id, "2024-06-01 10:05:00", { ai_quality_score: 0.6 });
+    const other = await upload(user.id, "2024-06-01 10:10:00", { ai_quality_score: 0.5 });
+    const asked: number[][] = [];
+    setSimilarPairsLoader(async (windows) => {
+      asked.push(...windows);
+      return [{ a: alike.id, b: best.id }];
+    });
+    const id = await createPhotoBook(user.id, { title: "Ähnlich", photoIds: [best.id, alike.id, other.id] });
+    expect(bookIds(await getPhotoBookView(user.id, id))).toEqual([best.id, other.id].sort((a, b) => a - b));
+    expect(asked).toEqual([[best.id, alike.id, other.id]]);
+    const all = await createPhotoBook(user.id, { title: "Alle", photoIds: [best.id, alike.id, other.id], groupPicksOnly: false });
     expect(bookIds(await getPhotoBookView(user.id, all))).toHaveLength(3);
   });
 

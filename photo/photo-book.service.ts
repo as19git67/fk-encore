@@ -56,7 +56,15 @@ import {
   type PhotoBookFormat,
   type RectMm,
 } from "./photo-book-layout";
-import { cleanWeights, hasWeights, keepSeriesPicks, loadSeries, loadSubjectShares, weightedScore } from "./photo-book-subjects";
+import {
+  cleanWeights,
+  dropSimilarPhotos,
+  hasWeights,
+  keepSeriesPicks,
+  loadSeries,
+  loadSubjectShares,
+  weightedScore,
+} from "./photo-book-subjects";
 
 /** A book holds at most this many photos; the narrowing keeps the best. */
 export const MAX_BOOK_PHOTOS = 600;
@@ -333,6 +341,7 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
   }
   if (source.group_picks_only === true && list.length > 1) {
     list = keepSeriesPicks(list, await loadSeries(userId, list.map((p) => p.id)));
+    list = await dropSimilarPhotos(list);
   }
   const max = source.max_photos && source.max_photos > 0 ? Math.min(source.max_photos, MAX_BOOK_PHOTOS) : MAX_BOOK_PHOTOS;
   return limitPhotos(list, max);

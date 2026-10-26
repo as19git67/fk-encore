@@ -108,7 +108,11 @@ played as a slideshow.
    fully) and confident POI matches (buildings). Without the embedding
    service only faces and landmarks count. A series of near-duplicates the
    owner has not reviewed contributes only the model's pick, else its best
-   photo; on by default, off with "Aus Serien … nur das beste" unticked.
+   photo. On top, photos that merely look alike (DINOv2 cosine ≥ 0.80, the
+   same scene a few minutes apart, compared within runs of photos at most
+   3 h apart through `/redundant-pairs`) are thinned to the best one
+   (`dropSimilarPhotos`). Both on by default, off with "Ähnliche Fotos nur
+   einmal" unticked.
    The narrowing (quality, aesthetics, faces, maximum, series, weights) can
    be changed afterwards with "Auswahl" on the book's page; the book is then
    laid out again from its source (`POST /photo-books/:id/rebuild` with

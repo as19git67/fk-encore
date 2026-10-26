@@ -48,7 +48,7 @@ const WEIGHT_OPTIONS = [
     <p class="pbn-hint">Mit Mindestwerten fallen Fotos ohne Bewertung heraus. Bei einer Höchstzahl bleiben die am besten bewerteten.</p>
     <div class="pbn-row">
       <Checkbox v-model="draft.seriesPicks" binary :input-id="id('series')" />
-      <label :for="id('series')">Aus Serien ähnlicher Fotos nur das beste</label>
+      <label :for="id('series')">Ähnliche Fotos nur einmal: von Serien und Fotos derselben Szene bleibt das beste</label>
     </div>
   </fieldset>
 
