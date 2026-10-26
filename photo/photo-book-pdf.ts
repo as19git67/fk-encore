@@ -9,6 +9,9 @@
  *     or single, each with bleed and optional crop marks in a slug outside it.
  *   - home: one file, the front cover and then every page at trim size.
  *
+ * Text goes through `useFont` (`lib/pdf-fonts.ts`): titles, place names and
+ * captions can be in any script, which Helvetica cannot show.
+ *
  * No database: the caller hands over the book and a loader for the image
  * bytes, so the tests render a book of generated pictures.
  */
@@ -16,6 +19,7 @@
 import * as fs from "fs";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
+import { useFont } from "../lib/pdf-fonts";
 import { coverCrop } from "./recap-export.service";
 import {
   PHOTO_BOOK_FORMATS,
@@ -148,24 +152,27 @@ class Renderer {
       const f = PHOTO_BOOK_FORMATS[format];
       const titlePt = Math.max(14, Math.min(32, pt(f.height) * 0.045));
       const align = layout.cells.length ? "left" : "center";
-      doc.font("Helvetica-Bold").fontSize(titlePt).fillColor(INK);
-      const titleH = doc.heightOfString(page.chapterTitle, { width: pt(tr.w) });
+      const title = useFont(doc, page.chapterTitle, true);
+      doc.fontSize(titlePt).fillColor(INK);
+      const titleH = doc.heightOfString(title, { width: pt(tr.w) });
       const subPt = titlePt * 0.5;
       const subH = page.chapterSubtitle ? subPt * 1.6 : 0;
       // Openers with a photo hang the text from the top of its box, text-only ones centre it.
       const top = layout.cells.length ? pt(oy + tr.y) : pt(oy + tr.y) + (pt(tr.h) - titleH - subH) / 2;
-      doc.text(page.chapterTitle, pt(ox + tr.x), top, { width: pt(tr.w), align, lineBreak: true });
+      doc.text(title, pt(ox + tr.x), top, { width: pt(tr.w), align, lineBreak: true });
       if (page.chapterSubtitle) {
-        doc.font("Helvetica").fontSize(subPt).fillColor(MUTED)
-          .text(page.chapterSubtitle, pt(ox + tr.x), top + titleH + subPt * 0.4, { width: pt(tr.w), align });
+        const sub = useFont(doc, page.chapterSubtitle);
+        doc.fontSize(subPt).fillColor(MUTED)
+          .text(sub, pt(ox + tr.x), top + titleH + subPt * 0.4, { width: pt(tr.w), align });
       }
     }
   }
 
   /** A caption under its photo, or over it in a dark band when the photo fills the page. */
-  caption(doc: PDFKit.PDFDocument, text: string, rect: RectMm, overlay: boolean): void {
+  caption(doc: PDFKit.PDFDocument, raw: string, rect: RectMm, overlay: boolean): void {
     const size = Math.min(8.5, Math.max(6, pt(rect.h) * 0.4));
-    doc.font("Helvetica").fontSize(size);
+    const text = useFont(doc, raw);
+    doc.fontSize(size);
     if (overlay) {
       const pad = 2;
       const w = Math.min(pt(rect.w), doc.widthOfString(text) + pt(2 * pad));
@@ -189,11 +196,11 @@ class Renderer {
     doc.save().rect(pt(x), pt(bandY), pt(w), pt(bandH)).fillOpacity(0.55).fill("#000000").restore();
     const titlePt = Math.max(16, Math.min(40, pt(trimH) * 0.06));
     const pad = trimH * 0.05;
-    doc.font("Helvetica-Bold").fontSize(titlePt).fillColor("#ffffff")
-      .text(this.book.title, pt(x + pad), pt(bandY) + pt(bandH) * 0.18, { width: pt(w - 2 * pad), align: "center" });
+    doc.fontSize(titlePt).fillColor("#ffffff")
+      .text(useFont(doc, this.book.title, true), pt(x + pad), pt(bandY) + pt(bandH) * 0.18, { width: pt(w - 2 * pad), align: "center" });
     if (this.book.subtitle) {
-      doc.font("Helvetica").fontSize(titlePt * 0.45).fillColor("#ffffff")
-        .text(this.book.subtitle, pt(x + pad), pt(bandY) + pt(bandH) * 0.62, { width: pt(w - 2 * pad), align: "center" });
+      doc.fontSize(titlePt * 0.45).fillColor("#ffffff")
+        .text(useFont(doc, this.book.subtitle), pt(x + pad), pt(bandY) + pt(bandH) * 0.62, { width: pt(w - 2 * pad), align: "center" });
     }
   }
 }
@@ -268,16 +275,16 @@ export async function renderCoverPdf(book: RenderBook, load: ImageLoader, out: s
   // Back and spine: one ground, the bleed included.
   doc.save().rect(pt(x0), pt(y0), pt(bleed + f.width + spine), pt(f.height + 2 * bleed)).fill(COVER_GROUND).restore();
   if (book.subtitle) {
-    doc.font("Helvetica").fontSize(10).fillColor("#ffffff")
-      .text(book.subtitle, pt(trimX + 15), pt(trimY + f.height - 25), { width: pt(f.width - 30), align: "center" });
+    doc.fontSize(10).fillColor("#ffffff")
+      .text(useFont(doc, book.subtitle), pt(trimX + 15), pt(trimY + f.height - 25), { width: pt(f.width - 30), align: "center" });
   }
   if (spine >= 5) {
     const cx = trimX + f.width + spine / 2;
     const cy = trimY + f.height / 2;
     const size = Math.min(14, pt(spine) * 0.55);
     doc.save().rotate(90, { origin: [pt(cx), pt(cy)] });
-    doc.font("Helvetica-Bold").fontSize(size).fillColor("#ffffff")
-      .text(book.title, pt(cx - f.height / 2 + 10), pt(cy) - size * 0.6, { width: pt(f.height - 20), align: "center", lineBreak: false });
+    doc.fontSize(size).fillColor("#ffffff")
+      .text(useFont(doc, book.title, true), pt(cx - f.height / 2 + 10), pt(cy) - size * 0.6, { width: pt(f.height - 20), align: "center", lineBreak: false });
     doc.restore();
   }
   const frontX = trimX + f.width + spine;
