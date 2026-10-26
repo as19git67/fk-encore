@@ -423,6 +423,19 @@ export function dropTaxRates(text: string): string {
   );
 }
 
+/**
+ * A line that names what a tax was charged on ("Berechnungsgrundlage für
+ * die Kapitalertragsteuer 200,00 EUR") carries a tax word and an amount,
+ * but the amount is no tax. Such a line reads as empty when the taxes are
+ * added up. A line that also states a rate is the tax itself and stays.
+ */
+export function dropTaxBases(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (/(?:Berechnungs|Bemessungs)grundlage/i.test(line) && !line.includes("%") ? "" : line))
+    .join("\n");
+}
+
 /** First amount after any of the labels, as a positive number. */
 function amountAfter(text: string, labels: string[], markers: string[]): number | null {
   for (const label of labels) {
@@ -882,7 +895,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     markers.push("vor − nach Steuern");
     return Math.round((gross - netAbs) * 100) / 100;
   })() ?? sumAfter(
-    dropTaxRates(text),
+    dropTaxRates(dropTaxBases(text)),
     [
       String.raw`Kapitalertrag(?:s)?steuer(?!satz)`,
       String.raw`KESt`,

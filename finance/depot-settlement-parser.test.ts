@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   cleanSecurityName,
+  dropTaxBases,
   dropTaxRates,
   extractDepotNumber,
   inspectSettlement,
@@ -14,6 +15,7 @@ import {
   SETTLEMENT_CANDIDATE_PATTERN,
 } from "./depot-settlement-parser";
 import { nameNearerIdentifier } from "./depot-settlement-reader";
+import { mergeSettlement } from "./depot-settlement-merge";
 
 // Synthetic settlement texts in the layouts German brokers print. Every
 // identifier, name and number here is invented.
@@ -934,6 +936,59 @@ Ausmachender Betrag 0,29 EUR`;
     const s = parseSettlement(CREDIT.replace("auf 0,09 EUR 0,01- EUR", "auf 0,09"))!;
     expect(s.tax).toBe(0.09);
     expect(dropTaxRates("Kirchensteuer 8,00% auf 0,09\nAusmachender Betrag 0,29 EUR")).toContain("\nAusmachender");
+  });
+});
+
+describe("parseSettlement — a fund sale that shows what the tax was charged on", () => {
+  // Synthetic: a fund sale whose taxes follow a block naming the taxable
+  // gain, ending in the base for the capital gains tax. That base carries
+  // the tax's name and an amount, but it is no tax.
+  const SALE = `Wertpapier Abrechnung Verkauf
+Stück 10,000 BEISPIEL FONDS ISIN DE0000000AA7
+Schlusstag 03.03.2026
+Ausführungskurs 50,00 EUR
+Kurswert 500,00 EUR
+Ermittlung steuerrelevante Erträge
+Veräußerungsgewinn (nach Teilfreistellung) 150,00 EUR
+Veräußerungsgewinn bei Umstellung am 01.01.2018 40,00 EUR
+Akkumulierter ausschüttungsgleicher Ertrag (bis 31.12.2017) 10,00 EUR
+Berechnungsgrundlage für die Kapitalertragsteuer 200,00 EUR
+Steuerberechnung
+Kapitalertragsteuer 24,51% auf 200,00 EUR 49,02- EUR
+Solidaritätszuschlag 5,50% auf 49,02 EUR 2,70- EUR
+Kirchensteuer 8,00% auf 49,02 EUR 3,92- EUR
+Ausmachender Betrag 444,36 EUR`;
+
+  it("adds the three taxes, church tax included, and not the base", () => {
+    const s = parseSettlement(SALE)!;
+    expect(s.kind).toBe("sell");
+    expect(s.gross).toBe(500);
+    expect(s.tax).toBe(55.64);
+    expect(s.net).toBe(444.36);
+  });
+
+  it("does the same when each tax amount stands on its own line", () => {
+    const s = parseSettlement(SALE.replace(/ (\d+,\d{2}- EUR)$/gm, "\n$1"))!;
+    expect(s.tax).toBe(55.64);
+  });
+
+  it("ignores the base under its other name too", () => {
+    const s = parseSettlement(SALE.replace("Berechnungsgrundlage für die", "Bemessungsgrundlage"))!;
+    expect(s.tax).toBe(55.64);
+  });
+
+  it("keeps a line that states a rate on its base", () => {
+    expect(dropTaxBases("Kapitalertragsteuer 25,00% (Bemessungsgrundlage 200,00) 50,00")).toContain("Kapitalertragsteuer");
+    expect(dropTaxBases("Bemessungsgrundlage Kapitalertragsteuer 200,00 EUR\nKurswert 500,00 EUR")).toBe("\nKurswert 500,00 EUR");
+  });
+
+  it("wins over a model reading that left out the church tax", () => {
+    const rules = parseSettlement(SALE)!;
+    const llm = { ...rules, tax: 51.72 };
+    const merged = mergeSettlement(rules, llm, new Date("2026-10-01"));
+    expect(merged.values.tax).toBe(55.64);
+    expect(merged.checks.find((c) => c.name === "net_equation")?.result).toBe("ok");
+    expect(merged.verdict).toBe("ok");
   });
 });
 

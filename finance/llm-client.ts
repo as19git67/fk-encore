@@ -419,6 +419,8 @@ export async function extractSettlementValues(
     '- "tax": Summe aller einbehaltenen Steuern (Kapitalertragsteuer, Solidaritätszuschlag, Kirchensteuer, Quellensteuer); ' +
     'ist eine Gesamtsumme der Steuern gedruckt ("abgeführte Steuern", "Summe Steuern", "Steuern insgesamt"), dann genau diese statt selbst zu addieren; ' +
     'sonst steht je Steuer ein Satz und eine Bemessungsgrundlage ("Kirchensteuer 8,00% auf 0,09 EUR 0,01- EUR"), zählt nur der Steuerbetrag am Ende, und jede Steuerzeile wird addiert; ' +
+    'auch die Kirchensteuer zählt, wenn sie nach Kapitalertragsteuer und Solidaritätszuschlag als dritte Zeile folgt; ' +
+    'eine Berechnungs- oder Bemessungsgrundlage ("Berechnungsgrundlage für die Kapitalertragsteuer") und die Erträge darüber ("Ermittlung steuerrelevante Erträge", "Veräußerungsgewinn") sind keine Steuern; ' +
     'ein negativ gedruckter Steuerbetrag unter "abgeführte" oder "einbehaltene" Steuern ist einbehalten, nicht erstattet; ' +
     'wurden Steuern erstattet statt einbehalten (Steuererstattung, erstattete Steuern), dann die erstattete Summe als negative Zahl\n' +
     '- "net": der ausmachende Betrag bzw. Endbetrag, der dem Konto belastet oder gutgeschrieben wird; ' +
