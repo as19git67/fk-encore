@@ -614,9 +614,20 @@ export const albums = pgTable("albums", {
   cover_photo_id: integer("cover_photo_id")
     .references(() => photos.id, { onDelete: "set null" }),
   display_mode: text("display_mode").notNull().default("grid"), // 'grid' | 'map'
+  // True for an album that already shared its name with an older album of the
+  // same owner when names became unique (migration 0278). Those pairs stay as
+  // they were; the flag only exempts them from the unique index below and is
+  // cleared when the album gets a new name.
+  legacy_duplicate_name: boolean("legacy_duplicate_name").notNull().default(false),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string" }).defaultNow(),
-});
+}, (table) => [
+  // One album per name and owner, ignoring case and surrounding spaces
+  // (albumNameTaken in photo/photo.service.ts checks the same key first).
+  uniqueIndex("albums_owner_name_unique")
+    .on(table.user_id, sql`lower(btrim(${table.name}))`)
+    .where(sql`NOT ${table.legacy_duplicate_name}`),
+]);
 
 // ========== Album Photos (Many-to-Many) ==========
 

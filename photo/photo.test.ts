@@ -1343,6 +1343,64 @@ describe("Photo Module", () => {
       expect(updated.name).toBe("Gardasee 2026");
     });
 
+    describe("unique names per owner", () => {
+      it("refuses a second album with the same name, ignoring case and spaces", async () => {
+        const first = await service.createAlbumLogic(user1.id, { name: "Beste Bilder" });
+        const err = await service.createAlbumLogic(user1.id, { name: "  beste BILDER " }).catch((e) => e);
+        expect(err).toMatchObject({ code: "already_exists", details: { album_id: first.id } });
+        expect(err.message).toContain("Beste Bilder");
+
+        const own = (await service.listAlbumsLogic(user1.id)).albums.filter((a) => a.user_id === user1.id);
+        expect(own.map((a) => a.name)).toEqual(["Beste Bilder"]);
+      });
+
+      it("lets another owner use the same name", async () => {
+        await service.createAlbumLogic(user1.id, { name: "Sommer" });
+        const theirs = await service.createAlbumLogic(user2.id, { name: "Sommer" });
+        expect(theirs.user_id).toBe(user2.id);
+      });
+
+      it("refuses renaming onto another album's name, also for a participant", async () => {
+        const a = await service.createAlbumLogic(user1.id, { name: "Erstes" });
+        const b = await service.createAlbumLogic(user1.id, { name: "Zweites" });
+        await expect(service.updateAlbumLogic(user1.id, { id: b.id, name: "erstes" }))
+          .rejects.toMatchObject({ code: "already_exists", details: { album_id: a.id } });
+
+        await service.shareAlbumLogic(user1.id, { albumId: b.id, userId: user2.id, accessLevel: "write" });
+        await expect(service.updateAlbumLogic(user2.id, { id: b.id, name: "ERSTES" }))
+          .rejects.toMatchObject({ code: "already_exists" });
+
+        // Changing only the case of its own name is fine.
+        const same = await service.updateAlbumLogic(user1.id, { id: a.id, name: "ERSTES" });
+        expect(same.name).toBe("ERSTES");
+      });
+
+      it("refuses an empty name", async () => {
+        await expect(service.createAlbumLogic(user1.id, { name: "   " }))
+          .rejects.toMatchObject({ code: "invalid_argument" });
+      });
+
+      // Albums that shared a name before migration 0278 stay as they are; the
+      // database index still stops a new one, even past the service check.
+      it("keeps flagged legacy duplicates and lets the index refuse new ones", async () => {
+        const first = await service.createAlbumLogic(user1.id, { name: "Alt" });
+        const legacy = await dbInsertReturning<{ id: number }>(
+          db.insert(albums).values({ user_id: user1.id, name: "alt", legacy_duplicate_name: true }).returning({ id: albums.id })
+        );
+        await expect(
+          db.insert(albums).values({ user_id: user1.id, name: " ALT " }).returning({ id: albums.id })
+        ).rejects.toBeTruthy();
+
+        // Renaming the legacy album ends its exemption.
+        await service.updateAlbumLogic(user1.id, { id: legacy!.id, name: "Alt (2)" });
+        const row = await dbFirst<{ legacy_duplicate_name: boolean }>(
+          db.select({ legacy_duplicate_name: albums.legacy_duplicate_name }).from(albums).where(eq(albums.id, legacy!.id))
+        );
+        expect(row!.legacy_duplicate_name).toBe(false);
+        expect(first.name).toBe("Alt");
+      });
+    });
+
     it("should list albums with cover photo and description", async () => {
       const album = await service.createAlbumLogic(user1.id, { 
         name: "Vacation with Cover", 
