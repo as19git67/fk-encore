@@ -47,6 +47,7 @@ import {
   photoScore,
   relayoutPage,
   slotDpi,
+  repeatedCaptions,
   slotGeometry,
   spineWidthMm,
   textRect,
@@ -56,7 +57,15 @@ import {
   type PhotoBookFormat,
   type RectMm,
 } from "./photo-book-layout";
-import { cleanWeights, hasWeights, keepSeriesPicks, loadSeries, loadSubjectShares, weightedScore } from "./photo-book-subjects";
+import {
+  cleanWeights,
+  dropSimilarPhotos,
+  hasWeights,
+  keepSeriesPicks,
+  loadSeries,
+  loadSubjectShares,
+  weightedScore,
+} from "./photo-book-subjects";
 
 /** A book holds at most this many photos; the narrowing keeps the best. */
 export const MAX_BOOK_PHOTOS = 600;
@@ -101,9 +110,11 @@ export interface PhotoBookSlotView {
   low_dpi: boolean;
   caption: string | null;
   caption_source: "llm" | "user" | null;
-  /** Where the caption goes on this page; null when the page shows none. */
+  /** Where the caption goes on this page; null when the page shows none or it repeats one above. */
   caption_rect: PageRect | null;
   caption_overlay: boolean;
+  /** The same text as an earlier caption on the page, so it is not shown again. */
+  caption_repeated: boolean;
 }
 
 export interface PhotoBookLayoutOption {
@@ -333,6 +344,7 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
   }
   if (source.group_picks_only === true && list.length > 1) {
     list = keepSeriesPicks(list, await loadSeries(userId, list.map((p) => p.id)));
+    list = await dropSimilarPhotos(list);
   }
   const max = source.max_photos && source.max_photos > 0 ? Math.min(source.max_photos, MAX_BOOK_PHOTOS) : MAX_BOOK_PHOTOS;
   return limitPhotos(list, max);
@@ -382,6 +394,18 @@ function bestCover(list: BookPhoto[]): number | null {
   return best?.id ?? null;
 }
 
+/** The narrowing as the source stores it. */
+function narrowingSource(input: PhotoBookNarrowing): Omit<PhotoBookSource, "kind"> {
+  return {
+    quality_min: percent(input.qualityMin),
+    aesthetic_min: percent(input.aestheticMin),
+    without_recognisable_faces: !!input.withoutRecognisableFaces,
+    max_photos: input.maxPhotos && input.maxPhotos > 0 ? Math.min(input.maxPhotos, MAX_BOOK_PHOTOS) : null,
+    weights: cleanWeights(input.weights),
+    group_picks_only: input.groupPicksOnly !== false,
+  };
+}
+
 export interface CreatePhotoBookInput extends PhotoBookNarrowing {
   title: string;
   subtitle?: string | null;
@@ -420,12 +444,7 @@ export async function createPhotoBook(userId: number, input: CreatePhotoBookInpu
       : collectionId
         ? { collection_id: collectionId }
         : { photo_ids: [...new Set(photoIds)] }),
-    quality_min: percent(input.qualityMin),
-    aesthetic_min: percent(input.aestheticMin),
-    without_recognisable_faces: !!input.withoutRecognisableFaces,
-    max_photos: input.maxPhotos && input.maxPhotos > 0 ? Math.min(input.maxPhotos, MAX_BOOK_PHOTOS) : null,
-    weights: cleanWeights(input.weights),
-    group_picks_only: input.groupPicksOnly !== false,
+    ...narrowingSource(input),
   };
   const list = await selectBookPhotos(userId, source);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");
@@ -457,14 +476,26 @@ async function touch(bookId: number): Promise<void> {
 }
 
 /** Build the book again from its source and narrowing; titles, format and settings stay. */
-export async function rebuildPhotoBook(userId: number, bookId: number): Promise<void> {
+/**
+ * Lays the book out again from its source. With `narrowing` the book's
+ * narrowing is replaced first (the source itself — photos, album or
+ * collection — stays), so quality, aesthetics, faces, the maximum and the
+ * weights can be changed after the book was made. Nothing is stored when
+ * the new narrowing leaves no photo.
+ */
+export async function rebuildPhotoBook(userId: number, bookId: number, narrowing?: PhotoBookNarrowing): Promise<void> {
   const book = await ownedBook(userId, bookId);
-  const list = await selectBookPhotos(userId, book.source);
+  const source: PhotoBookSource = narrowing ? { ...book.source, ...narrowingSource(narrowing) } : book.source;
+  const list = await selectBookPhotos(userId, source);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");
   const format = isPhotoBookFormat(book.format) ? book.format : "a4-landscape";
   await writeBookContent(bookId, format, list);
   const keepCover = book.cover_photo_id != null && list.some((p) => p.id === book.cover_photo_id);
-  await dbExec(db.update(photoBook).set({ cover_photo_id: keepCover ? book.cover_photo_id : bestCover(list), updated_at: sql`now()` })
+  await dbExec(db.update(photoBook).set({
+    cover_photo_id: keepCover ? book.cover_photo_id : bestCover(list),
+    ...(narrowing ? { source } : {}),
+    updated_at: sql`now()`,
+  })
     .where(eq(photoBook.id, bookId)));
 }
 
@@ -663,6 +694,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
   const pages: PhotoBookPageView[] = loaded.pages.map((p) => {
     const tr = textRect(format, p.layout);
     const captioned = pageCaptioned(loaded, p);
+    const repeats = repeatedCaptions(p.photos.map((s) => loaded.captions.get(s.photo_id)?.text));
     return {
       id: p.id,
       position: p.position,
@@ -678,6 +710,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
       layout_reason: p.layout_reason,
       slots: p.photos.map((s, i) => {
         const geo = slotGeometry(format, p.layout, p.layout.cells[i], captioned);
+        const repeated = repeats[i]!;
         const rect = geo.image;
         const dpi = slotDpi(s.width, s.height, rect);
         const caption = loaded.captions.get(s.photo_id) ?? null;
@@ -694,8 +727,9 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
           low_dpi: low,
           caption: caption?.text ?? null,
           caption_source: caption?.source ?? null,
-          caption_rect: geo.caption ? share(geo.caption, format) : null,
+          caption_rect: geo.caption && !repeated ? share(geo.caption, format) : null,
           caption_overlay: geo.overlay,
+          caption_repeated: repeated,
         };
       }),
     };

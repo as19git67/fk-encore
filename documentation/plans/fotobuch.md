@@ -81,6 +81,17 @@ played as a slideshow.
    title the user wrote stays and the model's proposal is shown next to it
    to take ("Übernehmen"). Runs in the `llm` slot at background priority,
    started from the book's page ("KI"), never while the GPU is lent.
+   A caption is written only when there is something concrete to say — a
+   place, a landmark, people the owner named, the photo's description, text
+   the recognition read on a sign in it (lines at confidence ≥ 0.8) or the
+   spot of one of the owner's trips it was taken at (a planned stop that day
+   or a stay in the visit diary, within 150 m) —
+   and is kept only when it names one of them (`captionNamesAFact`); a
+   caption that merely describes the picture ("Ein alter Keller") is dropped,
+   and "neu schreiben" removes such an earlier one. A page says a caption once:
+   the model is told the captions already on the page and a repeat is
+   dropped, and the same text under several photos of a page (also the
+   user's) is shown and printed only under the first (`repeatedCaptions`).
    Captions on/off for the book and per page (`photo_book_page.captions`,
    null follows the book); in the PDF a strip below a framed photo or a band
    inside a full-bleed one (`slotGeometry`). Captions live in
@@ -103,7 +114,15 @@ played as a slideshow.
    fully) and confident POI matches (buildings). Without the embedding
    service only faces and landmarks count. A series of near-duplicates the
    owner has not reviewed contributes only the model's pick, else its best
-   photo; on by default, off with "Aus Serien … nur das beste" unticked.
+   photo. On top, photos that merely look alike (DINOv2 cosine ≥ 0.80, the
+   same scene a few minutes apart, compared within runs of photos at most
+   3 h apart through `/redundant-pairs`) are thinned to the best one
+   (`dropSimilarPhotos`). Both on by default, off with "Ähnliche Fotos nur
+   einmal" unticked.
+   The narrowing (quality, aesthetics, faces, maximum, series, weights) can
+   be changed afterwards with "Auswahl" on the book's page; the book is then
+   laid out again from its source (`POST /photo-books/:id/rebuild` with
+   `narrowing`).
 5. **More sources** (implemented) — a collection as source
    (`kind: "collection"`: its photos and the photos of its albums, as far as
    the owner may see them, read again on "Neu verteilen"); the basket is

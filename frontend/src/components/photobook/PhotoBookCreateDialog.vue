@@ -3,27 +3,20 @@
  * "Fotobuch gestalten": builds a photo book from a selection, an album, a
  * collection or the basket (documentation/plans/fotobuch.md) and opens it.
  * The narrowing — quality, aesthetics, no recognisable faces, at most N
- * photos, more or fewer of a subject, one photo per series — happens once,
- * here; the book keeps it and "Neu verteilen" applies it again.
+ * photos, more or fewer of a subject, one photo per series — is chosen here;
+ * the book keeps it, "Neu verteilen" applies it again and "Auswahl" on the
+ * book's page changes it.
  */
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
-import Checkbox from 'primevue/checkbox'
 import Dialog from 'primevue/dialog'
-import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
-import SelectButton from 'primevue/selectbutton'
-import {
-  PHOTO_BOOK_FORMATS,
-  PHOTO_BOOK_SUBJECTS,
-  createPhotoBook,
-  type PhotoBookFormat,
-  type PhotoBookSubject,
-  type PhotoBookWeights,
-} from '../../api/photoBooks'
+import PhotoBookNarrowingFields from './PhotoBookNarrowingFields.vue'
+import { PHOTO_BOOK_FORMATS, createPhotoBook, type PhotoBookFormat } from '../../api/photoBooks'
+import { draftToNarrowing, narrowingDraft } from '../../utils/photoBookNarrowing'
 
 const props = defineProps<{
   visible: boolean
@@ -42,20 +35,7 @@ const router = useRouter()
 
 const title = ref('')
 const format = ref<PhotoBookFormat>('a4-landscape')
-const useQuality = ref(false)
-const qualityMin = ref<number | null>(50)
-const useAesthetic = ref(false)
-const aestheticMin = ref<number | null>(50)
-const withoutFaces = ref(false)
-const useMax = ref(false)
-const maxPhotos = ref<number | null>(120)
-const seriesPicks = ref(true)
-const weights = ref<Record<PhotoBookSubject, number>>({ people: 0, landscape: 0, nature: 0, buildings: 0 })
-const WEIGHT_OPTIONS = [
-  { label: 'Weniger', value: -1 },
-  { label: 'Normal', value: 0 },
-  { label: 'Mehr', value: 1 },
-]
+const draft = ref(narrowingDraft())
 const creating = ref(false)
 const error = ref('')
 
@@ -78,8 +58,6 @@ async function create() {
   creating.value = true
   error.value = ''
   try {
-    const weighted: PhotoBookWeights = {}
-    for (const s of PHOTO_BOOK_SUBJECTS) if (weights.value[s.id]) weighted[s.id] = weights.value[s.id]
     const book = await createPhotoBook({
       title: title.value.trim(),
       format: format.value,
@@ -88,12 +66,7 @@ async function create() {
         : props.collectionId
           ? { collectionId: props.collectionId }
           : { photoIds: props.photoIds ?? [] }),
-      weights: Object.keys(weighted).length ? weighted : null,
-      groupPicksOnly: seriesPicks.value,
-      qualityMin: useQuality.value ? qualityMin.value : null,
-      aestheticMin: useAesthetic.value ? aestheticMin.value : null,
-      withoutRecognisableFaces: withoutFaces.value,
-      maxPhotos: useMax.value ? maxPhotos.value : null,
+      ...draftToNarrowing(draft.value),
     })
     emit('update:visible', false)
     void router.push({ name: 'fotos-photo-book', params: { id: book.id } })
@@ -132,51 +105,7 @@ async function create() {
       </label>
     </div>
 
-    <fieldset class="pbc-narrow">
-      <legend>Eingrenzen (optional)</legend>
-      <div class="pbc-row">
-        <Checkbox v-model="useQuality" binary input-id="pbc-quality" />
-        <label for="pbc-quality">Qualität mindestens</label>
-        <InputNumber v-model="qualityMin" :min="0" :max="100" suffix=" %" :disabled="!useQuality" aria-label="Mindestqualität in Prozent" class="pbc-number" />
-      </div>
-      <div class="pbc-row">
-        <Checkbox v-model="useAesthetic" binary input-id="pbc-aesthetic" />
-        <label for="pbc-aesthetic">Ästhetik mindestens</label>
-        <InputNumber v-model="aestheticMin" :min="0" :max="100" suffix=" %" :disabled="!useAesthetic" aria-label="Mindestwert Ästhetik in Prozent" class="pbc-number" />
-      </div>
-      <div class="pbc-row">
-        <Checkbox v-model="withoutFaces" binary input-id="pbc-faces" />
-        <label for="pbc-faces">Ohne erkennbare Gesichter</label>
-      </div>
-      <p class="pbc-hint">Kleine oder unscharfe Gesichter im Hintergrund zählen nicht als erkennbar.</p>
-      <div class="pbc-row">
-        <Checkbox v-model="useMax" binary input-id="pbc-max" />
-        <label for="pbc-max">Höchstens</label>
-        <InputNumber v-model="maxPhotos" :min="1" :max="600" suffix=" Fotos" :disabled="!useMax" aria-label="Höchstzahl der Fotos" class="pbc-number" />
-      </div>
-      <p class="pbc-hint">Mit Mindestwerten fallen Fotos ohne Bewertung heraus. Bei einer Höchstzahl bleiben die am besten bewerteten.</p>
-      <div class="pbc-row">
-        <Checkbox v-model="seriesPicks" binary input-id="pbc-series" />
-        <label for="pbc-series">Aus Serien ähnlicher Fotos nur das beste</label>
-      </div>
-    </fieldset>
-
-    <fieldset class="pbc-narrow pbc-weights">
-      <legend>Gewichten (optional)</legend>
-      <p class="pbc-hint">Mehr oder weniger von einem Motiv: das ändert, welche Fotos bei einer Höchstzahl bleiben und welche groß stehen.</p>
-      <div v-for="s in PHOTO_BOOK_SUBJECTS" :key="s.id" class="pbc-weight">
-        <span :id="`pbc-w-${s.id}`" class="pbc-weight-label">{{ s.label }}</span>
-        <SelectButton
-          v-model="weights[s.id]"
-          :options="WEIGHT_OPTIONS"
-          option-label="label"
-          option-value="value"
-          :allow-empty="false"
-          size="small"
-          :aria-labelledby="`pbc-w-${s.id}`"
-        />
-      </div>
-    </fieldset>
+    <PhotoBookNarrowingFields v-model="draft" id-prefix="pbc" />
 
     <template #footer>
       <Button label="Abbrechen" severity="secondary" text @click="emit('update:visible', false)" />
@@ -200,45 +129,5 @@ async function create() {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-}
-.pbc-narrow {
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 6px;
-  padding: var(--space-3);
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.pbc-weights {
-  margin-top: var(--space-3);
-}
-.pbc-weight {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.pbc-weight-label {
-  min-width: 8rem;
-}
-.pbc-narrow legend {
-  padding: 0 var(--space-1);
-  color: var(--p-text-muted-color);
-}
-.pbc-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.pbc-number :deep(input) {
-  width: 7rem;
-}
-.pbc-hint {
-  margin: 0;
-  color: var(--p-text-muted-color);
-  font-size: var(--text-sm);
 }
 </style>

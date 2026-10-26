@@ -5,7 +5,7 @@
  * POST   /photo-books                          build one from photos, an album, a collection or the basket
  * GET    /photo-books/:id                      the book for the editor
  * PATCH  /photo-books/:id                      title, format, cover, print settings
- * POST   /photo-books/:id/rebuild              lay it out again from its source
+ * POST   /photo-books/:id/rebuild              lay it out again from its source, optionally with a new narrowing
  * DELETE /photo-books/:id
  * PATCH  /photo-books/:id/chapters/:chapterId  chapter title and subtitle
  * PUT    /photo-books/:id/pages/:pageId/layout another layout for the page
@@ -130,11 +130,24 @@ export const updatePhotoBookApi = api(
   },
 );
 
+export interface RebuildPhotoBookRequest {
+  id: number;
+  /** A new narrowing for the book; left out, the book keeps its own. */
+  narrowing?: {
+    qualityMin?: number | null;
+    aestheticMin?: number | null;
+    withoutRecognisableFaces?: boolean;
+    maxPhotos?: number | null;
+    weights?: PhotoBookWeights | null;
+    groupPicksOnly?: boolean;
+  };
+}
+
 export const rebuildPhotoBookApi = api(
   { expose: true, method: "POST", path: "/photo-books/:id/rebuild", auth: true },
-  async ({ id }: { id: number }): Promise<PhotoBookView> => {
+  async ({ id, narrowing }: RebuildPhotoBookRequest): Promise<PhotoBookView> => {
     const userId = viewer();
-    await rebuildPhotoBook(userId, id);
+    await rebuildPhotoBook(userId, id, narrowing);
     return getPhotoBookView(userId, id);
   },
 );

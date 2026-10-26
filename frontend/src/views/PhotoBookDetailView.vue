@@ -34,6 +34,7 @@ import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToo
 import PhotoBookPagePreview from '../components/photobook/PhotoBookPagePreview.vue'
 import PhotoBookExportDialog from '../components/photobook/PhotoBookExportDialog.vue'
 import PhotoBookAiDialog from '../components/photobook/PhotoBookAiDialog.vue'
+import PhotoBookNarrowingDialog from '../components/photobook/PhotoBookNarrowingDialog.vue'
 import RecapPlayer from '../components/RecapPlayer.vue'
 import { getRecapMusicUrl, listRecapMusic, type MusicTrack } from '../api/recaps'
 import { photoBookSlideshow } from '../utils/photoBookSlideshow'
@@ -69,6 +70,7 @@ const actionError = ref('')
 const busy = ref(false)
 const exportOpen = ref(false)
 const aiOpen = ref(false)
+const narrowingOpen = ref(false)
 const showOpen = ref(false)
 const showTracks = ref<MusicTrack[]>([])
 const showTrack = ref(0)
@@ -323,6 +325,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
   { key: 'show', label: 'Diashow', title: 'Als Diashow abspielen', icon: 'pi pi-play', disabled: !slideshow.value.length, command: openSlideshow },
   { key: 'ai', label: 'KI', title: 'Vorschläge der KI', icon: 'pi pi-sparkles', disabled: !book.value, command: () => (aiOpen.value = true) },
   { key: 'settings', label: 'Buch', title: 'Titel, Format und Bildunterschriften', icon: 'pi pi-pencil', disabled: !book.value || busy.value, command: openSettings },
+  { key: 'narrowing', label: 'Auswahl', title: 'Auswahl ändern: Qualität, Ästhetik, Gesichter, Höchstzahl, Gewichte', icon: 'pi pi-filter', disabled: !book.value || busy.value, command: () => (narrowingOpen.value = true) },
   { key: 'rebuild', title: 'Neu verteilen', icon: 'pi pi-refresh', disabled: !book.value || busy.value, menuOnly: true, command: confirmRebuild },
   { key: 'delete', title: 'Fotobuch löschen', icon: 'pi pi-trash', severity: 'danger', disabled: !book.value, menuOnly: true, command: confirmDelete },
 ])
@@ -438,6 +441,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     <Menu ref="slotMenu" :model="slotMenuItems" popup />
 
     <PhotoBookExportDialog v-if="book" v-model:visible="exportOpen" :book="book" @saved="book = $event" />
+    <PhotoBookNarrowingDialog v-if="book" v-model:visible="narrowingOpen" :book="book" @saved="book = $event" />
     <PhotoBookAiDialog v-if="book" v-model:visible="aiOpen" :book-id="book.id" @changed="load" />
     <RecapPlayer
       v-if="book"

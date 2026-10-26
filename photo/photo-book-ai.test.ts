@@ -9,11 +9,15 @@ import {
   faces,
   persons,
   photoBook,
+  photoBookCaption,
   photoBookPage,
   photoCuration,
+  photoOcr,
   photoPoiMatches,
   photos,
   poiReferences,
+  tripPlanVisits,
+  tripPlans,
   userFaceAssignments,
   users,
 } from "../db/schema";
@@ -25,6 +29,8 @@ import {
   articleExtract,
   buildCaptionPrompt,
   buildLayoutPrompt,
+  captionNamesAFact,
+  hasConcreteFacts,
   parseCaption,
   parseChapterTitle,
   parseLayoutPick,
@@ -85,6 +91,17 @@ describe("photo book captions: geometry and prompts", () => {
     expect(p.system).toMatch(/erfindest keine Namen/);
   });
 
+  it("keeps only captions that name a concrete fact", () => {
+    const ctx = { when: "Samstag", place: "Altstadt, Musterstadt", poi: { name: "Alter Turm", description: null, extract: null }, people: ["Erika Beispiel"], description: null, keywords: ["Urlaub"] };
+    expect(hasConcreteFacts(ctx)).toBe(true);
+    expect(hasConcreteFacts({ ...ctx, place: null, poi: null, people: [] })).toBe(false);
+    expect(captionNamesAFact("Abendlicht am Alten Turm", ctx)).toBe(true);
+    expect(captionNamesAFact("Gassen in Musterstadt", ctx)).toBe(true);
+    expect(captionNamesAFact("Erika auf der Treppe", ctx)).toBe(true);
+    expect(captionNamesAFact("Ein alter Keller", ctx)).toBe(false);
+    expect(captionNamesAFact("Urlaub am Samstag", ctx)).toBe(false);
+  });
+
   it("reads captions and titles strictly", () => {
     expect(parseCaption({ caption: '  „Abendlicht am Alten Turm“ #urlaub ' })).toBe("Abendlicht am Alten Turm");
     expect(parseCaption({ caption: "" })).toBeNull();
@@ -126,6 +143,8 @@ describe("photo book: the model's texts and layouts", () => {
 
   beforeEach(async () => {
     await db.delete(photoBook);
+    await db.delete(tripPlans);
+    await db.delete(photoOcr);
     await db.delete(photoPoiMatches);
     await db.delete(poiReferences);
     await db.delete(userFaceAssignments);
@@ -153,7 +172,7 @@ describe("photo book: the model's texts and layouts", () => {
       article: async () => ({ description: "Aussichtsturm", extract: "Der Alte Turm steht seit langer Zeit." }),
       askVision: async (_img, prompt) => {
         prompts.push({ kind: "vision", prompt });
-        return { result: { caption: `Blick Nummer ${prompts.length}` }, model: "test-model" };
+        return { result: { caption: `Blick über Musterstadt ${prompts.length}` }, model: "test-model" };
       },
       askText: async (prompt) => {
         prompts.push({ kind: "text", prompt });
@@ -241,6 +260,35 @@ describe("photo book: the model's texts and layouts", () => {
     expect(stopped.error).toMatch(/Ästhetik-Bewertung/);
   });
 
+  it("writes a caption only when there is something concrete to say", async () => {
+    const concrete = await upload("2024-06-01 10:00:00", { location_city: "Musterstadt" });
+    const described = await upload("2024-06-01 11:00:00", { description: "Weinlese bei Erika" });
+    const bare = await upload("2024-06-01 12:00:00", { keywords: ["Urlaub"] });
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: [concrete.id, described.id, bare.id] });
+
+    const asked: number[] = [];
+    const { deps } = fakeDeps({
+      image: async (photoId) => { asked.push(photoId); return Buffer.from("jpeg"); },
+      // The model describes the picture instead of naming a fact.
+      askVision: async () => ({ result: { caption: "Ein alter Keller" }, model: "test-model" }),
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, deps);
+    // A photo with only a date and keywords is not even asked about.
+    expect(asked).not.toContain(bare.id);
+    expect(job.captions).toBe(0);
+    expect(job.skipped).toBe(3);
+
+    // An earlier caption of the model that names nothing goes with "neu schreiben".
+    await db.insert(photoBookCaption).values({ book_id: id, photo_id: bare.id, text: "Ein alter Keller", source: "llm", model: "old" });
+    const named = fakeDeps({ askVision: async () => ({ result: { caption: "Weinlese mit Erika" }, model: "test-model" }) });
+    const again = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"], overwrite: true }, named.deps);
+    expect(again.captions).toBe(1);
+    const slots = (await getPhotoBookView(user.id, id)).pages.flatMap((p) => p.slots);
+    expect(slots.find((s) => s.photo_id === described.id)!.caption).toBe("Weinlese mit Erika");
+    expect(slots.find((s) => s.photo_id === bare.id)!.caption).toBeNull();
+    expect(slots.find((s) => s.photo_id === concrete.id)!.caption).toBeNull();
+  });
+
   it("lets the model pick among the rule's layouts, within the crop guard, and measures the picks", async () => {
     const list = [];
     for (let i = 0; i < 9; i++) list.push(await upload(`2024-06-01 1${i}:00:00`, { ai_quality_score: 0.5 }));
@@ -291,6 +339,67 @@ describe("photo book: the model's texts and layouts", () => {
     const llm = view.pages.filter((p) => p.layout_source === "llm").length;
     expect(llm + job.skipped).toBe(pages.length);
     expect(job.skipped).toBeGreaterThan(0);
+  });
+
+  it("does not write a caption a photo on the same page already has", async () => {
+    const list = [];
+    for (let i = 0; i < 5; i++) list.push(await upload(`2024-06-01 1${i}:00:00`, { location_city: "Musterstadt" }));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id), groupPicksOnly: false });
+    const view = await getPhotoBookView(user.id, id);
+    const pages = view.pages.filter((p) => p.slots.length);
+    const prompts: string[] = [];
+    const { deps } = fakeDeps({
+      askVision: async (_img, prompt) => { prompts.push(prompt.prompt); return { result: { caption: "Gassen in Musterstadt" }, model: "m" }; },
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, deps);
+    // One caption per page: every other photo of a page would repeat it.
+    expect(job.captions).toBe(pages.length);
+    expect(pages.some((p) => p.slots.length > 1)).toBe(true);
+    expect(prompts.some((p) => p.includes("Auf derselben Seite stehen schon diese Bildunterschriften: „Gassen in Musterstadt“"))).toBe(true);
+  });
+
+  it("says a caption once per page, in the view and in the PDF", async () => {
+    const list = [];
+    for (let i = 0; i < 9; i++) list.push(await upload(`2024-06-01 1${i}:00:00`));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id), groupPicksOnly: false });
+    await updatePhotoBook(user.id, id, { settings: { captions: true } });
+    const page = (await getPhotoBookView(user.id, id)).pages.find((p) => p.slots.length >= 2)!;
+    const [a, b] = page.slots;
+    await setPhotoBookCaption(user.id, id, a.photo_id, "Am Alten Turm");
+    await setPhotoBookCaption(user.id, id, b.photo_id, "am alten Turm.");
+    const slots = (await getPhotoBookView(user.id, id)).pages.find((p) => p.id === page.id)!.slots;
+    expect(slots[0]).toMatchObject({ caption_repeated: false });
+    expect(slots[0].caption_rect).not.toBeNull();
+    expect(slots[1]).toMatchObject({ caption: "am alten Turm.", caption_repeated: true, caption_rect: null });
+    const rendered = toRenderBook(await loadPhotoBook(user.id, id)).pages.flatMap((p) => p.slots);
+    expect(rendered.find((s) => s.photoId === a.photo_id)!.caption).toBe("Am Alten Turm");
+    expect(rendered.find((s) => s.photoId === b.photo_id)!.caption).toBeNull();
+  });
+
+  it("takes text on a sign and the spot of a trip as facts", async () => {
+    const sign = await upload("2024-06-01 10:00:00");
+    const spot = await upload("2024-06-01 11:00:00", { latitude: 47.5, longitude: 11.0 });
+    await db.insert(photoOcr).values({ photo_id: sign.id, blocks: [
+      { text: "Gasthof Zur Linde", confidence: 0.95, polygon: [], left: 0, top: 0, right: 1, bottom: 1 },
+      { text: "12", confidence: 0.99, polygon: [], left: 0, top: 0, right: 1, bottom: 1 },
+      { text: "unsicher", confidence: 0.4, polygon: [], left: 0, top: 0, right: 1, bottom: 1 },
+    ], full_text: "Gasthof Zur Linde 12 unsicher" });
+    const [plan] = await db.insert(tripPlans).values({ owner_id: user.id, title: "Sommer am Beispielsee" }).returning();
+    await db.insert(tripPlanVisits).values({ plan_id: plan.id, user_id: user.id, name: "Musterhütte", lat: 47.5005, lon: 11.0, arrived_at: "2024-06-01T09:00:00Z" });
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: [sign.id, spot.id] });
+
+    const prompts: string[] = [];
+    const { deps } = fakeDeps({
+      askVision: async (_img, prompt) => {
+        prompts.push(prompt.prompt);
+        return { result: { caption: prompt.prompt.includes("Musterhütte") ? "Rast im Gasthof Zur Linde" : "Einkehr im Gasthof Zur Linde" }, model: "m" };
+      },
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, deps);
+    expect(prompts.some((p) => p.includes("Text auf einem Schild oder einer Tafel im Bild: Gasthof Zur Linde") && !p.includes("unsicher"))).toBe(true);
+    expect(prompts.some((p) => p.includes("Spot der Reise „Sommer am Beispielsee“: Musterhütte"))).toBe(true);
+    // The spot's caption names neither the hut nor the trip: it is not kept.
+    expect(job.captions).toBe(1);
   });
 
   it("shows captions per page and puts them into the PDF", async () => {

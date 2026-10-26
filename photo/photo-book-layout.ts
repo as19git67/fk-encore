@@ -558,3 +558,27 @@ export function relayoutPage(format: PhotoBookFormat, kind: PageKind, photos: Bo
   const choice = chooseLayout(format, photos);
   return choice ? { kind, layout: choice.layout.id, photoIds: choice.photos.map((p) => p.id) } : null;
 }
+
+// ── captions on a page ──────────────────────────────────────────────────
+
+/** A caption as compared with the others of its page: case, spaces and punctuation aside. */
+export function captionKey(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+/**
+ * Which captions of a page repeat one before them. A page says a thing once:
+ * the first photo with a caption keeps it, the same text under its
+ * neighbours is left out (in the editor, the preview and the PDF).
+ */
+export function repeatedCaptions(captions: (string | null | undefined)[]): boolean[] {
+  const seen = new Set<string>();
+  return captions.map((c) => {
+    if (!c) return false;
+    const key = captionKey(c);
+    if (!key) return false;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    return false;
+  });
+}

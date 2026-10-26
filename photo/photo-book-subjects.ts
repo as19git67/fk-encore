@@ -16,6 +16,9 @@
  *
  * Without the embedding service the CLIP shares are missing and only faces
  * and landmarks count; the book is still built.
+ *
+ * Also here: photos that merely look alike (the same scene a few minutes
+ * apart) are thinned to the best one, below.
  */
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -209,4 +212,110 @@ export async function loadSeries(userId: number, photoIds: number[]): Promise<Se
           db.select({ id: photoGroupMembers.group_id }).from(photoGroupMembers).where(inArray(photoGroupMembers.photo_id, photoIds))),
       )),
   );
+}
+
+// ── similar photos ──────────────────────────────────────────────────────
+//
+// The series above are the near-duplicate groups (DINOv2 ≥ 0.90, reviewed or
+// not); many shots of the same scene never become one — a slightly other
+// angle, a few minutes later. A book shows such a scene once, so on top of
+// the series the selection thins photos that look alike: within a stretch of
+// time, the best photo stays and every photo too similar to one already kept
+// goes (the same cut the recaps make for "merely similar").
+
+/** DINOv2 cosine at which two photos count as the same scene for a book (recaps: 0.82). */
+export const BOOK_SIMILARITY = 0.8;
+/** Only photos taken this close to each other are compared. */
+const SIMILAR_WINDOW_MS = 3 * 60 * 60 * 1000;
+/** At most this many photos per comparison window (the service compares all pairs). */
+const SIMILAR_WINDOW_MAX = 200;
+const SIMILAR_TIMEOUT_MS = 60_000;
+
+export interface SimilarPair {
+  a: number;
+  b: number;
+}
+
+export type SimilarPairsLoader = (windows: number[][]) => Promise<SimilarPair[]>;
+
+function takenMs(p: BookPhoto): number | null {
+  if (!p.takenAt) return null;
+  const t = Date.parse(p.takenAt.replace(" ", "T"));
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Runs of photos close in time, in capture order; photos without a date form their own runs. */
+export function similarityWindows(list: BookPhoto[]): number[][] {
+  const dated = list.filter((p) => takenMs(p) != null).sort((a, b) => takenMs(a)! - takenMs(b)!);
+  const undated = list.filter((p) => takenMs(p) == null);
+  const out: number[][] = [];
+  let run: number[] = [];
+  let last: number | null = null;
+  for (const p of dated) {
+    const t = takenMs(p)!;
+    if (run.length && (last == null || t - last > SIMILAR_WINDOW_MS || run.length >= SIMILAR_WINDOW_MAX)) {
+      out.push(run);
+      run = [];
+    }
+    run.push(p.id);
+    last = t;
+  }
+  if (run.length) out.push(run);
+  for (let i = 0; i < undated.length; i += SIMILAR_WINDOW_MAX) out.push(undated.slice(i, i + SIMILAR_WINDOW_MAX).map((p) => p.id));
+  return out.filter((w) => w.length > 1);
+}
+
+/** The best photo of each look-alike set stays: by score, a photo goes when it is too similar to one kept. */
+export function thinSimilar<T extends BookPhoto>(list: T[], pairs: SimilarPair[]): T[] {
+  if (!pairs.length) return list;
+  const like = new Map<number, Set<number>>();
+  for (const { a, b } of pairs) {
+    if (!like.has(a)) like.set(a, new Set());
+    if (!like.has(b)) like.set(b, new Set());
+    like.get(a)!.add(b);
+    like.get(b)!.add(a);
+  }
+  const kept = new Set<number>();
+  for (const p of [...list].sort((x, y) => y.score - x.score || x.id - y.id)) {
+    const others = like.get(p.id);
+    if (others && [...others].some((o) => kept.has(o))) continue;
+    kept.add(p.id);
+  }
+  return list.filter((p) => kept.has(p.id));
+}
+
+async function similarPairsFromService(windows: number[][]): Promise<SimilarPair[]> {
+  if (!windows.length) return [];
+  try {
+    const res = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/redundant-pairs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groups: windows.map((ids, i) => ({ group_id: i, photo_ids: ids.map(String) })),
+        min_similarity: BOOK_SIMILARITY,
+      }),
+      timeoutMs: SIMILAR_TIMEOUT_MS,
+      queue: "embedding",
+    });
+    if (!res.ok) throw new Error(`embedding service returned ${res.status}`);
+    const body = (await res.json()) as { groups: { pairs: { photo_id_a: string; photo_id_b: string }[] }[] };
+    return body.groups.flatMap((g) => g.pairs.map((p) => ({ a: Number(p.photo_id_a), b: Number(p.photo_id_b) })));
+  } catch (err) {
+    // Without the service the series still thin the book; it is built anyway.
+    console.warn("[photo-book] similar photos unavailable:", (err as Error).message);
+    return [];
+  }
+}
+
+let similarLoader: SimilarPairsLoader = similarPairsFromService;
+
+/** Tests hand in their own pairs; `null` restores the embedding service. */
+export function setSimilarPairsLoader(next: SimilarPairsLoader | null): void {
+  similarLoader = next ?? similarPairsFromService;
+}
+
+/** `list` without photos that look like a better one taken around the same time. */
+export async function dropSimilarPhotos<T extends BookPhoto>(list: T[]): Promise<T[]> {
+  if (list.length < 2) return list;
+  return thinSimilar(list, await similarLoader(similarityWindows(list)));
 }
