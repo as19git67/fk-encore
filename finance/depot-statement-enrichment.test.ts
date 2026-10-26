@@ -158,6 +158,10 @@ async function setup(opts: { depotNumber?: string | null } = {}): Promise<{ bc: 
     currency: "EUR",
   });
   await admitSecurity(depot!.id, { isin: ISIN_A, wkn: null, name: "Alpha Industries AG" }, "bank");
+  // The portfolio covers the caller's own depots (a `write` entry); the
+  // default caller, user 1, owns them.
+  await ensureUser(1);
+  await db.insert(financeAccountAccess).values({ account_id: depot!.id, user_id: 1, level: "write" });
   return { bc: bcRow!.id, depot: depot!.id };
 }
 

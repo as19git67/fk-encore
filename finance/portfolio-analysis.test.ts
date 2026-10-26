@@ -83,15 +83,19 @@ async function insertAccount(
       label,
     })
     .returning({ id: financeAccount.id });
+  // The portfolio covers the caller's own depots (a `write` entry); the
+  // default caller, user 1, owns every account a test creates.
+  await ensureUser(1);
+  await db.insert(financeAccountAccess).values({ account_id: row.id, user_id: 1, level: "write" });
   return row.id;
 }
 
-async function grantRead(accountId: number, userId: number) {
+async function grantOwn(accountId: number, userId: number) {
   await ensureUser(userId);
   await db.insert(financeAccountAccess).values({
     account_id: accountId,
     user_id: userId,
-    level: "read",
+    level: "write",
   });
 }
 
@@ -273,8 +277,8 @@ describe("finance/portfolio — analysis", () => {
     const other = await insertAccount(bc, "depot", "Other");
     const usd = await insertAccount(bc, "depot", "Dollar");
     await db.update(financeAccount).set({ currency_code: "USD" }).where(eq(financeAccount.id, usd));
-    await grantRead(mine, 7);
-    await grantRead(usd, 7);
+    await grantOwn(mine, 7);
+    await grantOwn(usd, 7);
     await insertHolding({ accountId: mine, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "1", price: "10", value: "10" });
     await insertHolding({ accountId: other, asOf: "2026-09-01", isin: ISIN_B, name: "Beta ETF", amount: "1", price: "99", value: "99" });
     await insertHolding({ accountId: usd, asOf: "2026-09-01", wkn: "XYZ123", name: "Delta Inc", amount: "2", price: "20", value: "40" });

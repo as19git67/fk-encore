@@ -286,7 +286,7 @@ describe("GET /finance/mandates/upcoming", () => {
 
   it("lists the debits due in the rest of the month with their sum", async () => {
     const giro = await insertAccount("Giro");
-    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "write" });
     await insertMandate({ accountId: giro, counterparty: "Stadtwerke Musterstadt", amount: "-84.00", interval: 30, lastSeen: "2026-09-20" });
     await insertMandate({ accountId: giro, counterparty: "Beispiel Versicherung", amount: "-32.50", interval: 91, lastSeen: "2026-07-28" });
     // Already booked this month.
@@ -312,27 +312,38 @@ describe("GET /finance/mandates/upcoming", () => {
     expect(res.total_amount).toBe("-116.50");
   });
 
-  it("shows only mandates on accounts the caller may read", async () => {
+  it("shows only mandates on the caller's own accounts", async () => {
     const mine = await insertAccount("Mein Giro");
+    const shared = await insertAccount("Geteiltes Giro");
     const other = await insertAccount("Fremdes Giro");
-    await db.insert(financeAccountAccess).values({ account_id: mine, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: mine, user_id: 901, level: "write" });
+    // Shared for reading: searchable, but not the caller's to expect.
+    await db.insert(financeAccountAccess).values({ account_id: shared, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: shared, user_id: 902, level: "write" });
     await db.insert(financeAccountAccess).values({ account_id: other, user_id: 902, level: "write" });
     await insertMandate({ accountId: mine, counterparty: "Meins", amount: "-1.00", interval: 30, lastSeen: "2026-09-20" });
+    await insertMandate({ accountId: shared, counterparty: "Geteilt", amount: "-3.00", interval: 30, lastSeen: "2026-09-20" });
     await insertMandate({ accountId: other, counterparty: "Fremd", amount: "-2.00", interval: 30, lastSeen: "2026-09-20" });
 
     setAuth("901", ["finance.view"]);
     expect((await listUpcomingDebits({})).items.map((i) => i.counterparty)).toEqual(["Meins"]);
 
+    setAuth("902", ["finance.view"]);
+    expect((await listUpcomingDebits({})).items.map((i) => i.counterparty).sort()).toEqual(["Fremd", "Geteilt"]);
+
     setAuth("903", ["finance.view"]);
     expect((await listUpcomingDebits({})).items).toEqual([]);
 
+    // No admin bypass: an admin sees their own accounts, not the whole bank.
+    setAuth("901", ["finance.view", "finance.admin"]);
+    expect((await listUpcomingDebits({})).items.map((i) => i.counterparty)).toEqual(["Meins"]);
     setAuth("1", ["finance.view", "finance.admin"]);
-    expect((await listUpcomingDebits({})).items.map((i) => i.counterparty).sort()).toEqual(["Fremd", "Meins"]);
+    expect((await listUpcomingDebits({})).items).toEqual([]);
   });
 
   it("leaves closed accounts out", async () => {
     const closed = await insertAccount("Alt", true);
-    await db.insert(financeAccountAccess).values({ account_id: closed, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: closed, user_id: 901, level: "write" });
     await insertMandate({ accountId: closed, counterparty: "X", amount: "-1.00", interval: 30, lastSeen: "2026-09-20" });
     setAuth("901", ["finance.view"]);
     expect((await listUpcomingDebits({})).items).toEqual([]);
@@ -340,7 +351,7 @@ describe("GET /finance/mandates/upcoming", () => {
 
   it("takes an explicit window and rejects a bad one", async () => {
     const giro = await insertAccount("Giro");
-    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "write" });
     await insertMandate({ accountId: giro, counterparty: "Stadtwerke Musterstadt", amount: "-84.00", interval: 30, lastSeen: "2026-09-20" });
     setAuth("901", ["finance.view"]);
 
@@ -356,8 +367,8 @@ describe("GET /finance/mandates/upcoming", () => {
   it("narrows to direct debits or transfers, and never counts a cash account", async () => {
     const giro = await insertAccount("Giro");
     const wallet = await insertAccount("Portemonnaie", false, "bargeld");
-    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "read" });
-    await db.insert(financeAccountAccess).values({ account_id: wallet, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "write" });
+    await db.insert(financeAccountAccess).values({ account_id: wallet, user_id: 901, level: "write" });
     await insertMandate({ accountId: giro, counterparty: "Stadtwerke Musterstadt", amount: "-84.00", interval: 30, lastSeen: "2026-09-20" });
     await insertMandate({ accountId: giro, counterparty: "Miete Beispiel GmbH", amount: "-650.00", interval: 30, lastSeen: "2026-09-28", channel: "transfer" });
     await insertMandate({ accountId: giro, counterparty: "Unbekannt", amount: "-5.00", interval: 30, lastSeen: "2026-09-22", channel: null });
@@ -373,7 +384,7 @@ describe("GET /finance/mandates/upcoming", () => {
 
   it("judges a series by its bookings: a shop visited whenever is not expected, an instalment is", async () => {
     const giro = await insertAccount("Giro");
-    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "write" });
     // The detector's running average made 30 days of it; the bookings say otherwise.
     await insertMandate({ accountId: giro, counterparty: "Beispiel Versand", amount: "-45.00", interval: 30, lastSeen: "2026-09-28" });
     await insertBookings(giro, "Beispiel Versand", [
@@ -397,8 +408,8 @@ describe("GET /finance/mandates/upcoming", () => {
   it("lists a series that moved to another account once, under its new mandate", async () => {
     const alt = await insertAccount("Altes Giro");
     const neu = await insertAccount("Neues Giro");
-    await db.insert(financeAccountAccess).values({ account_id: alt, user_id: 901, level: "read" });
-    await db.insert(financeAccountAccess).values({ account_id: neu, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: alt, user_id: 901, level: "write" });
+    await db.insert(financeAccountAccess).values({ account_id: neu, user_id: 901, level: "write" });
     // Yearly premium, last paid from the old account two years ago — silent,
     // but not for two full cycles yet.
     const oldId = await insertMandate({ accountId: alt, counterparty: "Beispiel Versicherung AG", amount: "-412.00", interval: 365, lastSeen: "2024-11-10" });
@@ -414,17 +425,21 @@ describe("GET /finance/mandates/upcoming", () => {
     ]);
   });
 
-  it("the history behind a listed row opens under the same access rule as the list", async () => {
-    const other = await insertAccount("Fremdes Giro");
-    await db.insert(financeAccountAccess).values({ account_id: other, user_id: 902, level: "read" });
-    const id = await insertMandate({ accountId: other, counterparty: "Beispiel Fitness GmbH", amount: "-24.90", interval: 30, lastSeen: "2026-09-30" });
-    await insertBookings(other, "Beispiel Fitness GmbH", [["2026-09-30", "-24.90"], ["2026-08-31", "-24.90"], ["2026-07-31", "-24.90"]]);
+  it("the history behind a listed row opens, and so does one on an account shared for reading", async () => {
+    const own = await insertAccount("Mein Giro");
+    const shared = await insertAccount("Geteiltes Giro");
+    await db.insert(financeAccountAccess).values({ account_id: own, user_id: 902, level: "write" });
+    await db.insert(financeAccountAccess).values({ account_id: shared, user_id: 902, level: "read" });
+    const id = await insertMandate({ accountId: own, counterparty: "Beispiel Fitness GmbH", amount: "-24.90", interval: 30, lastSeen: "2026-09-30" });
+    await insertBookings(own, "Beispiel Fitness GmbH", [["2026-09-30", "-24.90"], ["2026-08-31", "-24.90"], ["2026-07-31", "-24.90"]]);
+    const sharedId = await insertMandate({ accountId: shared, counterparty: "Muster Verein", amount: "-8.00", interval: 30, lastSeen: "2026-09-30" });
+    await insertBookings(shared, "Muster Verein", [["2026-09-30", "-8.00"], ["2026-08-31", "-8.00"], ["2026-07-31", "-8.00"]]);
 
-    // A finance admin without an access row of their own sees the row on
-    // the page, so the history must open as well.
-    setAuth("1", ["finance.view", "finance.admin"]);
+    setAuth("902", ["finance.view"]);
     expect((await listUpcomingDebits({})).items.map((i) => i.mandate_id)).toEqual([id]);
     expect((await getMandateHistory({ mandateId: id })).items.map((i) => i.amount)).toEqual(["-24.90", "-24.90", "-24.90"]);
+    // Not listed, but still readable when reached from the bookings.
+    expect((await getMandateHistory({ mandateId: sharedId })).items.map((i) => i.amount)).toEqual(["-8.00", "-8.00", "-8.00"]);
 
     // Someone without access to the account gets neither.
     setAuth("901", ["finance.view"]);

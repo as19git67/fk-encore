@@ -140,6 +140,13 @@ async function setup(): Promise<{ bc: number; giro: number; depot: number }> {
     value: "2950.00",
     currency: "EUR",
   });
+  // The portfolio covers the caller's own depots (a `write` entry); the
+  // default caller, user 1, owns them.
+  await ensureUser(1);
+  await db.insert(financeAccountAccess).values([
+    { account_id: giro!.id, user_id: 1, level: "write" },
+    { account_id: depot!.id, user_id: 1, level: "write" },
+  ]);
   return { bc: bcRow!.id, giro: giro!.id, depot: depot!.id };
 }
 
@@ -666,6 +673,7 @@ Ausmachender Betrag 100,00 EUR`;
         label: "Depot 2",
       })
       .returning({ id: financeAccount.id });
+    await db.insert(financeAccountAccess).values({ account_id: other!.id, user_id: 1, level: "write" });
     await setDepotNumber(depot, "1234567801");
     await setDepotNumber(other!.id, "1234567802");
     const docId = await insertDocument(soldText("Depotnummer 12345678"));
@@ -686,13 +694,14 @@ Ausmachender Betrag 100,00 EUR`;
 describe("finance/portfolio — depots without any data", () => {
   it("are left out of the depot list and the scope", async () => {
     const { bc, depot } = await setup();
-    await db.insert(financeAccount).values({
+    const [empty] = await db.insert(financeAccount).values({
       bankcontact_id: bc,
       type_id: (await db.select({ id: financeAccountType.id }).from(financeAccountType).where(eq(financeAccountType.kind, "depot")).limit(1))[0]!.id,
       currency_code: "EUR",
       account_number: "empty-sub-depot",
       label: "Leeres Unterdepot",
-    });
+    }).returning({ id: financeAccount.id });
+    await db.insert(financeAccountAccess).values({ account_id: empty!.id, user_id: 1, level: "write" });
     const resp = await getPortfolio({});
     expect(resp.accounts.map((a) => a.id)).toEqual([depot]);
   });

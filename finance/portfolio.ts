@@ -39,7 +39,6 @@ import {
   financeDepotDocumentIgnore,
   financeDepotTransactionDocument,
   financeAccount,
-  financeAccountAccess,
   financeAccountHolding,
   financeAccountType,
   financeDepotSecurity,
@@ -49,6 +48,7 @@ import {
   financeDocumentPaperLlm,
   users,
 } from "../db/schema";
+import { ownFinanceAccountIds } from "./account-acl";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import { dedupeSnapshotRows, securityIdentity, type SecurityIdentity } from "./security-identity";
 import { closesAfter, latestQuotes, quoteDay, quoteFitsCurrency, type StoredQuote } from "./quote-store";
@@ -114,19 +114,24 @@ function hasAdmin(auth: { permissions: string[] }): boolean {
 }
 
 /**
- * Every depot account the caller may read, optionally narrowed to the
- * ids in `requested`. Ids outside the readable set are ignored.
+ * The caller's own depot accounts (`ownFinanceAccountIds`: a `write` entry,
+ * no admin bypass), optionally narrowed to the ids in `requested`. The
+ * portfolio is a personal view: a partner's depot shared for reading stays
+ * out of it, as it does of the anomalies and the expected payments. Ids
+ * outside the own set are ignored.
  */
 export async function visibleDepots(
   auth: { userID: string; permissions: string[] },
   requested: number[] | null,
 ): Promise<DepotAccount[]> {
-  const conditions = [eq(financeAccountType.kind, "depot")];
+  const own = await ownFinanceAccountIds(auth);
+  if (own.length === 0) return [];
+  const conditions = [eq(financeAccountType.kind, "depot"), inArray(financeAccount.id, own)];
   if (requested && requested.length > 0) {
     conditions.push(inArray(financeAccount.id, requested));
   }
 
-  const base = db
+  return await db
     .select({
       id: financeAccount.id,
       label: financeAccount.label,
@@ -134,46 +139,21 @@ export async function visibleDepots(
       closed: sql<boolean>`${financeAccount.closed_at} IS NOT NULL`,
     })
     .from(financeAccount)
-    .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id));
-
-  const rows = hasAdmin(auth)
-    ? await base.where(and(...conditions)).orderBy(asc(financeAccount.label))
-    : await base
-        .innerJoin(
-          financeAccountAccess,
-          and(
-            eq(financeAccountAccess.account_id, financeAccount.id),
-            eq(financeAccountAccess.user_id, Number(auth.userID)),
-          ),
-        )
-        .where(and(...conditions))
-        .orderBy(asc(financeAccount.label));
-
-  return rows;
+    .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+    .where(and(...conditions))
+    .orderBy(asc(financeAccount.label));
 }
 
 /**
- * The depots among `visibleDepots` the caller may write to: every one for
- * an admin, otherwise those with `level='write'` on the ACL.
+ * The depots the caller may write to. Own depots carry a `write` entry by
+ * definition, so these are `visibleDepots`; the name stays for the call
+ * sites that change something.
  */
 async function writableDepots(
   auth: { userID: string; permissions: string[] },
   requested: number[] | null,
 ): Promise<DepotAccount[]> {
-  const visible = await visibleDepots(auth, requested);
-  if (hasAdmin(auth) || visible.length === 0) return visible;
-  const rows = await db
-    .select({ account_id: financeAccountAccess.account_id })
-    .from(financeAccountAccess)
-    .where(
-      and(
-        eq(financeAccountAccess.user_id, Number(auth.userID)),
-        eq(financeAccountAccess.level, "write"),
-        inArray(financeAccountAccess.account_id, visible.map((d) => d.id)),
-      ),
-    );
-  const writable = new Set(rows.map((r) => r.account_id));
-  return visible.filter((d) => writable.has(d.id));
+  return visibleDepots(auth, requested);
 }
 
 /**
