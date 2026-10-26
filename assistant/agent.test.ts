@@ -214,9 +214,9 @@ describe("the loop", () => {
     ]);
     await runTurn({ user: USER, history: [], question: "Zähler?", tools: catalogFor(USER), chat: fn, now: NOW, schemaBudgetTokens: 1 });
     const offered = requests.map((r) => (r.tools ?? []).map((t) => (t as { function: { name: string } }).function.name));
-    expect(offered[0]).toEqual(["describe_tools"]);
+    expect(offered[0]).toEqual(["describe_tools", "switch_area"]);
     expect((requests[1].messages.at(-1) as { content: string }).content).toBe("error: call describe_tools for list_meters first");
-    expect(offered[2]).toEqual(["describe_tools", "list_meters"]);
+    expect(offered[2]).toEqual(["describe_tools", "switch_area", "list_meters"]);
     expect(clients.meter.listMeters).toHaveBeenCalledTimes(1);
     expect((requests[0].messages[0] as { content: string }).content).toContain("fetch a tool's argument schema with describe_tools");
   });
@@ -657,5 +657,130 @@ describe("the user's permissions (#1648)", () => {
     const { fn, requests } = scripted([calls(["list_accounts", {}]), answer("Dieses Konto kann ich nicht öffnen.")]);
     await runTurn({ user: USER, history: [], question: "Wie ist mein Kontostand?", tools: catalogFor(USER), chat: fn, now: NOW });
     expect((requests[1]!.messages.at(-1) as { content: string }).content).toContain("no access (permission_denied)");
+  });
+});
+
+describe("the router and the area packages (stage 1 of assistent-wegfindung.md)", () => {
+  const names = (req: ChatRequest) => (req.tools ?? []).map((t) => (t as { function: { name: string } }).function.name);
+
+  it("offers only the tools of the areas the question names, plus switch_area, and the other areas by name", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
+    const { fn, requests } = scripted([calls(["list_meters", {}]), answer("Keine Zähler.")]);
+    const res = await runTurn({ user: USER, history: [], question: "Welche Zähler haben wir?", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(names(requests[0]!)).toEqual(["describe_tools", "switch_area", "list_meters", "latest_readings", "consumption_report"]);
+    const system = (requests[0]!.messages[0] as { content: string }).content;
+    expect(system).toContain("- list_meters:");
+    expect(system).not.toContain("- list_photos:");
+    expect(system).not.toContain("Rules for photos:");
+    expect(system).toContain("Other areas, added with switch_area(area):\n- finance:");
+    expect(system).toContain('1. "Wie viel Strom haben wir letztes Jahr verbraucht?"');
+    expect(system).not.toContain("Zeige mir die 10 neuesten Buchungen");
+    expect(res).toMatchObject({ areas: ["meters"], routing: "keywords" });
+  });
+
+  it("the fixed part of the prompt comes first, then the day, the user, the areas", () => {
+    const prompt = buildSystemPrompt(catalogFor(USER), NOW, false, ["document 1: x"], USER.permissions, ["photos"], ["finance"]);
+    const at = (s: string) => prompt.indexOf(s);
+    expect(at("You are the assistant")).toBe(0);
+    expect(at("Today is")).toBeGreaterThan(0);
+    expect(at("Access of this user:")).toBeGreaterThan(at("Today is"));
+    expect(at("Working set")).toBeGreaterThan(at("Access of this user:"));
+    expect(at("Rules for photos:")).toBeGreaterThan(at("Working set"));
+    expect(at("Tools you may call:")).toBeGreaterThan(at("Rules for photos:"));
+    expect(at("Examples of chained calls:")).toBeGreaterThan(at("Tools you may call:"));
+    expect(at("Other areas")).toBeGreaterThan(at("Examples of chained calls:"));
+  });
+
+  it("with no area recognised, every area is in play, as before the router", async () => {
+    const { fn, requests } = scripted([answer("Hallo!")]);
+    const res = await runTurn({ user: USER, history: [], question: "Hallo", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(names(requests[0]!)).toEqual(catalogFor(USER).map((t) => t.name));
+    expect((requests[0]!.messages[0] as { content: string }).content).not.toContain("Other areas");
+    expect(res.routing).toBe("all");
+  });
+
+  it("switch_area adds an area's rules, tools and examples for the rest of the turn", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
+    const { fn, requests } = scripted([
+      calls(["switch_area", { area: "meters" }]),
+      calls(["list_meters", {}]),
+      answer("Keine Zähler."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "Zeig mir die 10 neuesten Buchungen", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(names(requests[0]!)).not.toContain("list_meters");
+    const pkg = (requests[1]!.messages.at(-1) as { content: string }).content;
+    expect(pkg).toContain("Tools of meters:\n- list_meters:");
+    expect(pkg).toContain("Examples of chained calls:");
+    expect(names(requests[1]!)).toContain("list_meters");
+    expect(names(requests[1]!)).toContain("list_transactions");
+    expect(clients.meter.listMeters).toHaveBeenCalledTimes(1);
+    expect(res.areas).toEqual(["finance", "meters"]);
+  });
+
+  it("switch_area refuses an unknown area and notes one already in play", async () => {
+    const { fn, requests } = scripted([
+      calls(["switch_area", { area: "weather" }], ["switch_area", { area: "finance" }]),
+      answer("Ok."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "Zeig mir die 10 neuesten Buchungen", tools: catalogFor(USER), chat: fn, now: NOW });
+    const results = requests[1]!.messages.filter((m) => m.role === "tool").map((m) => (m as { content: string }).content);
+    expect(results[0]).toMatch(/^error: unknown area; one of finance, depot/);
+    expect(results[1]).toBe("finance is already in play; its tools are offered.");
+  });
+
+  it("a tool of another area called by name runs, and its area joins the turn", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
+    const { fn, requests } = scripted([calls(["list_meters", {}]), answer("Keine Zähler.")]);
+    const res = await runTurn({ user: USER, history: [], question: "Zeig mir die 10 neuesten Buchungen", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(clients.meter.listMeters).toHaveBeenCalledTimes(1);
+    expect(names(requests[1]!)).toContain("consumption_report");
+    expect(res.areas).toEqual(["finance", "meters"]);
+  });
+
+  it("describe_tools on a tool of another area brings that area's rules along", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [], total: 0 });
+    const { fn, requests } = scripted([
+      calls(["describe_tools", { names: ["list_photos"] }]),
+      answer("Keine Fotos."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "Zeig mir die 10 neuesten Buchungen", tools: catalogFor(USER), chat: fn, now: NOW });
+    const described = (requests[1]!.messages.at(-1) as { content: string }).content;
+    expect(described).toContain("list_photos:");
+    expect(described).toContain("Rules for photos:");
+    expect(names(requests[1]!)).toContain("list_photos");
+  });
+
+  it("the model stage runs only when asked for and nothing cheaper decided", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
+    const { fn, requests } = scripted([
+      { content: null, finish_reason: "tool_calls", tool_calls: [{ id: "r", type: "function", function: { name: "choose_areas", arguments: JSON.stringify({ areas: ["meters"] }) } }] },
+      calls(["list_meters", {}]),
+      answer("Keine Zähler."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "Was haben wir im Haus so alles installiert?", tools: catalogFor(USER), chat: fn, now: NOW, routeModel: true });
+    expect(requests[0]!.tool_choice).toBe("required");
+    expect(names(requests[0]!)).toEqual(["choose_areas"]);
+    expect(names(requests[1]!)).toEqual(["describe_tools", "switch_area", "list_meters", "latest_readings", "consumption_report"]);
+    expect(res).toMatchObject({ areas: ["meters"], routing: "model", rounds: 2 });
+
+    const quiet = scripted([calls(["list_meters", {}]), answer("Keine Zähler.")]);
+    await runTurn({ user: USER, history: [], question: "Welche Zähler haben wir?", tools: catalogFor(USER), chat: quiet.fn, now: NOW, routeModel: true });
+    expect(quiet.requests).toHaveLength(2);
+    expect(names(quiet.requests[0]!)).not.toContain("choose_areas");
+  });
+
+  it("a follow-up inherits the previous turn's area", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [], total: 0 });
+    const history: ChatMessage[] = [
+      { role: "user", content: "Zeig meine Favoriten von 2025." },
+      { role: "assistant", content: null, tool_calls: [{ id: "h1", type: "function", function: { name: "list_photos", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "h1", content: "[earlier result of list_photos: 3 rows, ids 1,2,3]" },
+      { role: "assistant", content: "Du hast 3 Favoriten aus 2025." },
+    ];
+    const { fn, requests } = scripted([calls(["list_photos", { from_previous_result: true, place: "München" }]), answer("Eins.")]);
+    const res = await runTurn({ user: USER, history, question: "Nur die aus München.", tools: catalogFor(USER), chat: fn, now: NOW, previousRefs: { photo: [1, 2, 3] } });
+    expect(names(requests[0]!)).toContain("list_photos");
+    expect(names(requests[0]!)).not.toContain("list_meters");
+    expect(res.routing).toBe("inherited");
   });
 });

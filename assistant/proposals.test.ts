@@ -55,6 +55,11 @@ function text(content: string): ChatReply {
   return { content, tool_calls: [], finish_reason: "stop" };
 }
 
+/** The router's model stage, asked for a question without an area keyword, chooses nothing: every area stays in play. */
+function noAreas(): ChatReply {
+  return toolCall("choose_areas", { areas: [] });
+}
+
 const ctx = (userID = "711", permissions = PERMS): ToolContext => ({ user: { userID, permissions }, today: "2026-10-15" });
 
 function tool(name: string) {
@@ -117,17 +122,18 @@ describe("write tools", () => {
   it("a request for confirmation in words is sent back, so the card with the button appears", async () => {
     const conversation = await createConversation({});
     vi.mocked(chat)
+      .mockResolvedValueOnce(noAreas())
       .mockResolvedValueOnce(text("Soll ich den Buchungen 1 und 2 den Tag „Renovierung“ hinzufügen? Bitte bestätige die Änderung."))
       .mockResolvedValueOnce(toolCall("tag_transactions", { transaction_ids: [1, 2], add: ["Renovierung"] }))
       .mockResolvedValueOnce(text("Vorgeschlagen: bei 2 Buchungen „Renovierung“ setzen. Bitte bestätige auf der Karte."));
 
     const res = await ask({ id: conversation.id, message: "Ja, mach das." });
 
-    const second = vi.mocked(chat).mock.calls[1][0];
+    const second = vi.mocked(chat).mock.calls[2][0];
     expect(second.messages.at(-1)).toEqual({ role: "user", content: CONSENT_NUDGE });
     expect(res.blocks.find((b) => b.kind === "proposal")?.rows[0]).toMatchObject({ tool: "tag_transactions", status: "pending" });
     // With the card there, asking for confirmation is the right answer and is not sent back.
-    expect(vi.mocked(chat)).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(chat)).toHaveBeenCalledTimes(4);
     expect(clients.finance.batchTag).not.toHaveBeenCalled();
   });
 
@@ -153,9 +159,10 @@ describe("write tools", () => {
 
   it("an answer about an earlier card is not sent back when nothing was proposed before", async () => {
     const conversation = await createConversation({});
-    vi.mocked(chat).mockResolvedValueOnce(text("Ich habe nichts geändert."));
+    vi.mocked(chat).mockResolvedValueOnce(noAreas()).mockResolvedValueOnce(text("Ich habe nichts geändert."));
     await ask({ id: conversation.id, message: "Hallo" });
-    expect(vi.mocked(chat)).toHaveBeenCalledTimes(1);
+    // The router's call and the one answer; no nudge.
+    expect(vi.mocked(chat)).toHaveBeenCalledTimes(2);
   });
 
   it("refuses a selection that names no photos", async () => {
@@ -353,6 +360,7 @@ describe("a redacted Sammelmappe", () => {
       items: [41, 42, 43, 44].map((id) => ({ id, title: `Dokument ${id}`, doc_date: "2024-05-01" })),
     });
     vi.mocked(chat)
+      .mockResolvedValueOnce(noAreas())
       .mockResolvedValueOnce(toolCall("search_documents", { q: "Kauf Wohnung" }))
       .mockResolvedValueOnce(text("Vier Dokumente."));
     await ask({ id: conversation.id, message: "Was war beim Kauf der Wohnung relevant?" });

@@ -395,6 +395,7 @@ export const ask = api(
         chat,
         emit,
         signal,
+        routeModel: true,
         withSlot: (fn) => withAiSlot("llm", SLOT_PRIORITY, "assistant", fn, undefined, signal),
         log: (entry) => log.info("assistant tool call", {
           conversation_id: conversation.id,

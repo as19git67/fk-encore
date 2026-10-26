@@ -1,6 +1,7 @@
 # Assistant: finding the way to an answer
 
-Status: stage 6 (measuring) in progress; stages 1 to 5 open.
+Status: stage 1 (router and area packages) implemented, stage 6
+(measuring) in progress; stages 2 to 5 open.
 Follows `ki-assistent.md` (stages 1 to 7 implemented there).
 
 ## Problem
@@ -81,13 +82,13 @@ or can be made to.
 
 | Lever | Local | In the code today |
 |---|---|---|
-| Limit tools per round, load the rest on demand | yes, app logic | `offered` / `describe_tools` in `agent.ts`, used only above 9,000 tokens |
+| Limit tools per round, load the rest on demand | yes, app logic | the router offers the tools of the areas in play; `switch_area` and `describe_tools` add the rest (stage 1) |
 | Forced call (`tool_choice` = function) | yes | `chat.py` validates `forced_tool_name`; `agent.ts` uses only `auto` / `none` |
 | Structured answer by grammar (`response_format` with a JSON schema) | yes | used for `/classify` and `/vision`, not passed through for `/chat` on the server backend |
 | Strict schemas, enums | yes, llama-server builds a grammar from the schema | schemas are loose, few enums |
 | Thinking before the call | Gemma 4 knows `enable_thinking`; `chat.py` turns it off per round | off on purpose: a thinking block costs context every round |
 | Prompt cache (an unchanged prefix is not recomputed) | yes | works only while the start of the prompt is stable |
-| Embedding routing (question against area descriptions) | yes, the E5 embedder runs in the service | not used |
+| Embedding routing (question against area descriptions) | yes, the E5 embedder runs in the service | not used yet; the router's model stage covers the questions without a keyword |
 | A second checking call (evaluator) | yes, costs a round on the same GPU | none |
 
 Two limits remain. Every extra model round (router, plan, checker) costs
@@ -149,6 +150,49 @@ other), then 3, then 4 and 5 by measured value. After stage 2 a pause is
 worth it: if the failures collected in stage 6 have mostly gone, 3 to 5 can
 be smaller.
 
+### Stage 1 (implemented)
+
+- **Areas as data** in `assistant/areas/`: nine areas (`finance`, `depot`,
+  `businesses`, `documents`, `tax`, `photos`, `meters`, `trips`, `writing`),
+  each with its tools, the tools it borrows from others (tax lists bookings,
+  writing reads documents), its rule block, its examples and its keywords.
+  Every tool of the catalog has exactly one home (`areas.test.ts`).
+- **Router** in `assistant/router.ts`, three stages, each used only when the
+  one before found nothing: the areas' keywords in the question (a working
+  set adds its areas, a follow-up — short, or "davon", "daraus", "ja" — adds
+  the areas of the previous turn's tools); the previous turn's areas for any
+  question without a keyword, since a conversation usually stays on its
+  subject; a model call bound to one tool,
+  `choose_areas`, with the area list and the question (about 400 prompt
+  tokens, `tool_choice: required`, 64 output tokens). More than three areas
+  by keywords, or no decision, means every area is in play — the state
+  before the router. The model stage is on in the service and the benchmark
+  (`routeModel: true`) and off in unit tests. The embedding stage between
+  keywords and model is still open.
+- **Prompt** (`buildSystemPrompt`): the general rules first, fixed across
+  turns and users for llama-server's prompt cache; then the day, the user's
+  access and working set; then the rule blocks of the areas in play, the
+  catalog of their tools, their examples; last the other areas by name. The
+  rules on photos, tax, businesses, letters, text documents and "the user
+  answers an offer" moved into their areas; the general rules kept what holds
+  everywhere.
+- **Loop**: round 1 offers the tools of the areas in play plus `switch_area`
+  (adds an area's rules, tools and examples as a tool result) and
+  `describe_tools` (now also the way to a schema of an area not in play; it
+  brings the area's rules along). A tool of another area called by name runs
+  and its area joins the turn. The system prompt is not rebuilt during a
+  turn, so the cached prefix stays valid. `TurnResult` names the areas and
+  the router stage; the benchmark records them per case (`areas`, `routing`,
+  `router_ms`) and counts the stages in the summary (`routed`).
+- **Static measurement** (estimated tokens, characters / 4, a user with every
+  module, 48 tools): the system prompt with every area is 7,107 tokens plus
+  9,705 for the schemas, 16,812 together. Over the 67 benchmark questions the
+  keywords route 61; the mean of prompt plus schemas over all 67 is 5,787
+  tokens, a third of before. One area alone lies between 1,970 (trips) and
+  5,550 (photos). The target of the stage table, under 6,000 per round, is
+  met on average; the model's own count follows in the Measurements table
+  once the benchmark has run on the GPU.
+
 ### Stage 6, part 1 (implemented)
 
 - `CaseRun` carries `rounds`, `first_tool`, `nudges` (retracted drafts)
@@ -202,8 +246,13 @@ these parameters as given.
 - More rounds, more latency: cheap stages first, model calls only with a
   grammar and a small prompt, latency measured per stage.
 - Rule knowledge spreads over nine packages; in return each rule stands
-  next to the tool it concerns, and a test checks every tool belongs to
-  exactly one area.
+  next to the tool it concerns, and `areas.test.ts` checks every tool
+  belongs to exactly one area.
+- The keywords decide most questions and are German and English word
+  stems; a question in other words costs the model stage, and a question
+  that names an area in passing ("steuerfrei" for a PV system) gets that
+  area too. Both only add tokens, never take a tool away: every area stays
+  one `switch_area` away, and a tool called by name runs.
 - The prompt cache breaks if the area block precedes the fixed part; the
   order in the prompt is part of stage 1 and checked with the
   `prompt_tokens` timings.

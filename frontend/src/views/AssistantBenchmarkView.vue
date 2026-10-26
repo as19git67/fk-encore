@@ -37,6 +37,7 @@ import {
   type BenchRunDetail,
   type BenchRunSummary,
   type BenchStatus,
+  type BenchSummary,
 } from '../api/assistantBenchmark'
 
 const POLL_MS = 2000
@@ -99,9 +100,25 @@ function callText(c: BenchCaseRun['calls'][number]): string {
 }
 
 /** The road a case took, in one line: first tool, nudges, prompt of round 1. */
+const ROUTING_LABEL: Record<NonNullable<BenchCaseRun['routing']>, string> = {
+  keywords: 'Stichwörter',
+  inherited: 'vom Vortext',
+  model: 'Modell',
+  all: 'keine Entscheidung',
+}
+
+function routedText(routed: BenchSummary['routed']): string {
+  if (!routed) return '–'
+  const parts = (Object.keys(ROUTING_LABEL) as Array<keyof typeof ROUTING_LABEL>)
+    .filter((k) => routed[k])
+    .map((k) => `${ROUTING_LABEL[k]} ${routed[k]}`)
+  return parts.join(' · ') || '–'
+}
+
 function roadText(r: BenchCaseRun): string {
   if (r.first_tool === undefined) return '–'
   const parts = [r.first_tool ?? 'kein Werkzeug']
+  if (r.areas) parts.push(`${r.routing === 'all' ? 'alle Bereiche' : r.areas.join('+')} (${ROUTING_LABEL[r.routing ?? 'all']})`)
   if (r.nudges) parts.push(`${r.nudges}× zurück`)
   if (r.prompt_tokens_first) parts.push(`${r.prompt_tokens_first} Tokens`)
   return parts.join(' · ')
@@ -362,6 +379,7 @@ function remove(run: BenchRunSummary) {
           <div class="tile"><dt>Erstes Werkzeug richtig</dt><dd>{{ percent(selected.summary.first_tool_hit_rate) }}</dd></div>
           <div class="tile"><dt>Zurückgeschickt</dt><dd>{{ selected.summary.nudges ?? '–' }}</dd></div>
           <div class="tile"><dt>Prompt Runde 1 (Median)</dt><dd>{{ selected.summary.median_prompt_tokens_first ?? '–' }}</dd></div>
+          <div class="tile"><dt>Bereiche gewählt durch</dt><dd>{{ routedText(selected.summary.routed) }}</dd></div>
         </dl>
 
         <ScrollX v-if="selected.results.length">
