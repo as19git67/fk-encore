@@ -290,6 +290,27 @@ def test_server_tool_call_is_checked_and_passed_on(use_llm):
     assert "response_format" not in payload
 
 
+def test_server_sends_a_bound_call_as_the_one_tool_with_required(use_llm):
+    """llama-server reads tool_choice as a string, so a named function goes as that tool alone plus "required"."""
+    llm = FakeServer(message={
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "p", "type": "function", "function": {"name": "create_album", "arguments": '{"name":"Sommer"}'}}],
+    })
+    client = use_llm(llm)
+
+    resp = client.post("/chat", json={
+        "messages": [QUESTION], "tools": TOOLS,
+        "tool_choice": {"type": "function", "function": {"name": "create_album"}},
+    })
+
+    assert resp.status_code == 200
+    assert resp.json()["message"]["tool_calls"][0]["function"]["name"] == "create_album"
+    payload = llm.payloads[0]
+    assert [t["function"]["name"] for t in payload["tools"]] == ["create_album"]
+    assert payload["tool_choice"] == "required"
+
+
 def test_server_passes_response_format_and_thinking_through(use_llm):
     llm = FakeServer(message={"role": "assistant", "content": '{"steps": ["a", "b"]}'})
     client = use_llm(llm)

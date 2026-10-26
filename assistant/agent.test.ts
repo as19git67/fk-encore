@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -1125,5 +1125,47 @@ describe("the checker (stage 5 of assistent-wegfindung.md)", () => {
     const res2 = await run(denied.fn, { user: noFinance, tools: catalogFor(noFinance) });
     expect(res2.answer).toBe("Für Finanzen fehlt dir die Berechtigung.");
     expect(denied.requests).toHaveLength(1);
+  });
+});
+
+describe("what the GPU run of 2026-10-26 showed (assistent-wegfindung.md, measurements)", () => {
+  it("a plan call answered with a real tool call runs that call as round 1 instead of losing it", async () => {
+    clients.documents.listCorrespondents.mockResolvedValue({ items: [] });
+    clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [], total: 0 });
+    clients.documents.listDocuments.mockResolvedValue({ items: [], total: 0 });
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const { fn, requests } = scripted([
+      // The bound plan call, answered with a search instead of a plan.
+      calls(["search_documents", { q: "Musterfirma" }]),
+      answer("Keine Rechnungen und keine Zahlungen der Musterfirma gefunden."),
+    ]);
+    const res = await runTurn({
+      user: USER, history: [], question: "Welche Rechnungen der Musterfirma habe ich und welche Buchungen dazu?",
+      tools: catalogFor(USER), chat: fn, now: NOW,
+    });
+    expect(requests[0]!.tool_choice).toEqual({ type: "function", function: { name: WRITE_PLAN_NAME } });
+    expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledTimes(1);
+    expect(res.planOutcome).toBe("tool_call");
+    expect(res.plan).toBeUndefined();
+    // Two model calls, two rounds: the plan call was round 1.
+    expect(requests).toHaveLength(2);
+    expect(res.rounds).toBe(2);
+    expect(res.answer).toBe("Keine Rechnungen und keine Zahlungen der Musterfirma gefunden.");
+  });
+
+  it("an empty first reply is asked once more with the tools, never sent back as an assistant message without content", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const { fn, requests } = scripted([
+      answer(""),
+      calls(["list_transactions", { q: "Baumarkt" }]),
+      answer("Keine Buchungen vom Baumarkt."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "Zeig mir die Buchungen vom Baumarkt", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: EMPTY_REPLY_NUDGE });
+    expect(requests[1]!.messages.some((m) => m.role === "assistant" && m.content === null && !m.tool_calls?.length)).toBe(false);
+    expect(requests[1]!.tools?.length).toBeGreaterThan(0);
+    expect(res.answer).toBe("Keine Buchungen vom Baumarkt.");
+    expect(res.rounds).toBe(3);
+    expect(JSON.stringify(res.transcript)).not.toContain('"content":null,"tool_calls":[]');
   });
 });

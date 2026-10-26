@@ -107,6 +107,7 @@ export interface BenchCaseRun {
   errors_corrected?: number
   /** Stage 3: the router asked for a plan; the planned tools and how many steps got done. */
   plan_asked?: boolean
+  plan_reply?: 'plan' | 'tool_call' | 'none'
   plan?: string[]
   plan_done?: number
   /** Stage 4: the case came with earlier turns. */

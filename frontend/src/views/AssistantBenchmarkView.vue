@@ -123,7 +123,7 @@ function roadText(r: BenchCaseRun): string {
   if (r.empty_results) parts.push(`${r.empty_followed ?? 0}/${r.empty_results} leere Ergebnisse weiterverfolgt`)
   if (r.tool_errors) parts.push(`${r.errors_corrected ?? 0}/${r.tool_errors} Fehler korrigiert`)
   if (r.plan) parts.push(`Plan ${r.plan_done ?? 0}/${r.plan.length}: ${r.plan.join(' → ')}`)
-  else if (r.plan_asked) parts.push('Plan erbeten, keiner geschrieben')
+  else if (r.plan_asked) parts.push(r.plan_reply === 'tool_call' ? 'Plan erbeten, Modell rief stattdessen ein Werkzeug' : 'Plan erbeten, keiner geschrieben')
   if (r.follow_up) parts.push('Rückfrage')
   if (r.checks) parts.push(`Prüfer ${r.check_failed ?? 0}/${r.checks} Einwände${r.unverified ? ', Hinweis in der Antwort' : ''}`)
   if (r.prompt_tokens_first) parts.push(`${r.prompt_tokens_first} Tokens`)
