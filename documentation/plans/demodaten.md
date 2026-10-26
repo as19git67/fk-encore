@@ -50,7 +50,7 @@ result.
 | Determinism | A seeded PRNG (`demo/random.ts`) decides everything the code decides; the same seed gives the same skeleton. The LLM-written text varies between runs, the skeleton (dates, amounts, which document belongs to which booking) does not. |
 | Two text sources | `text: "llm"` lets the local model write the texts; `text: "template"` fills the same skeleton from fixed templates in seconds and without the llm-service. The admin button uses `llm`; tests, CI and the assistant benchmark use `template`. |
 | Ground truth | The generator knows what each document is (kind, sender, date, amount, tax role, matching booking). It keeps that in `demo_truth` and reports, after the pipeline has run, how often the classification hit: category, sender, date, amount, tax role, booking match. This is the measurement the demo is for; it is shown on the Systemstatus page after the run. The figure flatters the model a little, since the same model wrote and reads the text; the plan says so on the page. |
-| Migrations | Next free number at the time of implementation (0278 is taken on main, 0277 by the photo book PR); `_journal.json` updated with it. |
+| Migrations | Next free number at the time of implementation (0280 or later today: 0278 is on main, 0279 is taken by the photo book PR), with an entry in `_journal.json` whose `when` is later than every existing one, or Drizzle skips it. |
 
 ## How the data is made
 
