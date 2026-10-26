@@ -43,6 +43,44 @@ export interface CaseRun {
   routing?: RoutingStage;
   /** Milliseconds of the router's model call, when there was one; the loop rounds are in `rounds_ms`. */
   router_ms?: number | null;
+  // ── tools written for the model (stage 2) ──
+  /** Tool results with no rows, and how many of them the model followed with another call instead of answering. */
+  empty_results?: number;
+  empty_followed?: number;
+  /** Tool calls that ended in an error (refused arguments or a failing tool), and how many the model followed with a corrected call of the same tool. */
+  tool_errors?: number;
+  errors_corrected?: number;
+}
+
+/** One call as the loop logged it: with its row count or error, never row content. */
+interface TraceEntry {
+  tool: string;
+  args: Record<string, unknown>;
+  rows: number;
+  error?: string;
+}
+
+/**
+ * The stage-2 counts from a turn's trace: an empty result is "followed" when
+ * any call comes after it; an error is "corrected" when the same tool runs
+ * later with other arguments and no error.
+ */
+export function followUps(trace: TraceEntry[]): Pick<CaseRun, "empty_results" | "empty_followed" | "tool_errors" | "errors_corrected"> {
+  let empty_results = 0;
+  let empty_followed = 0;
+  let tool_errors = 0;
+  let errors_corrected = 0;
+  trace.forEach((entry, i) => {
+    const later = trace.slice(i + 1);
+    if (entry.error) {
+      tool_errors++;
+      if (later.some((e) => e.tool === entry.tool && !e.error && JSON.stringify(e.args) !== JSON.stringify(entry.args))) errors_corrected++;
+    } else if (entry.rows === 0) {
+      empty_results++;
+      if (later.length) empty_followed++;
+    }
+  });
+  return { empty_results, empty_followed, tool_errors, errors_corrected };
 }
 
 export interface RunnerDeps {
@@ -67,15 +105,34 @@ export function benchNow(): Date {
   return new Date(y, m - 1, d, 12, 0, 0);
 }
 
+/**
+ * A canned result as the case wrote it. `{ $sequence: [a, b] }` hands the
+ * first call a, the second b and every later call the last entry, so a case
+ * can show an empty result and then rows. `rows: []` counts as no rows,
+ * `hint` goes along as the tool's hint, and `{ $error: "…" }` fails the call
+ * as a tool would.
+ */
 function cannedTools(c: BenchCase, tools: ToolSpec[]): ToolSpec[] {
+  const calls = new Map<string, number>();
   return tools.map((tool) => ({
     ...tool,
     async run() {
-      const result = c.results[tool.name] ?? { error: "no data for this tool in the benchmark" };
+      const n = calls.get(tool.name) ?? 0;
+      calls.set(tool.name, n + 1);
+      let result: unknown = c.results[tool.name] ?? { error: "no data for this tool in the benchmark" };
+      if (result && typeof result === "object" && Array.isArray((result as { $sequence?: unknown }).$sequence)) {
+        const seq = (result as { $sequence: unknown[] }).$sequence;
+        result = seq[Math.min(n, seq.length - 1)];
+      }
+      const record = result && typeof result === "object" && !Array.isArray(result) ? result as Record<string, unknown> : null;
+      if (typeof record?.$error === "string") throw new Error(record.$error);
+      const { hint, ...rest } = record ?? {};
+      const rows = Array.isArray(rest.rows) ? rest.rows.length : undefined;
       return {
-        text: JSON.stringify(result),
+        text: JSON.stringify(record ? rest : result),
         digest: `[benchmark result of ${tool.name}]`,
-        rowCount: 1,
+        rowCount: rows ?? 1,
+        hint: typeof hint === "string" ? hint : undefined,
       };
     },
   }));
@@ -84,6 +141,7 @@ function cannedTools(c: BenchCase, tools: ToolSpec[]): ToolSpec[] {
 export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<CaseRun> {
   const rounds_ms: number[] = [];
   const calls: BenchCall[] = [];
+  const trace: TraceEntry[] = [];
   let nudges = 0;
   let prompt_tokens_first: number | null = null;
   let router_ms: number | null = null;
@@ -120,7 +178,10 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       context: c.context,
       withSlot: deps.withSlot,
       emit: (event) => { if (event.type === "retract") nudges++; },
-      log: (entry) => calls.push({ tool: entry.tool, args: entry.arguments }),
+      log: (entry) => {
+        calls.push({ tool: entry.tool, args: entry.arguments });
+        trace.push({ tool: entry.tool, args: entry.arguments, rows: entry.rows, error: entry.error });
+      },
       routeModel: true,
     });
     areas = result.areas;
@@ -146,5 +207,6 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     areas,
     routing,
     router_ms,
+    ...followUps(trace),
   };
 }

@@ -7,6 +7,7 @@ import { feed, photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
+import { loosenHint, periodLabel, type Probe, type ProbeCount } from "./hints";
 
 const PHOTOS = ["module.photos", "photos.view"];
 
@@ -145,10 +146,52 @@ function excerpt(text: string | undefined, max = 60): string | undefined {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
+/** The filters of one `list_photos` call, as the photo service takes them. */
+interface PhotoFilter {
+  favorite?: boolean; dateFrom?: string; dateTo?: string; personIds?: string; personMode?: string;
+  locationText?: string; hasDescription?: boolean; text?: string; keyword?: string; sight?: string;
+  orientation?: string; mediaTypes?: string; hasGps?: boolean; qualityMin?: number;
+}
+
+/** Photos a probe reads at most; past it the hint says "200+". */
+const PROBE_PAGE = 200;
+
+async function photoCount(filter: PhotoFilter, hidden: HiddenChoice): Promise<ProbeCount> {
+  const res = (await photo.listPhotos({ ...filter, hiddenMode: hidden, limit: PROBE_PAGE + 1 })) as unknown as { photos: unknown[] };
+  return { n: Math.min(res.photos.length, PROBE_PAGE), atLeast: res.photos.length > PROBE_PAGE };
+}
+
+/**
+ * Nothing found: the same query with each filter dropped in turn, and with
+ * the hidden photos counted in (stage 2 of assistent-wegfindung.md).
+ */
+async function emptyPhotosHint(filter: PhotoFilter, hidden: HiddenChoice, previous: boolean): Promise<string> {
+  if (previous) {
+    return "No photos of the previous result match these filters. To search all photos instead, call again without from_previous_result; otherwise tell the user none of those photos match.";
+  }
+  const probes: Probe[] = [];
+  const without = (patch: Partial<PhotoFilter>): (() => Promise<ProbeCount>) => () => photoCount({ ...filter, ...patch }, hidden);
+  if (filter.favorite) probes.push({ label: "favorite", count: without({ favorite: undefined }) });
+  if (filter.dateFrom || filter.dateTo) probes.push({ label: periodLabel(filter.dateFrom, filter.dateTo), count: without({ dateFrom: undefined, dateTo: undefined }) });
+  if (filter.personIds) probes.push({ label: `person_ids ${filter.personIds}`, count: without({ personIds: undefined, personMode: undefined }) });
+  if (filter.locationText) probes.push({ label: `place ${JSON.stringify(filter.locationText)}`, count: without({ locationText: undefined }) });
+  if (filter.text) probes.push({ label: `text ${JSON.stringify(filter.text)}`, count: without({ text: undefined }) });
+  if (filter.keyword) probes.push({ label: `keyword ${JSON.stringify(filter.keyword)}`, count: without({ keyword: undefined }) });
+  if (filter.sight) probes.push({ label: `sight ${JSON.stringify(filter.sight)}`, count: without({ sight: undefined }) });
+  if (filter.orientation) probes.push({ label: `orientation ${filter.orientation}`, count: without({ orientation: undefined }) });
+  if (filter.mediaTypes) probes.push({ label: `media_type ${filter.mediaTypes}`, count: without({ mediaTypes: undefined }) });
+  if (filter.hasGps !== undefined) probes.push({ label: `has_gps ${filter.hasGps}`, count: without({ hasGps: undefined }) });
+  if (filter.hasDescription !== undefined) probes.push({ label: `has_description ${filter.hasDescription}`, count: without({ hasDescription: undefined }) });
+  if (filter.qualityMin !== undefined) probes.push({ label: `quality_min ${filter.qualityMin}`, count: without({ qualityMin: undefined }) });
+  if (!probes.length) return loosenHint("photos", []);
+  if (hidden === "exclude") probes.push({ label: "hidden photos left out (hidden include instead)", count: () => photoCount(filter, "include") });
+  return loosenHint("photos", probes);
+}
+
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: "Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), ranked by date, quality, aesthetics, a person's face, favourites of all users or comments (rank_by, direction), optionally the first of every year, month or place (group_by); or narrows the previous photo result.",
+  summary: "Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), ranked by date, quality, aesthetics, a person's face, favourites of all users or comments (rank_by, direction), optionally the first of every year, month or place (group_by); or narrows the previous photo result. For what the image shows ('Strand', 'Hund') use search_photos instead.",
   permissions: PHOTOS,
   source: "hand",
   parameters: {
@@ -255,6 +298,7 @@ export const listPhotos: ToolSpec = {
     }
 
     const count = rows.length;
+    const hint = count ? undefined : await emptyPhotosHint(filter, hidden, !!previous);
     // Grouped: the rows become the first of every group; the count stays the
     // count of what matched, so "more than 2000" still says it was capped.
     const groups = grouping ? groupRows(rows, (p) => groupKey(p, grouping.by), grouping.perGroup) : undefined;
@@ -293,6 +337,7 @@ export const listPhotos: ToolSpec = {
       ),
       digest: digestOf("list_photos", groups ? shownRows.length : count, resultIds),
       rowCount: groups ? shownRows.length : count,
+      hint,
       // Grouped, the result is the picks: a follow-up (an album) takes them, not everything that matched.
       ref: { type: "photo", ids: resultIds },
       block: {
@@ -411,7 +456,7 @@ export const searchPhotos: ToolSpec = {
   name: "search_photos",
   kind: "read",
   refines: true,
-  summary: "Search over what the image shows (German works), e.g. 'Strand'. Not for places: use list_photos(place).",
+  summary: "Search over what the image shows (German works), e.g. 'Strand', 'Hund'. Only for the picture's content: for dates, persons, places, favorites or quality use list_photos instead.",
   permissions: PHOTOS,
   source: "hand",
   parameters: {

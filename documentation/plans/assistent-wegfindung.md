@@ -224,6 +224,57 @@ schemas grew by about 570 tokens). Every later stage builds on that state:
 the list tools are not changed in parallel, and the rest of stage 2 takes
 these parameters as given.
 
+### Stage 2 (implemented)
+
+- **Arguments checked before the call** (`assistant/arguments.ts`): the
+  loop holds every call against the tool's own schema before it runs —
+  unknown arguments (with the name most likely meant: `acount_id` →
+  `account_id`), missing required ones, wrong types, values outside an
+  enum, dates that are a year, a month or a German date instead of a day
+  (with the day to use: `from: "2025"` → `2025-01-01`). Such a call does
+  not run; its result is `error: <tool> was not run: …. Call <tool> again
+  with the corrected arguments.` Before, a tool swallowed what it did not
+  understand (`kind: "purchase"` became "every kind") and the model read a
+  true-looking answer to a question it never asked. A refused call is not
+  counted as made, so the corrected one runs.
+- **Empty results say what to loosen** (`assistant/tools/hints.ts`,
+  `ToolOutcome.hint`): `list_transactions`, `search_documents` and
+  `list_photos` run, on no rows, the same query once per filter the call
+  set with that filter dropped (side by side, at most six, one service call
+  each) and report the counts: `No bookings match. The same call with one
+  filter dropped: without q "Flug": 412; without the period
+  2026-09-01..2026-09-30: 3. Call again with the one filter dropped that
+  keeps what the user asked for …`. With one filter set, dropping it is
+  everything, and the hint says to tell the user instead; with none set,
+  the user has none of these at all. `search_documents` also counts the
+  word search (`mode: fts`) as hybrid, `list_photos` the hidden photos
+  included; a narrowing of an earlier result points to the search over all
+  photos. Every other tool with no rows and a filtered call gets the loop's
+  general hint (`EMPTY_RESULT_HINT`). The general rules tell the model to
+  act on a hint once and on an error at once, and never to repeat a call.
+- **Errors tell what to do**: a failing tool's error ends with "Fix what it
+  names and call again, or use another tool; do not repeat the same call."
+- **Lines between overlapping tools**, in their summaries: `list_photos` ↔
+  `search_photos` (metadata vs. what the image shows), `latest_readings` ↔
+  `consumption_report`, `position_detail` ↔ `depot_transactions` ↔
+  `portfolio_overview`/`quotes`. The enums the stage table asks for
+  (`kind`, `channel`, `rank_by`, `hidden`, `mode`, `direction`) were
+  already enums; the checker now enforces them.
+- **Measured**: each case records `empty_results`/`empty_followed` (empty
+  results the model followed with another call) and
+  `tool_errors`/`errors_corrected` (errors followed by a corrected call of
+  the same tool); the summary has `empty_follow_rate` and `error_fix_rate`,
+  the page two tiles. Canned results may be a `$sequence` (first call,
+  second call …), carry `rows: []` and a `hint`, or fail with `$error`;
+  two new cases (`empty-then-loosen-period`, `empty-nothing-to-loosen`)
+  check the two roads. The real probes run only against real data — the
+  synthetic-database mode of stage 6 part 2 is where they get measured.
+- **Left out on purpose**: namespaces (`finance_*`, `photos_*`). The areas
+  of stage 1 give the model the grouping the prefixes were for, and
+  renaming 48 tools would break every history digest, feedback trace and
+  benchmark case for no second gain. Merging tool pairs: none overlaps
+  enough; the lines in the summaries do the work.
+
 ### Stage 6, part 2 (open)
 
 - A benchmark mode against a synthetic test database, so that search,

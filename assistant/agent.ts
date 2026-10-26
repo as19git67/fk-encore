@@ -24,6 +24,7 @@ import {
   toolDefinition,
 } from "./catalog";
 import { accessSection, saysPermissionMissing, userAccess } from "./access";
+import { argumentError, checkArguments } from "./arguments";
 import { AREAS, AREA_IDS, areaById, homeOf, toolsOfArea, type Area, type AreaId } from "./areas/index";
 import { route, type RoutingStage } from "./router";
 import { contextSection, type ContextRef } from "./briefs";
@@ -35,6 +36,7 @@ import type {
   RefType,
   ResultBlock,
   ResultRef,
+  ToolOutcome,
   ToolSpec,
   TurnEvent,
 } from "./types";
@@ -166,7 +168,7 @@ Rules:
 - The tools below are those of the areas this question seems to need. When it needs another area, call ${SWITCH_AREA_NAME}(area) first: that adds the area's rules and tools for this turn. Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
-- If a tool finds nothing, say so plainly and suggest how to search differently.
+- A tool result with no rows says which filter to loosen and how many rows that brings: call the tool again once with that filter dropped before you tell the user nothing exists. A tool error names the argument and the allowed values: fix that argument and call again; never repeat the same call, and never answer as if the call had worked. When a tool finds nothing even so, say so plainly and name the criteria.
 - Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. To correct an earlier proposal (another layout, other text, other photos), call the write tool again with the changed arguments: that makes a new card under your answer, while the earlier card stays as it was and cannot be changed. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
 - When a table helps (a few rows compared by the same columns), write it as a Markdown table: a header row, then a separator row like |---|---:|, one row per line. The app shows it as a real table. Never draw tables with +---+, box characters or spaces, and never put a table in a code block.
@@ -465,6 +467,21 @@ function narrowingFamily(kind: string): string | null {
   return NARROWING_FAMILIES[kind] ?? null;
 }
 
+/**
+ * Sent back to the model for a result with no rows and no hint of its own:
+ * a call with arguments may have asked too narrowly, a call without has
+ * found that the user has none of these.
+ */
+export const EMPTY_RESULT_HINT = "No rows. Before you tell the user nothing exists, drop or widen one filter (the period, the text, the category) and call once more; if the question needs every filter, say that nothing matches and name the criteria.";
+
+/** The result text with its hint, or with the loop's general hint when it found nothing and said nothing about it. */
+export function withHint(outcome: ToolOutcome, args: Record<string, unknown>): string {
+  if (outcome.hint) return `${outcome.text}\n\n${outcome.hint}`;
+  const filtered = Object.values(args).some((v) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length));
+  if (outcome.rowCount === 0 && filtered) return `${outcome.text}\n\n${EMPTY_RESULT_HINT}`;
+  return outcome.text;
+}
+
 export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const now = input.now ?? new Date();
   const maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS;
@@ -739,6 +756,17 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         if (home) activate(home);
         offered.set(name, tool);
       }
+      // The arguments against the schema, before anything runs: a value the
+      // tool would have swallowed becomes an error that names it (stage 2 of
+      // assistent-wegfindung.md). A refused call may come again, corrected.
+      const problems = checkArguments(tool, args);
+      if (problems.length) {
+        const message = problems.join("; ");
+        result(argumentError(name, problems));
+        emit({ type: "tool_result", tool: name, rowCount: 0, error: message });
+        input.log?.({ tool: name, arguments: args, rows: 0, ms: 0, error: message });
+        continue;
+      }
       // Only a call that runs counts; a refused one may come again.
       seenCalls.add(key);
 
@@ -766,14 +794,16 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           }
           blocks.push(outcome.block);
         }
-        result(outcome.text);
+        result(withHint(outcome, args));
         emit({ type: "tool_result", tool: name, rowCount: outcome.rowCount, block: outcome.block });
         input.log?.({ tool: name, arguments: args, rows: outcome.rowCount, ms: Date.now() - started });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         // A refusal is not an empty result: the model passes it on as such.
         const denied = (err as { code?: unknown } | null)?.code === "permission_denied";
-        result(denied ? `error: ${name} failed: no access (permission_denied): ${message}` : `error: ${name} failed: ${message}`);
+        result(denied
+          ? `error: ${name} failed: no access (permission_denied): ${message}`
+          : `error: ${name} failed: ${message}. Fix what it names and call again, or use another tool; do not repeat the same call.`);
         emit({ type: "tool_result", tool: name, rowCount: 0, error: message });
         input.log?.({ tool: name, arguments: args, rows: 0, ms: Date.now() - started, error: message });
       }

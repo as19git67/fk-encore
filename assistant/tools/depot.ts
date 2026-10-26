@@ -144,7 +144,7 @@ export const portfolioOverview: ToolSpec = {
 export const positionDetail: ToolSpec = {
   name: "position_detail",
   kind: "read",
-  summary: "One security across the user's depots: holding, price, cost basis, gains, income, total return, share per depot, every sale with its gain, figures per year and its transactions. Key from portfolio_overview (ISIN or WKN).",
+  summary: "One security across the user's depots: holding, price, cost basis, gains, income, total return, share per depot, every sale with its gain, figures per year and its transactions. Key from portfolio_overview (ISIN or WKN). For the transactions of several securities, or of one kind (all dividends), use depot_transactions instead.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -197,7 +197,7 @@ export const positionDetail: ToolSpec = {
 export const depotTransactions: ToolSpec = {
   name: "depot_transactions",
   kind: "read",
-  summary: "Buys, sells, dividends and other depot transactions across the user's depots, newest first, with the sum of net amounts, fees and taxes the server computed; filter by security, kind and date range.",
+  summary: "Buys, sells, dividends and other depot transactions across the user's depots, newest first, with the sum of net amounts, fees and taxes the server computed; filter by security, kind and date range. For the value and gain of the holdings use portfolio_overview, for today's prices quotes.",
   permissions: FINANCE,
   source: "hand",
   parameters: {

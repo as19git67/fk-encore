@@ -118,6 +118,10 @@ export interface BenchSummary {
   median_prompt_tokens_first: number | null;
   /** How many cases each router stage decided (stage 1 of assistent-wegfindung.md). */
   routed: Partial<Record<RoutingStage, number>>;
+  /** Empty tool results the model followed with another call, over all empty results (stage 2); null without any. */
+  empty_follow_rate: number | null;
+  /** Tool errors the model followed with a corrected call of the same tool, over all tool errors (stage 2); null without any. */
+  error_fix_rate: number | null;
 }
 
 export interface CaseRunSummaryInput {
@@ -127,6 +131,18 @@ export interface CaseRunSummaryInput {
   nudges?: number;
   prompt_tokens_first?: number | null;
   routing?: RoutingStage;
+  empty_results?: number;
+  empty_followed?: number;
+  tool_errors?: number;
+  errors_corrected?: number;
+}
+
+function rate(part: number, whole: number): number | null {
+  return whole ? part / whole : null;
+}
+
+function total(runs: CaseRunSummaryInput[], key: "empty_results" | "empty_followed" | "tool_errors" | "errors_corrected"): number {
+  return runs.reduce((sum, r) => sum + (r[key] ?? 0), 0);
 }
 
 function median(values: number[]): number | null {
@@ -161,5 +177,7 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
       if (r.routing) acc[r.routing] = (acc[r.routing] ?? 0) + 1;
       return acc;
     }, {}),
+    empty_follow_rate: rate(total(runs, "empty_followed"), total(runs, "empty_results")),
+    error_fix_rate: rate(total(runs, "errors_corrected"), total(runs, "tool_errors")),
   };
 }
