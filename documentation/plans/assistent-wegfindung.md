@@ -138,7 +138,7 @@ starts first and runs beside the others.
 | Stage | What | Files | Metric |
 |---|---|---|---|
 | 1 Router and area packages | areas as data (tools, rule block, examples); router in three stages; `switch_area` as a tool; global `RULES` cut to what always holds; fixed prompt part first for the KV cache | `assistant/agent.ts`, `assistant/router.ts` (new), `assistant/areas/` (new), `assistant/catalog.ts` | prompt tokens per round (target under 6,000); share of right first tool |
-| 2 Tools written for the model | 0 rows: a hint what to loosen (without category, without period, sender instead of keyword) and how many rows that would bring; errors: which argument, which values; enums instead of strings (`kind`, `channel`, `order`, `hidden`); merge overlapping pairs or draw the line in the description ("use X instead when …"); namespaces `finance_*`, `photos_*`, `documents_*` | `assistant/tools/*.ts`, `assistant/format.ts` | share of 0-row rounds followed by another call; share of errors followed by a corrected call of the same tool |
+| 2 Tools written for the model | 0 rows: a hint what to loosen (without category, without period, sender instead of keyword) and how many rows that would bring; errors: which argument, which values; enums instead of strings (`kind`, `channel`, `rank_by`, `hidden`); merge overlapping pairs or draw the line in the description ("use X instead when …"); namespaces `finance_*`, `photos_*`, `documents_*` | `assistant/tools/*.ts`, `assistant/format.ts` | share of 0-row rounds followed by another call; share of errors followed by a corrected call of the same tool |
 | 3 Plan for multi-step questions | router sets `needs_plan` on two areas or chain words; round 1 produces a 2–4 step plan by grammar, carried and ticked off; pass `response_format` through for `/chat` on the server backend; try `enable_thinking` in round 1 only with a small budget | `assistant/agent.ts`, `llm-service/chat.py` | pass rate of the multi-area cases; median rounds |
 | 4 Context | history as a two-sentence summary per turn instead of an id list (written by the model at the end of the turn, grammar-bound); column selection per question in tool results; test the `q8_0` KV cache and raise `LLM_CTX` if latency allows | `assistant/agent.ts`, `assistant/assistant.ts`, llm-service config | pass rate of follow-ups on older results; `keptTurns` in `ContextUsage` |
 | 5 Checker instead of regex | grammar-bound call after the answer; on `wrong_area` back to the router once; regex stays as pre-filter; after two failed attempts tell the user in words | `assistant/agent.ts`, `assistant/verify.ts` (new) | answers with invented figures or names in the benchmark; latency per answer |
@@ -166,13 +166,19 @@ be smaller.
   replacing every real value with a made-up one; `DELETE
   /assistant/feedback/:id` removes an entry.
 
-### Stage 2, first step (in progress elsewhere)
+### Stage 2, first step (PR #1728)
 
-`rank_by`, `direction`, `group_by` and `per_group` for the photo, document
-and booking list tools ("die besten Fotos je Jahr mit Person X"), so a
-ranking the user asks for is one call with enums instead of a road the
-model has to find. Done in its own PR; the benchmark cases for it come
-with it.
+`rank_by`, `direction`, `group_by` and `per_group` on `list_photos`,
+`search_documents` and `list_transactions` ("die besten Fotos je Jahr mit
+Person X"), so a ranking the user asks for is one call with enums instead
+of a road the model has to find. The shared helper is
+`assistant/tools/ranking.ts`; `order` on `list_photos` and `sort` on
+`search_documents` are gone, both are `rank_by` plus `direction` now. PR
+#1728 also adds prompt example 13 and four benchmark cases, and raises the
+schema budget in `assistant/agent.ts` from 9000 to 10000 tokens (the
+schemas grew by about 570 tokens). Every later stage builds on that state:
+the list tools are not changed in parallel, and the rest of stage 2 takes
+these parameters as given.
 
 ### Stage 6, part 2 (open)
 
