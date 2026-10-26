@@ -5,7 +5,8 @@
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
 import Button from 'primevue/button'
-import type { Proposal, ResultBlock } from '../../api/assistant'
+import InputText from 'primevue/inputtext'
+import { giveFeedback, type FeedbackVerdict, type Proposal, type ResultBlock } from '../../api/assistant'
 import type { TurnStep } from '../../utils/assistantTurn'
 import { parseBlocks } from '../../utils/assistantMarkdown'
 import { mentionedIds } from '../../utils/assistantLinks'
@@ -64,6 +65,36 @@ async function copyMessage() {
 }
 
 onBeforeUnmount(() => { if (copiedTimer) clearTimeout(copiedTimer) })
+
+// A thumbs under a stored answer (stage 6 of assistent-wegfindung.md): a
+// thumbs-down opens one line for what went wrong, a thumbs-up goes at once.
+// The server keeps the turn behind the answer, so a wrong road can become a
+// benchmark case; a second thumbs replaces the first.
+const verdict = ref<FeedbackVerdict | null>(null)
+const commenting = ref(false)
+const comment = ref('')
+const sending = ref(false)
+const feedbackFailed = ref(false)
+
+async function sendFeedback(v: FeedbackVerdict) {
+  if (props.messageId === undefined) return
+  sending.value = true
+  feedbackFailed.value = false
+  try {
+    await giveFeedback(props.messageId, v, v === 'down' ? comment.value.trim() || undefined : undefined)
+    verdict.value = v
+    commenting.value = false
+  } catch {
+    feedbackFailed.value = true
+  } finally {
+    sending.value = false
+  }
+}
+
+function thumbsDown() {
+  if (verdict.value === 'down' && !commenting.value) return
+  commenting.value = !commenting.value
+}
 
 
 // A lookup that found nothing has its "· 0" in the steps above; an empty
@@ -183,8 +214,49 @@ function isFolded(i: number): boolean {
         v-tooltip.bottom="'Als Textdokument speichern'"
         @click="emit('keep', content)"
       />
-      <span class="copy-status" role="status">{{ copied ? 'Kopiert' : copyFailed ? 'Kopieren ging nicht' : '' }}</span>
+      <template v-if="messageId !== undefined && role === 'assistant'">
+        <Button
+          icon="pi pi-thumbs-up"
+          text
+          rounded
+          size="small"
+          :severity="verdict === 'up' ? 'success' : 'secondary'"
+          :class="['copy-button', { 'feedback--given': verdict === 'up' }]"
+          aria-label="Antwort war hilfreich"
+          :aria-pressed="verdict === 'up'"
+          v-tooltip.bottom="'Hilfreich'"
+          :disabled="sending"
+          @click="sendFeedback('up')"
+        />
+        <Button
+          icon="pi pi-thumbs-down"
+          text
+          rounded
+          size="small"
+          :severity="verdict === 'down' ? 'danger' : 'secondary'"
+          :class="['copy-button', { 'feedback--given': verdict === 'down' }]"
+          aria-label="Antwort war nicht hilfreich"
+          :aria-pressed="verdict === 'down'"
+          v-tooltip.bottom="'Nicht hilfreich'"
+          :disabled="sending"
+          @click="thumbsDown"
+        />
+      </template>
+      <span class="copy-status" role="status">{{ copied ? 'Kopiert' : copyFailed ? 'Kopieren ging nicht' : feedbackFailed ? 'Rückmeldung ging nicht' : verdict ? 'Danke' : '' }}</span>
     </div>
+
+    <form v-if="commenting" class="feedback-form" @submit.prevent="sendFeedback('down')">
+      <label for="feedback-comment" class="visually-hidden">Was war falsch?</label>
+      <InputText
+        id="feedback-comment"
+        v-model="comment"
+        size="small"
+        placeholder="Was war falsch? (optional)"
+        maxlength="2000"
+        autofocus
+      />
+      <Button type="submit" label="Senden" size="small" severity="secondary" :loading="sending" />
+    </form>
 
     <p v-if="error" class="error" role="alert">
       <i class="pi pi-exclamation-circle" aria-hidden="true" />
@@ -251,6 +323,23 @@ function isFolded(i: number): boolean {
 
 .copy-status:empty {
   display: none;
+}
+
+.feedback--given {
+  color: inherit;
+}
+
+.feedback-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  max-width: min(42rem, 100%);
+  margin-top: calc(-1 * var(--space-1));
+}
+
+.feedback-form > :first-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .text {

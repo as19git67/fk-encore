@@ -20,6 +20,12 @@ export interface CaseScore {
   passed: boolean;
   /** Expected calls no call matched, by tool name. */
   missing: string[];
+  /**
+   * The first call was one the case allows first (stage 6 of
+   * assistent-wegfindung.md). Null when the case expects no call, or none
+   * was made.
+   */
+  first_tool_hit?: boolean | null;
 }
 
 function loose(value: unknown): string {
@@ -64,17 +70,32 @@ export function callMatches(expect: ExpectedCall, call: BenchCall): boolean {
  * reach the right documents, so extra read calls are not penalised.
  */
 export function scoreCase(c: BenchCase, calls: BenchCall[], answered: boolean, answer: string | null = null): CaseScore {
+  const first_tool_hit = firstToolHit(c, calls);
   if (c.forbidTools && calls.length) {
-    return { tool_hit: false, args_hit: false, answered, passed: false, missing: ["no tool call expected"] };
+    return { tool_hit: false, args_hit: false, answered, passed: false, missing: ["no tool call expected"], first_tool_hit };
   }
   if (c.answerMatches && !(answer && new RegExp(c.answerMatches, "i").test(answer))) {
-    return { tool_hit: true, args_hit: true, answered, passed: false, missing: [`answer matching /${c.answerMatches}/`] };
+    return { tool_hit: true, args_hit: true, answered, passed: false, missing: [`answer matching /${c.answerMatches}/`], first_tool_hit };
   }
   const called = new Set(calls.map((x) => x.tool));
   const tool_hit = c.expect.every((e) => called.has(e.tool));
   const missing = c.expect.filter((e) => !calls.some((x) => callMatches(e, x))).map((e) => e.tool);
   const args_hit = missing.length === 0;
-  return { tool_hit, args_hit, answered, passed: tool_hit && args_hit && answered, missing };
+  return { tool_hit, args_hit, answered, passed: tool_hit && args_hit && answered, missing, first_tool_hit };
+}
+
+/**
+ * Did the turn start on the right road? `describe_tools` is the catalog's
+ * own step, not a choice, so the first real tool counts. Null where the
+ * case has no expectation to compare with.
+ */
+export function firstToolHit(c: BenchCase, calls: BenchCall[]): boolean | null {
+  const first = calls.find((x) => x.tool !== "describe_tools")?.tool;
+  if (c.forbidTools) return calls.length ? false : null;
+  if (!first) return null;
+  const allowed = c.firstTools ?? c.expect.map((e) => e.tool);
+  if (!allowed.length) return null;
+  return allowed.includes(first);
 }
 
 export interface BenchSummary {
@@ -89,12 +110,19 @@ export interface BenchSummary {
   p90_ms_per_round: number | null;
   median_rounds_per_case: number | null;
   max_rounds_used: number | null;
+  /** Cases whose first call was an allowed one, over the cases with a verdict (stage 6). */
+  first_tool_hit_rate: number | null;
+  /** Drafts the loop sent back (grounding, fake call, consent …), over all cases. */
+  nudges: number;
+  median_prompt_tokens_first: number | null;
 }
 
 export interface CaseRunSummaryInput {
   rounds_ms: number[];
   error: string | null;
   score: CaseScore;
+  nudges?: number;
+  prompt_tokens_first?: number | null;
 }
 
 function median(values: number[]): number | null {
@@ -109,6 +137,7 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
   const roundMs = runs.flatMap((r) => r.rounds_ms);
   const perCase = runs.filter((r) => r.rounds_ms.length).map((r) => r.rounds_ms.length);
   const sorted = [...roundMs].sort((a, b) => a - b);
+  const judged = runs.filter((r) => typeof r.score.first_tool_hit === "boolean");
   return {
     cases: runs.length,
     passed: runs.filter((r) => r.score.passed).length,
@@ -121,5 +150,8 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
     p90_ms_per_round: sorted.length ? sorted[Math.floor(0.9 * (sorted.length - 1))] : null,
     median_rounds_per_case: median(perCase),
     max_rounds_used: perCase.length ? Math.max(...perCase) : null,
+    first_tool_hit_rate: judged.length ? judged.filter((r) => r.score.first_tool_hit).length / judged.length : null,
+    nudges: runs.reduce((sum, r) => sum + (r.nudges ?? 0), 0),
+    median_prompt_tokens_first: median(runs.map((r) => r.prompt_tokens_first).filter((v): v is number => typeof v === "number")),
   };
 }

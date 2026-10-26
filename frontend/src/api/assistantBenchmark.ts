@@ -44,6 +44,10 @@ export interface BenchSummary {
   p90_ms_per_round: number | null
   median_rounds_per_case: number | null
   max_rounds_used: number | null
+  /** The road taken (stage 6 of assistent-wegfindung.md); missing on older runs. */
+  first_tool_hit_rate?: number | null
+  nudges?: number
+  median_prompt_tokens_first?: number | null
 }
 
 export type BenchStatus = 'running' | 'done' | 'failed' | 'cancelled'
@@ -69,7 +73,34 @@ export interface BenchCaseRun {
   calls: { tool: string; args: Record<string, unknown> }[]
   answer: string | null
   error: string | null
-  score: { tool_hit: boolean; args_hit: boolean; answered: boolean; passed: boolean; missing: string[] }
+  score: { tool_hit: boolean; args_hit: boolean; answered: boolean; passed: boolean; missing: string[]; first_tool_hit?: boolean | null }
+  /** The road taken; missing on older runs. */
+  rounds?: number
+  first_tool?: string | null
+  nudges?: number
+  prompt_tokens_first?: number | null
+}
+
+/** One call of the turn behind an answer the user judged: never the rows it returned. */
+export interface FeedbackTraceEntry {
+  tool: string
+  arguments: Record<string, unknown>
+  rows: number | null
+  error: string | null
+}
+
+export interface FeedbackEntry {
+  id: number
+  verdict: 'up' | 'down'
+  comment: string | null
+  question: string
+  trace: FeedbackTraceEntry[]
+  answer: string
+  conversation_id: number | null
+  message_id: number | null
+  created_at: string
+  /** A benchmark case skeleton as JSON, to paste into `bench/cases.ts` after anonymising. */
+  case_draft: string
 }
 
 export interface BenchRunDetail extends BenchRunSummary {
@@ -98,4 +129,12 @@ export function cancelBenchRun(id: number): Promise<BenchRunSummary> {
 
 export function deleteBenchRun(id: number): Promise<{ deleted: boolean }> {
   return apiFetch(`/assistant/benchmark/runs/${id}`, { method: 'DELETE' })
+}
+
+export function listFeedback(): Promise<{ entries: FeedbackEntry[] }> {
+  return apiFetch('/assistant/feedback')
+}
+
+export function deleteFeedback(id: number): Promise<{ deleted: boolean }> {
+  return apiFetch(`/assistant/feedback/${id}`, { method: 'DELETE' })
 }

@@ -4871,6 +4871,34 @@ export const assistantBenchmarkRun = pgTable(
   (table) => [index("assistant_benchmark_run_by_start").on(table.started_at)],
 );
 
+/**
+ * A thumbs-up or -down under an answer (migration 0276, stage 6 of
+ * documentation/plans/assistent-wegfindung.md). The question, the tool
+ * trace of that turn (tool, arguments, row count, error — never row
+ * content) and the answer are copied in, so an entry outlives its
+ * conversation and can become a benchmark case. One entry per answer; a
+ * second thumbs replaces the first.
+ */
+export const assistantFeedback = pgTable(
+  "assistant_feedback",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    conversation_id: integer("conversation_id").references(() => assistantConversation.id, { onDelete: "set null" }),
+    message_id: integer("message_id").references(() => assistantMessage.id, { onDelete: "set null" }),
+    verdict: text("verdict").$type<"up" | "down">().notNull(),
+    comment: text("comment"),
+    question: text("question").notNull(),
+    trace: jsonb("trace").$type<Array<{ tool: string; arguments: Record<string, unknown>; rows: number | null; error: string | null }>>().notNull().default([]),
+    answer: text("answer").notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("assistant_feedback_by_message").on(table.message_id),
+    index("assistant_feedback_by_created").on(table.created_at),
+  ],
+);
+
 // ========== Nightly aesthetic scoring (documentation/plans/foto-aesthetik.md) ==========
 
 /** Whether the nightly job runs, and the local time window it may use the GPU in. One row. */
