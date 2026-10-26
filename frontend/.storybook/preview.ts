@@ -37,6 +37,8 @@ const router = createRouter({
     { path: '/albums/shared/:token', component: { template: '<div />' } },
     { path: '/fotos/personen', component: { template: '<div />' } },
     { path: '/fotos/rueckblicke', name: 'fotos-recaps', component: { template: '<div />' } },
+    { path: '/fotos/fotobuecher', name: 'fotos-photo-books', component: { template: '<div />' } },
+    { path: '/fotos/fotobuecher/:id', name: 'fotos-photo-book', component: { template: '<div />' } },
     { path: '/fotos/feed', name: 'fotos-feed', component: { template: '<div />' } },
     { path: '/fotos/galerie', name: 'fotos-gallery', component: { template: '<div />' } },
     { path: '/fotos/review-queue', name: 'fotos-review-queue', component: { template: '<div />' } },

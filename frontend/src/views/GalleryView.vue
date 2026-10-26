@@ -70,6 +70,7 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
+import PhotoBookCreateDialog from '../components/photobook/PhotoBookCreateDialog.vue'
 import { useAtLeast, useBelow } from '../composables/useBreakpoint'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import type { FilterChip } from '../components/layout/listToolbar'
@@ -438,6 +439,9 @@ function openCollageDialog() {
   collageDialogVisible.value = true
 }
 
+// "Fotobuch gestalten" from the selection (documentation/plans/fotobuch.md).
+const photoBookDialogVisible = ref(false)
+
 // ── Share selected photos (1..n) ─────────────────────────────────────────────
 const sharingPhotos = ref(false)
 /**
@@ -592,6 +596,7 @@ const selectionActions = computed<ToolbarItem[]>(() => {
     command: () => void shareSelectedPhotos(),
   })
   if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  push({ key: 'photo-book', title: 'Fotobuch gestalten', icon: 'pi pi-print', command: () => (photoBookDialogVisible.value = true) })
   if (auth.hasPermission('module.assistant') && selectedCount.value <= MAX_ASSISTANT_CONTEXT) {
     push({
       key: 'assistant',
@@ -2038,6 +2043,11 @@ void refreshReviewSequence()
     <!-- Collage creator (entry point in the gallery's selection bar) -->
     <CollageDialog
       v-model:visible="collageDialogVisible"
+      :photo-ids="collagePhotoIds"
+    />
+
+    <PhotoBookCreateDialog
+      v-model:visible="photoBookDialogVisible"
       :photo-ids="collagePhotoIds"
     />
 

@@ -55,6 +55,18 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'photos.view' },
       },
       {
+        path: 'fotobuecher',
+        name: 'fotos-photo-books',
+        component: () => import('../views/PhotoBooksView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
+        path: 'fotobuecher/:id',
+        name: 'fotos-photo-book',
+        component: () => import('../views/PhotoBookDetailView.vue'),
+        meta: { permission: 'photos.view' },
+      },
+      {
         path: 'personen',
         name: 'fotos-people',
         component: () => import('../views/PersonsView.vue'),
@@ -127,6 +139,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Alben', icon: 'pi pi-folder-open', routeName: 'fotos-albums', permission: 'photos.view' },
       { label: 'Aktivität', icon: 'pi pi-bell', routeName: 'fotos-feed', permission: 'photos.view' },
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },
+      { label: 'Fotobücher', icon: 'pi pi-book', routeName: 'fotos-photo-books', permission: 'photos.view' },
       { label: 'Personen', icon: 'pi pi-users', routeName: 'fotos-people', permission: 'people.view' },
       { label: 'Gruppen-Review', icon: 'pi pi-bolt', routeName: 'fotos-review-queue', permission: 'photos.view' },
       {
