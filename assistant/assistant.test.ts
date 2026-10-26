@@ -20,6 +20,7 @@ import { chat, LlmServiceUnavailableError, type ChatReply } from "./llm-client";
 import { __resetLiveTurnsForTests } from "./live";
 import { isRouterRequest } from "./router";
 import { isSummaryRequest, SUMMARIZE_TURN_NAME } from "./summary";
+import { CHECK_ANSWER_NAME, isCheckRequest } from "./verify";
 import {
   __settleSummariesForTests,
   ask,
@@ -71,6 +72,8 @@ function scriptWithSummaries(replies: ChatReply[], summary: string | null = "Zus
         ? text("kein Werkzeugaufruf")
         : toolCall(SUMMARIZE_TURN_NAME, { summary });
     }
+    // The checker (stage 5) runs only when the test switches ASSISTANT_VERIFY on; then every answer is grounded.
+    if (isCheckRequest(req)) return toolCall(CHECK_ANSWER_NAME, { grounded: true, missing: "", wrong_area: "none" });
     const next = queue.shift();
     if (!next) throw new Error("script ran out");
     return next;
@@ -133,6 +136,24 @@ describe("asking", () => {
       ["assistant", "Der Stromzähler stand zuletzt bei 1234 kWh."],
     ]);
     expect(detail.messages[1].blocks[0]).toMatchObject({ kind: "meters" });
+  });
+
+  it("checks the answer against the results when ASSISTANT_VERIFY is on (stage 5)", async () => {
+    vi.stubEnv("ASSISTANT_VERIFY", "1");
+    try {
+      clients.meter.listMeters.mockResolvedValue({ meters: [{ id: 3, name: "Strom Haus", type: "electricity", unit: "kWh", lastReadingValue: 1234, lastReadingAt: "2026-10-01T00:00:00Z" }] });
+      scriptWithSummaries([toolCall("list_meters", {}), text("Der Stromzähler stand zuletzt bei 1234 kWh.")]);
+      const conv = await createConversation({});
+      const res = await ask({ id: conv.id, message: "Wie ist der Stand vom Stromzähler?" });
+      expect(res.answer).toBe("Der Stromzähler stand zuletzt bei 1234 kWh.");
+      expect(res.rounds).toBe(2);
+      await __settleSummariesForTests();
+      const requests = vi.mocked(chat).mock.calls.map((c) => c[0]);
+      expect(requests.filter(isCheckRequest)).toHaveLength(1);
+      expect(requests.filter((r) => !isCheckRequest(r) && !isSummaryRequest(r))).toHaveLength(2);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("replays earlier turns with their tool calls and each result whole", async () => {

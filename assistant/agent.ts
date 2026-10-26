@@ -24,6 +24,7 @@ import {
   toolDefinition,
 } from "./catalog";
 import { accessSection, saysPermissionMissing, userAccess } from "./access";
+import { checkRequest, MAX_FAILED_CHECKS, parseVerdict, turnResults, ungroundedNudge, unverifiedNote, wrongAreaNudge, type Verdict } from "./verify";
 import { argumentError, checkArguments } from "./arguments";
 import { AREAS, AREA_IDS, areaById, homeOf, toolsOfArea, type Area, type AreaId } from "./areas/index";
 import { route, type RoutingStage } from "./router";
@@ -477,6 +478,13 @@ export interface TurnInput {
    * then runs with every area, as before the router.
    */
   routeModel?: boolean;
+  /**
+   * The checker (stage 5): after an answer about the user's data, one short
+   * call bound to `check_answer` holds it against the turn's tool results.
+   * Off by default, so a scripted test sees only the rounds it scripted;
+   * `ask` and the benchmark switch it on unless `ASSISTANT_VERIFY=0`.
+   */
+  verify?: boolean;
 }
 
 export interface TurnResult {
@@ -494,6 +502,19 @@ export interface TurnResult {
   routing: RoutingStage;
   /** The plan of a multi-step question, with what got done (stage 3); absent when none was asked for or written. */
   plan?: PlanStep[];
+  /** The checker's work (stage 5); absent when no answer was checked. */
+  checks?: TurnChecks;
+}
+
+export interface TurnChecks {
+  /** Check calls made this turn. */
+  calls: number;
+  /** Checks that found a claim the results do not hold. */
+  failed: number;
+  /** The area the checker sent the turn to, when it did. */
+  wrongArea?: AreaId;
+  /** What the answer went out with as unbacked, after the last allowed check failed. */
+  unverified?: string;
 }
 
 /**
@@ -663,6 +684,12 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let consentNudged = false;
   const mayPropose = tools.some((t) => t.kind === "write");
   let revisionNudged = false;
+  /** The checker's tally (stage 5); `null` until an answer was checked. */
+  let checks: TurnChecks | null = null;
+  /** The checker sends a turn to another area at most once. */
+  let rerouted = false;
+  /** Meta tools whose results hold no data the check could hold an answer against. */
+  const metaTools = new Set([WRITE_PLAN_NAME, DESCRIBE_TOOLS_NAME, SWITCH_AREA_NAME]);
 
   const historyTurns = input.history.filter((m) => m.role === "user").length;
   const usage: ContextUsage = {
@@ -843,6 +870,61 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       }
       if (!answer || looksLikeFakeToolCall(answer)) {
         answer = last ? OUT_OF_ROUNDS : NO_ANSWER;
+        break;
+      }
+      // The checker (stage 5 of assistent-wegfindung.md): an answer about the
+      // user's data that passed the regex checks above is held against the
+      // turn's tool results by one short bound call. A claim they do not hold
+      // goes back to the model once; a question answered from the wrong
+      // area's tools gets that area and goes back once; after the last
+      // allowed failed check the answer goes out with a note instead.
+      const checkable = input.verify && !last && !emptyRetried
+        && (calledTools || isDataQuestion(input.question))
+        && !(missingAreas && saysPermissionMissing(answer))
+        && (checks?.failed ?? 0) < MAX_FAILED_CHECKS;
+      if (checkable) {
+        input.signal?.throwIfAborted();
+        const request = checkRequest({
+          question: input.question,
+          results: turnResults(messages.slice(questionIndex + 1), metaTools),
+          answer,
+          areas: AREAS.map((a) => ({
+            id: a.id, description: a.description, inPlay: active.has(a.id),
+            tools: tools.filter((t) => toolsOfArea(a).includes(t.name)).map((t) => t.name),
+          })),
+        });
+        let verdict: Verdict | null = null;
+        try {
+          verdict = parseVerdict(await withSlot(() => input.chat(request, undefined, input.signal)));
+        } catch (err) {
+          // A check that cannot run never costs the answer; a cancelled turn does.
+          if (input.signal?.aborted) throw err;
+          verdict = null;
+        }
+        checks = checks ?? { calls: 0, failed: 0 };
+        checks.calls++;
+        if (verdict && !verdict.grounded) {
+          checks.failed++;
+          if (checks.failed >= MAX_FAILED_CHECKS) {
+            checks.unverified = verdict.missing;
+            answer = `${answer}\n\n${unverifiedNote(verdict.missing)}`;
+          } else {
+            nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: ungroundedNudge(verdict.missing) }];
+            emit({ type: "retract" });
+            answer = null;
+            continue;
+          }
+        } else if (verdict?.wrongArea && !rerouted && !active.has(verdict.wrongArea) && switchable().includes(verdict.wrongArea)) {
+          const area = areaById(verdict.wrongArea)!;
+          rerouted = true;
+          checks.wrongArea = area.id;
+          activate(area.id);
+          if (deferred) for (const t of tools) if (toolsOfArea(area).includes(t.name)) offered.set(t.name, t);
+          nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: wrongAreaNudge(area.id, areaPackage(area, tools)) }];
+          emit({ type: "retract" });
+          answer = null;
+          continue;
+        }
       }
       break;
     }
@@ -991,5 +1073,6 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     answer: final, blocks, transcript, rounds, toolResults, context: usage,
     areas: AREA_IDS.filter((id) => active.has(id)), routing: routing.stage,
     ...(plan ? { plan } : {}),
+    ...(checks ? { checks } : {}),
   };
 }

@@ -143,6 +143,18 @@ describe("scoring", () => {
     expect(s.follow_up_pass_rate).toBe(0.5);
   });
 
+  it("tallies the checker's calls, objections and notes (stage 5)", () => {
+    const pass = { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] };
+    const s = summarize([
+      { rounds_ms: [100], error: null, score: pass, checks: 2, check_failed: 1, check_ms: 400 },
+      { rounds_ms: [100], error: null, score: pass, checks: 2, check_failed: 2, check_ms: 1000, unverified: true },
+      { rounds_ms: [100], error: null, score: pass, checks: 1, check_failed: 0, check_ms: 300 },
+      { rounds_ms: [100], error: null, score: pass },
+    ]);
+    expect(s).toMatchObject({ checks: 5, check_failed: 3, unverified: 1, median_check_ms: 300 });
+    expect(summarize([{ rounds_ms: [100], error: null, score: pass }])).toMatchObject({ checks: 0, check_failed: 0, unverified: 0, median_check_ms: null });
+  });
+
   it("counts empty results followed by another call, and errors followed by a corrected call", () => {
     expect(followUps([
       { tool: "list_transactions", args: { q: "a", from: "2026-09-01" }, rows: 0 },

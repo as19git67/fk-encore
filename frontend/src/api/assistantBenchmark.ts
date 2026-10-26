@@ -60,6 +60,11 @@ export interface BenchSummary {
   median_rounds_multi_area?: number | null
   /** Pass rate of the cases that come with earlier turns (stage 4: history as summaries). */
   follow_up_pass_rate?: number | null
+  /** The checker (stage 5): check calls, how many objected, answers that went out with a note, median time of a check. */
+  checks?: number
+  check_failed?: number
+  unverified?: number
+  median_check_ms?: number | null
 }
 
 export type BenchStatus = 'running' | 'done' | 'failed' | 'cancelled'
@@ -106,6 +111,11 @@ export interface BenchCaseRun {
   plan_done?: number
   /** Stage 4: the case came with earlier turns. */
   follow_up?: boolean
+  /** Stage 5: check calls of the turn, how many objected, and whether the answer went out with a note. */
+  checks?: number
+  check_failed?: number
+  check_ms?: number | null
+  unverified?: boolean
 }
 
 /** One call of the turn behind an answer the user judged: never the rows it returned. */

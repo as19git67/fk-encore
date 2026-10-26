@@ -15,6 +15,10 @@ export default defineConfig({
     hookTimeout: process.env.CI ? 30_000 : 10_000,
     env: {
       ENABLE_LOCAL_FACES: "false",
+      // The assistant's checker (assistant/verify.ts) is one more model call
+      // after an answer; a scripted test counts its rounds, so it is off here
+      // and switched on by the tests that cover it.
+      ASSISTANT_VERIFY: "0",
       DB_TYPE: "postgres",
       // Postgres connection details fall back to a local instance but must
       // stay overridable from the real environment. `test.env` applies ONLY
