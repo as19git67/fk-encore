@@ -20,7 +20,7 @@ import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
-import { readableFinanceAccountIds } from "./account-acl";
+import { ownFinanceAccountIds, readableFinanceAccountIds } from "./account-acl";
 import {
   financeAccount,
   financeAccountAccess,
@@ -1604,16 +1604,7 @@ export const listAnomalies = api(
     // an admin without an explicit account-access row sees nothing here, by
     // design, since they have no business acknowledging alerts they don't
     // own.
-    const writeable = await db
-      .select({ id: financeAccountAccess.account_id })
-      .from(financeAccountAccess)
-      .where(
-        and(
-          eq(financeAccountAccess.user_id, Number(auth.userID)),
-          eq(financeAccountAccess.level, "write"),
-        ),
-      );
-    const accountIds = writeable.map((a) => a.id);
+    const accountIds = await ownFinanceAccountIds(auth);
     if (accountIds.length === 0) return { anomalies: [], total: 0 };
 
     const rows = await db
@@ -1714,16 +1705,7 @@ export const acknowledgeAnomaly = api(
     requirePermission(auth, "finance.view");
 
     // Acknowledging is a mutation: same write-only ACL as listAnomalies.
-    const writeable = await db
-      .select({ id: financeAccountAccess.account_id })
-      .from(financeAccountAccess)
-      .where(
-        and(
-          eq(financeAccountAccess.user_id, Number(auth.userID)),
-          eq(financeAccountAccess.level, "write"),
-        ),
-      );
-    const accountIds = writeable.map((a) => a.id);
+    const accountIds = await ownFinanceAccountIds(auth);
     if (accountIds.length === 0) throw APIError.notFound("anomaly not found");
 
     const result = await db
@@ -1773,9 +1755,9 @@ export const getMandateHistory = api(
 
     // Read-only view, under the one rule every finance list uses
     // (`readableFinanceAccountIds`): any account-access level, and finance
-    // admins see every account. The expected-payments page lists a mandate
-    // under that rule and links here; the two must agree, or the admin gets
-    // "mandate not found" on a row the page just showed.
+    // admins see every account. The expected-payments page links here and
+    // lists only the caller's own accounts, a subset of these, so every row
+    // it shows opens.
     const readable = await readableFinanceAccountIds(auth);
     if (readable !== null && readable.length === 0) throw APIError.notFound("mandate not found");
 

@@ -38,7 +38,7 @@ import { and, asc, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { financeAccount, financeAccountType, financeRecurringMandate } from "../db/schema";
-import { readableFinanceAccountIds } from "./account-acl";
+import { ownFinanceAccountIds } from "./account-acl";
 import { isLikelySeriesContinuation } from "./anomaly-detector";
 
 /**
@@ -400,8 +400,11 @@ export const listUpcomingDebits = api(
     const empty: UpcomingDebitsResponse = {
       from: windowFrom, until: windowUntil, items: [], count: 0, total_amount: "0.00",
     };
-    const readable = await readableFinanceAccountIds(auth);
-    if (readable !== null && readable.length === 0) return empty;
+    // A personal view, like the anomalies: only the caller's own accounts
+    // (`write` entry, no admin bypass). A partner's account shared for
+    // reading stays searchable but its debits are not the caller's to expect.
+    const own = await ownFinanceAccountIds(auth);
+    if (own.length === 0) return empty;
 
     const m = financeRecurringMandate;
     // Every outgoing series the caller may see, whatever its channel: a
@@ -427,7 +430,7 @@ export const listUpcomingDebits = api(
       .innerJoin(financeAccountType, sql`${financeAccountType.id} = ${financeAccount.type_id}`)
       .where(
         and(
-          readable === null ? undefined : inArray(m.account_id, readable),
+          inArray(m.account_id, own),
           isNull(financeAccount.closed_at),
           // Nothing is debited from a wallet: a recurring cash expense is a habit.
           sql`${financeAccountType.kind} <> 'bargeld'`,

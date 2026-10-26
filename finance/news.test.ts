@@ -68,6 +68,10 @@ async function insertDepot(): Promise<number> {
     .insert(financeAccount)
     .values({ bankcontact_id: bc!.id, type_id: type!.id, currency_code: "EUR", account_number: "D", label: "Depot" })
     .returning({ id: financeAccount.id });
+  // The portfolio covers the caller's own depots (a `write` entry); the
+  // default caller, user 1, owns every account a test creates.
+  await db.execute(sql`INSERT INTO users (id, email, name, password_hash) VALUES (1, 'u1@test.local', 'User1', 'x') ON CONFLICT (id) DO NOTHING`);
+  await db.insert(financeAccountAccess).values({ account_id: row!.id, user_id: 1, level: "write" });
   return row!.id;
 }
 

@@ -585,6 +585,15 @@ WHERE a.id IN (
 -- or bypass, if the caller holds 'finance.admin'.
 ```
 
+That rule (`readableFinanceAccountIds` in `finance/account-acl.ts`) answers
+"what may I see": lists, search, totals, reports and the assistant's queries
+over bookings. The personal views answer "what is mine" with
+`ownFinanceAccountIds`: accounts with `level = 'write'`, no admin bypass.
+They are the anomalies, the expected payments and the portfolio (with
+quotes and news of the held securities). A partner's account shared with
+`read` therefore stays searchable for the assistant without turning up in
+one's own expected payments or portfolio.
+
 ---
 
 ## 6. Open points

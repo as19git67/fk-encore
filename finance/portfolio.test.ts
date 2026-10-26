@@ -79,15 +79,19 @@ async function insertAccount(
       label,
     })
     .returning({ id: financeAccount.id });
+  // The portfolio covers the caller's own depots (a `write` entry); the
+  // default caller, user 1, owns every account a test creates.
+  await ensureUser(1);
+  await db.insert(financeAccountAccess).values({ account_id: row.id, user_id: 1, level: "write" });
   return row.id;
 }
 
-async function grantRead(accountId: number, userId: number) {
+async function grantOwn(accountId: number, userId: number) {
   await ensureUser(userId);
   await db.insert(financeAccountAccess).values({
     account_id: accountId,
     user_id: userId,
-    level: "read",
+    level: "write",
   });
 }
 
@@ -389,7 +393,7 @@ describe("finance/portfolio — getPortfolio", () => {
     const bc = await insertBankcontact();
     const mine = await insertAccount(bc, "depot", "Mine");
     const other = await insertAccount(bc, "depot", "Other");
-    await grantRead(mine, 7);
+    await grantOwn(mine, 7);
     await insertHolding({
       accountId: mine,
       asOf: "2026-09-01",
@@ -683,9 +687,27 @@ describe("finance/portfolio — listPortfolioTransactions", () => {
     expect(page.items[0].executed_at).toBe("2025-01-10");
   });
 
+  it("leaves out a depot shared for reading, for an admin as well", async () => {
+    const bc = await insertBankcontact();
+    const mine = await insertAccount(bc, "depot", "Mine");
+    const shared = await insertAccount(bc, "depot", "Shared");
+    await grantOwn(mine, 7);
+    await ensureUser(7);
+    await db.insert(financeAccountAccess).values({ account_id: shared, user_id: 7, level: "read" });
+    await insertHolding({ accountId: mine, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "1", price: "10.00", value: "10.00" });
+    await insertHolding({ accountId: shared, asOf: "2026-09-01", isin: ISIN_B, name: "Beta ETF", amount: "1", price: "99.00", value: "99.00" });
+
+    for (const perms of [["finance.view"], ["finance.view", "finance.admin"]]) {
+      setAuth("7", perms);
+      const resp = await getPortfolio({});
+      expect(resp.accounts.map((a) => a.id)).toEqual([mine]);
+      expect(resp.positions.map((p) => p.key)).toEqual([ISIN_A]);
+    }
+  });
+
   it("hides depots a non-admin may not read", async () => {
     const { d1 } = await seed();
-    await grantRead(d1, 9);
+    await grantOwn(d1, 9);
     setAuth("9", ["finance.view"]);
     const resp = await listPortfolioTransactions({});
     expect(resp.total).toBe(2);

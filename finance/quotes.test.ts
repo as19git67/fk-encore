@@ -58,6 +58,10 @@ async function insertDepot(label = "Depot"): Promise<number> {
     .insert(financeAccount)
     .values({ bankcontact_id: bc!.id, type_id: type!.id, currency_code: "EUR", account_number: label, label })
     .returning({ id: financeAccount.id });
+  // The portfolio covers the caller's own depots (a `write` entry); the
+  // default caller, user 1, owns every account a test creates.
+  await db.execute(sql`INSERT INTO users (id, email, name, password_hash) VALUES (1, 'u1@test.local', 'User1', 'x') ON CONFLICT (id) DO NOTHING`);
+  await db.insert(financeAccountAccess).values({ account_id: row!.id, user_id: 1, level: "write" });
   return row!.id;
 }
 
@@ -359,7 +363,7 @@ describe("buildQuoteTiles and getQuotes", () => {
     const d = await insertDepot();
     await insertHolding(d, "2026-02-03", ISIN_A, "1");
     await db.execute(sql`INSERT INTO users (id, email, name, password_hash) VALUES (7, 'q7@test.local', 'Q', 'x')`);
-    await db.insert(financeAccountAccess).values({ account_id: d, user_id: 7, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: d, user_id: 7, level: "write" });
     setAuth("7", ["finance.view"]);
 
     const resp = await getQuotes({ range: "1m" });
