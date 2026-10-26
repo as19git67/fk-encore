@@ -14,6 +14,7 @@ import type { AreaId } from "../areas/index";
 import { estimateTokens } from "../catalog";
 import type { ChatFn, ChatRequest } from "../llm-client";
 import { isRouterRequest, type RoutingStage } from "../router";
+import { isCheckRequest, verifyByDefault } from "../verify";
 import type { AssistantUser, ToolSpec } from "../types";
 import { BENCH_TODAY, type BenchCase } from "./cases";
 import { scoreCase, type BenchCall, type CaseScore } from "./scoring";
@@ -60,6 +61,11 @@ export interface CaseRun {
   // ── the context (stage 4) ──
   /** The case is a follow-up: it comes with earlier turns, whole or as summaries. */
   follow_up?: boolean;
+  /** Stage 5: check calls of the turn, how many found a claim the results do not hold, their time, and whether the answer went out with a note. */
+  checks?: number;
+  check_failed?: number;
+  check_ms?: number | null;
+  unverified?: boolean;
 }
 
 /** One call as the loop logged it: with its row count or error, never row content. */
@@ -161,6 +167,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   let nudges = 0;
   let prompt_tokens_first: number | null = null;
   let router_ms: number | null = null;
+  let check_ms: number | null = null;
   const timed: ChatFn = async (req) => {
     if (deps.signal?.aborted) throw new BenchCancelledError();
     const started = Date.now();
@@ -169,6 +176,11 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       // The router's call is not a loop round: measured apart, and never
       // the prompt of round 1.
       router_ms = (router_ms ?? 0) + Date.now() - started;
+      return reply;
+    }
+    if (isCheckRequest(req)) {
+      // Nor is the checker's (stage 5): its time is what the check costs the answer.
+      check_ms = (check_ms ?? 0) + Date.now() - started;
       return reply;
     }
     rounds_ms.push(Date.now() - started);
@@ -188,6 +200,9 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   let plan: string[] | undefined;
   let plan_done: number | undefined;
   let plan_asked = false;
+  let checks: number | undefined;
+  let check_failed: number | undefined;
+  let unverified = false;
   try {
     const result = await runTurn({
       user: c.permissions ? { userID: deps.user.userID, permissions: c.permissions } : deps.user,
@@ -205,8 +220,14 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
         trace.push({ tool: entry.tool, args: entry.arguments, rows: entry.rows, error: entry.error });
       },
       routeModel: true,
+      verify: verifyByDefault(),
     });
     areas = result.areas;
+    if (result.checks) {
+      checks = result.checks.calls;
+      check_failed = result.checks.failed;
+      if (result.checks.unverified !== undefined) unverified = true;
+    }
     routing = result.routing;
     if (result.plan) {
       plan = result.plan.map((s) => s.tool);
@@ -237,5 +258,6 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     plan_asked,
     ...(plan ? { plan, plan_done } : {}),
     follow_up: (c.history?.length ?? 0) > 0,
+    ...(checks !== undefined ? { checks, check_failed, check_ms, unverified } : {}),
   };
 }

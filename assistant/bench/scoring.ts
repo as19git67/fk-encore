@@ -131,6 +131,11 @@ export interface BenchSummary {
   median_rounds_multi_area: number | null;
   /** Pass rate of the cases that come with earlier turns, the measure of stage 4 (history as summaries); null without any. */
   follow_up_pass_rate: number | null;
+  /** The checker (stage 5): check calls over all cases, how many objected, how many answers went out with a note, and the median time of a check. */
+  checks: number;
+  check_failed: number;
+  unverified: number;
+  median_check_ms: number | null;
 }
 
 export interface CaseRunSummaryInput {
@@ -148,13 +153,17 @@ export interface CaseRunSummaryInput {
   plan_asked?: boolean;
   plan?: string[];
   follow_up?: boolean;
+  checks?: number;
+  check_failed?: number;
+  check_ms?: number | null;
+  unverified?: boolean;
 }
 
 function rate(part: number, whole: number): number | null {
   return whole ? part / whole : null;
 }
 
-function total(runs: CaseRunSummaryInput[], key: "empty_results" | "empty_followed" | "tool_errors" | "errors_corrected"): number {
+function total(runs: CaseRunSummaryInput[], key: "empty_results" | "empty_followed" | "tool_errors" | "errors_corrected" | "checks" | "check_failed"): number {
   return runs.reduce((sum, r) => sum + (r[key] ?? 0), 0);
 }
 
@@ -200,5 +209,9 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
     multi_area_pass_rate: rate(multi.filter((r) => r.score.passed).length, multi.length),
     median_rounds_multi_area: median(multi.filter((r) => r.rounds_ms.length).map((r) => r.rounds_ms.length)),
     follow_up_pass_rate: rate(followUps.filter((r) => r.score.passed).length, followUps.length),
+    checks: total(runs, "checks"),
+    check_failed: total(runs, "check_failed"),
+    unverified: runs.filter((r) => r.unverified).length,
+    median_check_ms: median(runs.filter((r) => r.checks && typeof r.check_ms === "number").map((r) => (r.check_ms as number) / (r.checks as number))),
   };
 }

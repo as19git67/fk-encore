@@ -9,6 +9,7 @@ import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSy
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
+import { CHECK_ANSWER_NAME, isCheckRequest, ungroundedNudge, unverifiedNote } from "./verify";
 
 const EVERYTHING = [
   "module.finance", "finance.view", "module.documents", "documents.view",
@@ -990,5 +991,139 @@ describe("the plan of a multi-step question (stage 3 of assistent-wegfindung.md)
     expect(planNudge(steps)).toContain("step 2, b.");
     const def = writePlanDefinition(["a", "b"]) as { function: { parameters: { properties: { steps: { minItems: number; maxItems: number } } } } };
     expect(def.function.parameters.properties.steps).toMatchObject({ minItems: 1, maxItems: 4 });
+  });
+});
+
+describe("the checker (stage 5 of assistent-wegfindung.md)", () => {
+  const names = (req: ChatRequest) => (req.tools ?? []).map((t) => (t as { function: { name: string } }).function.name);
+  const ROWS = {
+    items: [{ id: 41, booking_date: "2026-10-14", amount: "-45.00", currency_code: "EUR", counterparty: "Beispiel Baumarkt", purpose: "Schrauben", tags: [] }],
+    total: 1,
+  };
+  const QUESTION = "Welche Buchungen habe ich im Baumarkt?";
+  const verdict = (args: Record<string, unknown>) => calls([CHECK_ANSWER_NAME, args]);
+  const GROUNDED = verdict({ grounded: true, missing: "", wrong_area: "none" });
+  const MISSING = "Der Betrag 145,00 € steht in keinem Ergebnis.";
+  const run = (fn: ReturnType<typeof scripted>["fn"], extra: Partial<Parameters<typeof runTurn>[0]> = {}, events?: TurnEvent[]) =>
+    runTurn({ user: USER, history: [], question: QUESTION, tools: catalogFor(USER), chat: fn, now: NOW, verify: true, emit: (e) => events?.push(e), ...extra });
+
+  it("holds an answer about the user's data against the results, once, and lets a grounded one stand", async () => {
+    clients.finance.listTransactions.mockResolvedValue(ROWS);
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { q: "baumarkt" }]),
+      answer("45,00 € bei Beispiel Baumarkt am 14.10.2026."),
+      GROUNDED,
+    ]);
+    const res = await run(fn);
+    expect(res.answer).toBe("45,00 € bei Beispiel Baumarkt am 14.10.2026.");
+    expect(res.checks).toEqual({ calls: 1, failed: 0 });
+    // The check is its own small request, not a round of the loop.
+    expect(res.rounds).toBe(2);
+    expect(requests).toHaveLength(3);
+    expect(isCheckRequest(requests[2]!)).toBe(true);
+    const body = (requests[2]!.messages[1] as { content: string }).content;
+    expect(body).toContain(`Question:\n${QUESTION}`);
+    expect(body).toContain('Result 1, list_transactions({"q":"baumarkt"}):');
+    expect(body).toContain("Beispiel Baumarkt");
+    expect(body).toContain("Answer:\n45,00 € bei Beispiel Baumarkt am 14.10.2026.");
+    expect(body).toContain("- finance (used this turn):");
+    expect(body).toMatch(/- meters: .* Tools: list_meters/);
+    expect(requests[2]!.messages).toHaveLength(2);
+  });
+
+  it("is off unless asked for, and asks nothing about small talk", async () => {
+    clients.finance.listTransactions.mockResolvedValue(ROWS);
+    const off = scripted([calls(["list_transactions", { q: "baumarkt" }]), answer("45,00 €.")]);
+    const res = await run(off.fn, { verify: false });
+    expect(res.checks).toBeUndefined();
+    expect(off.requests).toHaveLength(2);
+
+    const thanks = scripted([answer("Gern geschehen!")]);
+    await run(thanks.fn, { question: "Danke!" });
+    expect(thanks.requests).toHaveLength(1);
+  });
+
+  it("a claim the results do not hold goes back once with the checker's sentence, and the corrected answer is checked again", async () => {
+    clients.finance.listTransactions.mockResolvedValue(ROWS);
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { q: "baumarkt" }]),
+      answer("145,00 € bei Beispiel Baumarkt."),
+      verdict({ grounded: false, missing: MISSING, wrong_area: "none" }),
+      answer("45,00 € bei Beispiel Baumarkt."),
+      GROUNDED,
+    ]);
+    const events: TurnEvent[] = [];
+    const res = await run(fn, {}, events);
+    expect(res.answer).toBe("45,00 € bei Beispiel Baumarkt.");
+    expect(res.checks).toEqual({ calls: 2, failed: 1 });
+    expect(requests).toHaveLength(5);
+    // The draft and the nudge go along once; neither stays in the transcript.
+    expect(requests[3]!.messages.at(-2)).toEqual({ role: "assistant", content: "145,00 € bei Beispiel Baumarkt." });
+    expect(requests[3]!.messages.at(-1)).toEqual({ role: "user", content: ungroundedNudge(MISSING) });
+    expect(events.filter((e) => e.type === "retract")).toHaveLength(1);
+    expect(JSON.stringify(res.transcript)).not.toContain("145,00");
+    expect(res.transcript.at(-1)).toEqual({ role: "assistant", content: "45,00 € bei Beispiel Baumarkt." });
+  });
+
+  it("after two failed checks the answer goes out with a note naming what could not be backed", async () => {
+    clients.finance.listTransactions.mockResolvedValue(ROWS);
+    const second = "Die Angabe 145,00 € steht in keinem Ergebnis.";
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { q: "baumarkt" }]),
+      answer("145,00 € bei Beispiel Baumarkt."),
+      verdict({ grounded: false, missing: MISSING, wrong_area: "none" }),
+      answer("Es waren 145,00 €."),
+      verdict({ grounded: false, missing: second, wrong_area: "none" }),
+    ]);
+    const res = await run(fn);
+    expect(res.answer).toBe(`Es waren 145,00 €.\n\n${unverifiedNote(second)}`);
+    expect(res.answer).toContain("_Hinweis: Diese Angabe konnte ich nicht in den gelesenen Daten belegen: Die Angabe 145,00 € steht in keinem Ergebnis._");
+    expect(res.checks).toEqual({ calls: 2, failed: 2, unverified: second });
+    expect(requests).toHaveLength(5);
+  });
+
+  it("a question answered from the wrong area gets that area once, and the model then calls its tool", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    clients.meter.listMeters.mockResolvedValue({ meters: [{ id: 3, name: "Strom Haus", type: "electricity", unit: "kWh", lastReadingValue: 1234, lastReadingAt: "2026-10-01T00:00:00Z" }] });
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { q: "strom" }]),
+      answer("Dazu habe ich keine Buchung gefunden."),
+      verdict({ grounded: true, missing: "", wrong_area: "meters" }),
+      calls(["list_meters", {}]),
+      answer("Der Stromzähler steht bei 1234 kWh."),
+      // A second detour is not taken: the answer stands.
+      verdict({ grounded: true, missing: "", wrong_area: "photos" }),
+    ]);
+    const res = await run(fn, { question: "Zeig mir die Buchungen von den Stadtwerken" });
+    expect(res.answer).toBe("Der Stromzähler steht bei 1234 kWh.");
+    expect(res.checks).toEqual({ calls: 2, failed: 0, wrongArea: "meters" });
+    expect(res.areas).toEqual(["finance", "meters"]);
+    expect(names(requests[0]!)).not.toContain("list_meters");
+    expect(names(requests[3]!)).toContain("list_meters");
+    const nudge = (requests[3]!.messages.at(-1) as { content: string }).content;
+    expect(nudge).toContain("the question is about meters, whose tools were not used this turn");
+    expect(nudge).toContain("Tools of meters:\n- list_meters:");
+    expect(clients.meter.listMeters).toHaveBeenCalledTimes(1);
+    expect(requests).toHaveLength(6);
+  });
+
+  it("a verdict the loop cannot read, a forced last round and a missing permission leave the answer as it is", async () => {
+    clients.finance.listTransactions.mockResolvedValue(ROWS);
+    const unreadable = scripted([calls(["list_transactions", { q: "baumarkt" }]), answer("45,00 €."), answer("Sieht gut aus.")]);
+    const res = await run(unreadable.fn);
+    expect(res.answer).toBe("45,00 €.");
+    expect(res.checks).toEqual({ calls: 1, failed: 0 });
+
+    const last = scripted([calls(["list_transactions", { q: "baumarkt" }]), answer("45,00 €.")]);
+    const forced = await run(last.fn, { maxRounds: 2 });
+    expect(forced.answer).toBe("45,00 €.");
+    expect(forced.checks).toBeUndefined();
+    expect(last.requests).toHaveLength(2);
+
+    const noFinance = { userID: "8", permissions: ["module.meters", "meters.view"] };
+    const denied = scripted([answer("Für Finanzen fehlt dir die Berechtigung.")]);
+    const res2 = await run(denied.fn, { user: noFinance, tools: catalogFor(noFinance) });
+    expect(res2.answer).toBe("Für Finanzen fehlt dir die Berechtigung.");
+    expect(denied.requests).toHaveLength(1);
   });
 });

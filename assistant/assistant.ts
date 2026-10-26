@@ -34,6 +34,7 @@ import {
 import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
 import { fallbackTitle, suggestTitle } from "./titles";
 import { summarizedTurn, summarizeTurn, summaryNote } from "./summary";
+import { verifyByDefault } from "./verify";
 import type { ChatMessage, ContextUsage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
@@ -431,6 +432,7 @@ export const ask = api(
         emit,
         signal,
         routeModel: true,
+        verify: verifyByDefault(),
         withSlot: (fn) => withAiSlot("llm", SLOT_PRIORITY, "assistant", fn, undefined, signal),
         log: (entry) => log.info("assistant tool call", {
           conversation_id: conversation.id,

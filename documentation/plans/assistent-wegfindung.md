@@ -365,6 +365,46 @@ these parameters as given.
   and compare `median_ms_per_round` and `p90_ms_per_round` with the pass
   rate; the Measurements table takes both rows.
 
+### Stage 5 (implemented)
+
+- **One check after the answer**, `assistant/verify.ts`. An answer about
+  the user's data — a tool ran this turn, or the question names what the
+  services keep — goes once more to the model, bound to the tool
+  `check_answer` (`grounded`, `missing`, `wrong_area`), with its own short
+  prompt: the question, the tool results of this turn with the call behind
+  each (meta tools left out, a result cut at 6,000 characters), the answer,
+  and the areas with their tools and which were used. No history, no
+  system prompt of the loop: a few hundred tokens, and the same bound-call
+  mechanism as `choose_areas`, `write_plan` and `summarize_turn`, so it
+  runs on both llm-service backends. The check is not a round of the loop;
+  its time is measured apart (`check_ms`).
+- **The regex checks stay as the free pre-filter.** An answer reaches the
+  checker only after it passed them (`nudge === null`), so the checker
+  pays only for what no regex can see: a figure or a name the results do
+  not hold, "nothing found" over a result with rows, a question answered
+  from the wrong area's tools.
+- **What the verdict does.** Not grounded: the draft and the checker's
+  sentence go back to the model once (`ungroundedNudge`), like the other
+  nudges — not kept in the transcript, withdrawn from the stream — and the
+  next answer is checked again. `wrong_area` naming an area not in play: the
+  area joins the turn (its package as the nudge, its tools offered), once
+  per turn; a second detour is not taken. After `MAX_FAILED_CHECKS` (2)
+  failed checks the answer goes out with a note in the user's words
+  (`unverifiedNote`: „Hinweis: Diese Angabe konnte ich nicht in den
+  gelesenen Daten belegen: …“) instead of a third attempt. A verdict the
+  loop cannot read, a check that fails to run, the forced last round and an
+  answer that names a missing permission leave the answer as it is.
+- **Switch.** `ask` and the benchmark run with the checker unless
+  `ASSISTANT_VERIFY=0`; `runTurn` itself has it off (`verify`), so a
+  scripted test sees only the rounds it scripted. The test suite sets `0`
+  and switches it on in the tests that cover the checker.
+- **Measured.** `checks`, `check_failed`, `check_ms` and `unverified` per
+  case, `checks`, `check_failed`, `unverified` and `median_check_ms` in
+  the summary, the tile „Prüfer-Einwände“ on the benchmark page; the
+  benchmark's pass rate says whether an objection made an answer right, the
+  latency per answer is `median_check_ms` on top of the rounds. Both go
+  into the table below after the next GPU run.
+
 ### Stage 6, part 2 (open)
 
 - A benchmark mode against a synthetic test database, so that search,
