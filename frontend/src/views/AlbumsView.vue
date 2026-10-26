@@ -15,6 +15,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import SelectButton from 'primevue/selectbutton'
 import Checkbox from 'primevue/checkbox'
+import Message from 'primevue/message'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import VirtualAlbumGrid from '../components/VirtualAlbumGrid.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
@@ -28,6 +29,8 @@ import {
   type Album,
   createAlbum,
 } from '../api/photos'
+import { ApiError } from '../api/client'
+import { findOwnAlbumByName } from '../utils/albumName'
 import { useAuthStore } from '../stores/auth'
 import { usePhotoNavStore } from '../stores/photoNav'
 import { useRealtimeEvent } from '../composables/useRealtime'
@@ -361,6 +364,18 @@ const newAlbumName = ref('')
 const newAlbumDesc = ref('')
 const newAlbumMapEnabled = ref(false)
 const creating = ref(false)
+// Album names are unique per owner (case and surrounding spaces ignored):
+// the dialog says so while typing instead of posting into a 409.
+const existingAlbum = computed(() => findOwnAlbumByName(albums.value, newAlbumName.value))
+const createError = ref('')
+watch(newAlbumName, () => { createError.value = '' })
+
+function openExistingAlbum() {
+  const target = existingAlbum.value
+  if (!target) return
+  showCreateDialog.value = false
+  void router.push(`/fotos/alben/${target.id}`)
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -444,7 +459,7 @@ async function loadData(force = false) {
 }
 
 async function handleCreateAlbum() {
-  if (!newAlbumName.value.trim()) return
+  if (!newAlbumName.value.trim() || existingAlbum.value) return
   creating.value = true
   try {
     const album = await createAlbum(
@@ -460,7 +475,13 @@ async function handleCreateAlbum() {
     await loadData()
     router.push(`/fotos/alben/${album.id}`)
   } catch (err: any) {
-    error.value = err.message || 'Fehler beim Erstellen des Albums'
+    if (err instanceof ApiError && err.code === 'already_exists') {
+      // Created elsewhere since the list was loaded: show it in the dialog.
+      createError.value = err.message
+      void loadData(true)
+    } else {
+      error.value = err.message || 'Fehler beim Erstellen des Albums'
+    }
   } finally {
     creating.value = false
   }
@@ -656,8 +677,29 @@ onMounted(async () => {
     <Dialog v-model:visible="showCreateDialog" class="dialog-md" header="Neues Album erstellen" :modal="true">
       <div class="dialog-content">
         <label for="albumName">Name des Albums</label>
-        <InputText id="albumName" v-model="newAlbumName" autofocus @keydown.enter="handleCreateAlbum"/>
+        <InputText
+          id="albumName"
+          v-model="newAlbumName"
+          autofocus
+          :invalid="!!existingAlbum || !!createError"
+          aria-describedby="albumNameTaken"
+          @keydown.enter="handleCreateAlbum"
+        />
       </div>
+      <Message
+        v-if="existingAlbum || createError"
+        id="albumNameTaken"
+        severity="warn"
+        size="small"
+        variant="simple"
+        class="name-taken"
+      >
+        <template v-if="existingAlbum">
+          Es gibt schon ein Album „{{ existingAlbum.name }}“.
+          <Button label="Öffnen" link size="small" class="name-taken__open" @click="openExistingAlbum" />
+        </template>
+        <template v-else>{{ createError }}</template>
+      </Message>
       <div class="dialog-content" style="margin-top: 0.5rem">
         <label for="albumDesc">Beschreibung</label>
         <textarea id="albumDesc" v-model="newAlbumDesc" rows="2" class="p-inputtextarea p-inputtext" style="width: 100%"></textarea>
@@ -668,7 +710,7 @@ onMounted(async () => {
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showCreateDialog = false"/>
-        <Button label="Erstellen" :loading="creating" @click="handleCreateAlbum"/>
+        <Button label="Erstellen" :loading="creating" :disabled="!newAlbumName.trim() || !!existingAlbum" @click="handleCreateAlbum"/>
       </template>
     </Dialog>
 
@@ -747,6 +789,14 @@ onMounted(async () => {
 
 .dialog-content.map-toggle-row label {
   cursor: pointer;
+}
+
+.name-taken {
+  margin-top: var(--space-2);
+}
+
+.name-taken__open {
+  padding: 0;
 }
 
 /* Page frame and title: PageLayout (issue #1272). The VirtualAlbumGrid

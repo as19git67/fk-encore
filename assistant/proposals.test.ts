@@ -100,7 +100,8 @@ describe("write tools", () => {
 
     const res = await ask({ id: conversation.id, message: "Leg ein Album mit allen Favoriten von 2025 an." });
 
-    expect(calledEndpoints()).toEqual(["photo.listPhotos"]);
+    // Only reads: the photos, and the albums to reuse one of the same name.
+    expect(calledEndpoints()).toEqual(["photo.listPhotos", "photo.listAlbums"]);
     expect(clients.photo.listPhotos.mock.calls[0][0]).toMatchObject({ favorite: true, dateFrom: "2025-01-01", dateTo: "2025-12-31" });
     const block = res.blocks.find((b) => b.kind === "proposal");
     expect(block?.rows[0]).toMatchObject({
@@ -281,6 +282,39 @@ describe("deciding", () => {
     expect(clients.photo.createAlbum).toHaveBeenCalledTimes(1);
   });
 
+  it("fills the user's album of the same name instead of creating a second one", async () => {
+    clients.photo.listAlbums.mockResolvedValue({ albums: [
+      { id: 7, name: "sommer", my_access_level: "write" },
+      { id: 8, name: "Sommer ", my_access_level: "owner" },
+    ] });
+    const id = await albumProposal();
+    clients.photo.batchUpdateAlbumPhotos.mockResolvedValue({ success: true });
+
+    const done = await executeAssistantProposal({ id });
+    expect(done).toMatchObject({ status: "executed", result_route: "/fotos/alben/8" });
+    expect(clients.photo.createAlbum).not.toHaveBeenCalled();
+    expect(clients.photo.batchUpdateAlbumPhotos).toHaveBeenCalledWith({ albumIds: [8], photoIds: [5, 6], action: "add" });
+  });
+
+  it("an empty album that exists already is not proposed", async () => {
+    clients.photo.listAlbums.mockResolvedValue({ albums: [{ id: 8, name: "Sommer", my_access_level: "owner" }] });
+    await expect(tool("create_album").run({ name: "sommer" }, ctx())).rejects.toThrow("already exists");
+  });
+
+  it("two proposals for the same name end in one album", async () => {
+    const first = await albumProposal();
+    const second = await albumProposal();
+    clients.photo.batchUpdateAlbumPhotos.mockResolvedValue({ success: true });
+    clients.photo.createAlbum.mockResolvedValueOnce({ id: 42, name: "Sommer" });
+    expect((await executeAssistantProposal({ id: first })).status).toBe("executed");
+
+    clients.photo.createAlbum.mockRejectedValueOnce(Object.assign(new Error("exists"), { code: "already_exists", details: { album_id: 42 } }));
+    clients.photo.listAlbums.mockResolvedValue({ albums: [{ id: 42, name: "Sommer", my_access_level: "owner" }] });
+    const done = await executeAssistantProposal({ id: second });
+    expect(done).toMatchObject({ status: "executed", result_route: "/fotos/alben/42" });
+    expect(clients.photo.batchUpdateAlbumPhotos).toHaveBeenLastCalledWith({ albumIds: [42], photoIds: [5, 6], action: "add" });
+  });
+
   it("is not visible to another user", async () => {
     const id = await albumProposal();
     setAuth("712");
@@ -319,7 +353,8 @@ describe("deciding", () => {
     const id = Number(res.blocks.find((b) => b.kind === "proposal")?.rows[0].proposal_id);
 
     expect((await discardAssistantProposal({ id })).status).toBe("discarded");
-    expect(calledEndpoints()).toEqual([]);
+    // Only the album lookup while proposing; nothing written.
+    expect(calledEndpoints()).toEqual(["photo.listAlbums"]);
 
     const reopened = await getConversation({ id: conversation.id });
     const card = reopened.messages.at(-1)?.blocks.find((b) => b.kind === "proposal")?.rows[0];

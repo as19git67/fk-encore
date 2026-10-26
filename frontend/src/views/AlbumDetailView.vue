@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
+import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
@@ -88,6 +89,7 @@ import {
   isVisibleViaLink,
   updatePhotoDate,
 } from '../api/photos'
+import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -1605,6 +1607,9 @@ async function handleSetMapCover(photoId: number) {
 // ── Album settings (rename + map mode) ───────────────────────────────────────
 const showAlbumSettingsDialog = ref(false)
 const albumSettingsName = ref('')
+// "Es gibt schon ein Album …" from the server, shown under the name field.
+const albumSettingsNameError = ref('')
+watch(albumSettingsName, () => { albumSettingsNameError.value = '' })
 const albumSettingsDesc = ref('')
 const albumSettingsMapEnabled = ref(false)
 const albumSettingsUpdating = ref(false)
@@ -1641,6 +1646,7 @@ async function handleAdoptionChange(value: 'inherit' | 'on' | 'off') {
 function openAlbumSettingsDialog() {
   if (!album.value) return
   albumSettingsName.value = album.value.name
+  albumSettingsNameError.value = ''
   albumSettingsDesc.value = album.value.description || ''
   albumSettingsMapEnabled.value = album.value.display_mode === 'map'
   albumAdoption.value = (album.value.settings?.group_review_adoption as 'on' | 'off' | null | undefined) ?? 'inherit'
@@ -1664,7 +1670,8 @@ async function handleSaveAlbumSettings() {
     album.value.display_mode = albumSettingsMapEnabled.value ? 'map' : 'grid'
     showAlbumSettingsDialog.value = false
   } catch (err: any) {
-    error.value = err.message || 'Fehler beim Speichern'
+    if (err instanceof ApiError && err.code === 'already_exists') albumSettingsNameError.value = err.message
+    else error.value = err.message || 'Fehler beim Speichern'
   } finally {
     albumSettingsUpdating.value = false
   }
@@ -3075,7 +3082,18 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       <div class="dialog-body">
         <div class="dialog-field">
           <label for="albumSettingsName">Name</label>
-          <InputText id="albumSettingsName" v-model="albumSettingsName" autofocus class="dialog-input" @keydown.enter="handleSaveAlbumSettings" />
+          <InputText
+            id="albumSettingsName"
+            v-model="albumSettingsName"
+            autofocus
+            class="dialog-input"
+            :invalid="!!albumSettingsNameError"
+            aria-describedby="albumSettingsNameError"
+            @keydown.enter="handleSaveAlbumSettings"
+          />
+          <Message v-if="albumSettingsNameError" id="albumSettingsNameError" severity="warn" size="small" variant="simple">
+            {{ albumSettingsNameError }}
+          </Message>
         </div>
         <div class="dialog-field">
           <label for="albumSettingsDesc">Beschreibung</label>

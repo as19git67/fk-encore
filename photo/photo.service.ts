@@ -4467,10 +4467,58 @@ export function normalizeAlbumName(name: string): string {
   return name.trim();
 }
 
-export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
-  const row = await dbInsertReturning<typeof albums.$inferSelect>(
-    db.insert(albums).values({ user_id: userId, name: normalizeAlbumName(req.name), description: req.description ?? null, display_mode: req.displayMode ?? "grid" }).returning()
+/**
+ * The owner's album that already carries `name`, ignoring case and
+ * surrounding spaces — the same key as the unique index
+ * albums_owner_name_unique. `exceptId` leaves out the album being renamed.
+ */
+export async function findAlbumByName(
+  ownerId: number,
+  name: string,
+  exceptId?: number,
+): Promise<{ id: number; name: string } | undefined> {
+  const key = normalizeAlbumName(name).toLowerCase();
+  const row = await dbFirst<{ id: number; name: string }>(
+    db.select({ id: albums.id, name: albums.name })
+      .from(albums)
+      .where(and(
+        eq(albums.user_id, ownerId),
+        sql`lower(btrim(${albums.name})) = lower(${key})`,
+        exceptId !== undefined ? sql`${albums.id} <> ${exceptId}` : undefined,
+      ))
+      .orderBy(albums.id)
+      .limit(1)
   );
+  return row ? { id: Number(row.id), name: row.name } : undefined;
+}
+
+/** 409 with the existing album's id, so a client can offer to open it. */
+function albumNameTaken(existing: { id: number; name: string }): APIError {
+  return APIError.alreadyExists(`Es gibt schon ein Album „${existing.name}“.`)
+    .withDetails({ album_id: existing.id });
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | null;
+  return (e?.code ?? e?.cause?.code) === "23505";
+}
+
+export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
+  const name = normalizeAlbumName(req.name);
+  if (!name) throw APIError.invalidArgument("Der Name des Albums darf nicht leer sein.");
+  const existing = await findAlbumByName(userId, name);
+  if (existing) throw albumNameTaken(existing);
+  let row: typeof albums.$inferSelect | undefined;
+  try {
+    row = await dbInsertReturning<typeof albums.$inferSelect>(
+      db.insert(albums).values({ user_id: userId, name, description: req.description ?? null, display_mode: req.displayMode ?? "grid" }).returning()
+    );
+  } catch (err) {
+    // Two requests with the same name at once: the index lets one through.
+    const winner = isUniqueViolation(err) ? await findAlbumByName(userId, name) : undefined;
+    if (winner) throw albumNameTaken(winner);
+    throw err;
+  }
 
   return {
     id: row!.id,
@@ -5033,7 +5081,16 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
   }
 
   const values: any = { updated_at: new Date().toISOString() };
-  if (req.name !== undefined) values.name = normalizeAlbumName(req.name);
+  if (req.name !== undefined) {
+    const name = normalizeAlbumName(req.name);
+    if (!name) throw APIError.invalidArgument("Der Name des Albums darf nicht leer sein.");
+    // Names are unique per owner, also when a participant renames the album.
+    const existing = await findAlbumByName(album.user_id, name, album.id);
+    if (existing) throw albumNameTaken(existing);
+    values.name = name;
+    // A new name ends the exemption of an album that predates unique names.
+    if (name.toLowerCase() !== normalizeAlbumName(album.name).toLowerCase()) values.legacy_duplicate_name = false;
+  }
   if (req.description !== undefined) values.description = req.description;
   if (req.displayMode !== undefined) values.display_mode = req.displayMode;
   if (req.coverPhotoId !== undefined) {
@@ -5049,9 +5106,15 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
     }
   }
 
-  await dbExec(
-    db.update(albums).set(values).where(eq(albums.id, req.id))
-  );
+  try {
+    await dbExec(
+      db.update(albums).set(values).where(eq(albums.id, req.id))
+    );
+  } catch (err) {
+    const winner = isUniqueViolation(err) && values.name ? await findAlbumByName(album.user_id, values.name, album.id) : undefined;
+    if (winner) throw albumNameTaken(winner);
+    throw err;
+  }
 
   const updated = (await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.id))

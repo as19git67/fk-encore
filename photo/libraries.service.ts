@@ -30,6 +30,8 @@ import {
   iptcLocationUpdate,
   combineDescription,
   mergeRatingKeyword,
+  findAlbumByName,
+  normalizeAlbumName,
 } from "./photo.service";
 import { enqueuePhotoScan } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
@@ -498,27 +500,30 @@ async function attachToAutoAlbum(
   albumName: string,
   photoId: number
 ): Promise<void> {
-  let album = await dbFirst<{ id: number }>(
-    db
-      .select({ id: albums.id })
-      .from(albums)
-      .where(and(eq(albums.user_id, ownerId), eq(albums.name, albumName)))
-  );
+  // Same key as the unique album names: an album the owner created by hand
+  // as "urlaub" takes the photos of the folder "Urlaub".
+  let album: { id: number } | undefined = await findAlbumByName(ownerId, albumName);
   if (!album) {
     const eventName = deriveEventName(albumName);
-    album = await dbInsertReturning<{ id: number }>(
-      db
-        .insert(albums)
-        .values({
-          user_id: ownerId,
-          name: albumName,
-          event_name: eventName,
-          // Also seed the human-readable description so the event label shows
-          // up in existing album UIs without any additional wiring.
-          description: eventName,
-        })
-        .returning({ id: albums.id })
-    );
+    try {
+      album = await dbInsertReturning<{ id: number }>(
+        db
+          .insert(albums)
+          .values({
+            user_id: ownerId,
+            name: normalizeAlbumName(albumName),
+            event_name: eventName,
+            // Also seed the human-readable description so the event label shows
+            // up in existing album UIs without any additional wiring.
+            description: eventName,
+          })
+          .returning({ id: albums.id })
+      );
+    } catch (err) {
+      // A parallel import of the same folder created it first.
+      album = await findAlbumByName(ownerId, albumName);
+      if (!album) throw err;
+    }
   }
   // ON CONFLICT DO NOTHING keeps the call idempotent across re-scans.
   await dbExec(
