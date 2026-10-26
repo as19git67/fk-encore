@@ -20,7 +20,7 @@ import { clients } from "./clients.test-helper";
 import { chat, type ChatReply, type ChatRequest } from "./llm-client";
 import { allTools, catalogFor } from "./catalog";
 import { BENCH_CASES, type BenchCase } from "./bench/cases";
-import { runBenchCase } from "./bench/runner";
+import { followUps, runBenchCase } from "./bench/runner";
 import { matches, scoreCase, summarize } from "./bench/scoring";
 import {
   __settleBenchmarkForTests,
@@ -103,6 +103,34 @@ describe("scoring", () => {
     expect(s).toMatchObject({ first_tool_hit_rate: 0.5, nudges: 3, median_prompt_tokens_first: 6000 });
   });
 
+  it("summarizes how the model treats empty results and errors (stage 2)", () => {
+    const pass = { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] };
+    const s = summarize([
+      { rounds_ms: [100], error: null, score: pass, empty_results: 2, empty_followed: 1, tool_errors: 1, errors_corrected: 1 },
+      { rounds_ms: [100], error: null, score: pass, empty_results: 2, empty_followed: 2 },
+    ]);
+    expect(s).toMatchObject({ empty_follow_rate: 0.75, error_fix_rate: 1 });
+    expect(summarize([{ rounds_ms: [100], error: null, score: pass }])).toMatchObject({ empty_follow_rate: null, error_fix_rate: null });
+  });
+
+  it("counts empty results followed by another call, and errors followed by a corrected call", () => {
+    expect(followUps([
+      { tool: "list_transactions", args: { q: "a", from: "2026-09-01" }, rows: 0 },
+      { tool: "list_transactions", args: { q: "a" }, rows: 3 },
+    ])).toEqual({ empty_results: 1, empty_followed: 1, tool_errors: 0, errors_corrected: 0 });
+    expect(followUps([
+      { tool: "depot_transactions", args: { kind: "purchase" }, rows: 0, error: "kind must be one of …" },
+      { tool: "depot_transactions", args: { kind: "buy" }, rows: 4 },
+      { tool: "list_photos", args: { place: "x" }, rows: 0 },
+    ])).toEqual({ empty_results: 1, empty_followed: 0, tool_errors: 1, errors_corrected: 1 });
+    // The same call again is no correction; a different tool is none either.
+    expect(followUps([
+      { tool: "a", args: { k: 1 }, rows: 0, error: "x" },
+      { tool: "a", args: { k: 1 }, rows: 0, error: "x" },
+      { tool: "b", args: {}, rows: 1 },
+    ])).toEqual({ empty_results: 0, empty_followed: 0, tool_errors: 2, errors_corrected: 0 });
+  });
+
   it("judges the first tool against the case's allowed first tools", () => {
     const c = caseById("electricity-last-year");
     const report = { tool: "consumption_report", args: { meter_id: 3, from: "2025-01-01", to: "2025-12-31" } };
@@ -174,6 +202,42 @@ describe("running a case", () => {
     expect(JSON.stringify(later.messages)).toContain("BV-77-0042");
     // Nothing touched a service.
     expect(clients.documents.getDocumentText).not.toHaveBeenCalled();
+  });
+
+  it("hands the model an empty result with its hint, then the rows, and counts the follow-up", async () => {
+    const c = caseById("empty-then-loosen-period");
+    const model = scripted([
+      { tool: "list_transactions", args: { q: "Musterfirma Haustechnik", from: "2026-09-01", to: "2026-09-30" } },
+      { tool: "list_transactions", args: { q: "Musterfirma Haustechnik" } },
+    ], "Im September nichts; die letzte Zahlung an die Musterfirma war am 12.08.2026: 120,50 €.");
+    const run = await runBenchCase(c, { chat: model, tools, user });
+    expect(run.score.passed).toBe(true);
+    expect(run).toMatchObject({ empty_results: 1, empty_followed: 1, tool_errors: 0, errors_corrected: 0 });
+    // The requests after a tool round (the router's call comes first, so the index is not fixed).
+    const afterTools = model.mock.calls.map((c) => c[0] as ChatRequest).filter((r) => r.messages.at(-1)!.role === "tool");
+    const result = String(afterTools[0]!.messages.at(-1)!.content);
+    expect(result).toContain('{"rows":[]}');
+    expect(result).toContain("without the period 2026-09-01..2026-09-30: 1");
+    expect(String(afterTools[1]!.messages.at(-1)!.content)).toContain("RE-2026-0101");
+  });
+
+  it("a refused call counts as a tool error, and the corrected call as its correction", async () => {
+    const run = await runBenchCase(caseById("bookings-by-counterparty"), {
+      chat: scripted([
+        { tool: "list_transactions", args: { q: "Musterhandel", from: "2026-09", to: "2026-09-30" } },
+        { tool: "list_transactions", args: { q: "Musterhandel", from: "2026-09-01", to: "2026-09-30" } },
+      ]),
+      tools,
+      user,
+    });
+    expect(run.score.passed).toBe(true);
+    expect(run).toMatchObject({ tool_errors: 1, errors_corrected: 1 });
+  });
+
+  it("a canned $error fails the call as a tool would", async () => {
+    const c: BenchCase = { ...caseById("which-meters"), results: { list_meters: { $error: "meter service down" } } };
+    const run = await runBenchCase(c, { chat: scripted([{ tool: "list_meters", args: {} }], "Der Zählerdienst antwortet nicht."), tools, user });
+    expect(run).toMatchObject({ tool_errors: 1, errors_corrected: 0 });
   });
 
   it("names what is missing when the arguments are wrong", async () => {

@@ -45,7 +45,7 @@ export const listMeters: ToolSpec = {
 export const latestReadings: ToolSpec = {
   name: "latest_readings",
   kind: "read",
-  summary: "The most recent readings of one meter, newest first.",
+  summary: "The most recent readings of one meter, newest first — the values as read. For the consumption over a period use consumption_report instead.",
   permissions: METERS,
   source: "hand",
   parameters: {
@@ -79,7 +79,7 @@ export const latestReadings: ToolSpec = {
 export const consumptionReport: ToolSpec = {
   name: "consumption_report",
   kind: "read",
-  summary: "Consumption of one meter over a date range, per day, week, month or year, with the server-computed total.",
+  summary: "Consumption of one meter over a date range, per day, week, month or year, with the server-computed total. For the readings themselves use latest_readings instead.",
   permissions: METERS,
   source: "hand",
   parameters: {

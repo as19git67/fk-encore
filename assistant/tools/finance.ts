@@ -7,6 +7,7 @@ import { finance } from "~encore/clients";
 import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
+import { loosenHint, periodLabel, type Probe } from "./hints";
 import { parseAmountBound, parseDirection, type TransactionCriteria } from "../../finance/transaction-conditions";
 import { parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
 
@@ -114,6 +115,36 @@ function groupKey(t: TransactionView, by: TransactionGroup): string | undefined 
   return dateKey(t.booking_date, by);
 }
 
+/** What `list_transactions` asks the finance service for (the query of GET /finance/transactions). */
+interface ListParams {
+  q?: string; from?: string; to?: string; accountId?: number; tagsCsv?: string; taxRelevant?: boolean;
+  amountMin?: number; amountMax?: number; direction?: "in" | "out"; sortBy: "date" | "amount"; sortDir: "asc" | "desc"; limit: number;
+}
+
+/** The bookings the same query finds, without one filter. */
+async function bookingCount(params: ListParams): Promise<{ n: number }> {
+  const res = (await finance.listTransactions({ ...params, limit: 1 })) as unknown as { total: number };
+  return { n: res.total };
+}
+
+/**
+ * Nothing found: the same query with each filter dropped in turn, so the
+ * model sees which one shut the rows out (stage 2 of assistent-wegfindung.md).
+ */
+async function emptyBookingsHint(params: ListParams): Promise<string> {
+  const probes: Probe[] = [];
+  if (params.q) probes.push({ label: `q ${JSON.stringify(params.q)}`, count: () => bookingCount({ ...params, q: undefined }) });
+  if (params.from || params.to) probes.push({ label: periodLabel(params.from, params.to), count: () => bookingCount({ ...params, from: undefined, to: undefined }) });
+  if (params.accountId !== undefined) probes.push({ label: `account_id ${params.accountId}`, count: () => bookingCount({ ...params, accountId: undefined }) });
+  if (params.tagsCsv) probes.push({ label: `tags ${params.tagsCsv}`, count: () => bookingCount({ ...params, tagsCsv: undefined }) });
+  if (params.direction) probes.push({ label: `direction ${params.direction}`, count: () => bookingCount({ ...params, direction: undefined }) });
+  if (params.taxRelevant !== undefined) probes.push({ label: `tax_relevant ${params.taxRelevant}`, count: () => bookingCount({ ...params, taxRelevant: undefined }) });
+  if (params.amountMin !== undefined || params.amountMax !== undefined) {
+    probes.push({ label: "the amount range", count: () => bookingCount({ ...params, amountMin: undefined, amountMax: undefined }) });
+  }
+  return loosenHint("bookings", probes);
+}
+
 export const listTransactions: ToolSpec = {
   name: "list_transactions",
   kind: "read",
@@ -143,7 +174,7 @@ export const listTransactions: ToolSpec = {
     const direction = parseDirection(args.direction);
     const ranking = parseRanking(args, RANK_FIELDS, "booking_date");
     const grouping = parseGrouping(args, GROUPS);
-    const res = await (finance.listTransactions({
+    const params: ListParams = {
       q: str(args.q),
       from: isoDate(args.from),
       to: isoDate(args.to),
@@ -156,7 +187,9 @@ export const listTransactions: ToolSpec = {
       sortBy: RANK_FIELDS[ranking.field].sortBy,
       sortDir: ranking.direction,
       limit: grouping ? GROUPED_CAP : limit,
-    })) as unknown as { items: TransactionView[]; total: number };
+    };
+    const res = await (finance.listTransactions(params)) as unknown as { items: TransactionView[]; total: number };
+    const hint = res.items.length ? undefined : await emptyBookingsHint(params);
     const groups = grouping ? groupRows(res.items, (t) => groupKey(t, grouping.by), grouping.perGroup) : undefined;
     const rows = groups ? groups.flatMap((g) => g.rows.map((t) => ({ ...t, group: g.key }))) : res.items.map((t) => ({ ...t, group: undefined as string | undefined }));
     const rowCap = groups ? Math.min(rows.length, limit * grouping!.perGroup) : limit;
@@ -194,6 +227,7 @@ export const listTransactions: ToolSpec = {
       ),
       digest: digestOf("list_transactions", total, rows.map((t) => t.id)),
       rowCount: rows.length,
+      hint,
       // Only the rows fetched: a follow-up acts on what the user saw.
       ref: { type: "transaction", ids: rows.map((t) => t.id) },
       block: {

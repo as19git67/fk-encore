@@ -50,6 +50,9 @@ export interface BenchSummary {
   median_prompt_tokens_first?: number | null
   /** Cases per router stage (stage 1); missing on older runs. */
   routed?: Partial<Record<'keywords' | 'inherited' | 'model' | 'all', number>>
+  /** Tools written for the model (stage 2): empty results followed by another call, errors followed by a corrected call. */
+  empty_follow_rate?: number | null
+  error_fix_rate?: number | null
 }
 
 export type BenchStatus = 'running' | 'done' | 'failed' | 'cancelled'
@@ -85,6 +88,11 @@ export interface BenchCaseRun {
   areas?: string[]
   routing?: 'keywords' | 'inherited' | 'model' | 'all'
   router_ms?: number | null
+  /** Stage 2: empty results and tool errors of the turn, and how many the model followed up. */
+  empty_results?: number
+  empty_followed?: number
+  tool_errors?: number
+  errors_corrected?: number
 }
 
 /** One call of the turn behind an answer the user judged: never the rows it returned. */

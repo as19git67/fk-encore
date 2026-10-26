@@ -120,6 +120,8 @@ function roadText(r: BenchCaseRun): string {
   const parts = [r.first_tool ?? 'kein Werkzeug']
   if (r.areas) parts.push(`${r.routing === 'all' ? 'alle Bereiche' : r.areas.join('+')} (${ROUTING_LABEL[r.routing ?? 'all']})`)
   if (r.nudges) parts.push(`${r.nudges}× zurück`)
+  if (r.empty_results) parts.push(`${r.empty_followed ?? 0}/${r.empty_results} leere Ergebnisse weiterverfolgt`)
+  if (r.tool_errors) parts.push(`${r.errors_corrected ?? 0}/${r.tool_errors} Fehler korrigiert`)
   if (r.prompt_tokens_first) parts.push(`${r.prompt_tokens_first} Tokens`)
   return parts.join(' · ')
 }
@@ -380,6 +382,8 @@ function remove(run: BenchRunSummary) {
           <div class="tile"><dt>Zurückgeschickt</dt><dd>{{ selected.summary.nudges ?? '–' }}</dd></div>
           <div class="tile"><dt>Prompt Runde 1 (Median)</dt><dd>{{ selected.summary.median_prompt_tokens_first ?? '–' }}</dd></div>
           <div class="tile"><dt>Bereiche gewählt durch</dt><dd>{{ routedText(selected.summary.routed) }}</dd></div>
+          <div class="tile"><dt>Leere Ergebnisse weiterverfolgt</dt><dd>{{ percent(selected.summary.empty_follow_rate) }}</dd></div>
+          <div class="tile"><dt>Fehler korrigiert</dt><dd>{{ percent(selected.summary.error_fix_rate) }}</dd></div>
         </dl>
 
         <ScrollX v-if="selected.results.length">
