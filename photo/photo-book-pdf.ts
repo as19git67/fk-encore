@@ -20,7 +20,7 @@ import { coverCrop } from "./recap-export.service";
 import {
   PHOTO_BOOK_FORMATS,
   RENDER_DPI,
-  cellRect,
+  slotGeometry,
   spineWidthMm,
   textRect,
   type BookLayout,
@@ -42,12 +42,15 @@ const COVER_GROUND = "#1f2933";
 export interface RenderSlot {
   photoId: number;
   focal: { x: number; y: number } | null;
+  caption?: string | null;
 }
 
 export interface RenderPage {
   layout: BookLayout;
   chapterTitle: string | null;
   chapterSubtitle: string | null;
+  /** The page shows captions: framed photos make room for them. */
+  captioned?: boolean;
   slots: RenderSlot[];
 }
 
@@ -133,9 +136,12 @@ class Renderer {
     const { format } = this.book;
     const layout = page.layout;
     for (let i = 0; i < page.slots.length && i < layout.cells.length; i++) {
-      let r = cellRect(format, layout, layout.cells[i]);
+      const geo = slotGeometry(format, layout, layout.cells[i], !!page.captioned);
+      let r = geo.image;
       if (layout.fullBleed) r = { x: r.x - bleed.l, y: r.y - bleed.t, w: r.w + bleed.l + bleed.r, h: r.h + bleed.t + bleed.b };
       await this.image(doc, page.slots[i], { x: ox + r.x, y: oy + r.y, w: r.w, h: r.h });
+      const caption = page.slots[i].caption;
+      if (geo.caption && caption) this.caption(doc, caption, { x: ox + geo.caption.x, y: oy + geo.caption.y, w: geo.caption.w, h: geo.caption.h }, geo.overlay);
     }
     const tr = textRect(format, layout);
     if (tr && page.chapterTitle) {
@@ -154,6 +160,24 @@ class Renderer {
           .text(page.chapterSubtitle, pt(ox + tr.x), top + titleH + subPt * 0.4, { width: pt(tr.w), align });
       }
     }
+  }
+
+  /** A caption under its photo, or over it in a dark band when the photo fills the page. */
+  caption(doc: PDFKit.PDFDocument, text: string, rect: RectMm, overlay: boolean): void {
+    const size = Math.min(8.5, Math.max(6, pt(rect.h) * 0.4));
+    doc.font("Helvetica").fontSize(size);
+    if (overlay) {
+      const pad = 2;
+      const w = Math.min(pt(rect.w), doc.widthOfString(text) + pt(2 * pad));
+      const h = Math.min(pt(rect.h), doc.heightOfString(text, { width: pt(rect.w) - pt(2 * pad) }) + pt(pad));
+      const top = pt(rect.y + rect.h) - h;
+      doc.save().rect(pt(rect.x), top, w, h).fillOpacity(0.5).fill("#000000").restore();
+      doc.fillColor("#ffffff").text(text, pt(rect.x + pad), top + pt(pad) / 2, {
+        width: w - pt(2 * pad), height: h, ellipsis: true, lineBreak: true,
+      });
+      return;
+    }
+    doc.fillColor(MUTED).text(text, pt(rect.x), pt(rect.y), { width: pt(rect.w), height: pt(rect.h), ellipsis: true, lineBreak: true });
   }
 
   /** The front: cover photo over the whole panel and a band with the title. */

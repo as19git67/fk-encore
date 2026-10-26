@@ -14,7 +14,7 @@ import * as path from "path";
 import { convertHeicToJpeg } from "./heic-convert.service";
 import { resolvePhotoFilePath } from "./photo";
 import { renderUserAndCache } from "./photo-transforms-render.service";
-import { bookSettings, loadPhotoBook, type LoadedBook } from "./photo-book.service";
+import { bookSettings, loadPhotoBook, pageCaptioned, type LoadedBook } from "./photo-book.service";
 import {
   renderCoverPdf,
   renderHomePdf,
@@ -80,7 +80,8 @@ export function toRenderBook(loaded: LoadedBook): RenderBook {
         layout: p.layout,
         chapterTitle: p.kind === "opener" ? ch?.title ?? null : null,
         chapterSubtitle: p.kind === "opener" ? ch?.subtitle ?? null : null,
-        slots: p.photos.map((s) => ({ photoId: s.photo_id, focal: s.auto_crop })),
+        captioned: pageCaptioned(loaded, p),
+        slots: p.photos.map((s) => ({ photoId: s.photo_id, focal: s.auto_crop, caption: loaded.captions.get(s.photo_id)?.text ?? null })),
       };
     }),
     bleedMm: settings.bleed_mm,

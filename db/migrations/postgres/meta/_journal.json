@@ -1954,6 +1954,13 @@
       "when": 1789800000000,
       "tag": "0279_photo_books",
       "breakpoints": true
+    },
+    {
+      "idx": 280,
+      "version": "7",
+      "when": 1789890000000,
+      "tag": "0280_photo_book_texts",
+      "breakpoints": true
     }
   ]
 }

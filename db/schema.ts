@@ -5088,18 +5088,33 @@ export interface PhotoBookSettings {
   crop_marks?: boolean;
   spreads?: boolean;
   paper_mm?: number;
+  /** Captions under the photos (stage 2); a page may override it. */
+  captions?: boolean;
+}
+
+/** Weight of a subject when the book picks its photos (stage 4): -1 (fewer) .. 1 (more). */
+export interface PhotoBookWeights {
+  people?: number;
+  landscape?: number;
+  nature?: number;
+  buildings?: number;
 }
 
 /** How the book was built, kept so "Neu verteilen" can build it again. */
 export interface PhotoBookSource {
-  kind: "photos" | "album";
+  kind: "photos" | "album" | "collection";
   /** The chosen photos before narrowing, for `kind: "photos"`. */
   photo_ids?: number[];
   album_id?: number;
+  /** A collection (stage 5): its photos and the photos of its albums, read again on rebuild. */
+  collection_id?: number;
   quality_min?: number | null;
   aesthetic_min?: number | null;
   without_recognisable_faces?: boolean;
   max_photos?: number | null;
+  weights?: PhotoBookWeights | null;
+  /** Near-duplicate groups contribute only their pick (stage 4). */
+  group_picks_only?: boolean;
 }
 
 export const photoBook = pgTable(
@@ -5129,6 +5144,8 @@ export const photoBookChapter = pgTable(
     subtitle: text("subtitle"),
     starts_at: timestamp("starts_at", { mode: "string" }),
     ends_at: timestamp("ends_at", { mode: "string" }),
+    title_source: text("title_source").$type<PhotoBookTextSource>().notNull().default("rule"),
+    title_suggestion: text("title_suggestion"),
   },
   (table) => [index("photo_book_chapter_by_book").on(table.book_id)],
 );
@@ -5142,6 +5159,13 @@ export const photoBookPage = pgTable(
     position: integer("position").notNull(),
     kind: text("kind").$type<"opener" | "photos">().notNull(),
     layout: text("layout").notNull(),
+    /** Captions on this page; null follows the book. */
+    captions: boolean("captions"),
+    layout_source: text("layout_source").$type<PhotoBookTextSource>().notNull().default("rule"),
+    /** Who picked the layout before the user changed it. */
+    layout_origin: text("layout_origin").$type<PhotoBookTextSource>().notNull().default("rule"),
+    rule_layout: text("rule_layout"),
+    layout_reason: text("layout_reason"),
   },
   (table) => [index("photo_book_page_by_book").on(table.book_id)],
 );
@@ -5154,4 +5178,21 @@ export const photoBookSlot = pgTable(
     photo_id: integer("photo_id").notNull().references(() => photos.id, { onDelete: "cascade" }),
   },
   (table) => [primaryKey({ columns: [table.page_id, table.slot] }), index("photo_book_slot_by_photo").on(table.photo_id)],
+);
+
+/** Who wrote a title or caption, or picked a layout. */
+export type PhotoBookTextSource = "rule" | "llm" | "user";
+
+/** A photo's caption within one book (stage 2). */
+export const photoBookCaption = pgTable(
+  "photo_book_caption",
+  {
+    book_id: integer("book_id").notNull().references(() => photoBook.id, { onDelete: "cascade" }),
+    photo_id: integer("photo_id").notNull().references(() => photos.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    source: text("source").$type<"llm" | "user">().notNull(),
+    model: text("model"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.book_id, table.photo_id] }), index("photo_book_caption_by_photo").on(table.photo_id)],
 );

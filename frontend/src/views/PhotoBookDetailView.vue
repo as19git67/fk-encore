@@ -5,31 +5,42 @@
  * in place, each page picks one of the layouts for its number of photos, and
  * a photo can become the cover or leave the book. "Neu verteilen" lays the
  * book out again from its source; the PDF comes from the export dialog.
+ *
+ * Stages 2 and 3: the model proposes captions, chapter titles and layouts
+ * (`PhotoBookAiDialog`). A caption is edited from the photo's menu, captions
+ * are switched on for the book in its settings and per page at its foot, and a
+ * chapter whose own title the user kept shows the model's proposal to take.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
 import type { MenuItem } from 'primevue/menuitem'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
+import Textarea from 'primevue/textarea'
 import PageLayout from '../components/layout/PageLayout.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import PhotoBookPagePreview from '../components/photobook/PhotoBookPagePreview.vue'
 import PhotoBookExportDialog from '../components/photobook/PhotoBookExportDialog.vue'
+import PhotoBookAiDialog from '../components/photobook/PhotoBookAiDialog.vue'
 import { useModuleBack } from '../composables/useModuleBack'
 import {
   PHOTO_BOOK_FORMATS,
+  acceptPhotoBookChapterSuggestion,
   deletePhotoBook,
   getPhotoBook,
   photoBookThumbUrl,
   rebuildPhotoBook,
   removePhotoFromBookPage,
+  setPhotoBookCaption,
+  setPhotoBookPageCaptions,
   setPhotoBookPageLayout,
   updatePhotoBook,
   updatePhotoBookChapter,
@@ -50,6 +61,7 @@ const loadError = ref('')
 const actionError = ref('')
 const busy = ref(false)
 const exportOpen = ref(false)
+const aiOpen = ref(false)
 
 const bookId = computed(() => Number(route.params.id))
 
@@ -88,6 +100,8 @@ interface ChapterBlock {
   id: number | null
   title: string
   subtitle: string | null
+  /** The model's title when it differs from the one that stands. */
+  suggestion: string | null
   pages: { page: PhotoBookPage; number: number }[]
 }
 
@@ -95,11 +109,14 @@ const chapters = computed<ChapterBlock[]>(() => {
   const b = book.value
   if (!b) return []
   const blocks = new Map<number | null, ChapterBlock>()
-  for (const c of b.chapters) blocks.set(c.id, { id: c.id, title: c.title, subtitle: c.subtitle, pages: [] })
+  for (const c of b.chapters) {
+    const suggestion = c.title_suggestion && c.title_suggestion !== c.title ? c.title_suggestion : null
+    blocks.set(c.id, { id: c.id, title: c.title, subtitle: c.subtitle, suggestion, pages: [] })
+  }
   b.pages.forEach((page, i) => {
     let block = blocks.get(page.chapter_id)
     if (!block) {
-      block = { id: page.chapter_id, title: 'Ohne Kapitel', subtitle: null, pages: [] }
+      block = { id: page.chapter_id, title: 'Ohne Kapitel', subtitle: null, suggestion: null, pages: [] }
       blocks.set(page.chapter_id, block)
     }
     block.pages.push({ page, number: i + 1 })
@@ -126,11 +143,48 @@ function saveChapterTitle(id: number | null) {
   void apply(() => updatePhotoBookChapter(bookId.value, id, { title: draft }))
 }
 
+function acceptSuggestion(id: number | null) {
+  if (id == null) return
+  void apply(() => acceptPhotoBookChapterSuggestion(bookId.value, id))
+}
+
 // ── pages and photos ────────────────────────────────────────────────────
 
 function changeLayout(page: PhotoBookPage, layout: string) {
   if (layout === page.layout) return
   void apply(() => setPhotoBookPageLayout(bookId.value, page.id, layout))
+}
+
+/** Flip the page's captions; the page follows the book again when that is what it says. */
+function toggleCaptions(page: PhotoBookPage) {
+  const next = !(page.captions_override ?? book.value?.settings.captions ?? false)
+  const value = next === book.value?.settings.captions ? null : next
+  void apply(() => setPhotoBookPageCaptions(bookId.value, page.id, value))
+}
+
+function pageHasCaption(page: PhotoBookPage): boolean {
+  return page.slots.some((s) => !!s.caption)
+}
+
+function captionsOn(page: PhotoBookPage): boolean {
+  return page.captions_override ?? book.value?.settings.captions ?? false
+}
+
+const captionOpen = ref(false)
+const captionTarget = ref<PhotoBookSlot | null>(null)
+const captionDraft = ref('')
+
+function openCaption(slot: PhotoBookSlot) {
+  captionTarget.value = slot
+  captionDraft.value = slot.caption ?? ''
+  captionOpen.value = true
+}
+
+async function saveCaption() {
+  const t = captionTarget.value
+  if (!t) return
+  await apply(() => setPhotoBookCaption(bookId.value, t.photo_id, captionDraft.value.trim() || null))
+  if (!actionError.value) captionOpen.value = false
 }
 
 const slotMenu = ref<InstanceType<typeof Menu> | null>(null)
@@ -144,6 +198,11 @@ const slotMenuItems = computed<MenuItem[]>(() => {
       label: t.slot.dpi ? `Druckt mit ${t.slot.dpi} dpi` : 'Auflösung unbekannt',
       icon: t.slot.low_dpi ? 'pi pi-exclamation-triangle' : 'pi pi-info-circle',
       disabled: true,
+    },
+    {
+      label: t.slot.caption ? 'Bildunterschrift bearbeiten' : 'Bildunterschrift schreiben',
+      icon: 'pi pi-align-left',
+      command: (): void => openCaption(t.slot),
     },
     {
       label: 'Als Titelbild',
@@ -170,12 +229,14 @@ const settingsOpen = ref(false)
 const draftTitle = ref('')
 const draftSubtitle = ref('')
 const draftFormat = ref<PhotoBookFormat>('a4-landscape')
+const draftCaptions = ref(false)
 
 function openSettings() {
   if (!book.value) return
   draftTitle.value = book.value.title
   draftSubtitle.value = book.value.subtitle ?? ''
   draftFormat.value = book.value.format
+  draftCaptions.value = book.value.settings.captions
   settingsOpen.value = true
 }
 
@@ -185,6 +246,7 @@ async function saveSettings() {
     title: draftTitle.value.trim(),
     subtitle: draftSubtitle.value.trim() || null,
     format: draftFormat.value,
+    settings: { captions: draftCaptions.value },
   }))
   if (!actionError.value) settingsOpen.value = false
 }
@@ -192,7 +254,7 @@ async function saveSettings() {
 function confirmRebuild() {
   confirm.require({
     header: 'Neu verteilen?',
-    message: 'Kapitel und Seiten werden aus der Quelle neu gebildet. Geänderte Kapiteltitel, Layouts und herausgenommene Fotos gehen dabei verloren.',
+    message: 'Kapitel und Seiten werden aus der Quelle neu gebildet. Geänderte Kapiteltitel, Layouts und herausgenommene Fotos gehen dabei verloren; Bildunterschriften bleiben.',
     icon: 'pi pi-refresh',
     rejectProps: { label: 'Abbrechen', severity: 'secondary', text: true },
     acceptProps: { label: 'Neu verteilen' },
@@ -222,7 +284,8 @@ function confirmDelete() {
 
 const toolbarItems = computed<ToolbarItem[]>(() => [
   { key: 'pdf', label: 'PDF', title: 'Als PDF ausgeben', icon: 'pi pi-file-pdf', disabled: !book.value, command: () => (exportOpen.value = true) },
-  { key: 'settings', label: 'Buch', title: 'Titel und Format', icon: 'pi pi-pencil', disabled: !book.value || busy.value, command: openSettings },
+  { key: 'ai', label: 'KI', title: 'Vorschläge der KI', icon: 'pi pi-sparkles', disabled: !book.value, command: () => (aiOpen.value = true) },
+  { key: 'settings', label: 'Buch', title: 'Titel, Format und Bildunterschriften', icon: 'pi pi-pencil', disabled: !book.value || busy.value, command: openSettings },
   { key: 'rebuild', title: 'Neu verteilen', icon: 'pi pi-refresh', disabled: !book.value || busy.value, menuOnly: true, command: confirmRebuild },
   { key: 'delete', title: 'Fotobuch löschen', icon: 'pi pi-trash', severity: 'danger', disabled: !book.value, menuOnly: true, command: confirmDelete },
 ])
@@ -281,6 +344,11 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
           <h2 v-else class="pbd-heading">{{ ch.title }}</h2>
           <span v-if="ch.subtitle" class="pbd-chapter-sub">{{ ch.subtitle }}</span>
         </div>
+        <p v-if="ch.suggestion" class="pbd-suggestion">
+          <i class="pi pi-sparkles" aria-hidden="true" />
+          <span>Vorschlag der KI: „{{ ch.suggestion }}“</span>
+          <Button label="Übernehmen" size="small" text :disabled="busy" @click="acceptSuggestion(ch.id)" />
+        </p>
         <ul class="pbd-pages">
           <li v-for="{ page, number } in ch.pages" :key="page.id" class="pbd-page">
             <PhotoBookPagePreview
@@ -305,6 +373,25 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
                 @update:model-value="changeLayout(page, $event)"
               />
               <span v-else class="pbd-page-layout">{{ page.layout_options[0]?.name }}</span>
+              <i
+                v-if="page.layout_source === 'llm'"
+                v-tooltip.top="page.layout_reason ?? 'Von der KI gewählt'"
+                class="pi pi-sparkles pbd-page-ai"
+                tabindex="0"
+                :aria-label="`Layout von der KI gewählt${page.layout_reason ? `: ${page.layout_reason}` : ''}`"
+              />
+              <Button
+                v-if="pageHasCaption(page)"
+                icon="pi pi-align-left"
+                size="small"
+                text
+                rounded
+                :severity="captionsOn(page) ? 'primary' : 'secondary'"
+                :aria-pressed="captionsOn(page)"
+                :aria-label="captionsOn(page) ? `Bildunterschriften auf Seite ${number} ausblenden` : `Bildunterschriften auf Seite ${number} zeigen`"
+                :disabled="busy"
+                @click="toggleCaptions(page)"
+              />
             </div>
           </li>
         </ul>
@@ -314,6 +401,19 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     <Menu ref="slotMenu" :model="slotMenuItems" popup />
 
     <PhotoBookExportDialog v-if="book" v-model:visible="exportOpen" :book="book" @saved="book = $event" />
+    <PhotoBookAiDialog v-if="book" v-model:visible="aiOpen" :book-id="book.id" @changed="load" />
+
+    <Dialog v-model:visible="captionOpen" class="dialog-sm" modal header="Bildunterschrift">
+      <label class="pbd-field">
+        <span>Text unter dem Foto</span>
+        <Textarea v-model="captionDraft" rows="3" auto-resize maxlength="300" autofocus />
+      </label>
+      <p class="pbd-hint">Leer lassen entfernt die Bildunterschrift. Was du schreibst, ändert die KI nicht mehr.</p>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" text @click="captionOpen = false" />
+        <Button label="Speichern" icon="pi pi-check" :loading="busy" @click="saveCaption" />
+      </template>
+    </Dialog>
 
     <Dialog v-model:visible="settingsOpen" class="dialog-sm" modal header="Titel und Format">
       <div class="pbd-form">
@@ -329,6 +429,10 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
           <span>Format</span>
           <Select v-model="draftFormat" :options="PHOTO_BOOK_FORMATS" option-label="name" option-value="id" />
         </label>
+        <div class="pbd-check">
+          <Checkbox v-model="draftCaptions" binary input-id="pbd-captions" />
+          <label for="pbd-captions">Bildunterschriften unter den Fotos zeigen</label>
+        </div>
       </div>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" text @click="settingsOpen = false" />
@@ -432,6 +536,28 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
 .pbd-page-layout {
   color: var(--p-text-muted-color);
   font-size: var(--text-sm);
+}
+.pbd-suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.pbd-page-ai {
+  color: var(--p-primary-color);
+  border-radius: 4px;
+}
+.pbd-page-ai:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.pbd-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 .pbd-form {
   display: flex;
