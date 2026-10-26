@@ -214,7 +214,7 @@ describe("photo book service", () => {
     expect(view.pages[0].kind).toBe("opener");
     expect(view.chapters).toHaveLength(1);
     expect(view.cover_photo_id).not.toBeNull();
-    expect(view.settings).toEqual({ bleed_mm: 3, crop_marks: false, spreads: true, paper_mm: 0.12 });
+    expect(view.settings).toEqual({ bleed_mm: 3, crop_marks: false, spreads: true, paper_mm: 0.12, captions: false });
 
     await expect(getPhotoBookView(other.id, id)).rejects.toThrow(/not found/);
     expect((await listPhotoBooks(user.id)).map((b) => b.title)).toEqual(["Sommer"]);

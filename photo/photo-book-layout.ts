@@ -160,6 +160,46 @@ export function textRect(format: PhotoBookFormat, layout: BookLayout): RectMm | 
   return { x: box.x + t.x * box.w, y: box.y + t.y * box.h, w: t.w * box.w, h: t.h * box.h };
 }
 
+/** Height of the strip under a framed photo that holds its caption (stage 2). */
+export const CAPTION_STRIP_MM = 7;
+/** Space between a photo and its caption, taken from the strip. */
+const CAPTION_GAP_MM = 1.2;
+
+export interface SlotGeometry {
+  /** Where the photo goes. */
+  image: RectMm;
+  /** Where its caption goes; null when the page shows no captions. */
+  caption: RectMm | null;
+  /** The caption lies over the photo (full bleed), not under it. */
+  overlay: boolean;
+}
+
+/**
+ * A cell split into photo and caption. On a framed page the caption takes a
+ * strip at the bottom of the cell, so every photo on a captioned page loses
+ * the same height and the page stays even. A full-bleed photo has no frame to
+ * put it in: the caption lies over the photo, inside the page margin, where
+ * the trim cannot cut it.
+ */
+export function slotGeometry(format: PhotoBookFormat, layout: BookLayout, c: BookCell, captioned: boolean): SlotGeometry {
+  const r = cellRect(format, layout, c);
+  if (!captioned) return { image: r, caption: null, overlay: false };
+  if (layout.fullBleed) {
+    const f = PHOTO_BOOK_FORMATS[format];
+    return {
+      image: r,
+      caption: { x: PAGE_MARGIN_MM, y: f.height - PAGE_MARGIN_MM - CAPTION_STRIP_MM, w: f.width - 2 * PAGE_MARGIN_MM, h: CAPTION_STRIP_MM },
+      overlay: true,
+    };
+  }
+  const strip = Math.min(CAPTION_STRIP_MM, r.h * 0.3);
+  return {
+    image: { x: r.x, y: r.y, w: r.w, h: Math.max(1, r.h - strip) },
+    caption: { x: r.x, y: r.y + r.h - strip + CAPTION_GAP_MM, w: r.w, h: Math.max(1, strip - CAPTION_GAP_MM) },
+    overlay: false,
+  };
+}
+
 /** The dpi a photo of `px` pixels prints at when it covers a cell of `rect`. */
 export function slotDpi(photoW: number | null, photoH: number | null, rect: RectMm): number | null {
   if (!photoW || !photoH) return null;
@@ -408,16 +448,19 @@ export interface LayoutChoice {
 }
 
 /**
- * The layout and cell order for `photos` on one page that crops the least,
- * with the best photo in the largest cell when cells differ in size.
- * `avoid` (the previous page's layout) costs a little extra.
+ * Every layout for `photos` on one page, each with the cell order that crops
+ * the least, cheapest first. The best photo should sit in the largest cell
+ * when cells differ in size; `avoid` (the previous page's layout) costs a
+ * little extra. Stage 3 hands the first few to the model.
  */
-export function chooseLayout(format: PhotoBookFormat, photos: BookPhoto[], avoid?: string | null): LayoutChoice | null {
-  let best: LayoutChoice | null = null;
+export function rankLayouts(format: PhotoBookFormat, photos: BookPhoto[], avoid?: string | null): LayoutChoice[] {
+  const out: LayoutChoice[] = [];
+  if (!photos.length) return out;
   const bestPhoto = [...photos].sort((a, b) => b.score - a.score || a.id - b.id)[0];
   for (const layout of bookLayouts("photos", photos.length)) {
     const big = largestCell(layout.cells);
     const sizesDiffer = layout.cells.some((c) => Math.abs(c.w * c.h - layout.cells[big].w * layout.cells[big].h) > 1e-6);
+    let best: LayoutChoice | null = null;
     for (const order of permutations(photos)) {
       let loss = 0;
       order.forEach((p, i) => { loss += cropLoss(photoAspect(p), cellAspect(format, layout, layout.cells[i])); });
@@ -428,8 +471,14 @@ export function chooseLayout(format: PhotoBookFormat, photos: BookPhoto[], avoid
       order.forEach((p, i) => { if (p.id !== photos[i].id) cost += 0.005; });
       if (!best || cost < best.cost - 1e-9) best = { layout, photos: order, cost };
     }
+    if (best) out.push(best);
   }
-  return best;
+  return out.sort((a, b) => a.cost - b.cost);
+}
+
+/** The cheapest of `rankLayouts`. */
+export function chooseLayout(format: PhotoBookFormat, photos: BookPhoto[], avoid?: string | null): LayoutChoice | null {
+  return rankLayouts(format, photos, avoid)[0] ?? null;
 }
 
 /** The share of a chapter's photos that may get a page of their own. */

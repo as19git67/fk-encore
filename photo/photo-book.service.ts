@@ -17,7 +17,9 @@ import {
   albumPhotos,
   albumShares,
   albums,
+  collectionMembers,
   photoBook,
+  photoBookCaption,
   photoBookChapter,
   photoBookPage,
   photoBookSlot,
@@ -25,7 +27,10 @@ import {
   photos,
   type PhotoBookSettings,
   type PhotoBookSource,
+  type PhotoBookTextSource,
+  type PhotoBookWeights,
 } from "../db/schema";
+import { loadReadableCollection } from "../documents/collection-access";
 import { accessiblePhotoCondition, accessiblePhotoConditionFor } from "./photo-file-access";
 import { aestheticScoreSql } from "./photo.filters";
 import {
@@ -36,13 +41,13 @@ import {
   bookLayouts,
   buildChapterPages,
   buildChapters,
-  cellRect,
   findBookLayout,
   isPhotoBookFormat,
   limitPhotos,
   photoScore,
   relayoutPage,
   slotDpi,
+  slotGeometry,
   spineWidthMm,
   textRect,
   type BookLayout,
@@ -51,6 +56,7 @@ import {
   type PhotoBookFormat,
   type RectMm,
 } from "./photo-book-layout";
+import { cleanWeights, hasWeights, keepSeriesPicks, loadSeries, loadSubjectShares, weightedScore } from "./photo-book-subjects";
 
 /** A book holds at most this many photos; the narrowing keeps the best. */
 export const MAX_BOOK_PHOTOS = 600;
@@ -60,6 +66,7 @@ export const DEFAULT_BOOK_SETTINGS: Required<PhotoBookSettings> = {
   crop_marks: false,
   spreads: true,
   paper_mm: 0.12,
+  captions: false,
 };
 
 export function bookSettings(s: PhotoBookSettings | null | undefined): Required<PhotoBookSettings> {
@@ -68,6 +75,7 @@ export function bookSettings(s: PhotoBookSettings | null | undefined): Required<
   if (s?.crop_marks != null) out.crop_marks = !!s.crop_marks;
   if (s?.spreads != null) out.spreads = !!s.spreads;
   if (s?.paper_mm != null && Number.isFinite(s.paper_mm)) out.paper_mm = Math.min(1, Math.max(0.03, s.paper_mm));
+  if (s?.captions != null) out.captions = !!s.captions;
   return out;
 }
 
@@ -86,10 +94,16 @@ export interface PhotoBookSlotView {
   photo_id: number;
   filename: string;
   auto_crop: { x: number; y: number } | null;
+  /** Where the photo goes (without its caption strip). */
   rect: PageRect;
   /** The dpi it prints at; null while the photo's size is unknown. */
   dpi: number | null;
   low_dpi: boolean;
+  caption: string | null;
+  caption_source: "llm" | "user" | null;
+  /** Where the caption goes on this page; null when the page shows none. */
+  caption_rect: PageRect | null;
+  caption_overlay: boolean;
 }
 
 export interface PhotoBookLayoutOption {
@@ -106,6 +120,13 @@ export interface PhotoBookPageView {
   layout_options: PhotoBookLayoutOption[];
   full_bleed: boolean;
   text_rect: PageRect | null;
+  /** Whether the page shows captions, after the book's setting. */
+  captions: boolean;
+  /** The page's own setting; null follows the book. */
+  captions_override: boolean | null;
+  layout_source: PhotoBookTextSource;
+  /** Why the model picked this layout (stage 3). */
+  layout_reason: string | null;
   slots: PhotoBookSlotView[];
 }
 
@@ -116,6 +137,9 @@ export interface PhotoBookChapterView {
   subtitle: string | null;
   starts_at: string | null;
   ends_at: string | null;
+  title_source: PhotoBookTextSource;
+  /** The model's proposal, also when the user's own title stays. */
+  title_suggestion: string | null;
 }
 
 export interface PhotoBookFormatOption {
@@ -130,6 +154,7 @@ export interface PhotoBookSettingsView {
   crop_marks: boolean;
   spreads: boolean;
   paper_mm: number;
+  captions: boolean;
 }
 
 export interface PhotoBookView {
@@ -178,6 +203,10 @@ export interface PhotoBookNarrowing {
   aestheticMin?: number | null;
   withoutRecognisableFaces?: boolean;
   maxPhotos?: number | null;
+  /** -1 (fewer) .. 1 (more) per subject (stage 4). */
+  weights?: PhotoBookWeights | null;
+  /** A series of near-duplicates contributes only its pick (stage 4); on by default. */
+  groupPicksOnly?: boolean;
 }
 
 interface PhotoRow {
@@ -213,9 +242,45 @@ async function assertAlbumVisible(userId: number, albumId: number): Promise<void
 }
 
 /**
+ * The photos of a collection or the basket (stage 5): its photos and the
+ * photos of its albums the owner may see. The owner must be able to read the
+ * collection; every photo still passes the access check of the selection.
+ */
+async function collectionPhotoIds(userId: number, collectionId: number): Promise<number[]> {
+  await loadReadableCollection(userId, collectionId, false);
+  return collectionMemberPhotoIds(userId, collectionId);
+}
+
+async function collectionMemberPhotoIds(userId: number, collectionId: number): Promise<number[]> {
+  const rows = await dbAll<{ entity_type: string; entity_id: number }>(
+    db.select({ entity_type: collectionMembers.entity_type, entity_id: collectionMembers.entity_id })
+      .from(collectionMembers)
+      .where(and(eq(collectionMembers.collection_id, collectionId), inArray(collectionMembers.entity_type, ["photo", "album"]))),
+  );
+  const ids = new Set(rows.filter((r) => r.entity_type === "photo").map((r) => Number(r.entity_id)));
+  const albumIds = rows.filter((r) => r.entity_type === "album").map((r) => Number(r.entity_id));
+  if (albumIds.length) {
+    const visible = await dbAll<{ id: number }>(
+      db.select({ id: albums.id }).from(albums).where(and(
+        inArray(albums.id, albumIds),
+        sql`(${albums.user_id} = ${userId} OR EXISTS (SELECT 1 FROM ${albumShares} s WHERE s.album_id = ${albums.id} AND s.user_id = ${userId}))`,
+      )),
+    );
+    if (visible.length) {
+      const inAlbums = await dbAll<{ photo_id: number }>(
+        db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(inArray(albumPhotos.album_id, visible.map((a) => a.id))),
+      );
+      for (const r of inAlbums) ids.add(r.photo_id);
+    }
+  }
+  return [...ids];
+}
+
+/**
  * The photos a book built from `source` holds for `userId`: visible to them,
  * pictures (no videos), not hidden by them, through the narrowing, in
- * chronological order.
+ * chronological order. Subject weights move the scores the narrowing keeps
+ * the best by; a series of near-duplicates gives only its pick.
  */
 export async function selectBookPhotos(userId: number, source: PhotoBookSource): Promise<BookPhoto[]> {
   const conds: SQL[] = [
@@ -227,6 +292,11 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
     if (!source.album_id) throw APIError.invalidArgument("album_id is required");
     await assertAlbumVisible(userId, source.album_id);
     conds.push(sql`EXISTS (SELECT 1 FROM ${albumPhotos} ap WHERE ap.photo_id = ${photos.id} AND ap.album_id = ${source.album_id})`);
+  } else if (source.kind === "collection") {
+    if (!source.collection_id) throw APIError.invalidArgument("collection_id is required");
+    const ids = await collectionPhotoIds(userId, source.collection_id);
+    if (!ids.length) return [];
+    conds.push(inArray(photos.id, ids));
   } else {
     const ids = [...new Set(source.photo_ids ?? [])].filter((n) => Number.isInteger(n) && n > 0);
     if (!ids.length) return [];
@@ -249,7 +319,7 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
       city: photos.location_city,
     }).from(photos).where(and(...conds)),
   );
-  const list: BookPhoto[] = rows.map((r) => ({
+  let list: BookPhoto[] = rows.map((r) => ({
     id: r.id,
     takenAt: r.taken_at,
     width: r.width,
@@ -257,6 +327,13 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
     score: photoScore(r.aesthetic, r.quality),
     city: r.city,
   }));
+  if (hasWeights(source.weights) && list.length) {
+    const shares = await loadSubjectShares(list.map((p) => p.id));
+    list = list.map((p) => ({ ...p, score: weightedScore(p.score, shares.get(p.id), source.weights) }));
+  }
+  if (source.group_picks_only === true && list.length > 1) {
+    list = keepSeriesPicks(list, await loadSeries(userId, list.map((p) => p.id)));
+  }
   const max = source.max_photos && source.max_photos > 0 ? Math.min(source.max_photos, MAX_BOOK_PHOTOS) : MAX_BOOK_PHOTOS;
   return limitPhotos(list, max);
 }
@@ -283,7 +360,14 @@ async function writeBookContent(bookId: number, format: PhotoBookFormat, list: B
     );
     for (const page of buildChapterPages(format, ch.photos)) {
       const p = await dbInsertReturning<{ id: number }>(
-        db.insert(photoBookPage).values({ book_id: bookId, chapter_id: row!.id, position: position++, kind: page.kind, layout: page.layout })
+        db.insert(photoBookPage).values({
+          book_id: bookId,
+          chapter_id: row!.id,
+          position: position++,
+          kind: page.kind,
+          layout: page.layout,
+          rule_layout: page.layout,
+        })
           .returning({ id: photoBookPage.id }),
       );
       if (page.photoIds.length) {
@@ -302,9 +386,10 @@ export interface CreatePhotoBookInput extends PhotoBookNarrowing {
   title: string;
   subtitle?: string | null;
   format?: PhotoBookFormat;
-  /** A selection; or `albumId`. */
+  /** A selection; or `albumId`, or `collectionId` (a collection or the basket). */
   photoIds?: number[];
   albumId?: number;
+  collectionId?: number;
 }
 
 export async function createPhotoBook(userId: number, input: CreatePhotoBookInput): Promise<number> {
@@ -312,15 +397,35 @@ export async function createPhotoBook(userId: number, input: CreatePhotoBookInpu
   if (!title) throw APIError.invalidArgument("title is required");
   const format = input.format ?? "a4-landscape";
   if (!isPhotoBookFormat(format)) throw APIError.invalidArgument(`unknown format ${String(format)}`);
-  if (!input.albumId && !input.photoIds?.length) throw APIError.invalidArgument("photoIds or albumId is required");
+  if (!input.albumId && !input.collectionId && !input.photoIds?.length) {
+    throw APIError.invalidArgument("photoIds, albumId or collectionId is required");
+  }
 
+  // The basket changes all the time: a book made from it keeps the photos it
+  // held then, so "Neu verteilen" does not pull in what was added since.
+  let collectionId = input.collectionId;
+  let photoIds = input.photoIds;
+  if (collectionId && !input.albumId) {
+    const col = await loadReadableCollection(userId, collectionId, false);
+    if (col.kind === "basket") {
+      photoIds = await collectionMemberPhotoIds(userId, collectionId);
+      collectionId = undefined;
+      if (!photoIds.length) throw APIError.failedPrecondition("no photos left after narrowing");
+    }
+  }
   const source: PhotoBookSource = {
-    kind: input.albumId ? "album" : "photos",
-    ...(input.albumId ? { album_id: input.albumId } : { photo_ids: [...new Set(input.photoIds)] }),
+    kind: input.albumId ? "album" : collectionId ? "collection" : "photos",
+    ...(input.albumId
+      ? { album_id: input.albumId }
+      : collectionId
+        ? { collection_id: collectionId }
+        : { photo_ids: [...new Set(photoIds)] }),
     quality_min: percent(input.qualityMin),
     aesthetic_min: percent(input.aestheticMin),
     without_recognisable_faces: !!input.withoutRecognisableFaces,
     max_photos: input.maxPhotos && input.maxPhotos > 0 ? Math.min(input.maxPhotos, MAX_BOOK_PHOTOS) : null,
+    weights: cleanWeights(input.weights),
+    group_picks_only: input.groupPicksOnly !== false,
   };
   const list = await selectBookPhotos(userId, source);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");
@@ -420,7 +525,9 @@ async function writePage(pageId: number, kind: PageKind, format: PhotoBookFormat
     await dbExec(db.delete(photoBookPage).where(eq(photoBookPage.id, pageId)));
     return;
   }
-  await dbExec(db.update(photoBookPage).set({ layout: draft.layout }).where(eq(photoBookPage.id, pageId)));
+  // A new photo count is the rule's to lay out again; nobody chose this layout yet.
+  await dbExec(db.update(photoBookPage).set({ layout: draft.layout, layout_source: "rule", layout_origin: "rule", rule_layout: draft.layout, layout_reason: null })
+    .where(eq(photoBookPage.id, pageId)));
   if (draft.photoIds.length) {
     await dbExec(db.insert(photoBookSlot).values(draft.photoIds.map((photo_id, slot) => ({ page_id: pageId, slot, photo_id }))));
   }
@@ -432,7 +539,15 @@ export interface LoadedPage {
   chapter_id: number | null;
   kind: PageKind;
   layout: BookLayout;
+  captions: boolean | null;
+  layout_source: PhotoBookTextSource;
+  layout_reason: string | null;
   photos: SlotPhotoRow[];
+}
+
+export interface LoadedCaption {
+  text: string;
+  source: "llm" | "user";
 }
 
 export interface LoadedBook {
@@ -441,6 +556,14 @@ export interface LoadedBook {
   chapters: PhotoBookChapterView[];
   pages: LoadedPage[];
   cover: SlotPhotoRow | null;
+  /** By photo id. */
+  captions: Map<number, LoadedCaption>;
+}
+
+/** Whether `page` shows captions: its own setting, else the book's, and only when one of its photos has one. */
+export function pageCaptioned(loaded: LoadedBook, page: LoadedPage): boolean {
+  const on = page.captions ?? bookSettings(loaded.book.settings).captions;
+  return on && page.photos.some((p) => loaded.captions.has(p.photo_id));
 }
 
 /**
@@ -459,17 +582,36 @@ export async function loadPhotoBook(userId: number, bookId: number): Promise<Loa
       subtitle: photoBookChapter.subtitle,
       starts_at: photoBookChapter.starts_at,
       ends_at: photoBookChapter.ends_at,
+      title_source: photoBookChapter.title_source,
+      title_suggestion: photoBookChapter.title_suggestion,
     }).from(photoBookChapter).where(eq(photoBookChapter.book_id, bookId)).orderBy(asc(photoBookChapter.position)),
   );
+  const captionRows = await dbAll<{ photo_id: number; text: string; source: "llm" | "user" }>(
+    db.select({ photo_id: photoBookCaption.photo_id, text: photoBookCaption.text, source: photoBookCaption.source })
+      .from(photoBookCaption).where(eq(photoBookCaption.book_id, bookId)),
+  );
+  const captions = new Map(captionRows.map((c) => [c.photo_id, { text: c.text, source: c.source }]));
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const pageRows = await dbAll<{ id: number; position: number; chapter_id: number | null; kind: PageKind; layout: string }>(
+    const pageRows = await dbAll<{
+      id: number;
+      position: number;
+      chapter_id: number | null;
+      kind: PageKind;
+      layout: string;
+      captions: boolean | null;
+      layout_source: PhotoBookTextSource;
+      layout_reason: string | null;
+    }>(
       db.select({
         id: photoBookPage.id,
         position: photoBookPage.position,
         chapter_id: photoBookPage.chapter_id,
         kind: photoBookPage.kind,
         layout: photoBookPage.layout,
+        captions: photoBookPage.captions,
+        layout_source: photoBookPage.layout_source,
+        layout_reason: photoBookPage.layout_reason,
       }).from(photoBookPage).where(eq(photoBookPage.book_id, bookId)).orderBy(asc(photoBookPage.position), asc(photoBookPage.id)),
     );
     const slots = await loadSlots(userId, bookId);
@@ -490,13 +632,23 @@ export async function loadPhotoBook(userId: number, bookId: number): Promise<Loa
         repaired = true;
         continue;
       }
-      pages.push({ id: r.id, position: r.position, chapter_id: r.chapter_id, kind: r.kind, layout, photos: list });
+      pages.push({
+        id: r.id,
+        position: r.position,
+        chapter_id: r.chapter_id,
+        kind: r.kind,
+        layout,
+        captions: r.captions,
+        layout_source: r.layout_source,
+        layout_reason: r.layout_reason,
+        photos: list,
+      });
     }
     if (repaired) continue;
 
     let cover: SlotPhotoRow | null = null;
     if (book.cover_photo_id != null) cover = slots.find((s) => s.photo_id === book.cover_photo_id) ?? null;
-    return { book, format, chapters, pages, cover };
+    return { book, format, chapters, pages, cover, captions };
   }
   throw APIError.internal("photo book pages could not be repaired");
 }
@@ -510,6 +662,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
   const photoIds = new Set<number>();
   const pages: PhotoBookPageView[] = loaded.pages.map((p) => {
     const tr = textRect(format, p.layout);
+    const captioned = pageCaptioned(loaded, p);
     return {
       id: p.id,
       position: p.position,
@@ -519,9 +672,15 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
       layout_options: bookLayouts(p.kind, p.photos.length).map((l) => ({ id: l.id, name: l.name })),
       full_bleed: !!p.layout.fullBleed,
       text_rect: tr ? share(tr, format) : null,
+      captions: captioned,
+      captions_override: p.captions,
+      layout_source: p.layout_source,
+      layout_reason: p.layout_reason,
       slots: p.photos.map((s, i) => {
-        const rect = cellRect(format, p.layout, p.layout.cells[i]);
+        const geo = slotGeometry(format, p.layout, p.layout.cells[i], captioned);
+        const rect = geo.image;
         const dpi = slotDpi(s.width, s.height, rect);
+        const caption = loaded.captions.get(s.photo_id) ?? null;
         const low = dpi != null && dpi < MIN_PRINT_DPI;
         if (low) lowDpi += 1;
         photoIds.add(s.photo_id);
@@ -533,6 +692,10 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
           rect: share(rect, format),
           dpi: dpi == null ? null : Math.round(dpi),
           low_dpi: low,
+          caption: caption?.text ?? null,
+          caption_source: caption?.source ?? null,
+          caption_rect: geo.caption ? share(geo.caption, format) : null,
+          caption_overlay: geo.overlay,
         };
       }),
     };
@@ -631,6 +794,7 @@ export async function updatePhotoBookChapter(
     const t = input.title.trim();
     if (!t) throw APIError.invalidArgument("title must not be empty");
     values.title = t;
+    values.title_source = "user";
   }
   if (input.subtitle !== undefined) values.subtitle = input.subtitle?.trim() || null;
   const res = await dbExec(db.update(photoBookChapter).set(values)
@@ -653,7 +817,46 @@ export async function setPhotoBookPageLayout(userId: number, bookId: number, pag
     const known = bookLayouts(page.kind, page.photos.length).map((l) => l.id).join(", ");
     throw APIError.invalidArgument(`unknown layout ${layoutId} for ${page.photos.length} photos; one of ${known}`);
   }
-  await dbExec(db.update(photoBookPage).set({ layout: layoutId }).where(eq(photoBookPage.id, pageId)));
+  if (layoutId === page.layout.id) return;
+  // `layout_origin` keeps who picked the layout the user turned away from.
+  await dbExec(db.update(photoBookPage).set({ layout: layoutId, layout_source: "user" }).where(eq(photoBookPage.id, pageId)));
+  await touch(bookId);
+}
+
+/** Captions on one page: true or false, or null to follow the book. */
+export async function setPhotoBookPageCaptions(userId: number, bookId: number, pageId: number, captions: boolean | null): Promise<void> {
+  await ownedPage(userId, bookId, pageId);
+  await dbExec(db.update(photoBookPage).set({ captions }).where(eq(photoBookPage.id, pageId)));
+  await touch(bookId);
+}
+
+/** The user's caption for a photo of the book; empty text removes it. */
+export async function setPhotoBookCaption(userId: number, bookId: number, photoId: number, text: string | null): Promise<void> {
+  await ownedBook(userId, bookId);
+  const inBook = (await loadSlots(userId, bookId)).some((s) => s.photo_id === photoId);
+  if (!inBook) throw APIError.notFound("photo not in this book");
+  const t = text?.replace(/\s+/g, " ").trim() ?? "";
+  if (!t) {
+    await dbExec(db.delete(photoBookCaption).where(and(eq(photoBookCaption.book_id, bookId), eq(photoBookCaption.photo_id, photoId))));
+  } else {
+    if (t.length > 300) throw APIError.invalidArgument("caption is longer than 300 characters");
+    const values = { book_id: bookId, photo_id: photoId, text: t, source: "user" as const, model: null, created_at: new Date().toISOString() };
+    await db.insert(photoBookCaption).values(values)
+      .onConflictDoUpdate({ target: [photoBookCaption.book_id, photoBookCaption.photo_id], set: values });
+  }
+  await touch(bookId);
+}
+
+/** Take the model's proposed title for a chapter. */
+export async function acceptPhotoBookChapterSuggestion(userId: number, bookId: number, chapterId: number): Promise<void> {
+  await ownedBook(userId, bookId);
+  const ch = await dbFirst<{ title_suggestion: string | null }>(
+    db.select({ title_suggestion: photoBookChapter.title_suggestion }).from(photoBookChapter)
+      .where(and(eq(photoBookChapter.id, chapterId), eq(photoBookChapter.book_id, bookId))),
+  );
+  if (!ch) throw APIError.notFound("chapter not found");
+  if (!ch.title_suggestion) throw APIError.failedPrecondition("no suggestion for this chapter");
+  await dbExec(db.update(photoBookChapter).set({ title: ch.title_suggestion, title_source: "llm" }).where(eq(photoBookChapter.id, chapterId)));
   await touch(bookId);
 }
 

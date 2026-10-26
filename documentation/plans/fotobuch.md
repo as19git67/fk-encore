@@ -72,23 +72,52 @@ played as a slideshow.
    rebuild), PDF for the print shop and for home. Entry points: "Fotobuch
    gestalten" in the gallery's selection bar and on the album page, list under
    Fotos › Fotobücher.
-2. **LLM chapters and captions** — the LLM proposes chapter headings from
-   time, place, people and the images, and a caption per photo from location,
-   POI match with its Wikipedia/Wikidata text (`geo/src/poi-search.ts`) and
-   the image (`/vision/json-prompt`, like `photo/critique.ts`). Batch work
-   through the `llm` queue. Captions on/off per page and book.
-3. **LLM picks the layout** — the rule-based builder produces candidates, the
-   LLM ranks them per page from the photo information (orientation, faces,
-   scores, captions); measured against the rule-based choice before it is
-   adopted.
-4. **Subject weighting** — sliders for people, landscape, nature, buildings
-   (zero-shot prompts on the CLIP vector, faces, POI matches); near-duplicate
-   groups contribute only their pick (`photo/group-auto-pick.ts`).
-5. **More sources** — the basket and collections, and an assistant tool that
-   proposes a book from the photos of an answer (`from_previous_result`).
-   Built on the router and area packages in `assistant/areas/`.
-6. **Slideshow** — the same book (chapters, pages, captions) played with the
-   recap player (`RecapPlayer.vue`) and music, optionally exported as video.
+2. **LLM chapters and captions** (implemented) — `photo/photo-book-ai.ts`
+   with the prompts in `photo-book-prompts.ts`. A caption per photo from
+   place, a confident POI match with the start of its Wikipedia article, the
+   owner's named people and the image (`/vision/json-prompt`); without the
+   projector it is written from the facts alone, and a photo without facts
+   gets none. Chapter titles from time, places, people and the captions; a
+   title the user wrote stays and the model's proposal is shown next to it
+   to take ("Übernehmen"). Runs in the `llm` slot at background priority,
+   started from the book's page ("KI"), never while the GPU is lent.
+   Captions on/off for the book and per page (`photo_book_page.captions`,
+   null follows the book); in the PDF a strip below a framed photo or a band
+   inside a full-bleed one (`slotGeometry`). Captions live in
+   `photo_book_caption` with `source` `llm`/`user`; a user caption is never
+   overwritten.
+3. **LLM picks the layout** (implemented) — `rankLayouts` gives every layout
+   with its best cell order; the model picks among the best
+   `LAYOUT_CANDIDATES` (4) from the photos' orientation, faces, scores and
+   captions, and a pick that crops more than `LAYOUT_MAX_EXTRA_COST` (0.1)
+   beyond the best is refused. Each page records `layout_origin`,
+   `rule_layout` and the model's reason; a page the user changed is
+   `layout_source = 'user'` and never picked again. The measurement is how
+   often the user changes a page, rule against model
+   (`GET /photo-books-layout-stats`, shown in the KI dialog).
+4. **Subject weighting** (implemented) — `photo/photo-book-subjects.ts`.
+   Weights −1 … 1 for people, landscape, nature, buildings move a photo's
+   score by at most 30 points per subject. Shares from zero-shot CLIP
+   prompts on the stored vector (`/zero-shot/score` of the embedding
+   service, with a catch-all label), faces (a recognisable face counts
+   fully) and confident POI matches (buildings). Without the embedding
+   service only faces and landmarks count. A series of near-duplicates the
+   owner has not reviewed contributes only the model's pick, else its best
+   photo; on by default, off with "Aus Serien … nur das beste" unticked.
+5. **More sources** (implemented) — a collection as source
+   (`kind: "collection"`: its photos and the photos of its albums, as far as
+   the owner may see them, read again on "Neu verteilen"); the basket is
+   copied into a photo list when the book is made. Entry points in the
+   basket drawer and on the collection page. Assistant tool
+   `create_photo_book` (`assistant/tools/photo-book.ts`, area photos), a
+   write proposal from `from_previous_result`, ids or an album, with the
+   narrowing and weights.
+6. **Slideshow** (implemented) — "Diashow" on the book's page plays it in
+   the recap player: one slide per page in reading order, chapter titles on
+   the opener, the page's first caption when the page shows captions, pages
+   of four or more as collages of two or three
+   (`frontend/src/utils/photoBookSlideshow.ts`, prop `plan` of
+   `RecapPlayer.vue`), to the recaps' music. A video export is left open.
 
 ## Open questions
 

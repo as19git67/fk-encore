@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
  * One page of a photo book as the PDF lays it out: the server sends every
- * cell as a share of the page, so this only places them. A cell is a button;
- * what it does is the parent's (`slot-click`).
+ * cell and caption as a share of the page, so this only places them. A cell
+ * is a button; what it does is the parent's (`slot-click`).
  */
 import { computed } from 'vue'
 import { photoBookThumbUrl, type PageRect, type PhotoBookPage, type PhotoBookSlot } from '../../api/photoBooks'
@@ -62,6 +62,14 @@ function slotLabel(s: PhotoBookSlot): string {
       <img :src="photoBookThumbUrl(s.filename)" alt="" loading="lazy" :style="{ objectPosition: focal(s) }" />
       <span v-if="s.low_dpi" class="pbp-warn" aria-hidden="true"><i class="pi pi-exclamation-triangle" /></span>
     </button>
+    <template v-for="s in page.slots" :key="`c${s.slot}`">
+      <span
+        v-if="s.caption_rect && s.caption"
+        class="pbp-caption"
+        :class="{ 'pbp-caption--overlay': s.caption_overlay }"
+        :style="box(s.caption_rect)"
+      ><span class="pbp-caption-text">{{ s.caption }}</span></span>
+    </template>
   </div>
 </template>
 
@@ -72,6 +80,7 @@ function slotLabel(s: PhotoBookSlot): string {
   background: #ffffff; /* audit-ok: printed paper is white in both themes */
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  font-size: var(--text-sm);
 }
 .pbp-text {
   position: absolute;
@@ -113,6 +122,29 @@ function slotLabel(s: PhotoBookSlot): string {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.pbp-caption {
+  position: absolute;
+  overflow: hidden;
+  font-size: 0.55em;
+  line-height: 1.2;
+  color: #666666; /* audit-ok: muted ink on the white paper */
+  pointer-events: none;
+}
+.pbp-caption-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pbp-caption--overlay {
+  display: flex;
+  align-items: flex-end;
+}
+.pbp-caption--overlay .pbp-caption-text {
+  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #ffffff; /* audit-ok: white on the dark band, as in the PDF */
 }
 .pbp-warn {
   position: absolute;
