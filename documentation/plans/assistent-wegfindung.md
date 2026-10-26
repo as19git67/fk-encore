@@ -318,6 +318,53 @@ these parameters as given.
   estimated tokens) past it, so a turn with every area in play went to
   `describe_tools` first; only such turns send the full catalog.
 
+### Stage 4 (implemented)
+
+- **A summary per turn** (`assistant/summary.ts`): after the answer has
+  gone out, one model call bound to the tool `summarize_turn` writes two or
+  three sentences in the user's language — what was asked (a "davon"
+  resolved into words), what the tools found with the names, dates and
+  figures the answer rested on and how many rows, and what the answer said
+  or proposed; never ids, never tool names. It runs in the background at
+  `AI_PRIORITY.background` (before batch work, after anyone waiting), so it
+  never delays the answer, and lands in `assistant_message.summary` on the
+  answer row (migration 0281). A turn without a tool call gets none: its
+  answer is its own summary. A failed or unusable summary leaves the turn
+  as it was.
+- **The history replays older turns as question and summary**
+  (`history()` in `assistant/assistant.ts`): the newest `WHOLE_TURNS` (3)
+  turns go along as they happened — question, tool calls, results, answer —
+  so a follow-up can still read the rows; every older turn with a summary
+  goes as its question and the summary, with a bracketed note of the tools
+  behind it and their row counts ("[summary of an earlier turn; tools then:
+  list_transactions (3 rows). Follow-ups on those rows use
+  from_previous_result.]"). The rows themselves stay reachable through
+  `from_previous_result`, which reads the stored result sets, not the
+  transcript. `fitContext` still shrinks the whole turns' results to digests
+  and drops the oldest turns when the window runs short; a summarized turn
+  has nothing left to shrink. The note is in the shape the loop already
+  treats as a tool note: copied into an answer it is stripped
+  (`cleanAnswer`) and sent back (`looksLikeFakeToolCall`).
+- **Measured as** `summarizedTurns` in `ContextUsage` (the meter under the
+  chat says "n ältere als Zusammenfassung") and `follow_up_pass_rate` in
+  the benchmark summary: the pass rate of the cases that come with earlier
+  turns. Two new cases replay a two-turns-old bookings question as a
+  summary (`older-turn-tag-bookings`, `older-turn-largest-booking`): the
+  first tags those rows through `from_previous_result`, the second must read
+  them again with the words of the summary ("Baumarkt", September) instead
+  of answering from it.
+- **Left out on purpose: column selection per question.** A column list the
+  model chooses costs schema tokens in every round and risks dropping the
+  column the answer needs; pruning columns that are empty in every shown
+  row saves a few tokens per result and would have changed the table shape
+  the tools' tests pin. Neither pays for itself next to the summaries, which
+  take a thousand-token result down to three sentences.
+- **To test on the GPU** (not something the code can decide): `LLM_KV_TYPE=q8_0`
+  (with `LLM_FLASH_ATTN=1`) halves the KV cache of Gemma 4 26B-A4B, which
+  would let `LLM_CTX` rise from 30000. Run the benchmark once at each setting
+  and compare `median_ms_per_round` and `p90_ms_per_round` with the pass
+  rate; the Measurements table takes both rows.
+
 ### Stage 6, part 2 (open)
 
 - A benchmark mode against a synthetic test database, so that search,

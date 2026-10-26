@@ -48,6 +48,8 @@ export interface ContextUsage {
   keptTurns: number
   digested: number
   earlierTurns?: number
+  /** Earlier turns replayed as question and summary instead of their tool rounds. */
+  summarizedTurns?: number
 }
 
 export interface ConversationMessage {

@@ -57,6 +57,9 @@ export interface CaseRun {
   plan?: string[];
   /** How many of them got done. */
   plan_done?: number;
+  // ── the context (stage 4) ──
+  /** The case is a follow-up: it comes with earlier turns, whole or as summaries. */
+  follow_up?: boolean;
 }
 
 /** One call as the loop logged it: with its row count or error, never row content. */
@@ -233,5 +236,6 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     ...followUps(trace),
     plan_asked,
     ...(plan ? { plan, plan_done } : {}),
+    follow_up: (c.history?.length ?? 0) > 0,
   };
 }

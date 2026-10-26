@@ -160,6 +160,8 @@ export interface ContextUsage {
   digested: number;
   /** Earlier questions in the conversation, answered or not. Set by the service. */
   earlierTurns?: number;
+  /** Earlier turns that went along as question and summary instead of their tool rounds (stage 4). Set by the service. */
+  summarizedTurns?: number;
 }
 
 /** What the agent reports while it works, in order. */

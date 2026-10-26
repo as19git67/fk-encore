@@ -58,6 +58,8 @@ export interface BenchSummary {
   planned?: number
   multi_area_pass_rate?: number | null
   median_rounds_multi_area?: number | null
+  /** Pass rate of the cases that come with earlier turns (stage 4: history as summaries). */
+  follow_up_pass_rate?: number | null
 }
 
 export type BenchStatus = 'running' | 'done' | 'failed' | 'cancelled'
@@ -102,6 +104,8 @@ export interface BenchCaseRun {
   plan_asked?: boolean
   plan?: string[]
   plan_done?: number
+  /** Stage 4: the case came with earlier turns. */
+  follow_up?: boolean
 }
 
 /** One call of the turn behind an answer the user judged: never the rows it returned. */

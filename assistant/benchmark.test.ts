@@ -129,7 +129,18 @@ describe("scoring", () => {
       { rounds_ms: [100], error: null, score: pass, routing: "all", areas: ["finance", "documents", "photos"] },
     ]);
     expect(s).toMatchObject({ plan_asked: 3, planned: 2, multi_area_pass_rate: 0.5, median_rounds_multi_area: 4 });
-    expect(summarize([{ rounds_ms: [100], error: null, score: pass }])).toMatchObject({ plan_asked: 0, planned: 0, multi_area_pass_rate: null, median_rounds_multi_area: null });
+    expect(summarize([{ rounds_ms: [100], error: null, score: pass }])).toMatchObject({ plan_asked: 0, planned: 0, multi_area_pass_rate: null, median_rounds_multi_area: null, follow_up_pass_rate: null });
+  });
+
+  it("rates the follow-up cases apart (stage 4: history as summaries)", () => {
+    const pass = { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] };
+    const fail = { ...pass, args_hit: false, passed: false, missing: ["list_transactions"] };
+    const s = summarize([
+      { rounds_ms: [100], error: null, score: pass, follow_up: true },
+      { rounds_ms: [100], error: null, score: fail, follow_up: true },
+      { rounds_ms: [100], error: null, score: fail },
+    ]);
+    expect(s.follow_up_pass_rate).toBe(0.5);
   });
 
   it("counts empty results followed by another call, and errors followed by a corrected call", () => {

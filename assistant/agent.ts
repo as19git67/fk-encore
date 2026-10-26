@@ -260,7 +260,7 @@ Rules:
 - If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
 - When ${WRITE_PLAN_NAME} is among the tools, the question needs several steps: the first call writes the plan, every later round follows it step by step, and the plan's own status after each result says what comes next.
 - A tool result with no rows says which filter to loosen and how many rows that brings: call the tool again once with that filter dropped before you tell the user nothing exists. A tool error names the argument and the allowed values: fix that argument and call again; never repeat the same call, and never answer as if the call had worked. When a tool finds nothing even so, say so plainly and name the criteria.
-- Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
+- Earlier turns show the tool calls behind each answer and what they found; an older turn shows its question and a summary of what was found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. To correct an earlier proposal (another layout, other text, other photos), call the write tool again with the changed arguments: that makes a new card under your answer, while the earlier card stays as it was and cannot be changed. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
 - When a table helps (a few rows compared by the same columns), write it as a Markdown table: a header row, then a separator row like |---|---:|, one row per line. The app shows it as a real table. Never draw tables with +---+, box characters or spaces, and never put a table in a code block.
 - When you name a single item by its id, put its kind right before the number: "Dokument 123", "Buchung 4711", "Album 12", "Sammelmappe 5", "Zähler 3", "Betrieb 2", or "Dokument „Titel“ (ID 123)". The app turns such a mention into a link to the item's page. Only name ids a tool printed.
@@ -404,7 +404,7 @@ function proposedEarlier(history: ChatMessage[], writeTools: Set<string>): boole
 export const FINAL_ANSWER_NUDGE = "No more tool calls are possible. Answer the user now in plain words, only from the tool results above; say what is missing if they were not enough.";
 
 /** A tool call or a tool note written out as text — Gemma's own call syntax, or the shape of a history note. */
-const FAKE_CALL_RE = /<\|?tool_call|<tool_call\|>|\[tools behind this answer|\bcall:[a-z_]+\{/i;
+const FAKE_CALL_RE = /<\|?tool_call|<tool_call\|>|\[tools behind this answer|\[summary of an earlier turn|\bcall:[a-z_]+\{/i;
 
 export function looksLikeFakeToolCall(text: string | null): boolean {
   return !!text && FAKE_CALL_RE.test(text);
@@ -419,8 +419,11 @@ export function wantsNoRows(text: string | null): boolean {
   return !!text && new RegExp(NO_ROWS_RE.source, "i").test(text);
 }
 
+/** The note under a replayed summary (`summary.ts`), should the model copy it into an answer. */
+const SUMMARY_NOTE_RE = /\[summary of an earlier turn[^\]]*\]/gi;
+
 export function cleanAnswer(text: string): string {
-  return text.replace(TOOL_NOTE_LINE_RE, "").replace(NO_ROWS_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+  return text.replace(TOOL_NOTE_LINE_RE, "").replace(SUMMARY_NOTE_RE, "").replace(NO_ROWS_RE, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 const AMOUNT_RE = /\d,\d{2}\s*(?:€|eur\b)|(?:€|eur)\s*-?\d|\d\.\d{2}\s*(?:€|eur\b)/i;
