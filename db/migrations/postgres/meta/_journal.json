@@ -1947,6 +1947,13 @@
       "when": 1789710000000,
       "tag": "0278_unique_album_names",
       "breakpoints": true
+    },
+    {
+      "idx": 279,
+      "version": "7",
+      "when": 1789800000000,
+      "tag": "0279_photo_books",
+      "breakpoints": true
     }
   ]
 }

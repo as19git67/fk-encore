@@ -5079,3 +5079,79 @@ export const financeBusinessDocument = pgTable(
   },
   (table) => [index("finance_business_document_by_document").on(table.document_id)],
 );
+
+// ========== Photo books (documentation/plans/fotobuch.md, issue #1729) ==========
+
+/** Export settings of a photo book; every field optional, defaults in photo/photo-book.service.ts. */
+export interface PhotoBookSettings {
+  bleed_mm?: number;
+  crop_marks?: boolean;
+  spreads?: boolean;
+  paper_mm?: number;
+}
+
+/** How the book was built, kept so "Neu verteilen" can build it again. */
+export interface PhotoBookSource {
+  kind: "photos" | "album";
+  /** The chosen photos before narrowing, for `kind: "photos"`. */
+  photo_ids?: number[];
+  album_id?: number;
+  quality_min?: number | null;
+  aesthetic_min?: number | null;
+  without_recognisable_faces?: boolean;
+  max_photos?: number | null;
+}
+
+export const photoBook = pgTable(
+  "photo_book",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    subtitle: text("subtitle"),
+    format: text("format").notNull().default("a4-landscape"),
+    cover_photo_id: integer("cover_photo_id").references(() => photos.id, { onDelete: "set null" }),
+    settings: jsonb("settings").$type<PhotoBookSettings>().notNull().default(sql`'{}'::jsonb`),
+    source: jsonb("source").$type<PhotoBookSource>().notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("photo_book_by_user").on(table.user_id)],
+);
+
+export const photoBookChapter = pgTable(
+  "photo_book_chapter",
+  {
+    id: serial("id").primaryKey(),
+    book_id: integer("book_id").notNull().references(() => photoBook.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    title: text("title").notNull(),
+    subtitle: text("subtitle"),
+    starts_at: timestamp("starts_at", { mode: "string" }),
+    ends_at: timestamp("ends_at", { mode: "string" }),
+  },
+  (table) => [index("photo_book_chapter_by_book").on(table.book_id)],
+);
+
+export const photoBookPage = pgTable(
+  "photo_book_page",
+  {
+    id: serial("id").primaryKey(),
+    book_id: integer("book_id").notNull().references(() => photoBook.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => photoBookChapter.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    kind: text("kind").$type<"opener" | "photos">().notNull(),
+    layout: text("layout").notNull(),
+  },
+  (table) => [index("photo_book_page_by_book").on(table.book_id)],
+);
+
+export const photoBookSlot = pgTable(
+  "photo_book_slot",
+  {
+    page_id: integer("page_id").notNull().references(() => photoBookPage.id, { onDelete: "cascade" }),
+    slot: integer("slot").notNull(),
+    photo_id: integer("photo_id").notNull().references(() => photos.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.page_id, table.slot] }), index("photo_book_slot_by_photo").on(table.photo_id)],
+);

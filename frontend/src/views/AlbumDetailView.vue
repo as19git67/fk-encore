@@ -17,6 +17,7 @@ import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
+import PhotoBookCreateDialog from '../components/photobook/PhotoBookCreateDialog.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
@@ -522,6 +523,15 @@ function openCollageDialog() {
   collageDialogVisible.value = true
 }
 
+// "Fotobuch gestalten": from the selection bar for the chosen photos, from
+// the album's menu for all of them.
+const photoBookDialogVisible = ref(false)
+const photoBookFromSelection = ref(false)
+function openPhotoBookDialog(fromSelection: boolean) {
+  photoBookFromSelection.value = fromSelection
+  photoBookDialogVisible.value = true
+}
+
 // Collage was saved into this album → refresh metadata + grid so it shows up
 // instantly, just like after a delete.
 async function onCollageSaved() {
@@ -709,6 +719,7 @@ const selectionActions = computed<ToolbarItem[]>(() => {
     command: () => void shareSelectedPhotos(),
   })
   if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  push({ key: 'photo-book', title: 'Fotobuch gestalten', icon: 'pi pi-print', command: () => openPhotoBookDialog(true) })
   push({ key: 'file', title: 'Ablegen', icon: 'pi pi-file-import', command: () => openCollectionDialog(selectedPhotoRefs.value) })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
     push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
@@ -2413,6 +2424,17 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
     })
   }
 
+  if (album.value && !selectMode.value) {
+    items.push({
+      key: 'photo-book',
+      title: 'Fotobuch gestalten',
+      icon: 'pi pi-print',
+      text: true,
+      menuOnly: true,
+      command: () => openPhotoBookDialog(false),
+    })
+  }
+
   if (canShareAlbum.value) {
     items.push({
       key: 'share',
@@ -3268,6 +3290,14 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       v-model:visible="descriptionDialogVisible"
       :photo-ids="descriptionDialogPhotoIds"
       @saved="onDescriptionsSaved"
+    />
+
+    <!-- Photo book from the selection or the whole album (documentation/plans/fotobuch.md) -->
+    <PhotoBookCreateDialog
+      v-model:visible="photoBookDialogVisible"
+      :photo-ids="photoBookFromSelection ? collagePhotoIds : undefined"
+      :album-id="photoBookFromSelection ? undefined : albumId"
+      :default-title="album?.name"
     />
 
     <!-- Collage creator (album select-bar entry point) -->
