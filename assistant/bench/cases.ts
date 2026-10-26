@@ -280,7 +280,7 @@ export const BENCH_CASES: BenchCase[] = [
   {
     id: "best-photo-per-year-into-album",
     title: "Je Jahr ein Foto einer Person ins Album",
-    question: "Such für jedes Jahr das Foto mit Max mit den meisten Likes und füge es dem Album \"Beste Kinder\" hinzu.",
+    question: "Such für jedes Jahr das Foto mit Max mit den meisten Likes und füge es dem Album \"Jahresbeste\" hinzu.",
     expect: [
       { tool: "list_persons" },
       { tool: "list_photos", args: { person_ids: { $contains: "41" }, rank_by: "favorites_count", group_by: "year" } },
@@ -288,9 +288,9 @@ export const BENCH_CASES: BenchCase[] = [
     ],
     results: {
       list_persons: { rows: [{ id: 41, name: "Max", faces: 318 }], total: 1 },
-      list_albums: { rows: [{ id: 7, name: "Beste Kinder", photos: 12 }], total: 1 },
+      list_albums: { rows: [{ id: 7, name: "Jahresbeste", photos: 12 }], total: 1 },
       list_photos: { rows: [{ group: "2024", id: 911, taken: "2024-07-02", favorites_count: 4 }, { group: "2023", id: 877, taken: "2023-05-19", favorites_count: 3 }], total: 2, note: "ordered by favorites_count descending, the first row of each year (2 groups)" },
-      add_photos_to_album: { proposal: "2 Fotos zum Album „Beste Kinder“ hinzufügen", status: "proposed" },
+      add_photos_to_album: { proposal: "2 Fotos zum Album „Jahresbeste“ hinzufügen", status: "proposed" },
     },
   },
   {
