@@ -31,12 +31,22 @@ export class ContextTooLargeError extends Error {
   }
 }
 
+/** A call bound to one tool: the grammar allows nothing else. */
+export interface ForcedTool {
+  type: "function";
+  function: { name: string };
+}
+
 export interface ChatRequest {
   messages: ChatMessage[];
   tools?: unknown[];
-  tool_choice?: "auto" | "none" | "required";
+  tool_choice?: "auto" | "none" | "required" | ForcedTool;
   max_tokens?: number;
   temperature?: number;
+  /** A grammar for a plain reply (no tools): llama-server turns the schema into GBNF. */
+  response_format?: { type: "json_object"; schema: Record<string, unknown> };
+  /** Let the model think first; off by default, since a reasoning block costs context every round. */
+  thinking?: boolean;
 }
 
 /** The model's window and what one request took of it, as llm-service counted. */

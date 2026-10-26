@@ -18,6 +18,11 @@
  *      the question: a few hundred prompt tokens and a handful of output
  *      tokens, a fraction of a loop round.
  *
+ * The routing also says whether the question needs a plan (stage 3): two
+ * areas in play, chain words in the question ("und dann", "und mach
+ * daraus"), or the model's own `needs_plan`. The loop then asks for the
+ * steps before the first tool.
+ *
  * When nothing decides, every area is in play — today's state, and the safe
  * one. An embedding stage (the question against the area descriptions,
  * through the E5 embedder of the embedding service) is planned between 1
@@ -35,6 +40,12 @@ export type RoutingStage = "keywords" | "inherited" | "model" | "all";
 export interface Routing {
   areas: AreaId[];
   stage: RoutingStage;
+  /**
+   * The question needs steps that build on each other (stage 3): two areas,
+   * or words that chain one thing to the next. The loop then asks for a
+   * plan before the first tool.
+   */
+  needsPlan: boolean;
 }
 
 /** More areas than this by keywords means the question is broad: everything stays in play. */
@@ -80,6 +91,28 @@ export function areasOfContext(refs: Array<{ type: RefType }>): AreaId[] {
   return AREA_IDS.filter((id) => hit.has(id));
 }
 
+/**
+ * Words that chain one step to the next: "und dann", "danach", "und mach
+ * daraus", "erst … dann", "und füge … hinzu". A question with one of them
+ * wants two things done in order, whatever area they are in.
+ */
+const CHAIN_RE = new RegExp(
+  "(?<!\\p{L})(?:(?:und dann|danach|anschließend|und daraus|daraus dann|zuerst|zunächst)(?!\\p{L})|erst(?:mal)?(?!\\p{L})[^.?!]{0,60}(?<!\\p{L})(?:dann|danach)(?!\\p{L})"
+  + "|und (?:leg|lege|erstell|erstelle|mach|mache|schreib|schreibe|schick|schicke|exportier|exportiere|speicher|speichere|vergleich|vergleiche|füg|füge|pack|packe|ordne|häng|hänge)(?!\\p{L})"
+  + "|and then|afterwards|then (?:create|make|write|put|add|save|compare)(?!\\p{L}))",
+  "iu",
+);
+
+/** Does the question chain one step to another in words? */
+export function hasChainWords(question: string): boolean {
+  return CHAIN_RE.test(question);
+}
+
+/** Two areas, or a chain in words: the question is one for a plan. */
+function needsPlan(question: string, areas: AreaId[], stage: RoutingStage): boolean {
+  return (stage !== "all" && areas.length >= 2) || hasChainWords(question);
+}
+
 function union(...lists: AreaId[][]): AreaId[] {
   const hit = new Set(lists.flat());
   return AREA_IDS.filter((id) => hit.has(id));
@@ -94,6 +127,7 @@ const chooseAreasDefinition = toolDefinition({
     type: "object",
     properties: {
       areas: { type: "array", items: { type: "string", enum: AREA_IDS }, description: "one or two area ids, the most likely first" },
+      needs_plan: { type: "boolean", description: "true when the question needs two or more steps that build on each other" },
     },
     required: ["areas"],
   },
@@ -123,13 +157,18 @@ export function isRouterRequest(req: ChatRequest): boolean {
 
 /** What the model chose; null when it chose nothing usable. */
 export function parseAreaChoice(reply: { tool_calls: Array<{ function: { name: string; arguments: string } }> }): AreaId[] | null {
+  return parseChoice(reply)?.areas ?? null;
+}
+
+/** The model's choice with its plan flag; null when it chose nothing usable. */
+export function parseChoice(reply: { tool_calls: Array<{ function: { name: string; arguments: string } }> }): { areas: AreaId[]; needsPlan: boolean } | null {
   const call = reply.tool_calls.find((c) => c.function.name === CHOOSE_AREAS_NAME);
   if (!call) return null;
   try {
-    const parsed = JSON.parse(call.function.arguments || "{}") as { areas?: unknown };
+    const parsed = JSON.parse(call.function.arguments || "{}") as { areas?: unknown; needs_plan?: unknown };
     if (!Array.isArray(parsed.areas)) return null;
     const areas = parsed.areas.filter(isAreaId);
-    return AREA_IDS.filter((id) => areas.includes(id)).slice(0, 2);
+    return { areas: AREA_IDS.filter((id) => areas.includes(id)).slice(0, 2), needsPlan: parsed.needs_plan === true };
   } catch {
     return null;
   }
@@ -151,27 +190,30 @@ export interface RouteInput {
  * chose nothing — the loop then works as it did before the router.
  */
 export async function route(input: RouteInput): Promise<Routing> {
-  const byWords = areasByKeywords(input.question);
+  const q = input.question;
+  const decided = (areas: AreaId[], stage: RoutingStage, plan = false): Routing =>
+    ({ areas, stage, needsPlan: plan || needsPlan(q, areas, stage) });
+  const byWords = areasByKeywords(q);
   const inherited = areasOfLastTurn(input.history);
   const fromContext = areasOfContext(input.context ?? []);
   if (byWords.length) {
     // The working set is what the user handed over to talk about; a
     // follow-up keeps the previous turn's areas as well.
-    const areas = union(byWords, fromContext, looksLikeFollowUp(input.question) ? inherited : []);
-    if (areas.length > MAX_KEYWORD_AREAS) return { areas: AREA_IDS, stage: "all" };
-    return { areas, stage: "keywords" };
+    const areas = union(byWords, fromContext, looksLikeFollowUp(q) ? inherited : []);
+    if (areas.length > MAX_KEYWORD_AREAS) return decided(AREA_IDS, "all");
+    return decided(areas, "keywords");
   }
-  if (inherited.length || fromContext.length) return { areas: union(inherited, fromContext), stage: "inherited" };
+  if (inherited.length || fromContext.length) return decided(union(inherited, fromContext), "inherited");
   if (input.chat) {
     const withSlot = input.withSlot ?? ((fn) => fn());
     try {
-      const reply = await withSlot(() => input.chat!(routerRequest(input.question), undefined, input.signal));
-      const chosen = parseAreaChoice(reply);
-      if (chosen?.length) return { areas: chosen, stage: "model" };
+      const reply = await withSlot(() => input.chat!(routerRequest(q), undefined, input.signal));
+      const chosen = parseChoice(reply);
+      if (chosen?.areas.length) return decided(chosen.areas, "model", chosen.needsPlan);
     } catch (err) {
       // The user's cancel ends the turn; anything else leaves every area in play.
       if (input.signal?.aborted) throw err;
     }
   }
-  return { areas: AREA_IDS, stage: "all" };
+  return decided(AREA_IDS, "all");
 }

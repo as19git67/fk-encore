@@ -122,6 +122,13 @@ export interface BenchSummary {
   empty_follow_rate: number | null;
   /** Tool errors the model followed with a corrected call of the same tool, over all tool errors (stage 2); null without any. */
   error_fix_rate: number | null;
+  /** Cases the router asked a plan for, and how many of those got one (stage 3). */
+  plan_asked: number;
+  planned: number;
+  /** Pass rate of the cases with two or more areas in play, the plan's own measure (stage 3); null without any. */
+  multi_area_pass_rate: number | null;
+  /** Median rounds of those cases, the plan call included; null without any. */
+  median_rounds_multi_area: number | null;
 }
 
 export interface CaseRunSummaryInput {
@@ -135,6 +142,9 @@ export interface CaseRunSummaryInput {
   empty_followed?: number;
   tool_errors?: number;
   errors_corrected?: number;
+  areas?: string[];
+  plan_asked?: boolean;
+  plan?: string[];
 }
 
 function rate(part: number, whole: number): number | null {
@@ -158,6 +168,8 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
   const perCase = runs.filter((r) => r.rounds_ms.length).map((r) => r.rounds_ms.length);
   const sorted = [...roundMs].sort((a, b) => a - b);
   const judged = runs.filter((r) => typeof r.score.first_tool_hit === "boolean");
+  // A case of two or more areas, as the router decided them (every area in play is no decision).
+  const multi = runs.filter((r) => r.routing && r.routing !== "all" && (r.areas?.length ?? 0) >= 2);
   return {
     cases: runs.length,
     passed: runs.filter((r) => r.score.passed).length,
@@ -179,5 +191,9 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
     }, {}),
     empty_follow_rate: rate(total(runs, "empty_followed"), total(runs, "empty_results")),
     error_fix_rate: rate(total(runs, "errors_corrected"), total(runs, "tool_errors")),
+    plan_asked: runs.filter((r) => r.plan_asked).length,
+    planned: runs.filter((r) => r.plan).length,
+    multi_area_pass_rate: rate(multi.filter((r) => r.score.passed).length, multi.length),
+    median_rounds_multi_area: median(multi.filter((r) => r.rounds_ms.length).map((r) => r.rounds_ms.length)),
   };
 }

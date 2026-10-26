@@ -119,6 +119,14 @@ class ChatRequest(BaseModel):
     max_tokens: int = Field(default=1024, gt=0, le=8192)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     stream: bool = False
+    # A grammar for a plain reply: {"type": "json_object", "schema": {...}} as
+    # llama-server and llama-cpp-python read it. Only without tools — a bound
+    # tool call is tool_choice with a named function.
+    response_format: dict[str, Any] | None = None
+    # Let the model think before it answers. Off by default: a reasoning block
+    # costs context every round of an agent loop; a caller turns it on for one
+    # call with a small max_tokens, e.g. the plan of a multi-step question.
+    thinking: bool = False
 
     @model_validator(mode="after")
     def _check_conversation(self) -> "ChatRequest":
@@ -138,6 +146,11 @@ class ChatRequest(BaseModel):
             raise ValueError(f"tool_choice names unknown tool {forced!r}")
         if self.tool_choice in ("required",) and not names:
             raise ValueError("tool_choice 'required' needs tools")
+        if self.response_format is not None:
+            if names:
+                raise ValueError("response_format needs a request without tools; bind a call with tool_choice instead")
+            if self.response_format.get("type") not in ("json_object", "json_schema"):
+                raise ValueError("response_format.type must be 'json_object' or 'json_schema'")
 
         # Every tool result must answer a call the conversation actually made —
         # a stray id is a caller bug that the chat template would render as
@@ -196,17 +209,21 @@ def server_payload(req: ChatRequest) -> dict[str, Any]:
     """The body for llama-server's ``/v1/chat/completions``.
 
     Thinking is switched off per request on top of the deployment's
-    ``--reasoning`` flag: a reasoning block spends exactly the context the
-    tool results need, and an agent loop of several rounds pays for it every
-    round. Templates that know no ``enable_thinking`` ignore the variable.
+    ``--reasoning`` flag unless the request asks for it: a reasoning block
+    spends exactly the context the tool results need, and an agent loop of
+    several rounds pays for it every round. Templates that know no
+    ``enable_thinking`` ignore the variable. A ``response_format`` goes
+    through as it is; llama-server turns its schema into a grammar.
     """
 
     payload: dict[str, Any] = {
         "messages": [_wire_message(m) for m in req.messages],
         "max_tokens": req.max_tokens,
         "temperature": req.temperature,
-        "chat_template_kwargs": {"enable_thinking": False},
+        "chat_template_kwargs": {"enable_thinking": req.thinking},
     }
+    if req.response_format is not None:
+        payload["response_format"] = req.response_format
     if req.tools:
         payload["tools"] = [t.model_dump() for t in req.tools]
         payload["parallel_tool_calls"] = True
@@ -341,11 +358,12 @@ def emulation_response_format(req: ChatRequest) -> dict[str, Any] | None:
 
     ``tool_choice`` narrows the grammar rather than the prompt alone: "none"
     leaves only ``answer``, "required" or a named function only ``tool``.
+    Without tools the request's own ``response_format`` is the grammar.
     """
 
     names = req.tool_names()
     if not names:
-        return None
+        return req.response_format
     forced = forced_tool_name(req.tool_choice)
     call_schema = {
         "type": "object",

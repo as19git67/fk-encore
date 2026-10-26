@@ -9,10 +9,10 @@
  * behind other work does not count.
  */
 
-import { NO_ANSWER, OUT_OF_ROUNDS, runTurn } from "../agent";
+import { NO_ANSWER, OUT_OF_ROUNDS, runTurn, WRITE_PLAN_NAME } from "../agent";
 import type { AreaId } from "../areas/index";
 import { estimateTokens } from "../catalog";
-import type { ChatFn } from "../llm-client";
+import type { ChatFn, ChatRequest } from "../llm-client";
 import { isRouterRequest, type RoutingStage } from "../router";
 import type { AssistantUser, ToolSpec } from "../types";
 import { BENCH_TODAY, type BenchCase } from "./cases";
@@ -50,6 +50,13 @@ export interface CaseRun {
   /** Tool calls that ended in an error (refused arguments or a failing tool), and how many the model followed with a corrected call of the same tool. */
   tool_errors?: number;
   errors_corrected?: number;
+  // ── the plan of a multi-step question (stage 3) ──
+  /** The router asked for a plan (two areas, or chain words). */
+  plan_asked?: boolean;
+  /** The steps the model planned, by tool; absent when it wrote no usable plan. */
+  plan?: string[];
+  /** How many of them got done. */
+  plan_done?: number;
 }
 
 /** One call as the loop logged it: with its row count or error, never row content. */
@@ -81,6 +88,12 @@ export function followUps(trace: TraceEntry[]): Pick<CaseRun, "empty_results" | 
     }
   });
   return { empty_results, empty_followed, tool_errors, errors_corrected };
+}
+
+/** The plan call of a turn: bound to write_plan. */
+function isPlanRequest(req: ChatRequest): boolean {
+  const choice = req.tool_choice;
+  return typeof choice === "object" && choice !== null && choice.function?.name === WRITE_PLAN_NAME;
 }
 
 export interface RunnerDeps {
@@ -156,6 +169,9 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       return reply;
     }
     rounds_ms.push(Date.now() - started);
+    if (isPlanRequest(req)) plan_asked = true;
+    // The plan call, when there is one, carries the prompt of round 1 plus
+    // one tool: what the model counted there is the round-1 figure.
     if (prompt_tokens_first === null) {
       prompt_tokens_first = reply.usage?.prompt_tokens ?? estimateTokens(req.messages) + estimateTokens(req.tools ?? []);
     }
@@ -166,6 +182,9 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   let error: string | null = null;
   let areas: AreaId[] | undefined;
   let routing: RoutingStage | undefined;
+  let plan: string[] | undefined;
+  let plan_done: number | undefined;
+  let plan_asked = false;
   try {
     const result = await runTurn({
       user: c.permissions ? { userID: deps.user.userID, permissions: c.permissions } : deps.user,
@@ -186,6 +205,10 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     });
     areas = result.areas;
     routing = result.routing;
+    if (result.plan) {
+      plan = result.plan.map((s) => s.tool);
+      plan_done = result.plan.filter((s) => s.done).length;
+    }
     // The loop's own stand-ins are not the model's answer.
     answer = result.answer === NO_ANSWER || result.answer === OUT_OF_ROUNDS ? null : result.answer;
   } catch (err) {
@@ -208,5 +231,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     routing,
     router_ms,
     ...followUps(trace),
+    plan_asked,
+    ...(plan ? { plan, plan_done } : {}),
   };
 }
