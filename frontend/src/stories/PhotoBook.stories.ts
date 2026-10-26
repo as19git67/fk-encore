@@ -28,6 +28,7 @@ function slot(i: number, rect: PageRect, lowDpi = false): PhotoBookSlot {
     caption_source: null,
     caption_rect: null,
     caption_overlay: false,
+    caption_repeated: false,
   }
 }
 

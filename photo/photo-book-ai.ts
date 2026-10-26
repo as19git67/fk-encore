@@ -15,7 +15,7 @@
 
 import fs from "fs";
 import path from "path";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec } from "../db/adapter";
 import {
@@ -26,10 +26,12 @@ import {
   photoBookChapter,
   photoBookPage,
   photoBookSlot,
+  photoOcr,
   photoPoiMatches,
   photos,
   poiReferences,
   userFaceAssignments,
+  type PhotoOcrBlock,
 } from "../db/schema";
 import { AI_PRIORITY, AiSlotTimeoutError, withAiSlot } from "../ai-queue/slot-helper";
 import { isGpuLent, llmBudgetMs } from "../lib/llm-lease";
@@ -43,6 +45,7 @@ import {
   RECOGNISABLE_FACE_MIN_SHARPNESS,
   formatDay,
   photoScore,
+  captionKey,
   rankLayouts,
   type BookPhoto,
 } from "./photo-book-layout";
@@ -186,6 +189,79 @@ async function poiByPhoto(photoIds: number[]): Promise<Map<number, { name: strin
   return out;
 }
 
+/** Lines the text recognition is sure of; a word of one or two letters or bare numbers say nothing. */
+const OCR_MIN_CONFIDENCE = 0.8;
+const OCR_MAX_LINES = 3;
+
+export function signText(blocks: PhotoOcrBlock[] | null | undefined): string | null {
+  const lines = (blocks ?? [])
+    .filter((b) => b.confidence >= OCR_MIN_CONFIDENCE)
+    .map((b) => b.text.replace(/\s+/g, " ").trim())
+    .filter((t) => (t.match(/\p{L}/gu) ?? []).length >= 3);
+  const unique = [...new Set(lines)].slice(0, OCR_MAX_LINES);
+  return unique.length ? unique.join(" · ") : null;
+}
+
+/** What the text recognition read on each photo: signs, boards, a name over a door. */
+async function signTextByPhoto(photoIds: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  if (!photoIds.length) return out;
+  const rows = await dbAll<{ photo_id: number; blocks: PhotoOcrBlock[] }>(
+    db.select({ photo_id: photoOcr.photo_id, blocks: photoOcr.blocks }).from(photoOcr).where(inArray(photoOcr.photo_id, photoIds)),
+  );
+  for (const r of rows) {
+    const t = signText(r.blocks);
+    if (t) out.set(r.photo_id, t);
+  }
+  return out;
+}
+
+/** A photo belongs to a spot of a trip when it was taken that day this close to it. */
+const TRIP_SPOT_RADIUS_M = 150;
+
+/**
+ * The spot of one of the owner's trips each photo was taken at: a planned
+ * stop on the day it was planned for, or a stay the visit diary kept that
+ * day, within `TRIP_SPOT_RADIUS_M` of where the photo was taken; with the
+ * trip's title. The nearest wins.
+ */
+async function tripSpotByPhoto(userId: number, photoIds: number[]): Promise<Map<number, { spot: string; trip: string | null }>> {
+  const out = new Map<number, { spot: string; trip: string | null }>();
+  if (!photoIds.length) return out;
+  const ids = sql.join(photoIds.map((id) => sql`${id}`), sql`, `);
+  const distance = (lat: SQL, lon: SQL) =>
+    sql`111320 * sqrt(power(${lat} - p.latitude, 2) + power((${lon} - p.longitude) * cos(radians(p.latitude)), 2))`;
+  const result = await db.execute(sql`
+    SELECT p.id AS photo_id, x.spot, x.trip, x.d FROM photos p
+    CROSS JOIN LATERAL (
+      SELECT * FROM (
+        SELECT COALESCE(s.name, s.local_name) AS spot, tp.title AS trip, ${distance(sql`s.lat`, sql`s.lon`)} AS d
+          FROM trip_plan_stops s
+          JOIN trip_plan_blocks b ON b.id = s.block_id
+          JOIN trip_plan_days dy ON dy.id = b.day_id
+          JOIN trip_plan_legs l ON l.id = dy.leg_id
+          JOIN trip_plans tp ON tp.id = l.plan_id
+         WHERE tp.owner_id = ${userId} AND l.start_date IS NOT NULL
+           AND (l.start_date + dy.day_index) = p.taken_at::date
+           AND COALESCE(s.name, s.local_name) IS NOT NULL
+        UNION ALL
+        SELECT v.name AS spot, tp.title AS trip, ${distance(sql`v.lat`, sql`v.lon`)} AS d
+          FROM trip_plan_visits v
+          JOIN trip_plans tp ON tp.id = v.plan_id
+         WHERE v.user_id = ${userId} AND NOT v.dismissed AND v.name IS NOT NULL
+           AND v.arrived_at::date = p.taken_at::date
+      ) c
+      WHERE c.d <= ${TRIP_SPOT_RADIUS_M}
+      ORDER BY c.d
+      LIMIT 1
+    ) x
+    WHERE p.id IN (${ids}) AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL AND p.taken_at IS NOT NULL
+  `);
+  const rows = result.rows as { photo_id: number; spot: string; trip: string | null; d: number }[];
+  for (const r of rows) out.set(r.photo_id, { spot: r.spot, trip: r.trip });
+  return out;
+}
+
 async function recognisableFaceCounts(photoIds: number[]): Promise<Map<number, number>> {
   const out = new Map<number, number>();
   if (!photoIds.length) return out;
@@ -256,6 +332,8 @@ async function writeCaptions(
   const byId = new Map(facts.map((f) => [f.id, f]));
   const people = await peopleByPhoto(userId, ids);
   const pois = await poiByPhoto(ids);
+  const signs = await signTextByPhoto(ids);
+  const spots = await tripSpotByPhoto(userId, ids);
   const articles = new Map<string, Promise<{ description: string | null; extract: string | null } | null>>();
   let vision = true;
 
@@ -282,6 +360,9 @@ async function writeCaptions(
       people: people.get(id) ?? [],
       description: f.description?.trim() || null,
       keywords: (f.keywords ?? []).slice(0, 8),
+      signText: signs.get(id) ?? null,
+      tripSpot: spots.get(id) ?? null,
+      onPage: pageCaptions(loaded, id),
     };
     // Nothing concrete to say: no caption, rather than one that only
     // describes the picture. With "neu schreiben" an earlier one goes too.
@@ -304,7 +385,8 @@ async function writeCaptions(
     // Without the picture the facts alone carry the caption.
     if (!answer) answer = await deps.askText(buildCaptionPrompt(ctx, false));
     const parsed = answer ? parseCaption(answer.result) : null;
-    const text = parsed && captionNamesAFact(parsed, ctx) ? parsed : null;
+    const repeats = parsed != null && (ctx.onPage ?? []).some((c) => captionKey(c) === captionKey(parsed));
+    const text = parsed && !repeats && captionNamesAFact(parsed, ctx) ? parsed : null;
     if (text && answer) {
       await saveCaption(loaded.book.id, id, text, answer.model);
       loaded.captions.set(id, { text, source: "llm" });
@@ -315,6 +397,16 @@ async function writeCaptions(
     }
     job.done += 1;
   }
+}
+
+/** The captions of the other photos on the page that holds `photoId`. */
+function pageCaptions(loaded: LoadedBook, photoId: number): string[] {
+  const page = loaded.pages.find((p) => p.photos.some((s) => s.photo_id === photoId));
+  if (!page) return [];
+  return page.photos
+    .filter((s) => s.photo_id !== photoId)
+    .map((s) => loaded.captions.get(s.photo_id)?.text)
+    .filter((t): t is string => !!t);
 }
 
 /** Removes the model's caption of a photo; one the user wrote stays. */

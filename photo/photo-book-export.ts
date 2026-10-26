@@ -15,6 +15,7 @@ import { convertHeicToJpeg } from "./heic-convert.service";
 import { resolvePhotoFilePath } from "./photo";
 import { renderUserAndCache } from "./photo-transforms-render.service";
 import { bookSettings, loadPhotoBook, pageCaptioned, type LoadedBook } from "./photo-book.service";
+import { repeatedCaptions } from "./photo-book-layout";
 import {
   renderCoverPdf,
   renderHomePdf,
@@ -76,12 +77,15 @@ export function toRenderBook(loaded: LoadedBook): RenderBook {
     cover: loaded.cover ? { photoId: loaded.cover.photo_id, focal: loaded.cover.auto_crop } : null,
     pages: loaded.pages.map((p) => {
       const ch = p.chapter_id != null ? chapters.get(p.chapter_id) : undefined;
+      const texts = p.photos.map((s) => loaded.captions.get(s.photo_id)?.text ?? null);
+      const repeats = repeatedCaptions(texts);
       return {
         layout: p.layout,
         chapterTitle: p.kind === "opener" ? ch?.title ?? null : null,
         chapterSubtitle: p.kind === "opener" ? ch?.subtitle ?? null : null,
         captioned: pageCaptioned(loaded, p),
-        slots: p.photos.map((s) => ({ photoId: s.photo_id, focal: s.auto_crop, caption: loaded.captions.get(s.photo_id)?.text ?? null })),
+        // A caption that repeats one above it on the page is printed once.
+        slots: p.photos.map((s, i) => ({ photoId: s.photo_id, focal: s.auto_crop, caption: repeats[i] ? null : texts[i] })),
       };
     }),
     bleedMm: settings.bleed_mm,

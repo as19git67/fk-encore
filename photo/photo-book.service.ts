@@ -47,6 +47,7 @@ import {
   photoScore,
   relayoutPage,
   slotDpi,
+  repeatedCaptions,
   slotGeometry,
   spineWidthMm,
   textRect,
@@ -109,9 +110,11 @@ export interface PhotoBookSlotView {
   low_dpi: boolean;
   caption: string | null;
   caption_source: "llm" | "user" | null;
-  /** Where the caption goes on this page; null when the page shows none. */
+  /** Where the caption goes on this page; null when the page shows none or it repeats one above. */
   caption_rect: PageRect | null;
   caption_overlay: boolean;
+  /** The same text as an earlier caption on the page, so it is not shown again. */
+  caption_repeated: boolean;
 }
 
 export interface PhotoBookLayoutOption {
@@ -691,6 +694,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
   const pages: PhotoBookPageView[] = loaded.pages.map((p) => {
     const tr = textRect(format, p.layout);
     const captioned = pageCaptioned(loaded, p);
+    const repeats = repeatedCaptions(p.photos.map((s) => loaded.captions.get(s.photo_id)?.text));
     return {
       id: p.id,
       position: p.position,
@@ -706,6 +710,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
       layout_reason: p.layout_reason,
       slots: p.photos.map((s, i) => {
         const geo = slotGeometry(format, p.layout, p.layout.cells[i], captioned);
+        const repeated = repeats[i]!;
         const rect = geo.image;
         const dpi = slotDpi(s.width, s.height, rect);
         const caption = loaded.captions.get(s.photo_id) ?? null;
@@ -722,8 +727,9 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
           low_dpi: low,
           caption: caption?.text ?? null,
           caption_source: caption?.source ?? null,
-          caption_rect: geo.caption ? share(geo.caption, format) : null,
+          caption_rect: geo.caption && !repeated ? share(geo.caption, format) : null,
           caption_overlay: geo.overlay,
+          caption_repeated: repeated,
         };
       }),
     };

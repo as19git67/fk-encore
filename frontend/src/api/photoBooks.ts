@@ -30,9 +30,11 @@ export interface PhotoBookSlot {
   low_dpi: boolean
   caption: string | null
   caption_source: 'llm' | 'user' | null
-  /** Where the caption goes; null when the page shows none. */
+  /** Where the caption goes; null when the page shows none or it repeats one above. */
   caption_rect: PageRect | null
   caption_overlay: boolean
+  /** The same text as an earlier caption on the page: kept, but not shown again. */
+  caption_repeated: boolean
 }
 
 export interface PhotoBookPage {

@@ -82,10 +82,16 @@ played as a slideshow.
    to take ("Übernehmen"). Runs in the `llm` slot at background priority,
    started from the book's page ("KI"), never while the GPU is lent.
    A caption is written only when there is something concrete to say — a
-   place, a landmark, people the owner named or the photo's description —
+   place, a landmark, people the owner named, the photo's description, text
+   the recognition read on a sign in it (lines at confidence ≥ 0.8) or the
+   spot of one of the owner's trips it was taken at (a planned stop that day
+   or a stay in the visit diary, within 150 m) —
    and is kept only when it names one of them (`captionNamesAFact`); a
    caption that merely describes the picture ("Ein alter Keller") is dropped,
-   and "neu schreiben" removes such an earlier one.
+   and "neu schreiben" removes such an earlier one. A page says a caption once:
+   the model is told the captions already on the page and a repeat is
+   dropped, and the same text under several photos of a page (also the
+   user's) is shown and printed only under the first (`repeatedCaptions`).
    Captions on/off for the book and per page (`photo_book_page.captions`,
    null follows the book); in the PDF a strip below a framed photo or a band
    inside a full-bleed one (`slotGeometry`). Captions live in

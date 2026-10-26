@@ -5,7 +5,7 @@ import { chunkSizes, photoBookSlideshow } from './photoBookSlideshow'
 const rect = { x: 0, y: 0, w: 10, h: 10 }
 
 function slot(id: number, caption: string | null = null): PhotoBookSlot {
-  return { slot: id, photo_id: id, filename: `p${id}.jpg`, auto_crop: null, rect, dpi: 300, low_dpi: false, caption, caption_source: caption ? 'user' : null, caption_rect: null, caption_overlay: false }
+  return { slot: id, photo_id: id, filename: `p${id}.jpg`, auto_crop: null, rect, dpi: 300, low_dpi: false, caption, caption_source: caption ? 'user' : null, caption_rect: null, caption_overlay: false, caption_repeated: false }
 }
 
 function page(position: number, kind: PhotoBookPage['kind'], chapter: number, slots: PhotoBookSlot[], captions = true): PhotoBookPage {

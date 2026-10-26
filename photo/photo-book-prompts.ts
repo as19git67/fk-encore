@@ -46,6 +46,12 @@ export interface CaptionContext {
   /** The photo's own description or keywords from its file. */
   description: string | null;
   keywords: string[];
+  /** What the text recognition read on the photo (a sign, a board), or null. */
+  signText?: string | null;
+  /** The spot of one of the owner's trips the photo was taken at, and the trip's title. */
+  tripSpot?: { spot: string; trip: string | null } | null;
+  /** Captions the other photos of the same page already have; the new one must say something else. */
+  onPage?: string[];
 }
 
 export const CAPTION_SCHEMA: Record<string, unknown> = {
@@ -57,7 +63,7 @@ export const CAPTION_SCHEMA: Record<string, unknown> = {
 const CAPTION_SYSTEM =
   "Du schreibst Bildunterschriften für ein privates Fotobuch auf Deutsch. " +
   "Eine Bildunterschrift ist ein kurzer, natürlicher Satz oder eine Wortgruppe, höchstens fünfzehn Wörter. " +
-  "Sie sagt etwas Konkretes: den Ort, die Sehenswürdigkeit, die Personen oder was die Beschreibung des Fotos sagt. " +
+  "Sie sagt etwas Konkretes: den Ort, die Sehenswürdigkeit, den Spot der Reise, die Personen, was die Beschreibung des Fotos sagt oder was auf einem Schild im Bild steht. " +
   "Eine bloße Beschreibung dessen, was man sieht (\"Ein alter Keller\", \"Blick auf das Meer\"), ist keine Bildunterschrift. " +
   "Das Bild hilft dir nur zu entscheiden, welche Fakten passen. " +
   "Du erfindest keine Namen, Orte, Daten oder Ereignisse. Personen nennst du nur mit den angegebenen Namen. " +
@@ -65,11 +71,12 @@ const CAPTION_SYSTEM =
 
 /**
  * Whether there is something concrete to say: a place, a landmark, people the
- * owner named or the photo's own description. The date and keywords alone are
+ * owner named, the photo's own description, text on a sign in the photo or
+ * the spot of a trip it was taken at. The date and keywords alone are
  * not enough — a caption from them would only describe the picture.
  */
 export function hasConcreteFacts(ctx: CaptionContext): boolean {
-  return !!(ctx.place || ctx.poi || ctx.people.length || ctx.description);
+  return !!(ctx.place || ctx.poi || ctx.people.length || ctx.description || ctx.signText || ctx.tripSpot);
 }
 
 /** Whether `text` holds `term` starting at a word (so "Musterstadts" names Musterstadt). */
@@ -85,7 +92,8 @@ function namesTerm(text: string, term: string): boolean {
  * none of them describes the picture in general ("Ein alter Keller") and is
  * not kept. A place counts by any of its parts, a landmark by its name or the
  * last word of it (German names end in the noun: "am Alten Turm"), a person
- * by the first name, the photo's description by any longer word of it.
+ * by the first name, the photo's description and the text on a sign by any
+ * longer word of them, a trip's spot like a landmark.
  */
 export function captionNamesAFact(caption: string, ctx: CaptionContext): boolean {
   const text = caption.toLowerCase();
@@ -97,6 +105,11 @@ export function captionNamesAFact(caption: string, ctx: CaptionContext): boolean
   }
   for (const name of ctx.people) terms.push(name.trim().split(/\s+/)[0] ?? "");
   if (ctx.description) terms.push(...ctx.description.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5));
+  if (ctx.signText) terms.push(...ctx.signText.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5));
+  if (ctx.tripSpot) {
+    const words = ctx.tripSpot.spot.trim().split(/\s+/);
+    terms.push(ctx.tripSpot.spot, words[words.length - 1] ?? "");
+  }
   return terms.some((t) => namesTerm(text, t));
 }
 
@@ -111,6 +124,8 @@ export function captionFacts(ctx: CaptionContext): string[] {
   }
   if (ctx.people.length) lines.push(`Personen im Bild: ${ctx.people.join(", ")}`);
   if (ctx.description) lines.push(`Beschreibung aus der Datei: ${ctx.description}`);
+  if (ctx.tripSpot) lines.push(`Spot der Reise${ctx.tripSpot.trip ? ` „${ctx.tripSpot.trip}“` : ""}: ${ctx.tripSpot.spot}`);
+  if (ctx.signText) lines.push(`Text auf einem Schild oder einer Tafel im Bild: ${ctx.signText}`);
   if (ctx.keywords.length) lines.push(`Stichwörter: ${ctx.keywords.join(", ")}`);
   return lines;
 }
@@ -125,7 +140,10 @@ export function buildCaptionPrompt(ctx: CaptionContext, withImage: boolean): Llm
     ctx.poi
       ? "Wenn die Sehenswürdigkeit im Bild zu sehen ist, nenne sie und, wenn es passt, eine kurze Tatsache aus dem Wikipedia-Text."
       : "",
-    "Nenne mindestens einen der Fakten (Ort, Sehenswürdigkeit, Personen oder Beschreibung) beim Namen. " +
+    ctx.onPage?.length
+      ? `Auf derselben Seite stehen schon diese Bildunterschriften: ${ctx.onPage.map((c) => `„${c}“`).join(", ")}. Wiederhole sie nicht; sag etwas anderes oder nichts.`
+      : "",
+    "Nenne mindestens einen der Fakten (Ort, Sehenswürdigkeit, Spot der Reise, Personen, Beschreibung oder Text im Bild) beim Namen. " +
       'Gibt es nichts Konkretes zu sagen, antworte mit {"caption": ""}.',
     "Das Datum gehört nicht in die Bildunterschrift; es steht schon am Kapitelanfang.",
     'Antworte als JSON-Objekt {"caption": "…"}.',

@@ -12,9 +12,12 @@ import {
   photoBookCaption,
   photoBookPage,
   photoCuration,
+  photoOcr,
   photoPoiMatches,
   photos,
   poiReferences,
+  tripPlanVisits,
+  tripPlans,
   userFaceAssignments,
   users,
 } from "../db/schema";
@@ -140,6 +143,8 @@ describe("photo book: the model's texts and layouts", () => {
 
   beforeEach(async () => {
     await db.delete(photoBook);
+    await db.delete(tripPlans);
+    await db.delete(photoOcr);
     await db.delete(photoPoiMatches);
     await db.delete(poiReferences);
     await db.delete(userFaceAssignments);
@@ -334,6 +339,67 @@ describe("photo book: the model's texts and layouts", () => {
     const llm = view.pages.filter((p) => p.layout_source === "llm").length;
     expect(llm + job.skipped).toBe(pages.length);
     expect(job.skipped).toBeGreaterThan(0);
+  });
+
+  it("does not write a caption a photo on the same page already has", async () => {
+    const list = [];
+    for (let i = 0; i < 5; i++) list.push(await upload(`2024-06-01 1${i}:00:00`, { location_city: "Musterstadt" }));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id), groupPicksOnly: false });
+    const view = await getPhotoBookView(user.id, id);
+    const pages = view.pages.filter((p) => p.slots.length);
+    const prompts: string[] = [];
+    const { deps } = fakeDeps({
+      askVision: async (_img, prompt) => { prompts.push(prompt.prompt); return { result: { caption: "Gassen in Musterstadt" }, model: "m" }; },
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, deps);
+    // One caption per page: every other photo of a page would repeat it.
+    expect(job.captions).toBe(pages.length);
+    expect(pages.some((p) => p.slots.length > 1)).toBe(true);
+    expect(prompts.some((p) => p.includes("Auf derselben Seite stehen schon diese Bildunterschriften: „Gassen in Musterstadt“"))).toBe(true);
+  });
+
+  it("says a caption once per page, in the view and in the PDF", async () => {
+    const list = [];
+    for (let i = 0; i < 9; i++) list.push(await upload(`2024-06-01 1${i}:00:00`));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id), groupPicksOnly: false });
+    await updatePhotoBook(user.id, id, { settings: { captions: true } });
+    const page = (await getPhotoBookView(user.id, id)).pages.find((p) => p.slots.length >= 2)!;
+    const [a, b] = page.slots;
+    await setPhotoBookCaption(user.id, id, a.photo_id, "Am Alten Turm");
+    await setPhotoBookCaption(user.id, id, b.photo_id, "am alten Turm.");
+    const slots = (await getPhotoBookView(user.id, id)).pages.find((p) => p.id === page.id)!.slots;
+    expect(slots[0]).toMatchObject({ caption_repeated: false });
+    expect(slots[0].caption_rect).not.toBeNull();
+    expect(slots[1]).toMatchObject({ caption: "am alten Turm.", caption_repeated: true, caption_rect: null });
+    const rendered = toRenderBook(await loadPhotoBook(user.id, id)).pages.flatMap((p) => p.slots);
+    expect(rendered.find((s) => s.photoId === a.photo_id)!.caption).toBe("Am Alten Turm");
+    expect(rendered.find((s) => s.photoId === b.photo_id)!.caption).toBeNull();
+  });
+
+  it("takes text on a sign and the spot of a trip as facts", async () => {
+    const sign = await upload("2024-06-01 10:00:00");
+    const spot = await upload("2024-06-01 11:00:00", { latitude: 47.5, longitude: 11.0 });
+    await db.insert(photoOcr).values({ photo_id: sign.id, blocks: [
+      { text: "Gasthof Zur Linde", confidence: 0.95, polygon: [], left: 0, top: 0, right: 1, bottom: 1 },
+      { text: "12", confidence: 0.99, polygon: [], left: 0, top: 0, right: 1, bottom: 1 },
+      { text: "unsicher", confidence: 0.4, polygon: [], left: 0, top: 0, right: 1, bottom: 1 },
+    ], full_text: "Gasthof Zur Linde 12 unsicher" });
+    const [plan] = await db.insert(tripPlans).values({ owner_id: user.id, title: "Sommer am Beispielsee" }).returning();
+    await db.insert(tripPlanVisits).values({ plan_id: plan.id, user_id: user.id, name: "Musterhütte", lat: 47.5005, lon: 11.0, arrived_at: "2024-06-01T09:00:00Z" });
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: [sign.id, spot.id] });
+
+    const prompts: string[] = [];
+    const { deps } = fakeDeps({
+      askVision: async (_img, prompt) => {
+        prompts.push(prompt.prompt);
+        return { result: { caption: prompt.prompt.includes("Musterhütte") ? "Rast im Gasthof Zur Linde" : "Einkehr im Gasthof Zur Linde" }, model: "m" };
+      },
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, deps);
+    expect(prompts.some((p) => p.includes("Text auf einem Schild oder einer Tafel im Bild: Gasthof Zur Linde") && !p.includes("unsicher"))).toBe(true);
+    expect(prompts.some((p) => p.includes("Spot der Reise „Sommer am Beispielsee“: Musterhütte"))).toBe(true);
+    // The spot's caption names neither the hut nor the trip: it is not kept.
+    expect(job.captions).toBe(1);
   });
 
   it("shows captions per page and puts them into the PDF", async () => {
