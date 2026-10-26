@@ -16,6 +16,7 @@ import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIn
 import { useScreenOrientation } from '../composables/useScreenOrientation'
 import { pickSideForScreen } from '../utils/orientationVariants'
 import { useAuthStore } from '../stores/auth'
+import type { PlanSlide } from '../utils/photoBookSlideshow'
 
 const props = defineProps<{
   photos: Photo[]
@@ -40,6 +41,12 @@ const props = defineProps<{
    * indices never move.
    */
   counterparts?: Record<number, Photo>
+  /**
+   * A fixed sequence instead of the player's own grouping: one slide per
+   * entry, with its chapter title and caption (a photo book played as a
+   * slideshow, `utils/photoBookSlideshow.ts`). `photos` is then ignored.
+   */
+  plan?: PlanSlide[] | null
 }>()
 
 const emit = defineEmits<{
@@ -69,6 +76,9 @@ interface Slide {
   key: string
   layout: SlideLayout
   photos: Photo[]
+  caption?: string | null
+  chapterTitle?: string | null
+  chapterSubtitle?: string | null
 }
 
 const COLLAGE_MAX_TIME_GAP_MS = 6 * 60 * 60 * 1000
@@ -141,8 +151,24 @@ const shownPhotos = computed<Photo[]>(() => {
   return props.photos.map((p) => pickSideForScreen(p, counterparts[p.id] ?? null, screenOrientation.value))
 })
 
+function slidesFromPlan(plan: PlanSlide[]): Slide[] {
+  return plan
+    .filter((s) => s.photos.length > 0)
+    .map((s, i): Slide => {
+      const group = s.photos.slice(0, 3)
+      return {
+        key: `plan-${i}-${group.map((p) => p.id).join('-')}`,
+        layout: group.length === 3 ? 'trio' : group.length === 2 ? 'duo' : 'single',
+        photos: group,
+        caption: s.caption ?? null,
+        chapterTitle: s.chapterTitle ?? null,
+        chapterSubtitle: s.chapterSubtitle ?? null,
+      }
+    })
+}
+
 const slides = computed<Slide[]>(() => {
-  const plan = buildSlides(shownPhotos.value)
+  const plan = props.plan ? slidesFromPlan(props.plan) : buildSlides(shownPhotos.value)
   if (props.compareIntro) {
     plan.unshift({
       key: 'compare-intro',
@@ -808,6 +834,27 @@ onBeforeUnmount(() => {
         <div v-if="subtitle" class="recap-player-subtitle">{{ subtitle }}</div>
       </div>
 
+      <Transition name="recap-text">
+        <div
+          v-if="currentSlide?.chapterTitle"
+          :key="`chapter-${currentSlide.key}`"
+          class="recap-player-chapter"
+        >
+          <div class="recap-player-chapter-title">{{ currentSlide.chapterTitle }}</div>
+          <div v-if="currentSlide.chapterSubtitle" class="recap-player-subtitle">{{ currentSlide.chapterSubtitle }}</div>
+        </div>
+      </Transition>
+      <Transition name="recap-text">
+        <div
+          v-if="currentSlide?.caption"
+          :key="`caption-${currentSlide.key}`"
+          class="recap-player-caption"
+          :class="{ 'is-raised': showControls }"
+        >
+          {{ currentSlide.caption }}
+        </div>
+      </Transition>
+
       <div
         class="recap-player-progress"
         :style="{ '--kb-duration': `${currentDurationMs}ms` }"
@@ -1075,6 +1122,55 @@ onBeforeUnmount(() => {
   font-size: var(--text-lg);
   opacity: 0.9;
   margin-top: 0.25rem;
+}
+
+.recap-player-chapter {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 90%;
+  padding: var(--space-4) var(--space-5);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  text-align: center;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+.recap-player-chapter-title {
+  font-size: var(--text-4xl);
+  font-weight: 600;
+}
+
+.recap-player-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 2rem;
+  transform: translateX(-50%);
+  max-width: min(90%, 48rem);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: var(--text-lg);
+  text-align: center;
+  transition: bottom 0.4s ease;
+  pointer-events: none;
+}
+
+/* Above the controls while they show. */
+.recap-player-caption.is-raised {
+  bottom: 6.5rem;
+}
+
+.recap-text-enter-active,
+.recap-text-leave-active {
+  transition: opacity 0.6s ease;
+}
+
+.recap-text-enter-from,
+.recap-text-leave-to {
+  opacity: 0;
 }
 
 .recap-player-progress {

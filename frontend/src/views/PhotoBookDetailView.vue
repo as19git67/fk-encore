@@ -10,6 +10,10 @@
  * (`PhotoBookAiDialog`). A caption is edited from the photo's menu, captions
  * are switched on for the book in its settings and per page at its foot, and a
  * chapter whose own title the user kept shows the model's proposal to take.
+ *
+ * Stage 6: "Diashow" plays the book in the recap player, page by page with
+ * its chapter titles and captions (`utils/photoBookSlideshow.ts`), to the
+ * recaps' music; another track is one tap away.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -30,6 +34,9 @@ import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToo
 import PhotoBookPagePreview from '../components/photobook/PhotoBookPagePreview.vue'
 import PhotoBookExportDialog from '../components/photobook/PhotoBookExportDialog.vue'
 import PhotoBookAiDialog from '../components/photobook/PhotoBookAiDialog.vue'
+import RecapPlayer from '../components/RecapPlayer.vue'
+import { getRecapMusicUrl, listRecapMusic, type MusicTrack } from '../api/recaps'
+import { photoBookSlideshow } from '../utils/photoBookSlideshow'
 import { useModuleBack } from '../composables/useModuleBack'
 import {
   PHOTO_BOOK_FORMATS,
@@ -62,6 +69,35 @@ const actionError = ref('')
 const busy = ref(false)
 const exportOpen = ref(false)
 const aiOpen = ref(false)
+const showOpen = ref(false)
+const showTracks = ref<MusicTrack[]>([])
+const showTrack = ref(0)
+
+const slideshow = computed(() => (book.value ? photoBookSlideshow(book.value) : []))
+const slideshowPhotos = computed(() => slideshow.value.flatMap((s) => s.photos))
+const showMusicUrl = computed(() => {
+  const track = showTracks.value[showTrack.value]
+  return track ? getRecapMusicUrl(track) : null
+})
+
+/** The recaps' tracks, a warm one first; a silent show when there are none. */
+async function openSlideshow() {
+  if (!slideshow.value.length) return
+  showOpen.value = true
+  if (showTracks.value.length) return
+  try {
+    const { tracks } = await listRecapMusic()
+    const warm = tracks.findIndex((t) => t.mood === 'warm')
+    showTracks.value = warm > 0 ? [tracks[warm]!, ...tracks.filter((_, i) => i !== warm)] : tracks
+    showTrack.value = 0
+  } catch {
+    showTracks.value = []
+  }
+}
+
+function nextTrack() {
+  if (showTracks.value.length > 1) showTrack.value = (showTrack.value + 1) % showTracks.value.length
+}
 
 const bookId = computed(() => Number(route.params.id))
 
@@ -284,6 +320,7 @@ function confirmDelete() {
 
 const toolbarItems = computed<ToolbarItem[]>(() => [
   { key: 'pdf', label: 'PDF', title: 'Als PDF ausgeben', icon: 'pi pi-file-pdf', disabled: !book.value, command: () => (exportOpen.value = true) },
+  { key: 'show', label: 'Diashow', title: 'Als Diashow abspielen', icon: 'pi pi-play', disabled: !slideshow.value.length, command: openSlideshow },
   { key: 'ai', label: 'KI', title: 'Vorschläge der KI', icon: 'pi pi-sparkles', disabled: !book.value, command: () => (aiOpen.value = true) },
   { key: 'settings', label: 'Buch', title: 'Titel, Format und Bildunterschriften', icon: 'pi pi-pencil', disabled: !book.value || busy.value, command: openSettings },
   { key: 'rebuild', title: 'Neu verteilen', icon: 'pi pi-refresh', disabled: !book.value || busy.value, menuOnly: true, command: confirmRebuild },
@@ -402,6 +439,18 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
 
     <PhotoBookExportDialog v-if="book" v-model:visible="exportOpen" :book="book" @saved="book = $event" />
     <PhotoBookAiDialog v-if="book" v-model:visible="aiOpen" :book-id="book.id" @changed="load" />
+    <RecapPlayer
+      v-if="book"
+      :open="showOpen"
+      :photos="slideshowPhotos"
+      :plan="slideshow"
+      :title="book.title"
+      :subtitle="book.subtitle"
+      :music-url="showMusicUrl"
+      :can-change-music="showTracks.length > 1"
+      @change-music="nextTrack"
+      @close="showOpen = false"
+    />
 
     <Dialog v-model:visible="captionOpen" class="dialog-sm" modal header="Bildunterschrift">
       <label class="pbd-field">
