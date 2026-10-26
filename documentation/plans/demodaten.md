@@ -44,7 +44,7 @@ result.
 |---|---|
 | When is a system "new" | When it holds no user content and no users besides the admin and the AI system user. "User content" is counted, not guessed from boot time: photos, documents, finance transactions, depot transactions, meter readings, trip plans. All zero → untouched. The check lives in one function (`demo/state.ts`, `isUntouched()`) and the endpoint repeats it before it starts, so a second admin tab or a document that arrived meanwhile cannot slip through. |
 | Who triggers it | An admin, explicitly, on Admin › Systemstatus ("Demodaten einspielen", with the volumes and the estimated duration). Nothing loads by itself on a production boot. For test installations `DEMO_DATA=1` starts the same job once at boot, still only on an untouched system. |
-| Who owns the data | The admin who starts it, so the demo appears in the account that is looking at it. Shared things (the depot, the household for the tax worksheet) are set up for that user. |
+| Who owns the data | The admin who starts it, so the demo appears in the account that is looking at it. A second demo user, the spouse "Erika Mustermann" (`erika@beispiel.test`), is created with it: no password (the admin can set one or send an invite from the user list, so the shared view can be tried), the roles of a household member, and a subject person with `relation_kind` spouse so the joint assessment works. Each of the two has an own giro account; the joint giro account belongs to the admin and is shared with the spouse with write access through the account access list, and the depot is the admin's. The demo users count as demo rows: `isUntouched()` ignores them, and removal deletes the spouse with everything else. |
 | Removal | Every row the generator writes is recorded in `demo_item` (`run_id`, `table`, `row_id`), every file it writes in `demo_file`. "Demodaten entfernen" deletes in reverse dependency order and removes the files. Rows the pipelines derive (thumbnails, embeddings, faces, text, classification, depot transactions derived from documents) hang off a recorded row by foreign key and go with it; where a derived row has no cascade, the remover deletes it by its parent id. A run that is removed leaves the system untouched again. |
 | Where it lives | A new service `demo/` (endpoints under `/admin/demo`, admin only (`user/admin-guard.ts`)), the job in the existing queue so it shows up under Admin › Jobs. The E2E seed becomes the size `small` of the same generator; `db/seed-demo.ts` goes away. |
 | Determinism | A seeded PRNG (`demo/random.ts`) decides everything the code decides; the same seed gives the same skeleton. The LLM-written text varies between runs, the skeleton (dates, amounts, which document belongs to which booking) does not. |
@@ -131,13 +131,21 @@ statement enrichment).
 
 ### Securities and quotes
 
-The four securities are fictional, with ISINs in the valid format but
-outside any issued range, and a synthetic daily quote history over the
-three years written into the quote cache (`finance_quote`) under the
-provider `demo`, so the portfolio pages, performance and allocation work
-without calling Onvista or Yahoo. The scheduler skips symbols of provider
-`demo`. (Real ISINs of broad index funds would give live quotes but could
-coincide with someone's real holdings; see open questions.)
+The four securities are real, widely held broad index funds (world
+equities, emerging markets, Europe, a bond index), listed in
+`demo/securities.ts`, so the demo gets real and current quotes from the
+configured provider like any depot. That needs the provider to be
+reachable when the demo is loaded; without it the run stops before the
+depot stage and says why.
+
+The prices in the settlements come from the provider's real history: the
+generator first loads the quote history of the three years, then sets each
+purchase, savings plan instalment and sale at that day's closing price, so
+settlements, bookings and the performance chart agree. Dividends and
+distributions use plausible synthetic amounts per unit (the provider has no
+dividend history); the demo says so in the settlement footer ("Demo"). Only
+broad index funds are chosen, never single stocks, so the list says nothing
+about anyone's holdings.
 
 ### Photos
 
@@ -166,10 +174,10 @@ licences forbid redistributing the photos as a collection.
   ("Sommerurlaub", "Weihnachten", "Garten") plus whatever the app suggests
   itself.
 
-Persons are left for a later stage: CC0 photos of real people still show
-real people with their right to their own image, and synthetic faces need
-a source whose licence allows redistribution. Until one is found, the demo
-has no persons and says so on the page.
+The demo has no persons: CC0 photos of real people still show real people
+with their right to their own image, and no source of synthetic faces with a
+licence that allows redistribution is known. The page says so; face
+recognition and persons are shown with one's own photos.
 
 ### Meters
 
@@ -191,8 +199,8 @@ show something.
    the `llm` queue; ground-truth report on the page.
 3. **Bookings and depot.** Removal of the Finanzkraft import beforehand
    (own PR). Accounts, 500 bookings, depot with settlements, dividends and
-   statements, fictional securities with synthetic quotes, provider `demo`
-   in the scheduler.
+   statements, real index funds with prices from the provider's history,
+   the spouse as second demo user with the joint account.
 4. **Photos.** Openverse download with licence list, face filter, EXIF
    rewrite, demo library, albums.
 5. **Meters and businesses.** Meter readings, PV business with its assets,
@@ -204,13 +212,9 @@ show something.
 
 ## Open questions
 
-- A source of synthetic faces with a licence that allows redistribution,
-  for persons and face recognition in the demo.
-- Fictional securities with synthetic quotes (recommended) or real broad
-  index funds with live quotes.
-- Whether the demo household should also get a second user (the spouse)
-  with shared accounts, to show account access and the joint tax
-  assessment.
+None at the moment. Decided (2026-10-26): no persons in the demo, real
+broad index funds with live quotes, a second demo user with one joint
+account.
 
 ## Risks and what is left out on purpose
 
