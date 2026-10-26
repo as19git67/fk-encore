@@ -253,6 +253,17 @@ export function composeText(payload: { instruction: string; title?: string; text
  * Stops a running answer. The waiting `ask` then fails with `canceled`;
  * `cancelled: false` means the answer was already finished.
  */
+export type FeedbackVerdict = 'up' | 'down'
+
+/**
+ * A thumbs-up or -down under a stored answer (stage 6 of
+ * assistent-wegfindung.md). The server copies the question, the tool trace
+ * and the answer, so the case can be studied on the benchmark page.
+ */
+export function giveFeedback(messageId: number, verdict: FeedbackVerdict, comment?: string): Promise<{ id: number; verdict: FeedbackVerdict }> {
+  return apiFetch(`/assistant/messages/${messageId}/feedback`, { method: 'POST', body: JSON.stringify({ verdict, comment }) })
+}
+
 export function cancelTurn(turnId: string): Promise<{ cancelled: boolean }> {
   return apiFetch(`/assistant/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' })
 }

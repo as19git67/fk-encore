@@ -10,6 +10,7 @@
  */
 
 import { NO_ANSWER, OUT_OF_ROUNDS, runTurn } from "../agent";
+import { estimateTokens } from "../catalog";
 import type { ChatFn } from "../llm-client";
 import type { AssistantUser, ToolSpec } from "../types";
 import { BENCH_TODAY, type BenchCase } from "./cases";
@@ -24,6 +25,15 @@ export interface CaseRun {
   answer: string | null;
   error: string | null;
   score: CaseScore;
+  // ── the road taken (stage 6 of assistent-wegfindung.md) ──
+  /** Model rounds, the retries after a nudge included. */
+  rounds: number;
+  /** The first tool the model chose; `describe_tools` does not count. */
+  first_tool: string | null;
+  /** Drafts the loop withdrew and sent back (grounding, fake call, consent …). */
+  nudges: number;
+  /** What round 1 cost in prompt tokens: the model's count, else the estimate. */
+  prompt_tokens_first: number | null;
 }
 
 export interface RunnerDeps {
@@ -65,11 +75,16 @@ function cannedTools(c: BenchCase, tools: ToolSpec[]): ToolSpec[] {
 export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<CaseRun> {
   const rounds_ms: number[] = [];
   const calls: BenchCall[] = [];
+  let nudges = 0;
+  let prompt_tokens_first: number | null = null;
   const timed: ChatFn = async (req) => {
     if (deps.signal?.aborted) throw new BenchCancelledError();
     const started = Date.now();
     const reply = await deps.chat(req);
     rounds_ms.push(Date.now() - started);
+    if (prompt_tokens_first === null) {
+      prompt_tokens_first = reply.usage?.prompt_tokens ?? estimateTokens(req.messages) + estimateTokens(req.tools ?? []);
+    }
     return reply;
   };
 
@@ -86,6 +101,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       previousRefs: c.previous,
       context: c.context,
       withSlot: deps.withSlot,
+      emit: (event) => { if (event.type === "retract") nudges++; },
       log: (entry) => calls.push({ tool: entry.tool, args: entry.arguments }),
     });
     // The loop's own stand-ins are not the model's answer.
@@ -94,5 +110,17 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     if (err instanceof BenchCancelledError) throw err;
     error = err instanceof Error ? err.message : String(err);
   }
-  return { id: c.id, title: c.title, rounds_ms, calls, answer, error, score: scoreCase(c, calls, answer !== null, answer) };
+  return {
+    id: c.id,
+    title: c.title,
+    rounds_ms,
+    calls,
+    answer,
+    error,
+    score: scoreCase(c, calls, answer !== null, answer),
+    rounds: rounds_ms.length,
+    first_tool: calls.find((x) => x.tool !== "describe_tools")?.tool ?? null,
+    nudges,
+    prompt_tokens_first,
+  };
 }
