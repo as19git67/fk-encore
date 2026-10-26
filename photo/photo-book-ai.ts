@@ -53,6 +53,8 @@ import {
   buildCaptionPrompt,
   buildChapterTitlePrompt,
   buildLayoutPrompt,
+  captionNamesAFact,
+  hasConcreteFacts,
   parseCaption,
   parseChapterTitle,
   parseLayoutPick,
@@ -281,6 +283,14 @@ async function writeCaptions(
       description: f.description?.trim() || null,
       keywords: (f.keywords ?? []).slice(0, 8),
     };
+    // Nothing concrete to say: no caption, rather than one that only
+    // describes the picture. With "neu schreiben" an earlier one goes too.
+    if (!hasConcreteFacts(ctx)) {
+      if (overwrite) await dropModelCaption(loaded, id);
+      job.skipped += 1;
+      job.done += 1;
+      continue;
+    }
     let answer: { result: unknown; model: string } | null = null;
     const image = vision ? await deps.image(id) : null;
     if (image) {
@@ -291,20 +301,31 @@ async function writeCaptions(
         vision = false;
       }
     }
-    // Without the picture the facts alone must carry the caption.
-    if (!answer && (ctx.place || ctx.poi || ctx.people.length || ctx.description)) {
-      answer = await deps.askText(buildCaptionPrompt(ctx, false));
-    }
-    const text = answer ? parseCaption(answer.result) : null;
+    // Without the picture the facts alone carry the caption.
+    if (!answer) answer = await deps.askText(buildCaptionPrompt(ctx, false));
+    const parsed = answer ? parseCaption(answer.result) : null;
+    const text = parsed && captionNamesAFact(parsed, ctx) ? parsed : null;
     if (text && answer) {
       await saveCaption(loaded.book.id, id, text, answer.model);
       loaded.captions.set(id, { text, source: "llm" });
       job.captions += 1;
     } else {
+      if (overwrite) await dropModelCaption(loaded, id);
       job.skipped += 1;
     }
     job.done += 1;
   }
+}
+
+/** Removes the model's caption of a photo; one the user wrote stays. */
+async function dropModelCaption(loaded: LoadedBook, photoId: number): Promise<void> {
+  if (loaded.captions.get(photoId)?.source !== "llm") return;
+  await dbExec(db.delete(photoBookCaption).where(and(
+    eq(photoBookCaption.book_id, loaded.book.id),
+    eq(photoBookCaption.photo_id, photoId),
+    eq(photoBookCaption.source, "llm"),
+  )));
+  loaded.captions.delete(photoId);
 }
 
 function countBy(values: string[]): string[] {

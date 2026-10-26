@@ -382,6 +382,18 @@ function bestCover(list: BookPhoto[]): number | null {
   return best?.id ?? null;
 }
 
+/** The narrowing as the source stores it. */
+function narrowingSource(input: PhotoBookNarrowing): Omit<PhotoBookSource, "kind"> {
+  return {
+    quality_min: percent(input.qualityMin),
+    aesthetic_min: percent(input.aestheticMin),
+    without_recognisable_faces: !!input.withoutRecognisableFaces,
+    max_photos: input.maxPhotos && input.maxPhotos > 0 ? Math.min(input.maxPhotos, MAX_BOOK_PHOTOS) : null,
+    weights: cleanWeights(input.weights),
+    group_picks_only: input.groupPicksOnly !== false,
+  };
+}
+
 export interface CreatePhotoBookInput extends PhotoBookNarrowing {
   title: string;
   subtitle?: string | null;
@@ -420,12 +432,7 @@ export async function createPhotoBook(userId: number, input: CreatePhotoBookInpu
       : collectionId
         ? { collection_id: collectionId }
         : { photo_ids: [...new Set(photoIds)] }),
-    quality_min: percent(input.qualityMin),
-    aesthetic_min: percent(input.aestheticMin),
-    without_recognisable_faces: !!input.withoutRecognisableFaces,
-    max_photos: input.maxPhotos && input.maxPhotos > 0 ? Math.min(input.maxPhotos, MAX_BOOK_PHOTOS) : null,
-    weights: cleanWeights(input.weights),
-    group_picks_only: input.groupPicksOnly !== false,
+    ...narrowingSource(input),
   };
   const list = await selectBookPhotos(userId, source);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");
@@ -457,14 +464,26 @@ async function touch(bookId: number): Promise<void> {
 }
 
 /** Build the book again from its source and narrowing; titles, format and settings stay. */
-export async function rebuildPhotoBook(userId: number, bookId: number): Promise<void> {
+/**
+ * Lays the book out again from its source. With `narrowing` the book's
+ * narrowing is replaced first (the source itself — photos, album or
+ * collection — stays), so quality, aesthetics, faces, the maximum and the
+ * weights can be changed after the book was made. Nothing is stored when
+ * the new narrowing leaves no photo.
+ */
+export async function rebuildPhotoBook(userId: number, bookId: number, narrowing?: PhotoBookNarrowing): Promise<void> {
   const book = await ownedBook(userId, bookId);
-  const list = await selectBookPhotos(userId, book.source);
+  const source: PhotoBookSource = narrowing ? { ...book.source, ...narrowingSource(narrowing) } : book.source;
+  const list = await selectBookPhotos(userId, source);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");
   const format = isPhotoBookFormat(book.format) ? book.format : "a4-landscape";
   await writeBookContent(bookId, format, list);
   const keepCover = book.cover_photo_id != null && list.some((p) => p.id === book.cover_photo_id);
-  await dbExec(db.update(photoBook).set({ cover_photo_id: keepCover ? book.cover_photo_id : bestCover(list), updated_at: sql`now()` })
+  await dbExec(db.update(photoBook).set({
+    cover_photo_id: keepCover ? book.cover_photo_id : bestCover(list),
+    ...(narrowing ? { source } : {}),
+    updated_at: sql`now()`,
+  })
     .where(eq(photoBook.id, bookId)));
 }
 

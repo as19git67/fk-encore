@@ -135,13 +135,8 @@ export interface PhotoBookFormatOption {
   height_mm: number
 }
 
-export interface CreatePhotoBookPayload {
-  title: string
-  subtitle?: string | null
-  format?: PhotoBookFormat
-  photoIds?: number[]
-  albumId?: number
-  collectionId?: number
+/** What narrows a book's source; stored with the book. */
+export interface PhotoBookNarrowing {
   /** 0..100 */
   qualityMin?: number | null
   /** 0..100 */
@@ -152,6 +147,15 @@ export interface CreatePhotoBookPayload {
   weights?: PhotoBookWeights | null
   /** A series of near-duplicates gives only its pick. */
   groupPicksOnly?: boolean
+}
+
+export interface CreatePhotoBookPayload extends PhotoBookNarrowing {
+  title: string
+  subtitle?: string | null
+  format?: PhotoBookFormat
+  photoIds?: number[]
+  albumId?: number
+  collectionId?: number
 }
 
 export interface UpdatePhotoBookPayload {
@@ -194,8 +198,12 @@ export function updatePhotoBook(id: number, payload: UpdatePhotoBookPayload) {
   return apiFetch<PhotoBook>(`/photo-books/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
 }
 
-export function rebuildPhotoBook(id: number) {
-  return apiFetch<PhotoBook>(`/photo-books/${id}/rebuild`, { method: 'POST' })
+/** Lays the book out again; with `narrowing`, under that narrowing from now on. */
+export function rebuildPhotoBook(id: number, narrowing?: PhotoBookNarrowing) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/rebuild`, {
+    method: 'POST',
+    ...(narrowing ? { body: JSON.stringify({ narrowing }) } : {}),
+  })
 }
 
 export function deletePhotoBook(id: number) {

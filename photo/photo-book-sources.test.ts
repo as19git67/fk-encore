@@ -118,6 +118,27 @@ describe("photo book sources and weighting", () => {
     expect(bookIds(await getPhotoBookView(user.id, moreLand))).toEqual([...landIds].sort((a, b) => a - b));
   });
 
+  it("changes the narrowing of a book afterwards and keeps it for the next rebuild", async () => {
+    const good = await upload(user.id, "2024-06-01 10:00:00", { ai_quality_score: 0.9 });
+    const weak = await upload(user.id, "2024-06-01 11:00:00", { ai_quality_score: 0.2 });
+    setZeroShotScorer(async () => new Map());
+    const id = await createPhotoBook(user.id, { title: "Später", photoIds: [good.id, weak.id] });
+    expect(bookIds(await getPhotoBookView(user.id, id))).toHaveLength(2);
+
+    await rebuildPhotoBook(user.id, id, { qualityMin: 50 });
+    let view = await getPhotoBookView(user.id, id);
+    expect(view.source).toMatchObject({ kind: "photos", photo_ids: [good.id, weak.id], quality_min: 50 });
+    expect(bookIds(view)).toEqual([good.id]);
+    await rebuildPhotoBook(user.id, id);
+    expect(bookIds(await getPhotoBookView(user.id, id))).toEqual([good.id]);
+
+    // Nothing left: the book stays as it was.
+    await expect(rebuildPhotoBook(user.id, id, { qualityMin: 99 })).rejects.toThrow(/no photos left/);
+    view = await getPhotoBookView(user.id, id);
+    expect(view.source.quality_min).toBe(50);
+    expect(bookIds(view)).toEqual([good.id]);
+  });
+
   it("builds without the embedding service, from faces alone", async () => {
     const withFace = await upload(user.id, "2024-06-01 10:00:00");
     const plain = await upload(user.id, "2024-06-01 11:00:00");

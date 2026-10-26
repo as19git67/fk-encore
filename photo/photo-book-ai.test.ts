@@ -9,6 +9,7 @@ import {
   faces,
   persons,
   photoBook,
+  photoBookCaption,
   photoBookPage,
   photoCuration,
   photoPoiMatches,
@@ -25,6 +26,8 @@ import {
   articleExtract,
   buildCaptionPrompt,
   buildLayoutPrompt,
+  captionNamesAFact,
+  hasConcreteFacts,
   parseCaption,
   parseChapterTitle,
   parseLayoutPick,
@@ -83,6 +86,17 @@ describe("photo book captions: geometry and prompts", () => {
     expect(p.prompt).toContain("Personen im Bild: Erika");
     expect(p.prompt).not.toContain("Beschreibung aus der Datei");
     expect(p.system).toMatch(/erfindest keine Namen/);
+  });
+
+  it("keeps only captions that name a concrete fact", () => {
+    const ctx = { when: "Samstag", place: "Altstadt, Musterstadt", poi: { name: "Alter Turm", description: null, extract: null }, people: ["Erika Beispiel"], description: null, keywords: ["Urlaub"] };
+    expect(hasConcreteFacts(ctx)).toBe(true);
+    expect(hasConcreteFacts({ ...ctx, place: null, poi: null, people: [] })).toBe(false);
+    expect(captionNamesAFact("Abendlicht am Alten Turm", ctx)).toBe(true);
+    expect(captionNamesAFact("Gassen in Musterstadt", ctx)).toBe(true);
+    expect(captionNamesAFact("Erika auf der Treppe", ctx)).toBe(true);
+    expect(captionNamesAFact("Ein alter Keller", ctx)).toBe(false);
+    expect(captionNamesAFact("Urlaub am Samstag", ctx)).toBe(false);
   });
 
   it("reads captions and titles strictly", () => {
@@ -153,7 +167,7 @@ describe("photo book: the model's texts and layouts", () => {
       article: async () => ({ description: "Aussichtsturm", extract: "Der Alte Turm steht seit langer Zeit." }),
       askVision: async (_img, prompt) => {
         prompts.push({ kind: "vision", prompt });
-        return { result: { caption: `Blick Nummer ${prompts.length}` }, model: "test-model" };
+        return { result: { caption: `Blick über Musterstadt ${prompts.length}` }, model: "test-model" };
       },
       askText: async (prompt) => {
         prompts.push({ kind: "text", prompt });
@@ -239,6 +253,35 @@ describe("photo book: the model's texts and layouts", () => {
     const stopped = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, lent.deps);
     expect(stopped.status).toBe("failed");
     expect(stopped.error).toMatch(/Ästhetik-Bewertung/);
+  });
+
+  it("writes a caption only when there is something concrete to say", async () => {
+    const concrete = await upload("2024-06-01 10:00:00", { location_city: "Musterstadt" });
+    const described = await upload("2024-06-01 11:00:00", { description: "Weinlese bei Erika" });
+    const bare = await upload("2024-06-01 12:00:00", { keywords: ["Urlaub"] });
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: [concrete.id, described.id, bare.id] });
+
+    const asked: number[] = [];
+    const { deps } = fakeDeps({
+      image: async (photoId) => { asked.push(photoId); return Buffer.from("jpeg"); },
+      // The model describes the picture instead of naming a fact.
+      askVision: async () => ({ result: { caption: "Ein alter Keller" }, model: "test-model" }),
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, deps);
+    // A photo with only a date and keywords is not even asked about.
+    expect(asked).not.toContain(bare.id);
+    expect(job.captions).toBe(0);
+    expect(job.skipped).toBe(3);
+
+    // An earlier caption of the model that names nothing goes with "neu schreiben".
+    await db.insert(photoBookCaption).values({ book_id: id, photo_id: bare.id, text: "Ein alter Keller", source: "llm", model: "old" });
+    const named = fakeDeps({ askVision: async () => ({ result: { caption: "Weinlese mit Erika" }, model: "test-model" }) });
+    const again = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"], overwrite: true }, named.deps);
+    expect(again.captions).toBe(1);
+    const slots = (await getPhotoBookView(user.id, id)).pages.flatMap((p) => p.slots);
+    expect(slots.find((s) => s.photo_id === described.id)!.caption).toBe("Weinlese mit Erika");
+    expect(slots.find((s) => s.photo_id === bare.id)!.caption).toBeNull();
+    expect(slots.find((s) => s.photo_id === concrete.id)!.caption).toBeNull();
   });
 
   it("lets the model pick among the rule's layouts, within the crop guard, and measures the picks", async () => {

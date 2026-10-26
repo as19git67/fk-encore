@@ -81,6 +81,11 @@ played as a slideshow.
    title the user wrote stays and the model's proposal is shown next to it
    to take ("Übernehmen"). Runs in the `llm` slot at background priority,
    started from the book's page ("KI"), never while the GPU is lent.
+   A caption is written only when there is something concrete to say — a
+   place, a landmark, people the owner named or the photo's description —
+   and is kept only when it names one of them (`captionNamesAFact`); a
+   caption that merely describes the picture ("Ein alter Keller") is dropped,
+   and "neu schreiben" removes such an earlier one.
    Captions on/off for the book and per page (`photo_book_page.captions`,
    null follows the book); in the PDF a strip below a framed photo or a band
    inside a full-bleed one (`slotGeometry`). Captions live in
@@ -104,6 +109,10 @@ played as a slideshow.
    service only faces and landmarks count. A series of near-duplicates the
    owner has not reviewed contributes only the model's pick, else its best
    photo; on by default, off with "Aus Serien … nur das beste" unticked.
+   The narrowing (quality, aesthetics, faces, maximum, series, weights) can
+   be changed afterwards with "Auswahl" on the book's page; the book is then
+   laid out again from its source (`POST /photo-books/:id/rebuild` with
+   `narrowing`).
 5. **More sources** (implemented) — a collection as source
    (`kind: "collection"`: its photos and the photos of its albums, as far as
    the owner may see them, read again on "Neu verteilen"); the basket is
