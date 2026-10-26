@@ -362,11 +362,18 @@ async function classifyInSlot(req: ClassifyRequest): Promise<Classification> {
 /**
  * A JSON answer from the generic `/json-prompt` endpoint. The caller prompts
  * the shape and validates what comes back; errors follow `fetchJson` (a 5xx
- * is `LlmServiceUnavailableError`, so a queue job defers).
+ * is `LlmServiceUnavailableError`, so a queue job defers). A `schema`
+ * becomes a grammar on the server, so `maxLength` there bounds a string the
+ * model would otherwise repeat into until the token cap cuts the JSON off.
  */
-export function jsonPrompt(prompt: string, system: string, maxTokens = 1200): Promise<unknown> {
+export function jsonPrompt(
+  prompt: string,
+  system: string,
+  maxTokens = 1200,
+  schema?: Record<string, unknown>,
+): Promise<unknown> {
   return inLlmSlot("documents:json-prompt", () =>
-    postJson<unknown>("/json-prompt", { prompt, system, temperature: 0, max_tokens: maxTokens }),
+    postJson<unknown>("/json-prompt", { prompt, system, temperature: 0, max_tokens: maxTokens, ...(schema ? { schema } : {}) }),
   );
 }
 
