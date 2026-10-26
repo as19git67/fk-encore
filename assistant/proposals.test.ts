@@ -401,6 +401,8 @@ describe("a redacted Sammelmappe", () => {
     await ask({ id: conversation.id, message: "Was war beim Kauf der Wohnung relevant?" });
 
     vi.mocked(chat)
+      // "und mach … daraus" chains two steps: the loop asks for a plan first.
+      .mockResolvedValueOnce(toolCall("write_plan", { steps: [{ tool: "create_collection", goal: "the redacted folder with its PDF" }] }))
       .mockResolvedValueOnce(toolCall("create_collection", { name: "Kauf Musterstadt", from_previous_result: true, redact: ["450.000,00"] }))
       .mockResolvedValueOnce(text("Vorgeschlagen."));
     const res = await ask({ id: conversation.id, message: "Schwärze den Kaufpreis und mach ein PDF daraus." });

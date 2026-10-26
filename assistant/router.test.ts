@@ -14,6 +14,8 @@ import {
   areasOfContext,
   areasOfLastTurn,
   CHOOSE_AREAS_NAME,
+  hasChainWords,
+  parseChoice,
   isRouterRequest,
   looksLikeFollowUp,
   parseAreaChoice,
@@ -82,24 +84,24 @@ describe("the previous turn and the working set", () => {
 
 describe("route", () => {
   it("decides by keywords first, and adds the previous turn's area to a follow-up", async () => {
-    expect(await route({ question: "Welche Zähler haben wir?", history: [] })).toEqual({ areas: ["meters"], stage: "keywords" });
-    expect(await route({ question: "Nur die aus München, und mach daraus ein Album.", history: HISTORY })).toEqual({ areas: ["photos"], stage: "keywords" });
+    expect(await route({ question: "Welche Zähler haben wir?", history: [] })).toMatchObject({ areas: ["meters"], stage: "keywords" });
+    expect(await route({ question: "Nur die aus München, und mach daraus ein Album.", history: HISTORY })).toMatchObject({ areas: ["photos"], stage: "keywords" });
     // A follow-up that names another area keeps the previous one too.
-    expect(await route({ question: "Und dazu die Buchungen von denen?", history: HISTORY })).toEqual({ areas: ["finance", "photos"], stage: "keywords" });
+    expect(await route({ question: "Und dazu die Buchungen von denen?", history: HISTORY })).toMatchObject({ areas: ["finance", "photos"], stage: "keywords" });
   });
 
   it("inherits the previous turn's areas for a question without a keyword", async () => {
-    expect(await route({ question: "Ja.", history: HISTORY })).toEqual({ areas: ["photos"], stage: "inherited" });
-    expect(await route({ question: "Nenn es lieber Sommer 2025.", history: HISTORY })).toEqual({ areas: ["photos"], stage: "inherited" });
+    expect(await route({ question: "Ja.", history: HISTORY })).toMatchObject({ areas: ["photos"], stage: "inherited" });
+    expect(await route({ question: "Nenn es lieber Sommer 2025.", history: HISTORY })).toMatchObject({ areas: ["photos"], stage: "inherited" });
     // The working set joins what the words name.
-    expect(await route({ question: "Mach daraus eine Collage.", history: [], context: [{ type: "photo" }] })).toEqual({ areas: ["photos"], stage: "keywords" });
-    expect(await route({ question: "Fasse die drei kurz zusammen.", history: [], context: [{ type: "document" }] })).toEqual({ areas: ["documents", "writing"], stage: "keywords" });
-    expect(await route({ question: "Was steht in denen?", history: [], context: [{ type: "document" }] })).toEqual({ areas: ["documents"], stage: "inherited" });
+    expect(await route({ question: "Mach daraus eine Collage.", history: [], context: [{ type: "photo" }] })).toMatchObject({ areas: ["photos"], stage: "keywords" });
+    expect(await route({ question: "Fasse die drei kurz zusammen.", history: [], context: [{ type: "document" }] })).toMatchObject({ areas: ["documents", "writing"], stage: "keywords" });
+    expect(await route({ question: "Was steht in denen?", history: [], context: [{ type: "document" }] })).toMatchObject({ areas: ["documents"], stage: "inherited" });
   });
 
   it("leaves every area in play when the keywords name too many", async () => {
     const broad = "Zeig mir Fotos, Buchungen, Zähler und Dokumente von gestern.";
-    expect(await route({ question: broad, history: [] })).toEqual({ areas: AREA_IDS, stage: "all" });
+    expect(await route({ question: broad, history: [] })).toMatchObject({ areas: AREA_IDS, stage: "all" });
   });
 
   it("asks the model when nothing else decides, with a short prompt bound to one tool", async () => {
@@ -113,7 +115,7 @@ describe("route", () => {
       question: "Was war der letzte Stand?", history: [], chat,
       withSlot: async (fn) => { slots.push("slot"); return fn(); },
     });
-    expect(result).toEqual({ areas: ["finance", "meters"], stage: "model" });
+    expect(result).toMatchObject({ areas: ["finance", "meters"], stage: "model" });
     expect(requests).toHaveLength(1);
     expect(isRouterRequest(requests[0]!)).toBe(true);
     expect(requests[0]!.tool_choice).toBe("required");
@@ -125,13 +127,13 @@ describe("route", () => {
 
   it("falls back to every area when the model chooses nothing, answers in words, or fails", async () => {
     const none: ChatFn = async () => choosing([]);
-    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: none })).toEqual({ areas: AREA_IDS, stage: "all" });
+    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: none })).toMatchObject({ areas: AREA_IDS, stage: "all" });
     const words: ChatFn = async () => ({ content: "meters", tool_calls: [], finish_reason: "stop" });
-    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: words })).toEqual({ areas: AREA_IDS, stage: "all" });
+    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: words })).toMatchObject({ areas: AREA_IDS, stage: "all" });
     const failing: ChatFn = async () => { throw new Error("llm-service unreachable"); };
-    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: failing })).toEqual({ areas: AREA_IDS, stage: "all" });
+    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: failing })).toMatchObject({ areas: AREA_IDS, stage: "all" });
     // Without a model stage the cheap stages decide alone.
-    expect(await route({ question: "Was war der letzte Stand?", history: [] })).toEqual({ areas: AREA_IDS, stage: "all" });
+    expect(await route({ question: "Was war der letzte Stand?", history: [] })).toMatchObject({ areas: AREA_IDS, stage: "all" });
   });
 
   it("rethrows the user's cancel", async () => {
@@ -147,5 +149,42 @@ describe("route", () => {
     expect(parseAreaChoice({ tool_calls: [] })).toBeNull();
     expect(isRouterRequest(routerRequest("x"))).toBe(true);
     expect(isRouterRequest({ messages: [], tools: [{ type: "function", function: { name: "list_meters" } }] })).toBe(false);
+  });
+});
+
+describe("the plan flag (stage 3 of assistent-wegfindung.md)", () => {
+  it("is set by two areas or by chain words, not by one area alone", async () => {
+    expect(await route({ question: "Welche Zähler haben wir?", history: [] })).toMatchObject({ needsPlan: false });
+    expect(await route({ question: "Welche Rechnungen der Musterfirma liegen vor, und sind sie alle bezahlt?", history: [] }))
+      .toMatchObject({ areas: ["finance", "documents"], stage: "keywords", needsPlan: true });
+    expect(await route({ question: "Such die Fotos von 2025 in Musterstadt raus und leg sie dann in ein Album.", history: [] }))
+      .toMatchObject({ areas: ["photos"], needsPlan: true });
+    expect(await route({ question: "Nur die aus München, und mach daraus ein Album.", history: HISTORY })).toMatchObject({ needsPlan: true });
+    // Every area in play is no decision for two areas; chain words still count.
+    const broad = "Zeig mir Fotos, Buchungen, Zähler und Dokumente von gestern.";
+    expect(await route({ question: broad, history: [] })).toMatchObject({ stage: "all", needsPlan: false });
+    expect(await route({ question: `${broad} Und dann leg alles in eine Mappe.`, history: [] })).toMatchObject({ stage: "all", needsPlan: true });
+  });
+
+  it("reads chain words at word boundaries", () => {
+    expect(hasChainWords("Erst die Buchungen, dann die Belege dazu.")).toBe(true);
+    expect(hasChainWords("Zeig die Fotos und füge sie dem Album hinzu.")).toBe(true);
+    expect(hasChainWords("List the invoices and then check whether they are paid.")).toBe(true);
+    expect(hasChainWords("Wie steht mein Depot, und wie viel Gewinn habe ich bisher gemacht?")).toBe(false);
+    expect(hasChainWords("Alle Buchungen mit Erstattung von der Kasse.")).toBe(false);
+    expect(hasChainWords("Zeig mir die Buchungen zuerstellen.")).toBe(false);
+  });
+
+  it("takes the model's own needs_plan, and two chosen areas", async () => {
+    const flagged: ChatFn = async () => ({
+      content: null, finish_reason: "tool_calls",
+      tool_calls: [{ id: "r1", type: "function", function: { name: CHOOSE_AREAS_NAME, arguments: JSON.stringify({ areas: ["meters"], needs_plan: true }) } }],
+    });
+    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: flagged })).toMatchObject({ areas: ["meters"], stage: "model", needsPlan: true });
+    const two: ChatFn = async () => choosing(["meters", "finance"]);
+    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: two })).toMatchObject({ stage: "model", needsPlan: true });
+    const one: ChatFn = async () => choosing(["meters"]);
+    expect(await route({ question: "Was war der letzte Stand?", history: [], chat: one })).toMatchObject({ stage: "model", needsPlan: false });
+    expect(parseChoice(choosing(["meters"]))).toEqual({ areas: ["meters"], needsPlan: false });
   });
 });
