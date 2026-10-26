@@ -111,9 +111,14 @@ type PhotoFilterQueryParams = {
   sight?: Query<string>;
   /** portrait | landscape | square. */
   orientation?: Query<string>;
-  /** Date order of the rows: desc (default, newest first) or asc. */
+  /** Order of the rows: desc (default, newest or highest first) or asc. */
   sortDir?: Query<string>;
-  /** `quality`: best first by the composite quality score, then by date. */
+  /**
+   * `date` (default) or a metric: `quality`, `aesthetics`, `favorites` (of
+   * every user), `comments`, `face` (how well the persons of `personIds`
+   * show), `size`. A metric fills `rank_value` on every row; the date order
+   * breaks ties.
+   */
   sortBy?: Query<string>;
   /** Maximum number of rows to return. Omit for "all". */
   limit?: Query<number>;
@@ -411,7 +416,9 @@ export const listPhotos = api(
     const offset = typeof params.offset === "number" && params.offset > 0 ? params.offset : undefined;
     return await service.listPhotosLogic(userId, filter, {
       order: params.sortDir === "asc" ? "asc" : "desc",
-      sortBy: params.sortBy === "quality" ? "quality" : "date",
+      sortBy: service.parsePhotoSortField(params.sortBy),
+      // The face metric rates the persons the list is filtered by.
+      facePersonIds: filter.personIds,
       limit,
       offset,
     });

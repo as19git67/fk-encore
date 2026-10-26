@@ -71,7 +71,7 @@ describe("list_photos", () => {
     clients.photo.getPhotoDetailsBatch.mockResolvedValue({ photos: [
       { id: 1, curation_status: "visible" }, { id: 2, curation_status: "hidden" }, { id: 3 },
     ] });
-    const out = await tool("list_photos").run({ from_previous_result: true, order: "best" }, ctx([1, 2, 3]));
+    const out = await tool("list_photos").run({ from_previous_result: true, rank_by: "quality" }, ctx([1, 2, 3]));
     expect(clients.photo.listPhotos).not.toHaveBeenCalled();
     expect(out.ref?.ids.sort()).toEqual([1, 3]);
 

@@ -6,6 +6,7 @@
 import { feed, photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
+import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
 
 const PHOTOS = ["module.photos", "photos.view"];
 
@@ -14,14 +15,65 @@ const PHOTO_COUNT_CAP = 2000;
 /** Photos read to narrow a previous result; the most the endpoint returns. */
 const NARROW_CAP = 5000;
 
-type PhotoOrder = "newest" | "oldest" | "best";
-const ORDER_NOTE: Record<PhotoOrder, string> = { newest: "newest first", oldest: "oldest first", best: "best first by quality score" };
+/**
+ * What a photo list is ranked by, in the words of the tool and of the photo
+ * service (`sortBy` of GET /photos). A field the service computes
+ * (favourites of every viewer, comments, the face) needs the service even
+ * when the rows are an earlier result; the rest a row carries itself.
+ */
+const RANK_FIELDS = {
+  taken_at: { description: "date taken", sortBy: "date", own: true },
+  quality: { description: "quality score ('die besten')", sortBy: "quality", own: true },
+  aesthetics: { description: "aesthetics score", sortBy: "aesthetics", own: true },
+  person_face: { description: "how well the persons of person_ids show (needs person_ids)", sortBy: "face", own: false },
+  favorites_count: { description: "favourites (Likes) of all users", sortBy: "favorites", own: false },
+  comments_count: { description: "comments in shared albums", sortBy: "comments", own: false },
+  file_size: { description: "file size", sortBy: "size", own: true },
+} satisfies Record<string, RankField & { sortBy: string; own: boolean }>;
+type PhotoRankField = keyof typeof RANK_FIELDS;
+
+const GROUPS = {
+  year: "taken",
+  month: "taken, YYYY-MM",
+  country: "of the place",
+  city: "of the place",
+} as const;
+type PhotoGroup = keyof typeof GROUPS;
 
 interface PhotoRow {
   id: number; taken_at?: string; created_at?: string; location_name?: string; location_city?: string; location_country?: string;
   filename?: string; original_name?: string; mime_type?: string; size?: number; latitude?: number; longitude?: number;
   ai_quality_score?: number; ai_quality_details?: Record<string, number>; description?: string; keywords?: string[];
-  curation_status?: string; orientation?: string | null;
+  curation_status?: string; orientation?: string | null; rank_value?: number;
+}
+
+/** The value of a field a row carries itself, for ranking an earlier result without the service. */
+function ownValue(p: PhotoRow, field: PhotoRankField): number | undefined {
+  switch (field) {
+    case "taken_at": {
+      const t = Date.parse(p.taken_at ?? p.created_at ?? "");
+      return Number.isFinite(t) ? t : undefined;
+    }
+    case "quality": return p.ai_quality_score;
+    case "aesthetics": return p.ai_quality_details?.clip_aesthetics;
+    case "file_size": return p.size;
+    default: return p.rank_value;
+  }
+}
+
+/** The ranked value as the table prints it: scores as percent, counts and bytes as they are. */
+function rankCell(p: PhotoRow, field: PhotoRankField): number | string | undefined {
+  const v = ownValue(p, field);
+  if (field === "taken_at") return (p.taken_at ?? p.created_at ?? "").slice(0, 10);
+  if (field === "quality" || field === "aesthetics") return percent(v);
+  if (field === "person_face") return v === undefined ? undefined : Math.round(v * 10) / 10;
+  return v;
+}
+
+function groupKey(p: PhotoRow, by: PhotoGroup): string | undefined {
+  const date = p.taken_at ?? p.created_at;
+  if (by === "year" || by === "month") return dateKey(date, by);
+  return by === "country" ? p.location_country || undefined : p.location_city || undefined;
 }
 interface NaturalResult { photoId: number; filename?: string; taken_at?: string; created_at: string; location_city?: string; location_country?: string; score: number }
 interface Recap { id: number; kind: string; title: string; subtitle: string | null; period_start: string | null; period_end: string | null; photo_count: number }
@@ -96,13 +148,13 @@ function excerpt(text: string | undefined, max = 60): string | undefined {
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: "Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), newest, oldest or best first; or narrows the previous photo result.",
+  summary: "Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), ranked by date, quality, aesthetics, a person's face, favourites of all users or comments (rank_by, direction), optionally the first of every year, month or place (group_by); or narrows the previous photo result.",
   permissions: PHOTOS,
   source: "hand",
   parameters: {
     type: "object",
     properties: {
-      favorite: { type: "boolean", description: "only when the user says Favoriten; 'die besten' is order=best" },
+      favorite: { type: "boolean", description: "only when the user says Favoriten; 'die besten' is rank_by=quality" },
       date_from: { type: "string", description: "taken on or after, YYYY-MM-DD" },
       date_to: { type: "string", description: "taken on or before, YYYY-MM-DD" },
       person_ids: { type: "array", items: { type: "integer" }, description: "ids from list_persons" },
@@ -115,8 +167,9 @@ export const listPhotos: ToolSpec = {
       media_type: { type: "string", enum: [...MEDIA_TYPES] },
       has_gps: { type: "boolean" },
       quality_min: { type: "integer", description: "0–100" },
-      order: { type: "string", enum: ["newest", "oldest", "best"], description: "best = by quality and aesthetics score" },
-      limit: { type: "integer", description: "at most 60 (default 15)" },
+      ...rankProperties(RANK_FIELDS, "taken_at"),
+      ...groupProperties(GROUPS),
+      limit: { type: "integer", description: "at most 60 (default 15); with group_by: groups shown" },
       from_previous_result: { type: "boolean", description: "narrow the previous answer's photos" },
       hidden: HIDDEN_PARAM,
     },
@@ -138,8 +191,10 @@ export const listPhotos: ToolSpec = {
     const mediaType = oneOf(args.media_type, MEDIA_TYPES);
     const hasGps = bool(args.has_gps);
     const qualityMin = int(args.quality_min, { min: 0, max: 100 });
-    const order: PhotoOrder = str(args.order) === "oldest" ? "oldest" : str(args.order) === "best" ? "best" : "newest";
-    const oldest = order === "oldest";
+    const ranking = parseRanking(args, RANK_FIELDS, "taken_at");
+    if (ranking.field === "person_face" && personIds.length === 0) throw new Error("rank_by person_face needs person_ids (ids from list_persons)");
+    const grouping = parseGrouping(args, GROUPS);
+    const oldest = ranking.direction === "asc";
     const limit = int(args.limit, { min: 1, max: 60 }) ?? 15;
     const fromPrevious = bool(args.from_previous_result) === true;
     const filter = {
@@ -167,12 +222,14 @@ export const listPhotos: ToolSpec = {
 
     let rows: PhotoRow[];
     let capped = false;
-    if (!previous || serverFilter) {
+    // A metric the service computes is read from the service even for an
+    // earlier result: the rows of that result do not carry it.
+    if (!previous || serverFilter || !RANK_FIELDS[ranking.field].own) {
       const res = await (photo.listPhotos({
         ...filter,
         hiddenMode: hidden,
-        sortBy: order === "best" ? "quality" : undefined,
-        sortDir: oldest ? "asc" : "desc",
+        sortBy: RANK_FIELDS[ranking.field].sortBy,
+        sortDir: ranking.direction,
         limit: (previous ? NARROW_CAP : PHOTO_COUNT_CAP) + 1,
       })) as unknown as { photos: PhotoRow[] };
       capped = res.photos.length > PHOTO_COUNT_CAP;
@@ -185,38 +242,65 @@ export const listPhotos: ToolSpec = {
     } else {
       // The details endpoint returns every photo it is asked for, hidden or not.
       rows = (await loadPhotoRows(previous)).filter((p) => passesHidden(p.curation_status, hidden));
-      if (oldest) rows = [...rows].reverse();
-      if (order === "best") rows = [...rows].sort((a, b) => (b.ai_quality_score ?? -1) - (a.ai_quality_score ?? -1));
+      // Ranked here: the rows carry the field. Unvalued rows last either way.
+      const sign = oldest ? 1 : -1;
+      rows = [...rows].sort((a, b) => {
+        const av = ownValue(a, ranking.field);
+        const bv = ownValue(b, ranking.field);
+        if (av === undefined && bv === undefined) return 0;
+        if (av === undefined) return 1;
+        if (bv === undefined) return -1;
+        return sign * (av - bv);
+      });
     }
 
     const count = rows.length;
+    // Grouped: the rows become the first of every group; the count stays the
+    // count of what matched, so "more than 2000" still says it was capped.
+    const groups = grouping ? groupRows(rows, (p) => groupKey(p, grouping.by), grouping.perGroup) : undefined;
+    const shownRows = groups ? groups.flatMap((g) => g.rows.map((p) => ({ ...p, group: g.key }))) : rows.map((p) => ({ ...p, group: undefined as string | undefined }));
+    const rankColumn = ranking.field === "taken_at" ? [] : [ranking.field];
+    const columns = [...(groups ? ["group"] : []), "id", "taken", ...rankColumn, "place", "description", "keywords", "quality"];
+    const tableRows = shownRows.map((p) => [
+      ...(groups ? [p.group] : []),
+      p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10),
+      ...(rankColumn.length ? [rankCell(p, ranking.field)] : []),
+      place(p), excerpt(p.description),
+      p.keywords?.length ? p.keywords.slice(0, 5).join(", ") : undefined, percent(p.ai_quality_score),
+    ]);
+    const rowCap = groups ? Math.min(shownRows.length, limit * grouping!.perGroup) : limit;
+    const resultIds = shownRows.map((p) => p.id);
     const countText = capped ? `more than ${PHOTO_COUNT_CAP}` : String(count);
     // The gallery knows neither a place by name, the text filters, nor "the previous result".
     const galleryCanShow = !previous && !placeTerm && hasDescription === undefined && !text && !keyword && !sight && !orientation;
-    const route = galleryCanShow ? `/fotos/galerie${query({
+    // The gallery sorts by date, quality and aesthetics; a grouped result is no gallery page.
+    const gallerySort = ranking.field === "quality" ? "ai_quality_score" : ranking.field === "aesthetics" ? "aesthetics" : ranking.field === "taken_at" ? undefined : null;
+    const route = galleryCanShow && !groups && gallerySort !== null ? `/fotos/galerie${query({
       favorite: favorite ? "true" : undefined, dateFrom, dateTo, personIds: personIds.join(",") || undefined,
       mediaTypes: mediaType, hasGps: hasGps === undefined ? undefined : String(hasGps), qualityMin,
-      sortBy: order === "best" ? "ai_quality_score" : undefined, sortDir: order === "best" ? "desc" : undefined,
+      sortBy: gallerySort, sortDir: gallerySort ? ranking.direction : undefined,
       hiddenMode: hidden === "exclude" ? undefined : hidden,
     })}` : undefined;
     return {
       text: table(
-        ["id", "taken", "place", "description", "keywords", "quality"],
-        rows.map((p) => [
-          p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p), excerpt(p.description),
-          p.keywords?.length ? p.keywords.slice(0, 5).join(", ") : undefined, percent(p.ai_quality_score),
-        ]),
-        { cap: limit, total: count, note: `photo count: ${countText}, ${ORDER_NOTE[order]}, ${HIDDEN_NOTE[hidden]}${previous ? " (narrowed from the previous result)" : ""}. For everything known about a few photos call photo_details(ids).` },
+        columns,
+        tableRows,
+        {
+          cap: rowCap,
+          total: groups ? shownRows.length : count,
+          note: `photo count: ${countText}, ${rankNote(ranking, grouping, groups?.length ?? 0)}, ${HIDDEN_NOTE[hidden]}${previous ? " (narrowed from the previous result)" : ""}. For everything known about a few photos call photo_details(ids).`,
+        },
       ),
-      digest: digestOf("list_photos", count, rows.map((p) => p.id)),
-      rowCount: count,
-      ref: { type: "photo", ids: rows.map((p) => p.id) },
+      digest: digestOf("list_photos", groups ? shownRows.length : count, resultIds),
+      rowCount: groups ? shownRows.length : count,
+      // Grouped, the result is the picks: a follow-up (an album) takes them, not everything that matched.
+      ref: { type: "photo", ids: resultIds },
       block: {
         kind: "photos",
         tool: "list_photos",
-        total: count,
+        total: groups ? shownRows.length : count,
         // The filename is what a thumbnail URL is built from.
-        rows: rows.slice(0, Math.max(limit, 12)).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
+        rows: shownRows.slice(0, Math.max(rowCap, 12)).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
         route,
       },
     };

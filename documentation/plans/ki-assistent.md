@@ -481,7 +481,7 @@ behind it.
        `photos.view` check: the client name Encore generates for the
        hyphenated `trip-planner` service could not be checked without the
        Encore CLI.
-     Schemas: up to `ASSISTANT_SCHEMA_BUDGET_TOKENS` (9000) every tool's
+     Schemas: up to `ASSISTANT_SCHEMA_BUDGET_TOKENS` (10000) every tool's
      schema goes along; past it the model gets the one-line catalog and
      `describe_tools`. The context budget follows the model's window
      (`n_ctx`, which llm-service names in a closing `context` chunk of every
@@ -849,6 +849,30 @@ behind it.
 | Alles zum Kauf der Immobilie München | documents + finance | `search_documents(q, category=kapitalanlage-immobilie-*)`, `list_transactions(q=…)` or `transaction_totals(tags)` | Document rows and booking rows, both kept as the working set |
 | Kaufpreis schwärzen, zwei PDFs, Rendite | documents + finance (stage 6) | `find_text_in_document(each doc, purchase price)` → proposal `create_collection` + `build_collection_pdf`; grouping by the model → proposal `transaction_report(groups, yield)` | Two proposal cards; after "Ausführen" two PDF links, the Sammelmappe and the saved analysis |
 | Anschreiben an den Verwalter zu drei Rechnungen | documents (stage 7) | context briefs of the three documents → draft in the answer → proposal `render_letter(body, recipient=correspondent, attachments)` | Editable draft card; after "Ausführen" the PDF, the new document, or the Sammelmappe with the letter as cover |
+| Für jedes Jahr das Foto mit Max mit den meisten Likes ins Album | photos | `list_persons(q)` → `list_albums(q)` → `list_photos(person_ids, rank_by=favorites_count, group_by=year)` → proposal `add_photos_to_album(album_id, from_previous_result)` | One row per year with the count; the picks are the result the album takes |
+
+### Ranking and grouping (`rank_by`, `direction`, `group_by`, `per_group`)
+
+"Das beste je Jahr", "die größte Buchung je Monat", "je Absender das
+größte Dokument" are one call each, never a loop the model writes: every
+list tool takes `rank_by` (a field from its own table), `direction`
+(`desc` highest or newest first, `asc` lowest or oldest), `group_by` (a
+key from its own table) and `per_group`. The helper is
+`assistant/tools/ranking.ts`; the service ranks (so the groups come from
+the whole set, not from one page) and the tool keeps the first
+`per_group` rows of each key, in rank order. A grouped result's `ref` is
+the picks, so `add_photos_to_album(from_previous_result)` takes them.
+
+| Tool | `rank_by` | `group_by` | Ranked by |
+|---|---|---|---|
+| `list_photos` | `taken_at`, `quality`, `aesthetics`, `person_face` (size × sharpness of the asked persons' faces, needs `person_ids`), `favorites_count` (favourite marks of every user), `comments_count`, `file_size` | `year`, `month`, `country`, `city` | `GET /photos?sortBy=` (`date`, `quality`, `aesthetics`, `face`, `favorites`, `comments`, `size`), value in `rank_value` |
+| `search_documents` | `relevance` (needs `q`), `doc_date`, `uploaded_at`, `size_bytes` | `year`, `month`, `correspondent`, `category` | `sort_by` of `/documents/search` (100 best matches) or, without `q`, `/documents` (200 rows) |
+| `list_transactions` | `booking_date`, `amount` (absolute) | `month`, `quarter`, `year`, `account`, `counterparty` | `sortBy` of `/finance/transactions` (500 rows when grouped) |
+
+A new metric is one line in the tool's table and, if the rows do not
+carry it, one `case` in the service's sort; never a new parameter. The
+face metric rates only the persons the list is filtered by; eye
+openness is measured per face but not yet part of it.
 
 The two-turn example is the one that decides the architecture: the
 second turn works only because the first turn's rows stay addressable

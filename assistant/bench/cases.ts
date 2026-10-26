@@ -239,7 +239,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "best-photos-in-country",
     title: "Beste Fotos eines Landes",
     question: "Zeige mir die 20 besten Fotos aus Beispielland.",
-    expect: [{ tool: "list_photos", args: { place: { $contains: "beispielland" }, order: "best" } }],
+    expect: [{ tool: "list_photos", args: { place: { $contains: "beispielland" }, rank_by: "quality" } }],
     results: { list_photos: { rows: [{ id: 902, taken: "2023-04-02", place: "Beispielstadt, Beispielland" }], total: 312 } },
   },
   {
@@ -274,8 +274,51 @@ export const BENCH_CASES: BenchCase[] = [
     id: "oldest-photo",
     title: "Ältestes Foto",
     question: "Was ist das älteste Foto in meiner Bibliothek?",
-    expect: [{ tool: "list_photos", args: { order: "oldest" } }],
+    expect: [{ tool: "list_photos", args: { direction: "asc" } }],
     results: { list_photos: { rows: [{ id: 1, taken: "2003-07-14", place: "Beispielheim" }], total: 48210 } },
+  },
+  {
+    id: "best-photo-per-year-into-album",
+    title: "Je Jahr ein Foto einer Person ins Album",
+    question: "Such für jedes Jahr das Foto mit Max mit den meisten Likes und füge es dem Album \"Beste Kinder\" hinzu.",
+    expect: [
+      { tool: "list_persons" },
+      { tool: "list_photos", args: { person_ids: { $contains: "41" }, rank_by: "favorites_count", group_by: "year" } },
+      { tool: "add_photos_to_album", args: { album_id: 7, from_previous_result: true } },
+    ],
+    results: {
+      list_persons: { rows: [{ id: 41, name: "Max", faces: 318 }], total: 1 },
+      list_albums: { rows: [{ id: 7, name: "Beste Kinder", photos: 12 }], total: 1 },
+      list_photos: { rows: [{ group: "2024", id: 911, taken: "2024-07-02", favorites_count: 4 }, { group: "2023", id: 877, taken: "2023-05-19", favorites_count: 3 }], total: 2, note: "ordered by favorites_count descending, the first row of each year (2 groups)" },
+      add_photos_to_album: { proposal: "2 Fotos zum Album „Beste Kinder“ hinzufügen", status: "proposed" },
+    },
+  },
+  {
+    id: "fewest-comments-per-year",
+    title: "Je Jahr das Foto mit den wenigsten Kommentaren",
+    question: "Welches Foto mit Max hat in jedem Jahr die wenigsten Kommentare?",
+    expect: [
+      { tool: "list_persons" },
+      { tool: "list_photos", args: { person_ids: { $contains: "41" }, rank_by: "comments_count", direction: "asc", group_by: "year" } },
+    ],
+    results: {
+      list_persons: { rows: [{ id: 41, name: "Max", faces: 318 }], total: 1 },
+      list_photos: { rows: [{ group: "2024", id: 912, taken: "2024-03-02", comments_count: 0 }], total: 1 },
+    },
+  },
+  {
+    id: "largest-booking-per-month",
+    title: "Größte Buchung je Monat",
+    question: "Was war dieses Jahr in jedem Monat meine größte Ausgabe?",
+    expect: [{ tool: "list_transactions", args: { direction: "out", rank_by: "amount", group_by: "month", from: "2026-01-01" } }],
+    results: { list_transactions: { rows: [{ group: "2026-09", id: 9501, date: "2026-09-03", amount: "-1250.00", counterparty: "Beispiel Vermietung", purpose: "Miete" }], total: 1 } },
+  },
+  {
+    id: "largest-document-per-sender",
+    title: "Größtes Dokument je Absender",
+    question: "Zeig mir je Absender das größte Dokument.",
+    expect: [{ tool: "search_documents", args: { rank_by: "size_bytes", group_by: "correspondent", q: { $absent: true } } }],
+    results: { search_documents: { rows: [{ group: "Beispielkasse", id: 310, date: "2025-02-01", size_bytes: 4820000, title: "Jahresbericht" }], total: 1 } },
   },
   {
     id: "beach-photos",
