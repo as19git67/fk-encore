@@ -22,13 +22,16 @@ import ScrollX from '../components/layout/ScrollX.vue'
 import {
   cancelBenchRun,
   deleteBenchRun,
+  deleteFeedback,
   getBenchRun,
   listBenchCases,
   listBenchRuns,
+  listFeedback,
   startBenchRun,
   PHASE_LEND,
   PHASE_RETURN,
   type BenchCaseInfo,
+  type FeedbackEntry,
   type BenchModel,
   type BenchCaseRun,
   type BenchRunDetail,
@@ -49,6 +52,9 @@ const onCpu = ref(false)
 const loaded = ref(false)
 const busy = ref<'start' | 'cancel' | null>(null)
 const error = ref<string | null>(null)
+
+const feedback = ref<FeedbackEntry[]>([])
+const copiedDraft = ref<number | null>(null)
 
 const running = computed(() => runs.value.find((r) => r.status === 'running') ?? null)
 const caseTitle = (id: string | null) => cases.value.find((c) => c.id === id)?.title ?? id ?? ''
@@ -90,6 +96,54 @@ function when(iso: string): string {
 
 function callText(c: BenchCaseRun['calls'][number]): string {
   return `${c.tool}(${JSON.stringify(c.args)})`
+}
+
+/** The road a case took, in one line: first tool, nudges, prompt of round 1. */
+function roadText(r: BenchCaseRun): string {
+  if (r.first_tool === undefined) return '–'
+  const parts = [r.first_tool ?? 'kein Werkzeug']
+  if (r.nudges) parts.push(`${r.nudges}× zurück`)
+  if (r.prompt_tokens_first) parts.push(`${r.prompt_tokens_first} Tokens`)
+  return parts.join(' · ')
+}
+
+async function refreshFeedback() {
+  feedback.value = (await listFeedback()).entries
+}
+
+function traceText(t: FeedbackEntry['trace'][number]): string {
+  const call = `${t.tool}(${JSON.stringify(t.arguments)})`
+  if (t.error) return `${call} → ${t.error}`
+  return t.rows === null ? call : `${call} · ${t.rows}`
+}
+
+async function copyDraft(entry: FeedbackEntry) {
+  try {
+    await navigator.clipboard.writeText(entry.case_draft)
+    copiedDraft.value = entry.id
+    setTimeout(() => { if (copiedDraft.value === entry.id) copiedDraft.value = null }, 2000)
+  } catch {
+    error.value = 'Der Fall konnte nicht in die Zwischenablage kopiert werden'
+  }
+}
+
+function removeFeedback(entry: FeedbackEntry) {
+  confirm.require({
+    message: `Die Rückmeldung vom ${when(entry.created_at)} zur Frage „${entry.question.slice(0, 60)}“ löschen?`,
+    header: 'Rückmeldung löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Löschen',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await deleteFeedback(entry.id)
+        await refreshFeedback()
+      } catch (e) {
+        error.value = message(e, 'Die Rückmeldung konnte nicht gelöscht werden')
+      }
+    },
+  })
 }
 
 function message(e: unknown, fallback: string): string {
@@ -134,7 +188,7 @@ async function poll() {
 
 onMounted(async () => {
   try {
-    const [c] = await Promise.all([listBenchCases(), refreshRuns()])
+    const [c] = await Promise.all([listBenchCases(), refreshRuns(), refreshFeedback()])
     cases.value = c.cases
     today.value = c.today
     const first = running.value ?? runs.value[0]
@@ -305,6 +359,9 @@ function remove(run: BenchRunSummary) {
             <dt>Runden je Fall</dt>
             <dd>{{ selected.summary.median_rounds_per_case ?? '–' }} (max. {{ selected.summary.max_rounds_used ?? '–' }})</dd>
           </div>
+          <div class="tile"><dt>Erstes Werkzeug richtig</dt><dd>{{ percent(selected.summary.first_tool_hit_rate) }}</dd></div>
+          <div class="tile"><dt>Zurückgeschickt</dt><dd>{{ selected.summary.nudges ?? '–' }}</dd></div>
+          <div class="tile"><dt>Prompt Runde 1 (Median)</dt><dd>{{ selected.summary.median_prompt_tokens_first ?? '–' }}</dd></div>
         </dl>
 
         <ScrollX v-if="selected.results.length">
@@ -314,6 +371,7 @@ function remove(run: BenchRunSummary) {
                 <th scope="col">Fall</th>
                 <th scope="col">Ergebnis</th>
                 <th scope="col">Runden</th>
+                <th scope="col">Weg</th>
                 <th scope="col">Aufrufe</th>
               </tr>
             </thead>
@@ -330,6 +388,7 @@ function remove(run: BenchRunSummary) {
                   <div v-else-if="!r.score.answered" class="muted">keine Antwort</div>
                 </td>
                 <td class="num">{{ r.rounds_ms.length }} · {{ r.rounds_ms.map((x) => ms(x)).join(' / ') }}</td>
+                <td :class="['road', { 'road--wrong': r.score.first_tool_hit === false }]">{{ roadText(r) }}</td>
                 <td class="calls">
                   <code v-for="(c, i) in r.calls" :key="i" class="call">{{ callText(c) }}</code>
                   <span v-if="!r.calls.length" class="muted">keine</span>
@@ -397,6 +456,53 @@ function remove(run: BenchRunSummary) {
             </tbody>
           </table>
         </ScrollX>
+      </section>
+
+      <section class="card" aria-labelledby="bench-feedback">
+        <h2 id="bench-feedback" class="card-title">Rückmeldungen aus dem Alltag</h2>
+        <p class="muted">
+          Was Nutzer unter einer Antwort mit Daumen hoch oder runter bewertet haben: die Frage, der Weg
+          des Modells (Werkzeuge, Argumente, Trefferzahl, Fehler – nie die Zeilen selbst) und die Antwort.
+          „Als Fall kopieren“ legt ein Fallgerüst für <code>bench/cases.ts</code> in die Zwischenablage;
+          vor dem Einfügen jeden echten Namen, jede Nummer und jeden Betrag durch erfundene ersetzen.
+        </p>
+        <p v-if="!feedback.length" class="muted">Noch keine Rückmeldungen.</p>
+        <ul v-else class="feedback-list">
+          <li v-for="f in feedback" :key="f.id" class="feedback">
+            <div class="feedback-head">
+              <Tag :value="f.verdict === 'down' ? 'Daumen runter' : 'Daumen hoch'" :severity="f.verdict === 'down' ? 'danger' : 'success'" />
+              <span class="muted">{{ when(f.created_at) }}</span>
+              <span class="spacer" />
+              <Button
+                :icon="copiedDraft === f.id ? 'pi pi-check' : 'pi pi-copy'"
+                :label="copiedDraft === f.id ? 'Kopiert' : 'Als Fall kopieren'"
+                text
+                size="small"
+                severity="secondary"
+                @click="copyDraft(f)"
+              />
+              <Button
+                icon="pi pi-trash"
+                text
+                rounded
+                severity="secondary"
+                size="small"
+                aria-label="Rückmeldung löschen"
+                @click="removeFeedback(f)"
+              />
+            </div>
+            <p class="feedback-question">{{ f.question }}</p>
+            <p v-if="f.comment" class="feedback-comment">„{{ f.comment }}“</p>
+            <div class="calls">
+              <code v-for="(t, i) in f.trace" :key="i" :class="['call', { 'call--failed': !!t.error }]">{{ traceText(t) }}</code>
+              <span v-if="!f.trace.length" class="muted">kein Werkzeug</span>
+            </div>
+            <details class="answer">
+              <summary>Antwort</summary>
+              <p>{{ f.answer }}</p>
+            </details>
+          </li>
+        </ul>
       </section>
     </div>
   </PageLayout>
@@ -538,6 +644,58 @@ function remove(run: BenchRunSummary) {
 /* Wide enough to read on a phone; ScrollX scrolls the rest. */
 .case {
   min-width: 10rem;
+}
+
+.road {
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
+}
+
+.road--wrong {
+  color: var(--p-red-600);
+}
+
+.feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.feedback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--p-content-border-color);
+}
+
+.feedback-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.feedback-question,
+.feedback-comment {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.feedback-comment {
+  color: var(--p-text-muted-color);
+}
+
+.call--failed {
+  color: var(--p-red-600);
 }
 
 .calls {

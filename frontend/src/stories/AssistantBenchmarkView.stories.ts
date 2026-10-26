@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw'
 import AssistantBenchmarkView from '../views/AssistantBenchmarkView.vue'
 import { defaultHandlers } from './handlers'
 import { routeFromParameters } from './storyRoute'
-import type { BenchRunDetail, BenchRunSummary } from '../api/assistantBenchmark'
+import type { BenchRunDetail, BenchRunSummary, FeedbackEntry } from '../api/assistantBenchmark'
 
 /** The assistant benchmark page: a finished run with its cases, and a run in progress. */
 
@@ -29,13 +29,15 @@ const DONE: BenchRunDetail = {
   summary: {
     cases: 3, passed: 2, tool_hit_rate: 1, args_hit_rate: 0.67, pass_rate: 0.67, errors: 0, rounds: 7,
     median_ms_per_round: 2140, p90_ms_per_round: 6310, median_rounds_per_case: 2, max_rounds_used: 3,
+    first_tool_hit_rate: 0.67, nudges: 1, median_prompt_tokens_first: 6120,
   },
   results: [
     {
       id: 'debits-this-month', title: 'Lastschriften bis Monatsende', rounds_ms: [1820, 2140],
       calls: [{ tool: 'upcoming_payments', args: { until: '2026-10-31', channel: 'direct_debit' } }],
       answer: 'Bis Ende Oktober kommen noch zwei Lastschriften, zusammen 116,50 €.', error: null,
-      score: { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] },
+      score: { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [], first_tool_hit: true },
+      rounds: 2, first_tool: 'upcoming_payments', nudges: 0, prompt_tokens_first: 5980,
     },
     {
       id: 'report-with-yield', title: 'Bericht mit Gruppen und Rendite', rounds_ms: [2300, 6310, 1900],
@@ -44,16 +46,44 @@ const DONE: BenchRunDetail = {
         { tool: 'transaction_report', args: { title: 'Wohnung Beispielweg', groups: [{ name: 'Kauf', transaction_ids: [801, 802] }, { name: 'Mieteinnahmen', transaction_ids: [804, 805] }] } },
       ],
       answer: 'Der Bericht liegt als Vorschlag bereit.', error: null,
-      score: { tool_hit: true, args_hit: false, answered: true, passed: false, missing: ['transaction_report'] },
+      score: { tool_hit: true, args_hit: false, answered: true, passed: false, missing: ['transaction_report'], first_tool_hit: true },
+      rounds: 3, first_tool: 'list_transactions', nudges: 1, prompt_tokens_first: 6120,
     },
     {
       id: 'letter-paid-invoices', title: 'Brief aus drei Rechnungen, Lücke für das Unbekannte', rounds_ms: [3900, 1500],
       calls: [{ tool: 'render_letter', args: { recipient: 'Musterfirma Haustechnik GmbH\nBeispielstraße 1\n12345 Musterstadt', body: 'Sehr geehrte Damen und Herren, … RE-2026-0101 … 89,90 € … am [[Zahlungsdatum]] …' } }],
       answer: 'Der Brief wartet auf der Karte; bitte das Zahlungsdatum ergänzen.', error: null,
-      score: { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] },
+      score: { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [], first_tool_hit: false },
+      rounds: 2, first_tool: 'search_documents', nudges: 0, prompt_tokens_first: 6400,
     },
   ],
 }
+
+/** What users judged under an answer: a wrong road and a good one. */
+const FEEDBACK: FeedbackEntry[] = [
+  {
+    id: 2, verdict: 'down', comment: 'Das war die falsche Suche, ich wollte die Steuerunterlagen.',
+    question: 'Welche Unterlagen brauche ich für die Steuer 2025?',
+    trace: [
+      { tool: 'search_documents', arguments: { q: 'Steuer 2025' }, rows: 0, error: null },
+      { tool: 'search_documents', arguments: { q: 'Steuer' }, rows: 14, error: null },
+    ],
+    answer: 'Ich habe 14 Dokumente gefunden, in denen es um Steuern geht.',
+    conversation_id: 12, message_id: 341, created_at: '2026-10-25T18:12:00Z',
+    case_draft: '{\n  "id": "feedback-2"\n}',
+  },
+  {
+    id: 1, verdict: 'up', comment: null,
+    question: 'Wie viel Strom haben wir letztes Jahr verbraucht?',
+    trace: [
+      { tool: 'list_meters', arguments: {}, rows: 2, error: null },
+      { tool: 'consumption_report', arguments: { meter_id: 3, from: '2025-01-01', to: '2025-12-31' }, rows: 1, error: null },
+    ],
+    answer: 'Der Zähler „Strom Haus“ zeigt für 2025 einen Verbrauch von 3.412 kWh.',
+    conversation_id: null, message_id: null, created_at: '2026-10-24T07:40:00Z',
+    case_draft: '{\n  "id": "feedback-1"\n}',
+  },
+]
 
 const OLDER: BenchRunSummary = {
   ...DONE, id: 1, label: 'CPU-Fallback 7B', model: { ...MODEL, label: 'CPU-Fallback 7B', model_filename: 'fallback-7b-q4.gguf', backend: 'inproc', ctx_size: 8192 },
@@ -75,6 +105,7 @@ const handlers = (runs: BenchRunSummary[], detail: BenchRunDetail) => [
   http.get('/api/assistant/benchmark/cases', () => HttpResponse.json({ today: '2026-10-15', cases: CASES })),
   http.get('/api/assistant/benchmark/runs', () => HttpResponse.json({ runs })),
   http.get('/api/assistant/benchmark/runs/:id', () => HttpResponse.json(detail)),
+  http.get('/api/assistant/feedback', () => HttpResponse.json({ entries: FEEDBACK })),
   ...defaultHandlers,
 ]
 

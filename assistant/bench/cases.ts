@@ -45,6 +45,12 @@ export interface BenchCase {
   context?: { refs: Array<{ type: RefType; id: number }>; briefs: string[] };
   /** Every one of these calls must occur, in any order; extra read calls are fine. */
   expect: ExpectedCall[];
+  /**
+   * Tools the first call of the turn may be, for the path metric (stage 6 of
+   * assistent-wegfindung.md). Default: any expected tool. Named where a
+   * lookup before the real call is fine (`list_categories` before a search).
+   */
+  firstTools?: string[];
   /** Fails on any tool call at all. */
   forbidTools?: boolean;
   /** Runs as a user holding only these permissions; the catalog shrinks with them. */
@@ -131,6 +137,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "owners-meeting-minutes",
     title: "Dokumente einer Kategorie suchen",
     question: "Gib mir alle Protokolle der Eigentümerversammlung der Immobilie in Musterstadt.",
+    firstTools: ["list_categories", "search_documents"],
     expect: [{ tool: "search_documents", args: { q: { $contains: "eigentümerversammlung" }, category: "kapitalanlage-immobilie-musterstadt" } }],
     results: {
       list_categories: { rows: [{ slug: "kapitalanlage-immobilie-musterstadt", path: "Kapitalanlage › Immobilie Musterstadt" }, { slug: "kapitalanlage-immobilie-beispielheim", path: "Kapitalanlage › Immobilie Beispielheim" }, { slug: "versicherung", path: "Versicherung" }] },
@@ -141,6 +148,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "insurer-documents-by-subject",
     title: "Dokumente eines Absenders zu einem Thema",
     question: "Such mir die Dokumente der TK, in denen es um das Einlösen der Gesundheitsdividende geht.",
+    firstTools: ["list_categories", "search_documents"],
     expect: [{ tool: "search_documents", args: { q: { $contains: "gesundheitsdividende" }, correspondent: { $present: true } } }],
     results: {
       list_categories: { rows: [{ slug: "versicherung", path: "Versicherung" }] },
@@ -160,6 +168,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "tax-bundle",
     title: "Steuermappe anlegen",
     question: "Erstelle eine Mappe mit allen Unterlagen für die Steuererklärung 2025.",
+    firstTools: ["tax_documents", "tax_return_bundle"],
     expect: [{ tool: "tax_return_bundle", args: { year: 2025 } }],
     results: {
       tax_documents: { summary: "4 documents for the tax return of 2025, in 2 Anlagen", rows: [{ id: 71, title: "Lohnsteuerbescheinigung 2025", section: "Anlage N" }] },
@@ -203,6 +212,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "trips-last-year",
     title: "Reisen letztes Jahr",
     question: "Welche Urlaubsreisen haben wir letztes Jahr gemacht?",
+    firstTools: ["list_recaps", "list_trip_plans", "list_albums"],
     expect: [{ tool: "list_recaps", args: { kind: "trip", year: 2025 } }],
     results: {
       list_recaps: { rows: [{ id: 7, title: "Sommer am Gardasee", from: "2025-08-02", to: "2025-08-16" }, { id: 9, title: "Herbst in Wien", from: "2025-10-10", to: "2025-10-13" }] },
@@ -214,6 +224,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "trips-2024",
     title: "Reisen eines Jahres",
     question: "Wo waren wir 2024 überall im Urlaub?",
+    firstTools: ["list_recaps", "list_trip_plans", "list_albums"],
     expect: [{ tool: "list_recaps", args: { kind: "trip", year: 2024 } }],
     results: { list_recaps: { rows: [{ id: 3, title: "Ostsee", from: "2024-07-20", to: "2024-08-03" }] }, list_trip_plans: { rows: [] }, list_albums: { rows: [] } },
   },
@@ -327,6 +338,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "expenses-by-tag",
     title: "Ausgaben mit einem Tag",
     question: "Zeig mir die Ausgaben mit dem Tag Urlaub.",
+    firstTools: ["list_transactions", "transaction_totals"],
     expect: [{ tool: "list_transactions", args: { tags: { $contains: "urlaub" }, direction: "out" } }],
     results: {
       list_transactions: { rows: [{ id: 9201, date: "2026-08-12", counterparty: "Beispiel Hotel", purpose: "Übernachtung", amount: -310.0, tags: "Urlaub" }], total: 1 },
@@ -373,6 +385,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "electricity-last-year",
     title: "Verbrauch eines Zählers",
     question: "Wie hoch war unser Stromverbrauch im letzten Jahr?",
+    firstTools: ["list_meters", "consumption_report"],
     expect: [{ tool: "consumption_report", args: { meter_id: 3, from: "2025-01-01", to: "2025-12-31" } }],
     results: { list_meters: METERS, consumption_report: { meter_id: 3, consumption: 3412, unit: "kWh", formula: "reading 2025-12-31 minus reading 2025-01-01" } },
   },
@@ -380,6 +393,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "farm-depreciation",
     title: "AfA der Landwirtschaft",
     question: "Wie hoch ist die AfA für die verpachtete Landwirtschaft im Jahr 2025, und welche Flächen gehören dazu?",
+    firstTools: ["list_businesses", "business_assets"],
     expect: [{ tool: "business_assets", args: { business_id: 2, year: 2025 } }],
     results: {
       list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
@@ -395,6 +409,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "farm-euer",
     title: "EÜR der Landwirtschaft",
     question: "Wie sieht die Einnahmen-Überschuss-Rechnung der Landwirtschaft für 2025 aus?",
+    firstTools: ["list_businesses", "euer_report"],
     expect: [{ tool: "euer_report", args: { business_id: 2, year: 2025 } }],
     results: {
       list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
@@ -405,6 +420,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "pv-tax-exempt",
     title: "PV-Anlage steuerfrei?",
     question: "Ist meine PV-Anlage eigentlich steuerfrei?",
+    firstTools: ["list_businesses", "business_assets"],
     expect: [{ tool: "business_assets", args: { business_id: 1 } }],
     results: {
       list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
@@ -415,6 +431,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "farm-lease-contracts",
     title: "Pachtverträge der Landwirtschaft",
     question: "Wo sind die Pachtverträge der Landwirtschaft?",
+    firstTools: ["list_businesses", "business_documents"],
     expect: [{ tool: "business_documents", args: { business_id: 2 } }],
     results: {
       list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
@@ -425,6 +442,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "farm-euer-pdf",
     title: "EÜR als PDF",
     question: "Erstell mir die EÜR 2025 der Landwirtschaft als PDF.",
+    firstTools: ["list_businesses", "euer_report", "euer_pdf"],
     expect: [{ tool: "euer_pdf", args: { business_id: 2, year: 2025 } }],
     results: {
       list_businesses: { rows: [{ id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
@@ -436,6 +454,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "latest-water-reading",
     title: "Letzter Zählerstand",
     question: "Was war der letzte Stand vom Wasserzähler?",
+    firstTools: ["list_meters", "latest_readings"],
     expect: [{ tool: "latest_readings", args: { meter_id: 4 } }],
     results: { list_meters: METERS, latest_readings: { rows: [{ date: "2026-10-01", value: 1234.5, unit: "m³" }] } },
   },
@@ -471,6 +490,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "quote-of-security",
     title: "Kurs eines Wertpapiers",
     question: "Wie steht die Beispiel AG gerade, und was gibt es Neues dazu?",
+    firstTools: ["portfolio_overview", "quotes", "position_news"],
     expect: [{ tool: "quotes", args: { q: { $contains: "beispiel" } } }, { tool: "position_news", args: { key: "DE0000000001" } }],
     results: {
       portfolio_overview: { rows: [{ key: "DE0000000001", name: "Beispiel AG", value: "7500.00" }] },
@@ -482,6 +502,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "sales-last-year",
     title: "Verkäufe letztes Jahr",
     question: "Was habe ich letztes Jahr im Depot verkauft, und mit welchem Ergebnis?",
+    firstTools: ["portfolio_overview", "depot_transactions"],
     expect: [{ tool: "depot_transactions", args: { kind: "sell", from: "2025-01-01", to: "2025-12-31" } }],
     results: {
       depot_transactions: { rows: [{ id: 22, date: "2025-03-03", kind: "sell", name: "Muster ETF", amount: "10", net: "1210.00" }], total: 1, sums: { net_amount: "1210.00", fees: "4.90", taxes: "0.00" } },
@@ -537,6 +558,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "shared-albums-participants",
     title: "Freigegebene Alben mit Teilnehmern",
     question: "Erstelle mir eine Liste der Alben, die freigegeben sind, und schreibe jeweils die Teilnehmer dazu.",
+    firstTools: ["list_albums", "list_album_shares"],
     expect: [{ tool: "list_album_shares" }],
     results: {
       list_albums: { rows: [{ id: 1, name: "Gardasee 2025", shared: "yes", owner: "me" }], total: 1 },
@@ -554,6 +576,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "property-purchase",
     title: "Zwei Module verbinden",
     question: "Zeige mir alles, was beim Kauf der Immobilie in Musterstadt relevant war.",
+    firstTools: ["list_categories", "search_documents", "list_transactions"],
     expect: [{ tool: "search_documents", args: { q: { $present: true } } }, { tool: "list_transactions" }],
     results: {
       list_categories: { rows: [{ slug: "kapitalanlage-immobilie-musterstadt", path: "Kapitalanlage › Immobilie Musterstadt" }] },
@@ -585,6 +608,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "favorites-album-2025",
     title: "Album aus Filter vorschlagen",
     question: "Mach mir ein Album mit allen favorisierten Bildern von 2025.",
+    firstTools: ["list_photos", "create_album"],
     expect: [{ tool: "create_album", args: { name: { $present: true } } }],
     results: {
       list_photos: { ids: [1201, 1202, 1203], total: 143, note: "143 photos; ids truncated" },
@@ -669,6 +693,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "report-with-yield",
     title: "Bericht mit Gruppen und Rendite",
     question: "Liste alle Buchungen zur Wohnung Beispielweg mit Zwischensummen für Kauf, Reparatur und Mieteinnahmen und ermittle die Rendite.",
+    firstTools: ["list_transactions", "transaction_report"],
     expect: [{
       tool: "transaction_report",
       args: {
@@ -698,6 +723,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "report-by-tags",
     title: "Bericht nach Tags",
     question: "Mach mir einen Bericht über meine Wohnungsbuchungen mit je einer Gruppe für die Tags Miete und Hausgeld.",
+    firstTools: ["list_transactions", "transaction_report"],
     expect: [{ tool: "transaction_report", args: { groups: { $all: [{ $contains: "miete" }, { $contains: "hausgeld" }] } } }],
     results: {
       // Looking at the bookings first is fine; only the report is scored.
@@ -715,6 +741,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "rule-folder-by-month",
     title: "Regel-Sammelmappe mit Zwischensummen",
     question: "Leg mir eine Sammelmappe für alle Buchungen von Musterfirma Haustechnik seit Januar an, mit Zwischensummen pro Monat.",
+    firstTools: ["transaction_totals", "create_transaction_folder"],
     expect: [{
       tool: "create_transaction_folder",
       args: { name: { $present: true }, q: { $contains: "musterfirma" }, from: "2026-01-01", group_by: "month" },

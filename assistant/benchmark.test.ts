@@ -89,6 +89,30 @@ describe("scoring", () => {
       { rounds_ms: [200], error: null, score: fail },
     ]);
     expect(s).toMatchObject({ cases: 2, passed: 1, pass_rate: 0.5, args_hit_rate: 0.5, rounds: 3, median_ms_per_round: 200, median_rounds_per_case: 1.5, max_rounds_used: 2 });
+    // No road measured: the rates stay unknown rather than zero.
+    expect(s).toMatchObject({ first_tool_hit_rate: null, nudges: 0, median_prompt_tokens_first: null });
+  });
+
+  it("summarizes the road: first tool, nudges and the prompt of round 1", () => {
+    const pass = { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] };
+    const s = summarize([
+      { rounds_ms: [100], error: null, score: { ...pass, first_tool_hit: true }, nudges: 1, prompt_tokens_first: 5000 },
+      { rounds_ms: [100], error: null, score: { ...pass, first_tool_hit: false }, nudges: 0, prompt_tokens_first: 7000 },
+      { rounds_ms: [100], error: null, score: { ...pass, first_tool_hit: null }, nudges: 2, prompt_tokens_first: null },
+    ]);
+    expect(s).toMatchObject({ first_tool_hit_rate: 0.5, nudges: 3, median_prompt_tokens_first: 6000 });
+  });
+
+  it("judges the first tool against the case's allowed first tools", () => {
+    const c = caseById("electricity-last-year");
+    const report = { tool: "consumption_report", args: { meter_id: 3, from: "2025-01-01", to: "2025-12-31" } };
+    expect(scoreCase(c, [{ tool: "list_meters", args: {} }, report], true).first_tool_hit).toBe(true);
+    expect(scoreCase(c, [{ tool: "latest_readings", args: {} }, report], true).first_tool_hit).toBe(false);
+    expect(scoreCase(c, [], false).first_tool_hit).toBeNull();
+    // A case that forbids tools: a call is the wrong road, none is no verdict.
+    const quiet = caseById("thanks-no-tool");
+    expect(scoreCase(quiet, [], true).first_tool_hit).toBeNull();
+    expect(scoreCase(quiet, [{ tool: "list_meters", args: {} }], true).first_tool_hit).toBe(false);
   });
 });
 
@@ -139,6 +163,10 @@ describe("running a case", () => {
     expect(run.calls.map((x) => x.tool)).toEqual(["get_document_text", "render_letter"]);
     expect(run.score.passed).toBe(true);
     expect(run.rounds_ms.length).toBe(model.mock.calls.length);
+    // The road taken, for the path metrics.
+    expect(run).toMatchObject({ rounds: model.mock.calls.length, first_tool: "get_document_text", nudges: 0 });
+    expect(run.score.first_tool_hit).toBe(true);
+    expect(run.prompt_tokens_first).toBeGreaterThan(1000);
     // The working set reaches the system prompt, the canned text the model.
     const first = model.mock.calls[0]![0] as ChatRequest;
     expect(first.messages[0]!.content).toContain('document 401: "Mahnung"');

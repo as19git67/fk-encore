@@ -8,6 +8,8 @@ vi.mock('../DocumentThumbnail.vue', () => ({ default: defineComponent({ render: 
 vi.mock('../../api/gallery', () => ({ getThumbUrl: (name: string) => `/thumb/${name}` }))
 const getPhotoDetailsBatch = vi.hoisted(() => vi.fn())
 vi.mock('../../api/photos', () => ({ getPhotoDetailsBatch }))
+const giveFeedback = vi.hoisted(() => vi.fn(async () => ({ id: 1, verdict: 'down' })))
+vi.mock('../../api/assistant', () => ({ giveFeedback }))
 
 // A RouterLink that renders an anchor: the row's attributes and click land
 // on it like on the real link.
@@ -35,6 +37,7 @@ function mount(blocks: ResultBlock[], messageId?: number, content = 'Antwort'): 
 
 beforeEach(() => {
   getPhotoDetailsBatch.mockReset()
+  giveFeedback.mockClear()
   document.body.innerHTML = ''
   sessionStorage.clear()
 })
@@ -231,5 +234,35 @@ describe('AssistantMessage copy', () => {
     }) }).use(PrimeVue).component('RouterLink', RouterLink).mount(el)
     expect(el.querySelector('.blocks')).toBeNull()
     expect(mount([docs('search_documents', [1, 2])]).querySelector('.blocks')).not.toBeNull()
+  })
+})
+
+describe('feedback under an answer', () => {
+  it('offers thumbs only under a stored answer, and sends a thumbs-down with its comment', async () => {
+    const el = mount([], 42)
+    const down = el.querySelector<HTMLButtonElement>('button[aria-label="Antwort war nicht hilfreich"]')
+    expect(down).not.toBeNull()
+    expect(el.querySelector('button[aria-label="Antwort war hilfreich"]')).not.toBeNull()
+    down!.click()
+    await nextTick()
+    const input = el.querySelector<HTMLInputElement>('#feedback-comment')
+    expect(input).not.toBeNull()
+    input!.value = 'falsches Werkzeug'
+    input!.dispatchEvent(new Event('input'))
+    await nextTick()
+    el.querySelector('form.feedback-form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await nextTick()
+    expect(giveFeedback).toHaveBeenCalledWith(42, 'down', 'falsches Werkzeug')
+    await nextTick()
+    expect(el.querySelector('form.feedback-form')).toBeNull()
+    expect(el.querySelector('.copy-status')?.textContent).toBe('Danke')
+  })
+
+  it('offers no thumbs under a user message or an answer that is not stored', () => {
+    expect(mount([]).querySelector('button[aria-label="Antwort war nicht hilfreich"]')).toBeNull()
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    createApp({ render: () => h(AssistantMessage, { role: 'user', content: 'Frage', messageId: 7 }) }).use(PrimeVue).component('RouterLink', RouterLink).mount(el)
+    expect(el.querySelector('button[aria-label="Antwort war hilfreich"]')).toBeNull()
   })
 })
