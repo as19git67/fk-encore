@@ -166,7 +166,7 @@ be smaller.
   replacing every real value with a made-up one; `DELETE
   /assistant/feedback/:id` removes an entry.
 
-### Stage 2, first step (PR #1728)
+### Stage 2, first step (implemented in PR #1728)
 
 `rank_by`, `direction`, `group_by` and `per_group` on `list_photos`,
 `search_documents` and `list_transactions` ("die besten Fotos je Jahr mit
