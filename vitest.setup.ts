@@ -39,9 +39,15 @@ vi.mock("encore.dev/cron", () => ({
 
 vi.mock("encore.dev/api", () => {
   class APIError extends Error {
+    details?: Record<string, unknown>;
     constructor(public code: string, message: string) {
       super(message);
       this.name = "APIError";
+    }
+    withDetails(details: Record<string, unknown>) {
+      const err = new APIError(this.code, this.message);
+      err.details = details;
+      return err;
     }
     static abondoned(msg: string) { return new APIError("abondoned", msg); }
     static aborted(msg: string) { return new APIError("aborted", msg); }

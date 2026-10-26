@@ -121,9 +121,35 @@ async function addToAlbum(albumId: number, photoIds: number[]): Promise<void> {
   }
 }
 
+interface AlbumRef { id: number; name: string }
+
+/** Album names are unique per owner, ignoring case and surrounding spaces. */
+function albumKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/** The user's own album called `name`, if there is one. */
+async function ownAlbumNamed(name: string): Promise<AlbumRef | undefined> {
+  const res = (await photo.listAlbums()) as unknown as
+    | { albums?: { id: number; name: string; my_access_level?: string }[] }
+    | undefined;
+  const hit = (res?.albums ?? []).find((a) => a.my_access_level === "owner" && albumKey(a.name) === albumKey(name));
+  return hit ? { id: hit.id, name: hit.name } : undefined;
+}
+
+/** The album that won when createAlbum answered "already exists". */
+async function existingAlbumOf(err: unknown, name: string): Promise<AlbumRef | undefined> {
+  const e = err as { code?: string; details?: { album_id?: unknown } } | null;
+  if (e?.code !== "already_exists") return undefined;
+  const found = await ownAlbumNamed(name);
+  if (found) return found;
+  const id = Number(e.details?.album_id);
+  return Number.isFinite(id) && id > 0 ? { id, name } : undefined;
+}
+
 const createAlbum: WriteToolDefinition = {
   name: "create_album",
-  summary: "Propose a new photo album, optionally filled with photos chosen by filter or ids.",
+  summary: "Propose a new photo album, optionally filled with photos chosen by filter or ids. If the user already has an album with that name, the photos go into it instead.",
   permissions: ["module.photos", "albums.manage"],
   parameters: {
     type: "object",
@@ -140,6 +166,17 @@ const createAlbum: WriteToolDefinition = {
     const wantsPhotos = Boolean(args.photos || ids(args.photo_ids).length || bool(args.from_previous_result));
     const photoIds = wantsPhotos ? await resolvePhotos(args, ctx) : [];
     checkPhotoCount(photoIds);
+    // A second album with the same name is never created (the service refuses
+    // it); asking again fills the album that is already there.
+    const existing = await ownAlbumNamed(name);
+    if (existing) {
+      if (!photoIds.length) throw new Error(`album „${existing.name}“ already exists (id ${existing.id}); nothing to create`);
+      return {
+        summary: `Album „${existing.name}“ gibt es schon: ${photoIds.length} Fotos hinzufügen`,
+        arguments: { name: existing.name, album_id: existing.id, photo_ids: photoIds },
+        count: photoIds.length,
+      };
+    }
     return {
       summary: photoIds.length
         ? `Album „${name}“ anlegen und ${photoIds.length} Fotos hinzufügen`
@@ -149,14 +186,31 @@ const createAlbum: WriteToolDefinition = {
     };
   },
   async execute(args) {
-    const album = (await photo.createAlbum({
-      name: String(args.name),
-      description: (args.description as string | null) ?? undefined,
-    })) as unknown as { id: number; name: string };
+    const name = String(args.name);
     const photoIds = ids(args.photo_ids);
+    let album: AlbumRef;
+    let created = false;
+    if (int(args.album_id) !== undefined) {
+      album = { id: Number(args.album_id), name };
+    } else {
+      try {
+        album = (await photo.createAlbum({
+          name,
+          description: (args.description as string | null) ?? undefined,
+        })) as unknown as AlbumRef;
+        created = true;
+      } catch (err) {
+        // Proposed twice before either ran: the second one fills the first album.
+        const existing = await existingAlbumOf(err, name);
+        if (!existing) throw err;
+        album = existing;
+      }
+    }
     if (photoIds.length) await addToAlbum(album.id, photoIds);
     return {
-      summary: `Album „${album.name}“ mit ${photoIds.length} Fotos angelegt`,
+      summary: created
+        ? `Album „${album.name}“ mit ${photoIds.length} Fotos angelegt`
+        : `${photoIds.length} Fotos zum vorhandenen Album „${album.name}“ hinzugefügt`,
       route: `/fotos/alben/${album.id}`,
       details: { album_id: album.id },
     };

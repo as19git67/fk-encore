@@ -9,6 +9,8 @@ import {
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useAuthStore } from '../stores/auth'
+import { ApiError } from '../api/client'
+import { findOwnAlbumByName } from '../utils/albumName'
 
 /**
  * Self-contained album-multi-select dialog driven by a list of photo IDs.
@@ -121,13 +123,19 @@ async function onSave(payload: { adds: number[]; removes: number[] }) {
 }
 
 async function onCreate(name: string) {
+  // Album names are unique per owner: an album that already carries the name
+  // stays the one in the list, nothing new is created.
+  if (findOwnAlbumByName(albums.value, name)) return
   try {
     await createAlbum(name)
-    invalidateAlbums()
-    await fetchAlbums(true)
   } catch (err) {
-    console.error('Failed to create album:', err)
+    if (!(err instanceof ApiError && err.code === 'already_exists')) {
+      console.error('Failed to create album:', err)
+      return
+    }
   }
+  invalidateAlbums()
+  await fetchAlbums(true)
 }
 </script>
 
