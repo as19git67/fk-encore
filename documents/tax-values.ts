@@ -70,6 +70,25 @@ const SYSTEM =
 // Prompts and their answers (pure)
 // -----------------------------------------------------------------------
 
+/**
+ * Lines of an OCR'd table that carry no character but its rules (`|`, `-`,
+ * `+`, `_`, `=`). A run of them gave the model a pattern to repeat: a quote
+ * of "Rechnungsbetrag:\n|\n|\n|…" until the token cap cut the JSON off.
+ */
+const RULE_ONLY_LINE = /^[\s|¦│┃+\-–—_=:.]*$/;
+
+/** The text as the model sees it: rule-only lines and blank runs gone, then capped. */
+export function promptText(text: string): string {
+  const lines: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const blank = RULE_ONLY_LINE.test(line);
+    if (blank && (lines.length === 0 || lines[lines.length - 1] === "")) continue;
+    lines.push(blank ? "" : line.replace(/[ \t]+$/, ""));
+  }
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return clipText(lines.join("\n"));
+}
+
 export function clipText(text: string): string {
   return text.length > MAX_TEXT_CHARS ? `${text.slice(0, MAX_TEXT_CHARS)}\n[…gekürzt]` : text;
 }
@@ -81,7 +100,7 @@ export function buildKindPrompt(kinds: readonly EvidenceKind[], text: string): s
     `Mögliche Arten:\n${list}\n\n` +
     'Antworte als {"kind": "<key>"} mit einem der Keys oben, oder {"kind": null}, ' +
     "wenn keine Art passt.\n\n" +
-    `Dokument:\n"""\n${clipText(text)}\n"""`
+    `Dokument:\n"""\n${promptText(text)}\n"""`
   );
 }
 
@@ -139,9 +158,45 @@ export function buildValuesPrompt(kind: EvidenceKind, year: number, text: string
     "Nur Felder, die im Text stehen; ein Feld, das fehlt, lässt du weg. " +
     "Beträge in Euro mit Komma, wie gedruckt (z. B. \"1.234,56\"). " +
     "Stehen Euro und Cent in getrennten Spalten (\"1.234  56\"), gehören beide zum Betrag: \"1.234,56\". " +
-    "Steht ein Betrag für mehrere Personen getrennt da, nimm den Gesamtbetrag.\n\n" +
-    `Dokument:\n"""\n${clipText(text)}\n"""`
+    "Steht ein Betrag für mehrere Personen getrennt da, nimm den Gesamtbetrag. " +
+    `Ein Zitat ist eine Zeile, höchstens ${MAX_QUOTE_CHARS} Zeichen.\n\n` +
+    `Dokument:\n"""\n${promptText(text)}\n"""`
   );
+}
+
+/** Longest quote the grammar lets the model write; a line of a receipt fits. */
+export const MAX_QUOTE_CHARS = 160;
+const MAX_PRINTED_CHARS = 40;
+
+/**
+ * The answer's shape as a JSON schema, turned into a grammar by the
+ * llm-service: only the kind's keys, one entry per field at most, and
+ * strings with a length cap. Without the cap a model caught in a loop
+ * writes one quote until `max_tokens` and the JSON never closes.
+ */
+export function valuesSchema(kind: EvidenceKind): Record<string, unknown> {
+  const amounts = kind.fields.filter((f) => f.kind === "amount").map((f) => f.key);
+  const flags = kind.fields.filter((f) => f.kind === "flag").map((f) => f.key);
+  const quote = { type: ["string", "null"], maxLength: MAX_QUOTE_CHARS };
+  const list = (keys: string[], value: Record<string, unknown>) => keys.length === 0 ? { type: "array", maxItems: 0 } : ({
+    type: "array",
+    maxItems: keys.length,
+    items: {
+      type: "object",
+      properties: { field: { type: "string", enum: keys }, ...value, quote },
+      required: ["field", ...Object.keys(value), "quote"],
+      additionalProperties: false,
+    },
+  });
+  return {
+    type: "object",
+    properties: {
+      values: list(amounts, { printed: { type: ["string", "null"], maxLength: MAX_PRINTED_CHARS } }),
+      flags: list(flags, { value: { type: "boolean" } }),
+    },
+    required: ["values", "flags"],
+    additionalProperties: false,
+  };
 }
 
 export type ReadStatus = "read" | "rejected";
@@ -392,7 +447,7 @@ export const modelReader: TaxValueReader = {
     return parseKindAnswer(await jsonPrompt(buildKindPrompt(kinds, text), SYSTEM, 100), kinds);
   },
   readValues(kind, year, text, examples) {
-    return jsonPrompt(buildValuesPrompt(kind, year, text, examples), SYSTEM, 1500);
+    return jsonPrompt(buildValuesPrompt(kind, year, text, examples), SYSTEM, 1500, valuesSchema(kind));
   },
 };
 

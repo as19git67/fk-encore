@@ -2576,6 +2576,10 @@ class JsonPromptRequest(BaseModel):
 
     prompt: str = Field(..., min_length=1)
     system: str | None = None
+    # Optional JSON schema, compiled into a grammar like /classify's. A
+    # ``maxLength`` on a string is what keeps a model caught repeating a
+    # pattern from writing until max_tokens and leaving the JSON open.
+    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
     max_tokens: int = Field(default=768, gt=0, le=4096)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
@@ -3226,11 +3230,15 @@ async def json_prompt(req: JsonPromptRequest) -> dict[str, Any]:
         messages.append({"role": "system", "content": req.system})
     messages.append({"role": "user", "content": req.prompt})
 
+    response_format: dict[str, Any] = {"type": "json_object"}
+    if req.schema_ is not None:
+        response_format["schema"] = req.schema_
+
     try:
         completion = await _run_blocking(
             llm.create_chat_completion,
             messages=messages,
-            response_format={"type": "json_object"},
+            response_format=response_format,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
         )
@@ -3240,11 +3248,21 @@ async def json_prompt(req: JsonPromptRequest) -> dict[str, Any]:
         log.exception("/json-prompt: llm.create_chat_completion failed")
         raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
 
-    raw = completion["choices"][0]["message"]["content"].strip()
+    choice = completion["choices"][0]
+    raw = choice["message"]["content"].strip()
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         log.warning("/json-prompt: LLM returned non-JSON: %r", raw[:200])
+        if choice.get("finish_reason") == "length":
+            # Cut off at max_tokens: the same prompt runs into the same cap
+            # again, so this is not an outage to retry but an answer that
+            # does not fit. 422 lets the caller fail the job once instead
+            # of deferring it until the retry budget is spent.
+            raise HTTPException(
+                status_code=422,
+                detail=f"llm output cut off at max_tokens={req.max_tokens}, JSON incomplete: {exc}",
+            ) from exc
         raise HTTPException(status_code=502, detail=f"llm returned invalid JSON: {exc}") from exc
 
     if not isinstance(data, dict):

@@ -23,11 +23,14 @@ import {
   correctionExamples,
   describeCorrections,
   householdOwner,
+  MAX_QUOTE_CHARS,
   ownerFor,
   parseKindAnswer,
+  promptText,
   queueTaxValuesIfEvidence,
   runTaxValues,
   type TaxValueReader,
+  valuesSchema,
 } from "./tax-values";
 import { queueTaxValuesBackfill } from "./tax-values-api";
 
@@ -135,6 +138,27 @@ describe("prompts", () => {
     const prompt = buildValuesPrompt(LOHN, 2025, LOHN_TEXT);
     for (const f of LOHN.fields) expect(prompt).toContain(`"${f.key}"`);
     expect(prompt).toContain("Steuerjahr 2025");
+  });
+
+  it("drops the rule-only lines of an OCR'd table the model looped on", () => {
+    const text = ["Musterbetrieb", "Rechnungsbetrag:", "|", "|", " | ", "---+---", "", "20,11 EUR", "|", "Danke"].join("\n");
+    expect(promptText(text)).toBe(["Musterbetrieb", "Rechnungsbetrag:", "", "20,11 EUR", "", "Danke"].join("\n"));
+    expect(buildValuesPrompt(HANDWERK, 2025, text)).not.toContain("\n|\n");
+  });
+
+  it("bounds every string of the answer and allows only the kind's keys", () => {
+    const schema = valuesSchema(HANDWERK) as any;
+    const values = schema.properties.values;
+    const amounts = HANDWERK.fields.filter((f) => f.kind === "amount").map((f) => f.key);
+    expect(values.items.properties.field.enum).toEqual(amounts);
+    expect(values.maxItems).toBe(amounts.length);
+    expect(values.items.properties.quote.maxLength).toBe(MAX_QUOTE_CHARS);
+    expect(values.items.properties.printed.maxLength).toBeGreaterThan(0);
+    expect(schema.properties.flags.items.properties.quote.maxLength).toBe(MAX_QUOTE_CHARS);
+    // A kind without flags gets an empty list, not an enum of nothing.
+    expect((valuesSchema(LOHN) as any).properties.flags).toEqual(
+      LOHN.fields.some((f) => f.kind === "flag") ? expect.anything() : { type: "array", maxItems: 0 },
+    );
   });
 });
 
