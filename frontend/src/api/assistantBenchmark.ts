@@ -48,6 +48,8 @@ export interface BenchSummary {
   first_tool_hit_rate?: number | null
   nudges?: number
   median_prompt_tokens_first?: number | null
+  /** Cases per router stage (stage 1); missing on older runs. */
+  routed?: Partial<Record<'keywords' | 'inherited' | 'model' | 'all', number>>
 }
 
 export type BenchStatus = 'running' | 'done' | 'failed' | 'cancelled'
@@ -79,6 +81,10 @@ export interface BenchCaseRun {
   first_tool?: string | null
   nudges?: number
   prompt_tokens_first?: number | null
+  /** The router (stage 1 of assistent-wegfindung.md); missing on older runs. */
+  areas?: string[]
+  routing?: 'keywords' | 'inherited' | 'model' | 'all'
+  router_ms?: number | null
 }
 
 /** One call of the turn behind an answer the user judged: never the rows it returned. */

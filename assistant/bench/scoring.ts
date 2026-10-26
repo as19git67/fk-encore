@@ -4,6 +4,7 @@
  * `llm-service/bench/chat_bench.py`, plus nested keys and `$all`.
  */
 
+import type { RoutingStage } from "../router";
 import type { BenchCase, Expected, ExpectedCall } from "./cases";
 
 export interface BenchCall {
@@ -90,7 +91,7 @@ export function scoreCase(c: BenchCase, calls: BenchCall[], answered: boolean, a
  * case has no expectation to compare with.
  */
 export function firstToolHit(c: BenchCase, calls: BenchCall[]): boolean | null {
-  const first = calls.find((x) => x.tool !== "describe_tools")?.tool;
+  const first = calls.find((x) => x.tool !== "describe_tools" && x.tool !== "switch_area")?.tool;
   if (c.forbidTools) return calls.length ? false : null;
   if (!first) return null;
   const allowed = c.firstTools ?? c.expect.map((e) => e.tool);
@@ -115,6 +116,8 @@ export interface BenchSummary {
   /** Drafts the loop sent back (grounding, fake call, consent …), over all cases. */
   nudges: number;
   median_prompt_tokens_first: number | null;
+  /** How many cases each router stage decided (stage 1 of assistent-wegfindung.md). */
+  routed: Partial<Record<RoutingStage, number>>;
 }
 
 export interface CaseRunSummaryInput {
@@ -123,6 +126,7 @@ export interface CaseRunSummaryInput {
   score: CaseScore;
   nudges?: number;
   prompt_tokens_first?: number | null;
+  routing?: RoutingStage;
 }
 
 function median(values: number[]): number | null {
@@ -153,5 +157,9 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
     first_tool_hit_rate: judged.length ? judged.filter((r) => r.score.first_tool_hit).length / judged.length : null,
     nudges: runs.reduce((sum, r) => sum + (r.nudges ?? 0), 0),
     median_prompt_tokens_first: median(runs.map((r) => r.prompt_tokens_first).filter((v): v is number => typeof v === "number")),
+    routed: runs.reduce<Partial<Record<RoutingStage, number>>>((acc, r) => {
+      if (r.routing) acc[r.routing] = (acc[r.routing] ?? 0) + 1;
+      return acc;
+    }, {}),
   };
 }

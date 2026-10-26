@@ -10,8 +10,10 @@
  */
 
 import { NO_ANSWER, OUT_OF_ROUNDS, runTurn } from "../agent";
+import type { AreaId } from "../areas/index";
 import { estimateTokens } from "../catalog";
 import type { ChatFn } from "../llm-client";
+import { isRouterRequest, type RoutingStage } from "../router";
 import type { AssistantUser, ToolSpec } from "../types";
 import { BENCH_TODAY, type BenchCase } from "./cases";
 import { scoreCase, type BenchCall, type CaseScore } from "./scoring";
@@ -34,6 +36,13 @@ export interface CaseRun {
   nudges: number;
   /** What round 1 cost in prompt tokens: the model's count, else the estimate. */
   prompt_tokens_first: number | null;
+  // ── the router (stage 1) ──
+  /** The areas in play at the end of the turn. */
+  areas?: AreaId[];
+  /** How the first areas were decided: keywords, inherited, model, or all (no decision). */
+  routing?: RoutingStage;
+  /** Milliseconds of the router's model call, when there was one; the loop rounds are in `rounds_ms`. */
+  router_ms?: number | null;
 }
 
 export interface RunnerDeps {
@@ -77,10 +86,17 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   const calls: BenchCall[] = [];
   let nudges = 0;
   let prompt_tokens_first: number | null = null;
+  let router_ms: number | null = null;
   const timed: ChatFn = async (req) => {
     if (deps.signal?.aborted) throw new BenchCancelledError();
     const started = Date.now();
     const reply = await deps.chat(req);
+    if (isRouterRequest(req)) {
+      // The router's call is not a loop round: measured apart, and never
+      // the prompt of round 1.
+      router_ms = (router_ms ?? 0) + Date.now() - started;
+      return reply;
+    }
     rounds_ms.push(Date.now() - started);
     if (prompt_tokens_first === null) {
       prompt_tokens_first = reply.usage?.prompt_tokens ?? estimateTokens(req.messages) + estimateTokens(req.tools ?? []);
@@ -90,6 +106,8 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
 
   let answer: string | null = null;
   let error: string | null = null;
+  let areas: AreaId[] | undefined;
+  let routing: RoutingStage | undefined;
   try {
     const result = await runTurn({
       user: c.permissions ? { userID: deps.user.userID, permissions: c.permissions } : deps.user,
@@ -103,7 +121,10 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       withSlot: deps.withSlot,
       emit: (event) => { if (event.type === "retract") nudges++; },
       log: (entry) => calls.push({ tool: entry.tool, args: entry.arguments }),
+      routeModel: true,
     });
+    areas = result.areas;
+    routing = result.routing;
     // The loop's own stand-ins are not the model's answer.
     answer = result.answer === NO_ANSWER || result.answer === OUT_OF_ROUNDS ? null : result.answer;
   } catch (err) {
@@ -119,8 +140,11 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     error,
     score: scoreCase(c, calls, answer !== null, answer),
     rounds: rounds_ms.length,
-    first_tool: calls.find((x) => x.tool !== "describe_tools")?.tool ?? null,
+    first_tool: calls.find((x) => x.tool !== "describe_tools" && x.tool !== "switch_area")?.tool ?? null,
     nudges,
     prompt_tokens_first,
+    areas,
+    routing,
+    router_ms,
   };
 }

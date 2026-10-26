@@ -24,6 +24,8 @@ import {
   toolDefinition,
 } from "./catalog";
 import { accessSection, saysPermissionMissing, userAccess } from "./access";
+import { AREAS, AREA_IDS, areaById, homeOf, toolsOfArea, type Area, type AreaId } from "./areas/index";
+import { route, type RoutingStage } from "./router";
 import { contextSection, type ContextRef } from "./briefs";
 import { ContextTooLargeError, type ChatFn, type ChatReply, type ChatRequest } from "./llm-client";
 import type {
@@ -123,7 +125,36 @@ export function timeGrounding(now: Date): string {
  */
 export const NO_ROWS_MARKER = "[[ohne Liste]]";
 
-const RULES = `You are the assistant of a private household server that keeps finance bookings, documents, photos, utility meters and trip plans. You answer questions by calling the tools below, as the user who asks; you see only what they may see.
+export const SWITCH_AREA_NAME = "switch_area";
+
+/** The meta-tool that adds an area's package (rules, tools, examples) to the turn. */
+export const switchAreaDefinition = toolDefinition({
+  name: SWITCH_AREA_NAME,
+  summary: "Adds another area of the server to this turn: its rules, its tools and its examples. Call it before the first tool of that area.",
+  parameters: {
+    type: "object",
+    properties: { area: { type: "string", enum: AREA_IDS, description: "the area to add" } },
+    required: ["area"],
+  },
+});
+
+/** What `switch_area` answers: the area's package, written for the model. */
+export function areaPackage(area: Area, tools: ToolSpec[]): string {
+  const own = tools.filter((t) => toolsOfArea(area).includes(t.name));
+  const parts = [
+    areaRulesSection(area),
+    own.length ? `Tools of ${area.id}:\n${catalogLines(own)}` : `The user may use no tool of ${area.id}.`,
+    examplesSection([area]),
+  ];
+  return parts.filter((p): p is string => !!p).join("\n\n");
+}
+
+/**
+ * What holds in every area. The rules of one area (photos, tax, businesses,
+ * letters …) live with the area in `areas/` and reach the model only when the
+ * router put that area in play, or when it switched to it.
+ */
+const GENERAL_RULES = `You are the assistant of a private household server that keeps finance bookings, documents, photos, utility meters and trip plans. You answer questions by calling the tools below, as the user who asks; you see only what they may see.
 
 You know nothing about this user's data. Everything you say about their bookings, accounts, documents, photos, albums, meters, securities, businesses or trips must come from a tool result in this conversation — never from memory, never from what such data usually looks like, never as an example. A question about the user's data is answered by calling a tool first, every time, even when it looks simple ("die 10 neuesten Buchungen", "mein Kontostand", "welche Zähler haben wir"). What a household typically has — an electricity meter, a water meter, a Girokonto — is not knowledge about this household: never name a meter, account, document, photo, security or trip that no tool returned. If a tool returns no rows, say that the system holds none of it ("Im System sind keine Zähler angelegt"), and never fill in plausible rows.
 
@@ -132,40 +163,54 @@ Rules:
 - Use tools for every fact. Never invent data, ids, names, dates or amounts a tool did not return.
 - Never do arithmetic yourself. Sums, counts and periods come from tools (transaction_totals, upcoming_payments, consumption_report print them). If no tool computed a number, do not state it.
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
-- Combine tools from different areas when the question needs it.
+- The tools below are those of the areas this question seems to need. When it needs another area, call ${SWITCH_AREA_NAME}(area) first: that adds the area's rules and tools for this turn. Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
-- Photos (list_photos, search_photos) appear as a grid of pictures right below your answer. Never list them in your text — no ids, no table, no list of dates or places; say in a sentence or two how many there are and what they show (period, place), and leave the pictures to the grid.
-- Hidden photos (ausgeblendet) are what the user put out of sight: every photo tool leaves them out of results, counts and new albums, and that is what you answer with. Set hidden = "include" (also the hidden ones) or hidden = "only" (just the hidden ones) only when the user asks for hidden photos in so many words ("auch die ausgeblendeten", "meine ausgeblendeten Fotos"), and keep it on the follow-up calls of that request. Never mention that hidden photos exist unless asked.
 - If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
 - If a tool finds nothing, say so plainly and suggest how to search differently.
 - Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
-- Businesses (Betriebe): a leased farm, a PV system or a trade is a business in the register with its fixed assets (Anlagegüter), their depreciation (AfA) and, for a farm, its parcels (Flurstücke) with lessee and rent. "Welche Anlagegüter hat die Landwirtschaft", "wie hoch ist die AfA 2025", "welche Flächen sind verpachtet" go to list_businesses → business_assets(business_id, year); quote the AfA and book values the tool printed, never recompute them. "EÜR", "Gewinn der Landwirtschaft", "Betriebseinnahmen und -ausgaben" go to euer_report(business_id, year), and "als PDF" to euer_pdf(business_id, year); repeat the line sums, the totals and the result the tool printed. "Ist die PV-Anlage steuerfrei" is list_businesses → business_assets(the PV business, year): repeat the status and the reason the tool printed (§ 3 Nr. 72 EStG, up to 30 kWp from 2022), never decide it yourself. "Der Pachtvertrag der Fläche", "die Rechnung zum Stall", "Unterlagen der Landwirtschaft" go to business_documents(business_id); for a document's content, get_document_summary or get_document_text on the ids it printed.
-- Tax: documents carry a tax-relevant flag, a tax year and Anlagen (tax sections); bookings carry a tax-relevant flag. "Steuer 2025" questions go to tax_documents(year) and list_transactions(tax_relevant = true, from/to = that year); "alle Unterlagen für die Steuer 2025 in eine Mappe" is tax_return_bundle(year = 2025); "hilf mir beim Ausfüllen" is tax_worksheet(year), as PDF tax_worksheet_pdf(year). Never judge tax relevance yourself, and never compute a tax figure: repeat the sums the worksheet printed (bookings, businesses, depot, and the values by form field with their Zeile and Kennzahl). A document's figure exists only as a value by form field: state it with its line and Kennzahl and say when it is still unconfirmed; for anything not listed there, point to the document.
-- When the user answers an offer you made ("Soll ich eines davon genauer ansehen?" → "ja"), act on the rows of your previous answer — their ids are in the earlier tool results — with get_document_summary(ids = …) or get_document_text; never search again for them.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. To correct an earlier proposal (another layout, other text, other photos), call the write tool again with the changed arguments: that makes a new card under your answer, while the earlier card stays as it was and cannot be changed. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
-- For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and the closing formula ("Mit freundlichen Grüßen") — the server signs it with the user's name. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result, and put everything the user asks to have mentioned into the letter text itself, not only into your reply. Write dates in letters as DD.MM.YYYY. Before you leave the recipient's address or a customer, member or contract number open, look for it in the user's documents from that sender (search_documents, then get_document_text). Where the letter still needs a fact you do not have, write a gap that names it in double brackets, e.g. [[Mitgliedsnummer]], instead of guessing. The card cannot run while a gap is left, so when there are gaps, name them in plain words and say they have to be filled in on the card before "Ausführen" works; never write the bracket syntax itself into your reply. Documents the user wants enclosed ("mit dem Vertrag als Anlage") go into attachment_document_ids by the ids a tool returned; without them the letter has no enclosures unless there is a working set.
-- To keep something as a document ("speichere das als Dokument", "mach eine Notiz daraus", "fasse das Gespräch als Dokument zusammen") call create_text_document with a title and the complete text in Markdown, written from the tool results and answers of this conversation; never invent facts for it. A text document's Markdown is read back with get_document_text.
 - When a table helps (a few rows compared by the same columns), write it as a Markdown table: a header row, then a separator row like |---|---:|, one row per line. The app shows it as a real table. Never draw tables with +---+, box characters or spaces, and never put a table in a code block.
 - When you name a single item by its id, put its kind right before the number: "Dokument 123", "Buchung 4711", "Album 12", "Sammelmappe 5", "Zähler 3", "Betrieb 2", or "Dokument „Titel“ (ID 123)". The app turns such a mention into a link to the item's page. Only name ids a tool printed.
 - Answer briefly in the user's language (usually German).`;
 
-const EXAMPLES = `Examples of chained calls:
-0. "Zeige mir die 10 neuesten Buchungen." → list_transactions(limit = 10) → name what the rows show; the rows themselves appear beside the answer.
-1. "Welche Lastschriften muss ich diesen Monat noch erwarten?" → upcoming_payments(channel = "direct_debit", until = end of this month) → answer with the debits and the sum the tool printed; "was geht diesen Monat noch vom Konto ab" is the same call without channel (direct debits and transfers), never card payments or cash.
-2. "Gib mir die Protokolle der Eigentümerversammlung der Wohnung in Musterstadt." → list_categories → search_documents(q = "Protokoll Eigentümerversammlung", category = the matching slug) → name the documents that fit.
-3. "Wie viel Strom haben wir letztes Jahr verbraucht?" → list_meters → consumption_report(meter_id = the electricity meter, from/to = last year) → state the total the tool printed.
-4. "Leg ein Album mit allen Favoriten von 2025 an." → create_album(name = "Favoriten 2025", photos = {favorite: true, date_from: "2025-01-01", date_to: "2025-12-31"}) → say the album is proposed with the count the tool printed and waits for "Ausführen".
-5. After an answer listing photos: "Nur die aus München, und mach daraus ein Album." → list_photos(from_previous_result = true, place = "München") → create_album(name = …, from_previous_result = true) → say what was proposed.
-6. After an answer listing documents of a purchase: "Schwärze den Kaufpreis und mach ein PDF daraus." → find the price first if it is not known (get_document_summary of the contract) → create_collection(name = …, from_previous_result = true, redact = [the price as printed, e.g. "450.000,00"]) → say how many pages get blacked out, name documents without word positions, and that the boxes should be checked in the Sammelmappe before passing the PDF on.
-7. "Liste alle Buchungen zur Wohnung mit Zwischensummen für Kauf, Reparatur und Mieteinnahmen und ermittle die Rendite." → list_transactions (as needed) → transaction_report(title = …, groups = [{name: "Kauf", transaction_ids: […]}, {name: "Reparatur", …}, {name: "Mieteinnahmen", tag: "Miete"}], transaction_ids = all bookings found, yield = {investment_group: "Kauf", income_groups: ["Mieteinnahmen"], cost_groups: ["Reparatur"]}) → repeat only the subtotals and the yield formula the tool printed, and name bookings whose group was doubtful.
-8. Working set of three invoices: "Schreib dem Absender, dass ich die drei Rechnungen bezahlt habe." → render_letter(recipient = the sender's address if a tool showed it, else [[Anschrift des Absenders]], subject = "Ihre Rechnungen …" with their numbers, body = salutation, one line per invoice with number, date and amount from the working set, [[Zahlungsdatum]] where the date of payment is unknown, closing) → say the letter waits on the card and name the gaps to fill.
-9. "Wie steht mein Depot, und was hat Beispiel AG dieses Jahr an Dividende gebracht?" → portfolio_overview → depot_transactions(position = the key the overview printed, kind = "dividend", from/to = this year) → repeat the figures the tools printed (never add them up yourself); for the price today, quotes(q = the name); for news, position_news(key).
-10. "Füge den Buchungen vom Baumarkt im September den Tag Renovierung hinzu." → list_transactions(q = "Baumarkt", from/to = September) → tag_transactions(from_previous_result = true, add = ["Renovierung"]) → say how many bookings get the tag and that it waits for "Ausführen" on the card; never ask first whether you should.
-11. "Zeige mir die 20 besten Fotos aus Beispielland." → list_photos(place = "Beispielland", rank_by = "quality", limit = 20) → say how many photos from there are and that the best are shown; "die besten" is rank_by = "quality", not favorite = true, and a place is list_photos(place), never search_photos.
-12. "Zeige mir 50 Fotos, bei denen die Beschreibung einen Inhalt hat." → list_photos(has_description = true, limit = 50); questions about a photo's metadata (where, when, who, which keywords, how good) → photo_details(ids) on the ids an earlier result printed.
-13. "Such für jedes Jahr das Foto mit Max mit den meisten Likes und leg es ins Album Beste Kinder." → list_persons → list_albums(q = "Beste Kinder") → list_photos(person_ids = [the id of Max], rank_by = "favorites_count", group_by = "year") → add_photos_to_album(album_id = the album's id, from_previous_result = true) → say which photo per year was picked and that the album change waits for "Ausführen". "Für jedes Jahr/jeden Monat das …" is always one list call with group_by, never one call per year; "die wenigsten" is direction = "asc"; the same rank_by/group_by exist on search_documents (size, date; year, sender) and list_transactions (amount; month, year, counterparty) — "die größte Buchung je Monat" is list_transactions(rank_by = "amount", group_by = "month").`;
+/** The rule block of one area, as the prompt and `switch_area` print it; empty when the area adds no rule. */
+export function areaRulesSection(area: Area): string | null {
+  if (!area.rules.length) return null;
+  return `Rules for ${area.id}:\n${area.rules.map((r) => `- ${r}`).join("\n")}`;
+}
 
-export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean, briefs: string[] = [], permissions?: readonly string[]): string {
+/** The examples of the areas in play, numbered through. */
+export function examplesSection(areas: Area[]): string | null {
+  const lines = areas.flatMap((a) => a.examples);
+  if (!lines.length) return null;
+  return `Examples of chained calls:\n${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}`;
+}
+
+/** The areas not in play, so the model knows what `switch_area` can add. */
+export function otherAreasSection(areas: Area[]): string | null {
+  if (!areas.length) return null;
+  return `Other areas, added with ${SWITCH_AREA_NAME}(area):\n${areas.map((a) => `- ${a.id}: ${a.description}`).join("\n")}`;
+}
+
+/**
+ * The system prompt of a turn. The fixed part comes first, so llama-server's
+ * prompt cache reuses it across turns and users: the general rules, then the
+ * day, then this user's access and working set, then the areas in play with
+ * their rules, tools and examples, then the areas that are one call away.
+ * `tools` are the tools offered in round 1; `areas` the areas in play (every
+ * area when absent).
+ */
+export function buildSystemPrompt(
+  tools: ToolSpec[],
+  now: Date,
+  deferred: boolean,
+  briefs: string[] = [],
+  permissions?: readonly string[],
+  areas: readonly AreaId[] = AREA_IDS,
+  otherAreas: readonly AreaId[] = [],
+): string {
+  const active = AREAS.filter((a) => areas.includes(a.id));
+  const others = AREAS.filter((a) => otherAreas.includes(a.id));
   const catalog = tools.length
     ? catalogLines(tools)
     : "(no tools — the user has no module the assistant can read)";
@@ -176,7 +221,17 @@ export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolea
   const access = permissions
     ? accessSection(userAccess(permissions), tools.filter((t) => t.kind === "write").map((t) => t.name))
     : null;
-  return [RULES, timeGrounding(now), ...(access ? [access] : []), ...(working ? [working] : []), `${how}\n${catalog}`, EXAMPLES].join("\n\n");
+  const sections: Array<string | null> = [
+    GENERAL_RULES,
+    timeGrounding(now),
+    access,
+    working,
+    ...active.map(areaRulesSection),
+    `${how}\n${catalog}`,
+    examplesSection(active),
+    otherAreasSection(others),
+  ];
+  return sections.filter((s): s is string => !!s).join("\n\n");
 }
 
 /**
@@ -320,6 +375,12 @@ export interface TurnInput {
   context?: { refs: ContextRef[]; briefs: string[] };
   /** Per tool call: name, argument keys and row count — never row content. */
   log?: (entry: { tool: string; arguments: Record<string, unknown>; rows: number; ms: number; error?: string }) => void;
+  /**
+   * The router's model stage (a short call bound to `choose_areas`) when the
+   * cheap stages name no area. Off by default: a turn with no area named
+   * then runs with every area, as before the router.
+   */
+  routeModel?: boolean;
 }
 
 export interface TurnResult {
@@ -332,6 +393,9 @@ export interface TurnResult {
   rounds: number;
   /** How full the window got, for the line under the chat. */
   context: ContextUsage;
+  /** The areas in play at the end of the turn, and how the first ones were decided. */
+  areas: AreaId[];
+  routing: RoutingStage;
 }
 
 /**
@@ -414,12 +478,38 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const tools = input.tools.filter((t) => mayUse(t, input.user));
   const missingAreas = userAccess(input.user.permissions).missing.length > 0;
 
-  const allDefinitions = tools.map(toolDefinition);
-  const deferred = estimateTokens(allDefinitions) > (input.schemaBudgetTokens ?? DEFAULT_SCHEMA_BUDGET);
-  const offered = new Map<string, ToolSpec>(deferred ? [] : tools.map((t) => [t.name, t]));
+  // The router decides which areas the question needs; their tools are what
+  // the model sees in round 1. Every other area is one switch_area away.
+  const routing = await route({
+    question: input.question,
+    history: input.history,
+    context: input.context?.refs,
+    chat: input.routeModel ? input.chat : undefined,
+    signal: input.signal,
+    withSlot: input.withSlot,
+  });
+  const active = new Set<AreaId>(routing.areas);
+  /** The tools of the areas in play that the user may use. */
+  const inPlay = (): ToolSpec[] => {
+    const names = new Set<string>();
+    for (const id of active) for (const name of toolsOfArea(areaById(id)!)) names.add(name);
+    return tools.filter((t) => names.has(t.name));
+  };
+  const firstTools = inPlay();
+  const deferred = estimateTokens(firstTools.map(toolDefinition)) > (input.schemaBudgetTokens ?? DEFAULT_SCHEMA_BUDGET);
+  const offered = new Map<string, ToolSpec>(deferred ? [] : firstTools.map((t) => [t.name, t]));
+  /** Areas with a tool for this user that are not in play yet. */
+  const switchable = (): AreaId[] => AREA_IDS.filter((id) => !active.has(id) && tools.some((t) => toolsOfArea(areaById(id)!).includes(t.name)));
+  const activate = (id: AreaId): void => {
+    active.add(id);
+    if (!deferred) for (const t of inPlay()) offered.set(t.name, t);
+  };
 
   const messages: ChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(tools, now, deferred, input.context?.briefs, input.user.permissions) },
+    {
+      role: "system",
+      content: buildSystemPrompt(firstTools, now, deferred, input.context?.briefs, input.user.permissions, routing.areas, switchable()),
+    },
     ...input.history,
     { role: "user", content: input.question },
   ];
@@ -488,8 +578,12 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     input.signal?.throwIfAborted();
     rounds = round;
     const last = round === maxRounds;
+    // describe_tools stands in for every schema not sent along: those of a
+    // deferred catalog, and those of the areas not in play.
+    const describable = deferred || offered.size < tools.length;
     const definitions = [
-      ...(deferred ? [describeToolsDefinition] : []),
+      ...(describable ? [describeToolsDefinition] : []),
+      ...(switchable().length ? [switchAreaDefinition] : []),
       ...[...offered.values()].map(toolDefinition),
     ];
     // The previous round's results stay whole; older ones may shrink.
@@ -598,10 +692,32 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         result(`error: the arguments of ${name} are not a JSON object`);
         continue;
       }
-      if (deferred && name === DESCRIBE_TOOLS_NAME) {
+      if (name === DESCRIBE_TOOLS_NAME) {
         const { text, described } = describeTools(args.names, tools);
-        for (const t of described) offered.set(t.name, t);
-        result(text);
+        // A described tool of an area not in play brings its area's rules along.
+        const added: string[] = [];
+        for (const t of described) {
+          const home = homeOf(t.name);
+          if (home && !active.has(home)) {
+            activate(home);
+            const rules = areaRulesSection(areaById(home)!);
+            if (rules) added.push(rules);
+          }
+          offered.set(t.name, t);
+        }
+        result([text, ...added].join("\n\n"));
+        continue;
+      }
+      if (name === SWITCH_AREA_NAME) {
+        const area = areaById(String(args.area ?? ""));
+        if (!area) {
+          result(`error: unknown area; one of ${AREA_IDS.join(", ")}`);
+        } else {
+          const wasActive = active.has(area.id);
+          activate(area.id);
+          result(wasActive ? `${area.id} is already in play; its tools are offered.` : areaPackage(area, tools));
+          if (deferred) for (const t of tools) if (toolsOfArea(area).includes(t.name)) offered.set(t.name, t);
+        }
         continue;
       }
       const key = `${name}:${canonical(args)}`;
@@ -615,6 +731,13 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           ? `error: call ${DESCRIBE_TOOLS_NAME} for ${name} first`
           : `error: ${name} is not in the catalog`);
         continue;
+      }
+      // A tool of an area not in play, called by name: the model knew the
+      // road, so the area joins the turn and the call runs.
+      if (!offered.has(name)) {
+        const home = homeOf(name);
+        if (home) activate(home);
+        offered.set(name, tool);
       }
       // Only a call that runs counts; a refused one may come again.
       seenCalls.add(key);
@@ -666,5 +789,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i]!.kind !== "proposal") blocks.splice(i, 1);
   }
   emit({ type: "done", answer: final, blocks });
-  return { answer: final, blocks, transcript, rounds, toolResults, context: usage };
+  return {
+    answer: final, blocks, transcript, rounds, toolResults, context: usage,
+    areas: AREA_IDS.filter((id) => active.has(id)), routing: routing.stage,
+  };
 }
