@@ -33,6 +33,7 @@ export const clients = {
     listTaxDocuments: vi.fn(),
     getTaxFormValues: vi.fn(),
     searchDocumentsEndpoint: vi.fn(),
+    listDocuments: vi.fn(),
     getDocument: vi.fn(),
     setDocumentFollowUp: vi.fn(),
     findDocumentTextBoxes: vi.fn(),

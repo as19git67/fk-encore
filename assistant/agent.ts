@@ -85,14 +85,16 @@ export function budgetForWindow(window: number): number {
 /**
  * Up to this size every schema goes along with every request; past it the
  * model gets the one-line catalog and fetches schemas with describe_tools.
- * The full catalog of a user with every module is about 8150 tokens (45
- * tools, the photo metadata tools included); the budget leaves room for a
- * few more before a round goes to fetching. A deployment with a small
+ * The full catalog of a user with every module is about 9600 tokens (47
+ * tools, ranking and grouping on the three list tools included); the
+ * budget leaves room for a few more before a round goes to fetching —
+ * the router with area packages (ki-assistent.md) is what brings it down
+ * again. A deployment with a small
  * context window lowers it through the environment — and raises
  * ASSISTANT_CONTEXT_TOKENS along with the model's window, since the
  * schemas count against that budget on every round.
  */
-const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "9000", 10);
+const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "10000", 10);
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -159,8 +161,9 @@ const EXAMPLES = `Examples of chained calls:
 8. Working set of three invoices: "Schreib dem Absender, dass ich die drei Rechnungen bezahlt habe." → render_letter(recipient = the sender's address if a tool showed it, else [[Anschrift des Absenders]], subject = "Ihre Rechnungen …" with their numbers, body = salutation, one line per invoice with number, date and amount from the working set, [[Zahlungsdatum]] where the date of payment is unknown, closing) → say the letter waits on the card and name the gaps to fill.
 9. "Wie steht mein Depot, und was hat Beispiel AG dieses Jahr an Dividende gebracht?" → portfolio_overview → depot_transactions(position = the key the overview printed, kind = "dividend", from/to = this year) → repeat the figures the tools printed (never add them up yourself); for the price today, quotes(q = the name); for news, position_news(key).
 10. "Füge den Buchungen vom Baumarkt im September den Tag Renovierung hinzu." → list_transactions(q = "Baumarkt", from/to = September) → tag_transactions(from_previous_result = true, add = ["Renovierung"]) → say how many bookings get the tag and that it waits for "Ausführen" on the card; never ask first whether you should.
-11. "Zeige mir die 20 besten Fotos aus Beispielland." → list_photos(place = "Beispielland", order = "best", limit = 20) → say how many photos from there are and that the best are shown; "die besten" is the quality order, not favorite = true, and a place is list_photos(place), never search_photos.
-12. "Zeige mir 50 Fotos, bei denen die Beschreibung einen Inhalt hat." → list_photos(has_description = true, limit = 50); questions about a photo's metadata (where, when, who, which keywords, how good) → photo_details(ids) on the ids an earlier result printed.`;
+11. "Zeige mir die 20 besten Fotos aus Beispielland." → list_photos(place = "Beispielland", rank_by = "quality", limit = 20) → say how many photos from there are and that the best are shown; "die besten" is rank_by = "quality", not favorite = true, and a place is list_photos(place), never search_photos.
+12. "Zeige mir 50 Fotos, bei denen die Beschreibung einen Inhalt hat." → list_photos(has_description = true, limit = 50); questions about a photo's metadata (where, when, who, which keywords, how good) → photo_details(ids) on the ids an earlier result printed.
+13. "Such für jedes Jahr das Foto mit Max mit den meisten Likes und leg es ins Album Beste Kinder." → list_persons → list_albums(q = "Beste Kinder") → list_photos(person_ids = [the id of Max], rank_by = "favorites_count", group_by = "year") → add_photos_to_album(album_id = the album's id, from_previous_result = true) → say which photo per year was picked and that the album change waits for "Ausführen". "Für jedes Jahr/jeden Monat das …" is always one list call with group_by, never one call per year; "die wenigsten" is direction = "asc"; the same rank_by/group_by exist on search_documents (size, date; year, sender) and list_transactions (amount; month, year, counterparty) — "die größte Buchung je Monat" is list_transactions(rank_by = "amount", group_by = "month").`;
 
 export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean, briefs: string[] = [], permissions?: readonly string[]): string {
   const catalog = tools.length

@@ -25,7 +25,7 @@ import { createHash } from "node:crypto";
 import { createTransactionReportPdf } from "./pdf-report";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, desc, eq, gte, inArray, lte, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, not, or, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -342,6 +342,14 @@ interface ListParams {
   direction?: "in" | "out";
   from?: string; // ISO date
   to?: string;
+  /**
+   * `date` (default): booking date; `amount`: the absolute amount, so the
+   * largest booking comes first whichever way the money went. The date
+   * breaks ties.
+   */
+  sortBy?: "date" | "amount";
+  /** `desc` (default): newest or largest first. */
+  sortDir?: "asc" | "desc";
   limit?: number;
   offset?: number;
 }
@@ -438,11 +446,15 @@ export const listTransactions = api(
     const limit = Math.min(Math.max(p.limit ?? 50, 1), 500);
     const offset = Math.max(p.offset ?? 0, 0);
 
+    const dir = p.sortDir === "asc" ? asc : desc;
+    const order = p.sortBy === "amount"
+      ? [dir(sql`ABS(${financeTransaction.amount})`), dir(financeTransaction.booking_date)]
+      : [dir(financeTransaction.booking_date)];
     const rows = await db
       .select()
       .from(financeTransaction)
       .where(where)
-      .orderBy(desc(financeTransaction.booking_date))
+      .orderBy(...order, financeTransaction.id)
       .limit(limit)
       .offset(offset);
 

@@ -2966,13 +2966,69 @@ export async function uploadPhotoLogic(
   };
 }
 
+/**
+ * What a photo list can be ranked by. `date` is the taken date; every other
+ * name is a metric, highest first with `order: "desc"`, photos without a
+ * value last either way, the date order breaking ties.
+ */
+export const PHOTO_SORT_FIELDS = ["date", "quality", "aesthetics", "favorites", "comments", "face", "size"] as const;
+export type PhotoSortField = (typeof PHOTO_SORT_FIELDS)[number];
+
+export function parsePhotoSortField(v: unknown): PhotoSortField {
+  return (PHOTO_SORT_FIELDS as readonly unknown[]).includes(v) ? (v as PhotoSortField) : "date";
+}
+
 export interface ListPhotosOptions {
-  /** Date order of the rows; newest first by default. */
+  /** Date order of the rows; newest first by default. With a metric in `sortBy`, the order of that metric. */
   order?: "asc" | "desc";
-  /** `quality`: highest composite quality score first (unscored last), the date order breaking ties. */
-  sortBy?: "date" | "quality";
+  /**
+   * `quality`: the composite quality score; `aesthetics`: the Q-Align or
+   * CLIP aesthetics score; `favorites`: how many users (of all who may see
+   * the photo) marked it a favourite; `comments`: comments under it in any
+   * album; `face`: how well the faces of `facePersonIds` show (bounding-box
+   * share of the frame times sharpness, best face counts); `size`: bytes.
+   */
+  sortBy?: PhotoSortField;
+  /** The persons `sortBy: "face"` rates; without them the face metric is empty. */
+  facePersonIds?: number[];
   limit?: number;
   offset?: number;
+}
+
+/**
+ * The SQL of a ranking metric, or null for the date order. The face metric
+ * reads the bounding box the scan stored as JSON (`{x, y, width, height}`
+ * relative to the frame) and weights it with the measured sharpness; an
+ * unmeasured face counts as half sharp so an old scan still ranks.
+ */
+function photoRankSql(sortBy: PhotoSortField, userId: number, facePersonIds: number[]): SQL | null {
+  switch (sortBy) {
+    case "quality":
+      return sql`${photos.ai_quality_score}`;
+    case "aesthetics":
+      return sql`(${photos.ai_quality_details}->>'clip_aesthetics')::real`;
+    case "favorites":
+      return sql`(SELECT COUNT(*)::int FROM ${photoCuration} pc WHERE pc.photo_id = ${photos.id} AND pc.status = 'favorite')`;
+    case "comments":
+      return sql`(SELECT COUNT(*)::int FROM ${photoComments} c WHERE c.photo_id = ${photos.id})`;
+    case "face": {
+      if (facePersonIds.length === 0) return sql`NULL::real`;
+      const idList = sql.join(facePersonIds.map((id) => sql`${id}`), sql`, `);
+      return sql`(SELECT MAX(
+          COALESCE(f.sharpness, 0.5)
+          * COALESCE((f.bbox::jsonb->>'width')::real, 0)
+          * COALESCE((f.bbox::jsonb->>'height')::real, 0)
+          * 100
+        )::real
+        FROM ${faces} f
+        JOIN ${userFaceAssignments} ufa ON ufa.face_id = f.id AND ufa.user_id = ${userId}
+        WHERE f.photo_id = ${photos.id} AND ufa.ignored = false AND ufa.person_id IN (${idList}))`;
+    }
+    case "size":
+      return sql`${photos.size}`;
+    case "date":
+      return null;
+  }
 }
 
 export async function listPhotosLogic(
@@ -2983,10 +3039,15 @@ export async function listPhotosLogic(
   const filterConds = buildPhotoFilterConditions(userId, filter);
   const whereClause = and(eq(photos.user_id, userId), ...filterConds);
   const dateOrder = options.order === "asc" ? sql`${photoDateOrder} ASC NULLS LAST` : sql`${photoDateOrder} DESC`;
+  const rankSql = photoRankSql(options.sortBy ?? "date", userId, options.facePersonIds ?? []);
+  const rankOrder = rankSql === null
+    ? []
+    : [options.order === "asc" ? sql`${rankSql} ASC NULLS LAST` : sql`${rankSql} DESC NULLS LAST`];
 
   let query = db
       .select({
         id: photos.id,
+        rank_value: rankSql === null ? sql<number | null>`NULL::real` : sql<number | null>`${rankSql}`,
         user_id: photos.user_id,
         filename: photos.filename,
         original_name: photos.original_name,
@@ -3019,13 +3080,13 @@ export async function listPhotosLogic(
         and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
       )
       .where(whereClause)
-      .orderBy(...(options.sortBy === "quality" ? [sql`${photos.ai_quality_score} DESC NULLS LAST`] : []), dateOrder, photos.id)
+      .orderBy(...rankOrder, dateOrder, photos.id)
       .$dynamic();
   if (options.limit !== undefined) query = query.limit(options.limit);
   if (options.offset) query = query.offset(options.offset);
 
   const rows = await dbAll<{
-    id: number; user_id: number; filename: string; original_name: string;
+    id: number; rank_value: number | string | null; user_id: number; filename: string; original_name: string;
     mime_type: string; size: number; hash: string | null; taken_at: string | null;
     created_at: string | null; curation_status: string | null;
     latitude: number | null; longitude: number | null;
@@ -3069,6 +3130,7 @@ export async function listPhotosLogic(
       keywords: r.keywords ?? [],
       link_visibility: (r.link_visibility as PhotoLinkVisibility) ?? "auto",
       has_known_face: !!r.has_known_face,
+      rank_value: rankSql === null ? undefined : finiteOrNull(r.rank_value === null ? null : Number(r.rank_value)) ?? undefined,
       orientation: photoOrientation(r.width, r.height),
     })),
   };
