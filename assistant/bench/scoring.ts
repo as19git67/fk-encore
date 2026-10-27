@@ -136,6 +136,8 @@ export interface BenchSummary {
   check_failed: number;
   unverified: number;
   median_check_ms: number | null;
+  /** Replies llama-server could not parse and the loop asked for once more, over all cases (llama.cpp issue #25072). */
+  malformed_replies: number;
 }
 
 export interface CaseRunSummaryInput {
@@ -157,13 +159,14 @@ export interface CaseRunSummaryInput {
   check_failed?: number;
   check_ms?: number | null;
   unverified?: boolean;
+  malformed_replies?: number;
 }
 
 function rate(part: number, whole: number): number | null {
   return whole ? part / whole : null;
 }
 
-function total(runs: CaseRunSummaryInput[], key: "empty_results" | "empty_followed" | "tool_errors" | "errors_corrected" | "checks" | "check_failed"): number {
+function total(runs: CaseRunSummaryInput[], key: "empty_results" | "empty_followed" | "tool_errors" | "errors_corrected" | "checks" | "check_failed" | "malformed_replies"): number {
   return runs.reduce((sum, r) => sum + (r[key] ?? 0), 0);
 }
 
@@ -213,5 +216,6 @@ export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
     check_failed: total(runs, "check_failed"),
     unverified: runs.filter((r) => r.unverified).length,
     median_check_ms: median(runs.filter((r) => r.checks && typeof r.check_ms === "number").map((r) => (r.check_ms as number) / (r.checks as number))),
+    malformed_replies: total(runs, "malformed_replies"),
   };
 }

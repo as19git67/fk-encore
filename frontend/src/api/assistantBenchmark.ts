@@ -65,6 +65,8 @@ export interface BenchSummary {
   check_failed?: number
   unverified?: number
   median_check_ms?: number | null
+  /** Replies llama-server could not parse and the loop asked for once more; missing on older runs. */
+  malformed_replies?: number
 }
 
 export type BenchStatus = 'running' | 'done' | 'failed' | 'cancelled'
@@ -117,6 +119,7 @@ export interface BenchCaseRun {
   check_failed?: number
   check_ms?: number | null
   unverified?: boolean
+  malformed_replies?: number
 }
 
 /** One call of the turn behind an answer the user judged: never the rows it returned. */

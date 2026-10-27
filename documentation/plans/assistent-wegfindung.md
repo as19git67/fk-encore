@@ -430,6 +430,7 @@ these parameters as given.
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-26 | Gemma-4-26B-A4B QAT UD-Q4_K_XL (CUDA, server backend, 30k ctx) | 6 + 1 (stage 2 not yet deployed) | 68 | 85 % (58) | 97 % | 3 | 5,116 | 16 |
 | 2026-10-26 (evening) | same | 1–5 | 75 | 88 % (66); on the 68 cases of the morning run 90 % (61) | 96 % | 3 | 5,250 | 21 |
+| 2026-10-27 | same | 1–5 with the bound-call fix | 75 | 81 % (61); 88 % of the 69 cases llama-server's parser did not lose | 97 % | 3 | 4,231 | 18 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -468,6 +469,33 @@ message without content, which llm-service refuses
 draft). The checker, the summary and the router's model stage were bound
 calls too and worked by prompt and a one-tool list alone; the fix binds
 them by grammar as intended.
+
+The run of 2026-10-27 (the bound-call fix deployed) answers the question
+the evening run left open: the plan call came back as a plan in 13 of 13
+cases (2 of 19 before), every plan was carried out (`plan_done` =
+steps), and the three cases the evening run had lost on the plan or the
+empty reply pass (`rule-folder-by-month`, `letter-from-bookings`,
+`multi-invoices-paid`); multi-area pass rate 86 % (82 % before). The
+headline pass rate still fell, 66 → 61, because six cases ended in round 1
+with llama-server's "The model produced output that does not match the
+expected peg-gemma4 format" — its Gemma 4 parser could not read what the
+model wrote, before any tool ran (`expenses-by-tag`, `pv-tax-exempt`,
+`shared-albums-participants`, `followup-photos-album`,
+`redact-price-bundle`, `keep-answer-as-text-document`, all green the
+evening before, four of them on tools whose arguments carry long text).
+That is llama.cpp issue #25072, intermittent and independent of this
+plan; the request path for an ordinary round did not change between the
+two runs. Since the output is sampled, the loop now sends such a request
+once more before giving up (`MalformedReplyError` in `llm-client.ts`, the
+retry in `send` of `agent.ts`, `malformed_replies` per case and in the
+summary) — the next run shows whether one retry is enough. Of the 69
+cases that ran, 61 passed (88 %). Newly failed: `insurer-documents-by-subject`
+(answered "nothing found" without a call) and `letter-paid-invoices` (the
+body without the figures the case expects). Checker: 67 checks, 2
+objections (`photos-with-description`, "84 photos, found one", was right;
+`trips-last-year`, "nothing found" over an empty result, was not), no
+answer out with the note, median 1,566 ms. Follow-ups 67 %, all three
+misses the parser errors above.
 
 ## Risks and what is left out on purpose
 

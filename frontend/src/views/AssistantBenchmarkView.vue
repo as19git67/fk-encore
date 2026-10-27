@@ -128,6 +128,7 @@ function roadText(r: BenchCaseRun): string {
   else if (r.plan_asked) parts.push(r.plan_reply === 'tool_call' ? 'Plan erbeten, Modell rief stattdessen ein Werkzeug' : 'Plan erbeten, keiner geschrieben')
   if (r.follow_up) parts.push('Rückfrage')
   if (r.checks) parts.push(`Prüfer ${r.check_failed ?? 0}/${r.checks} Einwände${r.unverified ? ', Hinweis in der Antwort' : ''}`)
+  if (r.malformed_replies) parts.push(`${r.malformed_replies}× unlesbare Antwort wiederholt`)
   if (r.prompt_tokens_first) parts.push(`${r.prompt_tokens_first} Tokens`)
   return parts.join(' · ')
 }

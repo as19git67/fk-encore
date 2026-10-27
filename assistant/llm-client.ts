@@ -23,6 +23,22 @@ export class LlmServiceUnavailableError extends Error {
   }
 }
 
+/**
+ * llama-server could not read what the model wrote as the template's
+ * tool-call syntax ("The model produced output that does not match the
+ * expected … format", llama.cpp issue #25072, intermittent on Gemma 4). The
+ * output is sampled, so the same request may well succeed once more; the
+ * agent loop retries such a call once.
+ */
+export class MalformedReplyError extends LlmServiceUnavailableError {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "MalformedReplyError";
+  }
+}
+
+const MALFORMED_REPLY = /does not match the expected .* format/i;
+
 /** The conversation does not fit the context window (llm-service 413). */
 export class ContextTooLargeError extends Error {
   constructor(reason: string) {
@@ -93,6 +109,7 @@ export class ReplyAssembler {
     if (error) {
       const message = error.message ?? "llm-service error";
       if (error.status === 413) throw new ContextTooLargeError(message);
+      if (MALFORMED_REPLY.test(message)) throw new MalformedReplyError(message);
       throw new LlmServiceUnavailableError(message);
     }
     const context = (chunk as { context?: Partial<ChatUsage> }).context;

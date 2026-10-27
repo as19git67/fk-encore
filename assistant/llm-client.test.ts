@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ContextTooLargeError, LlmServiceUnavailableError, ReplyAssembler, sseData } from "./llm-client";
+import { ContextTooLargeError, LlmServiceUnavailableError, MalformedReplyError, ReplyAssembler, sseData } from "./llm-client";
 
 function streamOf(text: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(text);
@@ -64,5 +64,12 @@ describe("ReplyAssembler", () => {
   it("maps error events", () => {
     expect(() => new ReplyAssembler().push({ error: { status: 413, message: "too long" } })).toThrow(ContextTooLargeError);
     expect(() => new ReplyAssembler().push({ error: { status: 502, message: "boom" } })).toThrow(LlmServiceUnavailableError);
+  });
+
+  it("tells a reply llama-server could not parse apart from the other failures (llama.cpp issue #25072)", () => {
+    const unread = "The model produced output that does not match the expected peg-gemma4 format";
+    expect(() => new ReplyAssembler().push({ error: { status: 502, message: unread } })).toThrow(MalformedReplyError);
+    // Still an LlmServiceUnavailableError for everyone who does not retry.
+    expect(() => new ReplyAssembler().push({ error: { status: 502, message: unread } })).toThrow(LlmServiceUnavailableError);
   });
 });

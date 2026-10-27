@@ -29,7 +29,7 @@ import { argumentError, checkArguments } from "./arguments";
 import { AREAS, AREA_IDS, areaById, homeOf, toolsOfArea, type Area, type AreaId } from "./areas/index";
 import { route, type RoutingStage } from "./router";
 import { contextSection, type ContextRef } from "./briefs";
-import { ContextTooLargeError, type ChatFn, type ChatReply, type ChatRequest, type ForcedTool } from "./llm-client";
+import { ContextTooLargeError, MalformedReplyError, type ChatFn, type ChatReply, type ChatRequest, type ForcedTool } from "./llm-client";
 import type {
   AssistantUser,
   ChatMessage,
@@ -517,6 +517,8 @@ export interface TurnResult {
   planOutcome?: "plan" | "tool_call" | "none";
   /** The checker's work (stage 5); absent when no answer was checked. */
   checks?: TurnChecks;
+  /** Replies llama-server could not parse and the loop asked for once more (llama.cpp issue #25072); absent when none. */
+  malformedReplies?: number;
 }
 
 export interface TurnChecks {
@@ -708,9 +710,23 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const usage: ContextUsage = {
     used: null, window, estimated: 0, budget: currentBudget(), historyTurns, keptTurns: historyTurns, digested: 0,
   };
+  /** Replies llama-server could not parse, each sent once more. */
+  let malformedReplies = 0;
   /** One /chat call, and what it took of the window. */
   const send = async (request: ChatRequest): Promise<ChatReply> => {
-    const reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
+    let reply: ChatReply;
+    try {
+      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
+    } catch (err) {
+      // The model wrote a call llama-server's parser did not read (an
+      // intermittent fault of its Gemma 4 parser, llama.cpp issue #25072).
+      // The output is sampled: the same request once more usually reads.
+      if (!(err instanceof MalformedReplyError)) throw err;
+      input.signal?.throwIfAborted();
+      malformedReplies++;
+      emit({ type: "retract" });
+      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
+    }
     const estimated = estimateTokens(request.messages) + estimateTokens(request.tools ?? []);
     usage.estimated = Math.max(usage.estimated, estimated);
     const counted = reply.usage;
@@ -1116,5 +1132,6 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     ...(plan ? { plan } : {}),
     ...(planOutcome ? { planOutcome } : {}),
     ...(checks ? { checks } : {}),
+    ...(malformedReplies ? { malformedReplies } : {}),
   };
 }
