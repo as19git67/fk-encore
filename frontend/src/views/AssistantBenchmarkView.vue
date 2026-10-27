@@ -19,6 +19,8 @@ import PageLayout from '../components/layout/PageLayout.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import ScrollX from '../components/layout/ScrollX.vue'
+import { triggerDownload } from '../utils/shareFile'
+import { benchRunFileName } from '../utils/benchRunFile'
 import {
   cancelBenchRun,
   deleteBenchRun,
@@ -262,6 +264,22 @@ async function cancel() {
   }
 }
 
+/** Saves the whole run (summary and every case) as the JSON the API returns, for a comparison outside the app. */
+async function download(run: BenchRunSummary) {
+  try {
+    const detail = await getBenchRun(run.id)
+    const blob = new Blob([JSON.stringify(detail, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    try {
+      triggerDownload(url, benchRunFileName(run))
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+  } catch (e) {
+    error.value = message(e, 'Der Lauf konnte nicht heruntergeladen werden')
+  }
+}
+
 function remove(run: BenchRunSummary) {
   confirm.require({
     message: `Den Lauf „${run.label}“ vom ${when(run.started_at)} mit allen Ergebnissen löschen?`,
@@ -476,7 +494,17 @@ function remove(run: BenchRunSummary) {
                 <td class="num">{{ percent(r.summary?.args_hit_rate) }}</td>
                 <td class="num">{{ ms(r.summary?.median_ms_per_round) }}</td>
                 <td class="num">{{ ms(r.summary?.p90_ms_per_round) }}</td>
-                <td>
+                <td class="actions">
+                  <Button
+                    icon="pi pi-download"
+                    text
+                    rounded
+                    severity="secondary"
+                    size="small"
+                    :aria-label="`Lauf ${r.label} als JSON herunterladen`"
+                    :disabled="r.status === 'running'"
+                    @click="download(r)"
+                  />
                   <Button
                     icon="pi pi-trash"
                     text
@@ -675,6 +703,10 @@ function remove(run: BenchRunSummary) {
 .num {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  white-space: nowrap;
 }
 
 /* Wide enough to read on a phone; ScrollX scrolls the rest. */
