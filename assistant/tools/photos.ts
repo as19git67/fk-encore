@@ -184,7 +184,7 @@ async function emptyPhotosHint(filter: PhotoFilter, hidden: HiddenChoice, previo
   if (filter.hasDescription !== undefined) probes.push({ label: `has_description ${filter.hasDescription}`, count: without({ hasDescription: undefined }) });
   if (filter.qualityMin !== undefined) probes.push({ label: `quality_min ${filter.qualityMin}`, count: without({ qualityMin: undefined }) });
   if (!probes.length) return loosenHint("photos", []);
-  if (hidden === "exclude") probes.push({ label: "hidden photos left out (hidden include instead)", count: () => photoCount(filter, "include") });
+  if (hidden === "exclude") probes.push({ label: "hidden photos left out (hidden include instead)", count: () => photoCount(filter, "include"), recommend: false });
   return loosenHint("photos", probes);
 }
 

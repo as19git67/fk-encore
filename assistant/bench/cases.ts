@@ -31,6 +31,12 @@ export type Expected =
 export interface ExpectedCall {
   tool: string;
   args?: Record<string, Expected>;
+  /**
+   * Alternatives to `args`: the call matches when its arguments match
+   * `args` or any one of these sets. For a question with two right roads
+   * (a depot by its id, or by its name in q).
+   */
+  anyOf?: Record<string, Expected>[];
 }
 
 export interface BenchCase {
@@ -392,7 +398,7 @@ export const BENCH_CASES: BenchCase[] = [
         $sequence: [
           {
             rows: [],
-            hint: 'No bookings match. The same call with one filter dropped: without q "Musterfirma Haustechnik": 212; without the period 2026-09-01..2026-09-30: 1. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.',
+            hint: 'No bookings match. The same call with one filter dropped: without q "Musterfirma Haustechnik": 212; without the period 2026-09-01..2026-09-30: 1. Call again with the period 2026-09-01..2026-09-30 dropped and every other filter kept: that brings the 1 row closest to the question. Dropping q "Musterfirma Haustechnik" instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.',
           },
           { rows: [{ id: 9101, date: "2026-08-12", counterparty: "Musterfirma Haustechnik GmbH", purpose: "Rechnung RE-2026-0101", amount: -120.5 }], total: -120.5, count: 1 },
         ],
@@ -553,7 +559,9 @@ export const BENCH_CASES: BenchCase[] = [
     title: "Kurs eines Wertpapiers",
     question: "Wie steht die Beispiel AG gerade, und was gibt es Neues dazu?",
     firstTools: ["portfolio_overview", "quotes", "position_news"],
-    expect: [{ tool: "quotes", args: { q: { $contains: "beispiel" } } }, { tool: "position_news", args: { key: "DE0000000001" } }],
+    // position_news takes the key the quotes row printed; a name is looked
+    // up by the tool since the runs of 2026-10-27, so it passes as well.
+    expect: [{ tool: "quotes", args: { q: { $contains: "beispiel" } } }, { tool: "position_news", args: { key: "DE0000000001" }, anyOf: [{ key: { $contains: "beispiel ag" } }] }],
     results: {
       portfolio_overview: { rows: [{ key: "DE0000000001", name: "Beispiel AG", value: "7500.00" }] },
       quotes: { rows: [{ key: "DE0000000001", name: "Beispiel AG", "last price": "75.10", at: "2026-10-16 15:30", value: "7510.00", "change 1m": "2.30", "%": "3.16", "unread news": 2 }] },
@@ -582,7 +590,10 @@ export const BENCH_CASES: BenchCase[] = [
     id: "securities-in-depot",
     title: "Wertpapiere eines Depots",
     question: "Welche Wertpapiere liegen im Depot bei der Beispielbank?",
-    expect: [{ tool: "list_accounts" }, { tool: "portfolio_overview", args: { account_ids: { $present: true } } }],
+    // The depot by its id from list_accounts, or by its name in q, which
+    // portfolio_overview reads as the depot when no security matches it.
+    firstTools: ["list_accounts", "portfolio_overview"],
+    expect: [{ tool: "portfolio_overview", args: { account_ids: { $present: true } }, anyOf: [{ q: { $contains: "beispielbank" } }] }],
     results: {
       list_accounts: { rows: [{ id: 1, section: "Täglich", label: "Girokonto", type: "Girokonto" }, { id: 2, section: "Sparen", label: "Depot Beispielbank", type: "Depot", balance: "12500.00 EUR (as of 2026-10-15)" }] },
       portfolio_overview: { rows: [{ key: "DE0000000001", name: "Beispiel AG", depot: "Depot Beispielbank", value: "7500.00" }, { key: "DE0000000002", name: "Muster ETF", depot: "Depot Beispielbank", value: "5000.00" }] },

@@ -72,6 +72,32 @@ function matches(p: { name: string | null; isin: string | null; wkn: string | nu
   return [p.name, p.isin, p.wkn, p.key].some((v) => v?.toLocaleLowerCase("de").includes(needle));
 }
 
+/**
+ * The key a tool argument means. The model names a security the way the
+ * user did ("Beispiel AG") as often as by the key the overview printed; the
+ * service knows keys, ISINs and WKNs only. A name that matches exactly one
+ * position (open or sold out) becomes its key; several matches are an
+ * error that lists them, so the next call names one; no match passes the
+ * value on, and the service says "not found".
+ */
+async function resolveKey(value: string): Promise<string> {
+  let positions: Position[];
+  try {
+    positions = ((await finance.getPortfolio({ closed: true })) as unknown as Portfolio | undefined)?.positions ?? [];
+  } catch {
+    return value; // the service will say what it thinks of the value
+  }
+  const needle = value.toLocaleLowerCase("de");
+  const exact = positions.filter((p) => [p.key, p.isin, p.wkn].some((v) => v?.toLocaleLowerCase("de") === needle));
+  if (exact.length) return exact[0]!.key;
+  const byName = positions.filter((p) => p.name?.toLocaleLowerCase("de").includes(needle));
+  if (byName.length === 1) return byName[0]!.key;
+  if (byName.length > 1) {
+    throw new Error(`"${value}" matches several securities: ${byName.map((p) => `${p.name} (key ${p.key})`).join(", ")}; call again with one key`);
+  }
+  return value;
+}
+
 /** The depots a position lies in, by label; ids the user cannot see stay ids. */
 function depotsOf(p: Position, labels: Map<number, string>): string {
   return p.account_ids.map((id) => labels.get(id) ?? `#${id}`).join(", ");
@@ -88,13 +114,13 @@ function positionRows(positions: Position[], labels: Map<number, string> = new M
 export const portfolioOverview: ToolSpec = {
   name: "portfolio_overview",
   kind: "read",
-  summary: "The user's depots as one portfolio: market value, cost basis, unrealized and realized gain, income (dividends, interest), fees, taxes and total return, the positions with value, gain and the depot(s) each lies in, and realized gain and income per year. The server does all arithmetic. account_ids narrows to one depot ('welche Wertpapiere sind im Depot X'); q finds one security and its key ('in welchem Depot liegt Y').",
+  summary: "The user's depots as one portfolio: market value, cost basis, unrealized and realized gain, income (dividends, interest), fees, taxes and total return, the positions with value, gain and the depot(s) each lies in, and realized gain and income per year. The server does all arithmetic. account_ids narrows to one depot ('welche Wertpapiere sind im Depot X'); q finds one security and its key ('in welchem Depot liegt Y'); a q that names no security but a depot narrows to that depot.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
     type: "object",
     properties: {
-      q: { type: "string", description: "only positions whose name, ISIN or WKN contains this" },
+      q: { type: "string", description: "only positions whose name, ISIN or WKN contains this; a depot's name narrows to that depot" },
       account_ids: { type: "array", items: { type: "integer" }, description: "only these depots (ids from list_accounts); default: every depot" },
       include_closed: { type: "boolean", description: "also positions sold out completely and closed depots" },
       limit: { type: "integer", description: "positions to show, at most 100 (default 30), largest value first" },
@@ -105,10 +131,20 @@ export const portfolioOverview: ToolSpec = {
     const limit = int(args.limit, { min: 1, max: 100 }) ?? 30;
     const res = (await finance.getPortfolio({ accounts: accountsParam(args), closed: args.include_closed === true || undefined })) as unknown as Portfolio;
     const s = res.summary;
-    const positions = res.positions.filter((p) => matches(p, q)).sort((a, b) => Number(b.value ?? 0) - Number(a.value ?? 0));
+    const labels = new Map(res.accounts.map((a) => [a.id, a.label]));
+    // "Welche Wertpapiere liegen im Depot bei der Beispielbank?" arrives as
+    // q = "Beispielbank" as often as with the depot's id: when no security
+    // matches but a depot's label does, the depot is what was meant.
+    const depotsByName = q && !res.positions.some((p) => matches(p, q))
+      ? res.accounts.filter((a) => a.label.toLocaleLowerCase("de").includes(q.toLocaleLowerCase("de")))
+      : [];
+    const depotIds = new Set(depotsByName.map((a) => a.id));
+    const positions = res.positions
+      .filter((p) => (depotIds.size ? p.account_ids.some((id) => depotIds.has(id)) : matches(p, q)))
+      .sort((a, b) => Number(b.value ?? 0) - Number(a.value ?? 0));
     const shown = positions.slice(0, limit);
     const cur = res.currency;
-    const labels = new Map(res.accounts.map((a) => [a.id, a.label]));
+    const depotNote = depotIds.size ? `q "${q}" named no security but the depot ${depotsByName.map((a) => `${a.label} [id ${a.id}]`).join(", ")}: these are its positions. ` : "";
     const summary = [
       `Portfolio of ${res.accounts.length} depot${res.accounts.length === 1 ? "" : "s"} (${res.accounts.map((a) => `${a.label} [id ${a.id}]`).join(", ")}), figures in ${cur}${res.mixed_currency ? " (mixed currencies, converted)" : ""}, prices as of ${day(s.price_as_of) ?? "?"}:`,
       `market value ${money(s.market_value)}; cost basis ${money(s.cost_basis)}${s.cost_basis_complete ? "" : " (incomplete: some buys are unknown)"}; unrealized gain ${money(s.unrealized_gain)}${s.unrealized_gain_pct ? ` (${money(s.unrealized_gain_pct)} %)` : ""}`,
@@ -118,7 +154,7 @@ export const portfolioOverview: ToolSpec = {
     const positionsTable = table(
       ["key", "name", "depot", "amount", "price", "value", "unrealized gain", "%", "realized", "income", "weight %"],
       shown.map((p) => [p.key, p.name, depotsOf(p, labels), p.amount, p.price, p.value, p.unrealized_gain, pct(p.unrealized_gain_pct), p.realized_gain, p.income, p.weight_pct]),
-      { total: positions.length, cap: limit, note: "key is the security's id for position_detail, depot_transactions, quotes and position_news; depot names the depot(s) holding the position." },
+      { total: positions.length, cap: limit, note: `${depotNote}key is the security's id for position_detail, depot_transactions, quotes and position_news; depot names the depot(s) holding the position.` },
     );
     const yearsTable = q ? "" : "\nPer year:\n" + table(
       ["year", "realized gain", "sells", "income", "dividends", "fees", "taxes", "net invested"],
@@ -150,14 +186,15 @@ export const positionDetail: ToolSpec = {
   parameters: {
     type: "object",
     properties: {
-      key: { type: "string", description: "the security's key, ISIN or WKN" },
+      key: { type: "string", description: "the security's key as portfolio_overview or quotes printed it (also its ISIN or WKN); a name works when it matches one security" },
       include_closed: { type: "boolean", description: "also closed depots" },
     },
     required: ["key"],
   },
   async run(args) {
-    const key = str(args.key);
-    if (!key) throw new Error("key is required");
+    const asked = str(args.key);
+    if (!asked) throw new Error("key is required");
+    const key = await resolveKey(asked);
     const res = (await finance.getPortfolioPosition({ key, closed: args.include_closed === true || undefined })) as unknown as PositionDetail;
     const p = res.position;
     const cur = res.currency;
@@ -314,14 +351,15 @@ export const positionNews: ToolSpec = {
   parameters: {
     type: "object",
     properties: {
-      key: { type: "string", description: "the security's key, ISIN or WKN" },
+      key: { type: "string", description: "the security's key as portfolio_overview or quotes printed it (also its ISIN or WKN); a name works when it matches one security" },
       limit: { type: "integer", description: "at most 50 (default 10)" },
     },
     required: ["key"],
   },
   async run(args) {
-    const key = str(args.key);
-    if (!key) throw new Error("key is required");
+    const asked = str(args.key);
+    if (!asked) throw new Error("key is required");
+    const key = await resolveKey(asked);
     const limit = int(args.limit, { min: 1, max: 50 }) ?? 10;
     const res = (await finance.getPositionNews({ key, limit })) as unknown as { items: NewsItem[]; checked_at: string | null };
     const rows = res.items;

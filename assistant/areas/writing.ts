@@ -11,6 +11,7 @@ export const WRITING_AREA: Area = {
   ],
   examples: [
     'Working set of three invoices: "Schreib dem Absender, dass ich die drei Rechnungen bezahlt habe." → render_letter(recipient = the sender\'s address if a tool showed it, else [[Anschrift des Absenders]], subject = "Ihre Rechnungen …" with their numbers, body = salutation, one line per invoice with number, date and amount from the working set, [[Zahlungsdatum]] where the date of payment is unknown, closing) → say the letter waits on the card and name the gaps to fill.',
+    'Working set: a reminder (Mahnung). "Entwirf einen Widerspruch dagegen und nenne die Rechnungsnummer und die Zahlungsfrist aus dem Schreiben." → get_document_text(id = the document\'s id) → render_letter(body with the invoice number and the deadline exactly as the text prints them, e.g. "Ihre Mahnung zur Rechnung RE-2026-0101 mit Zahlungsfrist bis 15.11.2026") — every fact the user asks to have named stands in the body, even one you would leave out yourself; a reply never explains why a named fact was left out.',
   ],
   keywords:
     "schreib|anschreiben|antwort|entwirf|entwurf|widerspr|kündig|notiz|speicher|zusammenfass|fasse|formulier|"

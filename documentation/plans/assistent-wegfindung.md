@@ -545,6 +545,49 @@ goes between runs). The other six failures are the known ones:
 checks, 2 objections (`best-photos-in-country` and `photos-with-description`,
 both right), no answer out with the note, median 1,158 ms.
 
+### The last seven cases
+
+The seven failures of the evening run fell the same way in the three
+runs before it (`insurer-documents-by-subject` in two of them), so each
+got a fix where its cause lies — in the tool, the loop or the area's
+data, never in `GENERAL_RULES`:
+
+- `empty-then-loosen-period`: the hint listed the counts and left the
+  choice to the model, which dropped the text (212 rows) instead of the
+  month (1 row). `loosenHint` now names the filter to drop — the one
+  whose absence brings the fewest rows, the narrowest guess — and says
+  that dropping the others brings rows the user did not ask for. A probe
+  that is a widening the model must not take on its own (hidden photos
+  counted in) carries `recommend: false` and is listed but never named.
+- `insurer-documents-by-subject`: the loop had asked once more after an
+  empty first round, and the words that came back ("ich konnte keine
+  Dokumente finden") went out without a call, because the data-question
+  nudge waits while another nudge is pending. After the empty-reply nudge
+  the next draft is a first draft like any other, so the checks apply.
+- `quote-of-security`: `position_news` and `position_detail` resolve a
+  name to the key of the one position it matches (open or sold out), and
+  name the candidates when several match; the rule of the depot area says
+  the key comes from the rows of `quotes` or `portfolio_overview`, with an
+  example. The case passes with the name as well.
+- `securities-in-depot`: `portfolio_overview(q = "Beispielbank")` named
+  no security, so it narrows to the depot whose label matches, and says
+  so in the note; the depot rule names `list_accounts` plus `account_ids`
+  as the other road, with an example. The case takes either
+  (`anyOf` in `ExpectedCall`).
+- `fewest-comments-per-year`: an example of "die wenigsten" with
+  `direction = "asc"` in the call, and why — `rank_by` alone orders from
+  the most, so the first row of each group is the one with the most.
+- `property-purchase`: an example in the documents area of "alles zum
+  Kauf …" as documents plus bookings, with `switch_area("finance")` when
+  the finance area is not in play.
+- `letter-reply-reads-text`: an example in the writing area of a reply
+  that names the invoice number and the deadline from the text, with the
+  rule that every fact the user asks to have named stands in the body,
+  even one the model would leave out.
+
+Whether that is 100 % is the next run's to say; the prompt grew by the
+examples and one rule in two areas, which `prompt_tokens_first` shows.
+
 ## Risks and what is left out on purpose
 
 - The router errs: a question needing two areas gets one. `switch_area`

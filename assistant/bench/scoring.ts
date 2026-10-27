@@ -62,7 +62,8 @@ function argAt(args: Record<string, unknown>, key: string): unknown {
 
 export function callMatches(expect: ExpectedCall, call: BenchCall): boolean {
   if (call.tool !== expect.tool) return false;
-  return Object.entries(expect.args ?? {}).every(([key, want]) => matches(want, argAt(call.args, key)));
+  const argsMatch = (want: Record<string, Expected>) => Object.entries(want).every(([key, w]) => matches(w, argAt(call.args, key)));
+  return argsMatch(expect.args ?? {}) || (expect.anyOf ?? []).some(argsMatch);
 }
 
 /**
