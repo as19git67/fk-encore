@@ -204,7 +204,8 @@ export function updatePhotoBook(id: number, payload: UpdatePhotoBookPayload) {
 export function rebuildPhotoBook(id: number, narrowing?: PhotoBookNarrowing) {
   return apiFetch<PhotoBook>(`/photo-books/${id}/rebuild`, {
     method: 'POST',
-    ...(narrowing ? { body: JSON.stringify({ narrowing }) } : {}),
+    // Always a JSON body: the endpoint has a request type, and an empty body is not valid JSON.
+    body: JSON.stringify(narrowing ? { narrowing } : {}),
   })
 }
 
