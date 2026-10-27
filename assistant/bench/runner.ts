@@ -54,6 +54,8 @@ export interface CaseRun {
   // ── the plan of a multi-step question (stage 3) ──
   /** The router asked for a plan (two areas, or chain words). */
   plan_asked?: boolean;
+  /** What the plan call came back with: the plan, a real tool call (used as round 1), or nothing usable. */
+  plan_reply?: "plan" | "tool_call" | "none";
   /** The steps the model planned, by tool; absent when it wrote no usable plan. */
   plan?: string[];
   /** How many of them got done. */
@@ -200,6 +202,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   let plan: string[] | undefined;
   let plan_done: number | undefined;
   let plan_asked = false;
+  let plan_reply: CaseRun["plan_reply"];
   let checks: number | undefined;
   let check_failed: number | undefined;
   let unverified = false;
@@ -233,6 +236,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       plan = result.plan.map((s) => s.tool);
       plan_done = result.plan.filter((s) => s.done).length;
     }
+    plan_reply = result.planOutcome;
     // The loop's own stand-ins are not the model's answer.
     answer = result.answer === NO_ANSWER || result.answer === OUT_OF_ROUNDS ? null : result.answer;
   } catch (err) {
@@ -256,6 +260,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     router_ms,
     ...followUps(trace),
     plan_asked,
+    ...(plan_reply ? { plan_reply } : {}),
     ...(plan ? { plan, plan_done } : {}),
     follow_up: (c.history?.length ?? 0) > 0,
     ...(checks !== undefined ? { checks, check_failed, check_ms, unverified } : {}),

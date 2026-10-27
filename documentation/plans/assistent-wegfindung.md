@@ -409,6 +409,18 @@ these parameters as given.
 
 - A benchmark mode against a synthetic test database, so that search,
   0-row hints and follow-ups are measured with real tools.
+- Finding (2026-10-26): the tools call the services through
+  `~encore/clients`, and Encore hands the caller's auth along, so a
+  benchmark run's real tools act as whoever started the run — never as a
+  stand-in user. Real tools over synthetic data therefore need a dedicated
+  benchmark account that owns the seeded data and starts the run itself:
+  seeders for finance (accounts, categories, bookings), meters (meters,
+  readings) and document metadata (rows with extracted text, pipeline
+  states set to done so no queue picks them up), photos left out because of
+  the file pipeline; cases of their own whose expectations name content
+  (sender, period, sum), never ids the sequences assign; a marker on every
+  seeded row so a run can remove its data again. Not started; decided after
+  the next GPU run.
 - Before each later stage the benchmark runs three times (temperature 0.2
   scatters); the means go into the table below.
 
@@ -417,6 +429,7 @@ these parameters as given.
 | Date | Model | Stage | Cases | Pass rate | First tool | Median rounds | Median prompt tokens (round 1) | Nudges |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-26 | Gemma-4-26B-A4B QAT UD-Q4_K_XL (CUDA, server backend, 30k ctx) | 6 + 1 (stage 2 not yet deployed) | 68 | 85 % (58) | 97 % | 3 | 5,116 | 16 |
+| 2026-10-26 (evening) | same | 1–5 | 75 | 88 % (66); on the 68 cases of the morning run 90 % (61) | 96 % | 3 | 5,250 | 21 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -430,6 +443,31 @@ three are a stop after 0 rows
 the case of stage 2 —, two skip a tool (`securities-in-depot` without
 `list_accounts`, `property-purchase` without `list_transactions`), one
 chooses `list_photos` over `search_photos`.
+
+The evening run of 2026-10-26 (stages 1 to 5 on `main`, seven new cases)
+against the morning run: on the 68 shared cases 58 → 61 passed. Fixed:
+`insurer-documents-by-subject` and `beach-photos` (the 0-row stops stage 2
+aimed at), `best-photo-per-year-into-album`, `letter-paid-invoices`.
+Broken: `letter-from-bookings` (the plan was written and followed, then
+the model declined to write the letter without the landlord's address).
+Of the seven new cases five pass; `empty-then-loosen-period` loosened the
+text instead of the period, `multi-invoices-paid` made no data call at
+all. Follow-ups on summarised turns: 100 % (stage 4). Checker (stage 5):
+72 checks, 4 objections, one answer out with the note, median 1,280 ms per
+check on top of the rounds; `best-photos-in-country` ("312 photos, found
+one") was a right objection, the two on `trips-last-year` ("nothing found"
+over an empty result) were not. Two defects the run exposed, fixed after
+it: the plan call came back as a plan in 2 of 19 cases — llama-server
+reads `tool_choice` as a string and ran a bound function as "auto", so the
+model called a real tool and the loop threw that reply away (now
+llm-service sends a bound call as that one tool with `required`, and the
+loop runs a tool call from the plan reply as round 1; the benchmark
+records `plan_reply`); and an empty first reply went back as an assistant
+message without content, which llm-service refuses
+(`rule-folder-by-month` failed on it; now `EMPTY_REPLY_NUDGE` without the
+draft). The checker, the summary and the router's model stage were bound
+calls too and worked by prompt and a one-tool list alone; the fix binds
+them by grammar as intended.
 
 ## Risks and what is left out on purpose
 

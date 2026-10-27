@@ -208,7 +208,8 @@ def _wire_message(msg: ChatMessage) -> dict[str, Any]:
 def server_payload(req: ChatRequest) -> dict[str, Any]:
     """The body for llama-server's ``/v1/chat/completions``.
 
-    Thinking is switched off per request on top of the deployment's
+    A bound call (``tool_choice`` naming a function) becomes that one tool
+    with ``tool_choice: "required"``, see below. Thinking is switched off per request on top of the deployment's
     ``--reasoning`` flag unless the request asks for it: a reasoning block
     spends exactly the context the tool results need, and an agent loop of
     several rounds pays for it every round. Templates that know no
@@ -225,9 +226,20 @@ def server_payload(req: ChatRequest) -> dict[str, Any]:
     if req.response_format is not None:
         payload["response_format"] = req.response_format
     if req.tools:
-        payload["tools"] = [t.model_dump() for t in req.tools]
+        # A bound call ({"type": "function", "function": {"name": X}}) reaches
+        # llama-server as the one tool X with tool_choice "required": its
+        # OpenAI-compatible endpoint reads tool_choice as a string and treats
+        # anything else as "auto", so a named function sent as it is let the
+        # model call any tool or answer in words — the agent loop's plan call
+        # came back as a plain tool call in 17 of 19 benchmark cases. One tool
+        # plus "required" is a grammar for exactly that call.
+        forced = forced_tool_name(req.tool_choice)
+        tools = [t for t in req.tools if forced is None or t.function.name == forced]
+        payload["tools"] = [t.model_dump() for t in tools]
         payload["parallel_tool_calls"] = True
-        if req.tool_choice is not None:
+        if forced is not None:
+            payload["tool_choice"] = "required"
+        elif req.tool_choice is not None:
             payload["tool_choice"] = req.tool_choice
     return payload
 

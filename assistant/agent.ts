@@ -401,6 +401,13 @@ function proposedEarlier(history: ChatMessage[], writeTools: Set<string>): boole
     || (m.role === "assistant" && !!m.tool_calls?.some((c) => writeTools.has(c.function.name))));
 }
 
+/**
+ * Sent back once when the model's first reply of a turn holds neither a tool
+ * call nor words. The empty draft itself is not sent along: llm-service
+ * refuses an assistant message without content or tool calls.
+ */
+export const EMPTY_REPLY_NUDGE = "Your reply was empty. Call the tool that answers the question now, or answer in plain words.";
+
 /** Sent with the forced last round when its answer was a tool call written as text. */
 export const FINAL_ANSWER_NUDGE = "No more tool calls are possible. Answer the user now in plain words, only from the tool results above; say what is missing if they were not enough.";
 
@@ -502,6 +509,12 @@ export interface TurnResult {
   routing: RoutingStage;
   /** The plan of a multi-step question, with what got done (stage 3); absent when none was asked for or written. */
   plan?: PlanStep[];
+  /**
+   * What the plan call came back with, when one was made: the plan, a real
+   * tool call (then used as round 1 instead of being thrown away), or nothing
+   * usable.
+   */
+  planOutcome?: "plan" | "tool_call" | "none";
   /** The checker's work (stage 5); absent when no answer was checked. */
   checks?: TurnChecks;
 }
@@ -743,6 +756,9 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let plan: PlanStep[] | null = null;
   let planRounds = 0;
   let planNudged = false;
+  let planOutcome: TurnResult["planOutcome"];
+  /** The plan call's reply when it was a real tool call: round 1 runs it instead of asking again. */
+  let carried: ChatReply | null = null;
   const planNames = firstTools.map((t) => t.name);
   const planDefinition = writePlanDefinition(planNames);
   if (routing.needsPlan && planNames.length >= 2 && maxRounds > 2) {
@@ -760,6 +776,14 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       planRounds = 1;
       plan = parsePlan(reply, new Set(planNames));
       const call = reply.tool_calls.find((c) => c.function.name === WRITE_PLAN_NAME);
+      planOutcome = plan && call ? "plan" : "none";
+      if (!(plan && call) && reply.tool_calls.some((c) => c.function.name !== WRITE_PLAN_NAME)) {
+        // The model went straight for a tool: that reply is round 1, not
+        // waste. The plan call then counts as that round.
+        planOutcome = "tool_call";
+        carried = { ...reply, tool_calls: reply.tool_calls.filter((c) => c.function.name !== WRITE_PLAN_NAME) };
+        planRounds = 0;
+      }
       if (plan && call) {
         lastRoundStart = messages.length;
         messages.push({ role: "assistant", content: null, tool_calls: [call] });
@@ -792,15 +816,32 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       max_tokens: ANSWER_TOKENS,
     };
     let reply: ChatReply;
-    try {
-      reply = await send(request);
-    } catch (err) {
-      if (!(err instanceof ContextTooLargeError)) throw err;
-      // The estimate was optimistic. Shrink everything that can shrink and
-      // try this round once more.
-      fit(definitions, messages.length, 0.6);
-      request.messages = [...messages, ...(nudge ?? [])];
-      reply = await send(request);
+    if (carried) {
+      reply = carried;
+      carried = null;
+    } else {
+      try {
+        reply = await send(request);
+      } catch (err) {
+        if (!(err instanceof ContextTooLargeError)) throw err;
+        // The estimate was optimistic. Shrink everything that can shrink and
+        // try this round once more.
+        fit(definitions, messages.length, 0.6);
+        request.messages = [...messages, ...(nudge ?? [])];
+        reply = await send(request);
+      }
+    }
+
+    // Neither a call nor words before any tool ran: asked once more, with
+    // the tools still offered. The regex checks below would otherwise send
+    // the empty draft along as an assistant message without content, which
+    // llm-service refuses. After a tool ran, the words-only retry below
+    // handles an empty reply.
+    const emptyReply = !reply.tool_calls.length && !(reply.content ?? "").trim();
+    if (emptyReply && !calledTools && !last && !emptyRetried) {
+      emptyRetried = true;
+      nudge = [{ role: "user", content: EMPTY_REPLY_NUDGE }];
+      continue;
     }
 
     const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
@@ -824,7 +865,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     // own, so it is sent back to it once.
     const planOpen = !reply.tool_calls.length && plan !== null && !planNudged && plan.some((s) => !s.done)
       && !(missingAreas && saysPermissionMissing(reply.content));
-    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision || planOpen)) {
+    if (!last && nudge === null && !emptyReply && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision || planOpen)) {
       // Not kept in the transcript: the draft was never the answer.
       const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE
         : claimsRevision ? REVISION_NUDGE : planOpen ? planNudge(plan!) : DATA_QUESTION_NUDGE;
@@ -1073,6 +1114,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     answer: final, blocks, transcript, rounds, toolResults, context: usage,
     areas: AREA_IDS.filter((id) => active.has(id)), routing: routing.stage,
     ...(plan ? { plan } : {}),
+    ...(planOutcome ? { planOutcome } : {}),
     ...(checks ? { checks } : {}),
   };
 }
