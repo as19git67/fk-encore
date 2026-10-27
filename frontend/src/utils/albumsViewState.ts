@@ -150,6 +150,13 @@ export function rememberFocusedAlbumId(id: number): void {
   try { localStorage.setItem(LAST_FOCUSED_ALBUM_KEY, String(id)) } catch { /* ignore */ }
 }
 
+/** Drops the remembered album when it is `id` (deleted, or no longer shared). */
+export function forgetRememberedAlbumId(id: number): void {
+  try {
+    if (localStorage.getItem(LAST_FOCUSED_ALBUM_KEY) === String(id)) localStorage.removeItem(LAST_FOCUSED_ALBUM_KEY)
+  } catch { /* ignore */ }
+}
+
 export function readRememberedAlbumId(): number | null {
   try {
     const raw = localStorage.getItem(LAST_FOCUSED_ALBUM_KEY)

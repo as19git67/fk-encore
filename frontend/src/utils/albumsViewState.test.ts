@@ -11,6 +11,7 @@ import {
   hasAnyAlbumsFilterQueryParam,
   loadAlbumsStateFromStorage,
   parseAlbumsStateFromQuery,
+  forgetRememberedAlbumId,
   readRememberedAlbumId,
   rememberFocusedAlbumId,
   saveAlbumsStateToStorage,
@@ -229,6 +230,18 @@ describe('albumsViewState', () => {
     it('returns null for a corrupted stored value', () => {
       localStorage.setItem(LAST_FOCUSED_ALBUM_KEY, 'not-a-number')
       expect(readRememberedAlbumId()).toBeNull()
+    })
+
+    it('forgets the album that cannot be opened any more', () => {
+      rememberFocusedAlbumId(42)
+      forgetRememberedAlbumId(42)
+      expect(readRememberedAlbumId()).toBeNull()
+    })
+
+    it('keeps another remembered album', () => {
+      rememberFocusedAlbumId(42)
+      forgetRememberedAlbumId(7)
+      expect(readRememberedAlbumId()).toBe(42)
     })
   })
 

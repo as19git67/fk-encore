@@ -3947,14 +3947,14 @@ export async function batchFavoritePhotosLogic(
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   const isOwner = album.user_id === userId;
   if (!isOwner) {
     const share = await dbFirst<typeof albumShares.$inferSelect>(
       db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
     );
-    if (!share) throw new Error("Unauthorized access to album");
+    if (!share) throw APIError.permissionDenied("Unauthorized access to album");
   }
 
   // Verify all photos belong to the album
@@ -4676,7 +4676,7 @@ export async function getAlbumLogic(
   );
 
   if (!album) {
-    throw new Error("Album not found");
+    throw APIError.notFound("Album not found");
   }
 
   // Check access
@@ -4686,7 +4686,7 @@ export async function getAlbumLogic(
   );
 
   if (!isOwner && !share) {
-    throw new Error("Unauthorized access to album");
+    throw APIError.permissionDenied("Unauthorized access to album");
   }
 
   const hasWriteAccess = share?.access_level === "write" || share?.access_level === "write_share";
@@ -4975,14 +4975,14 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   const isOwner = album.user_id === userId;
   if (!isOwner) {
     const share = await dbFirst<typeof albumShares.$inferSelect>(
       db.select().from(albumShares).where(and(eq(albumShares.album_id, req.albumId), eq(albumShares.user_id, userId)))
     );
-    if (!share) throw new Error("Unauthorized access to album");
+    if (!share) throw APIError.permissionDenied("Unauthorized access to album");
   }
 
   const values: any = {};
@@ -5068,7 +5068,7 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.id))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   // Check write access
   const isOwner = album.user_id === userId;
@@ -5179,7 +5179,7 @@ export async function addPhotoToAlbumLogic(userId: number, req: AddPhotoToAlbumR
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   // Check write access
   const isOwner = album.user_id === userId;
@@ -5558,7 +5558,7 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   const isOwner = album.user_id === userId;
   if (!isOwner) {
@@ -5647,7 +5647,7 @@ export async function getAlbumSharesLogic(userId: number, albumId: number): Prom
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   const isOwner = album.user_id === userId;
   const callerShare = isOwner ? null : await dbFirst<typeof albumShares.$inferSelect>(
@@ -5748,7 +5748,7 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, req.albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   const isOwner = album.user_id === userId;
   if (!isOwner) {
@@ -5945,7 +5945,7 @@ export async function createAlbumPublicLinkLogic(userId: number, albumId: number
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
   if (album.user_id !== userId) {
     const share = await dbFirst<typeof albumShares.$inferSelect>(
       db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
@@ -5999,7 +5999,7 @@ export async function deleteAlbumPublicLinkLogic(userId: number, albumId: number
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
   if (album.user_id !== userId) {
     const share = await dbFirst<typeof albumShares.$inferSelect>(
       db.select().from(albumShares).where(and(eq(albumShares.album_id, albumId), eq(albumShares.user_id, userId)))
@@ -6038,7 +6038,7 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, link.album_id))
   );
-  if (!album) throw new Error("Album not found");
+  if (!album) throw APIError.notFound("Album not found");
 
   // A photo hidden by ANY album participant (owner or a shared collaborator)
   // must never reach an anonymous public-link visitor — there's no "current
