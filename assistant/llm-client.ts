@@ -26,11 +26,19 @@ export class LlmServiceUnavailableError extends Error {
 /**
  * llama-server could not read what the model wrote as the template's
  * tool-call syntax ("The model produced output that does not match the
- * expected … format", llama.cpp issue #25072, intermittent on Gemma 4). The
- * output is sampled, so the same request may well succeed once more; the
- * agent loop retries such a call once.
+ * expected … format"). On Gemma 4 that happens for a call bound by grammar
+ * (`tool_choice: "required"`): the grammar llama-server builds for the
+ * template leaves the tail of the call unconstrained (llama.cpp issues
+ * #29089 and #30256, fix #29115 in builds from 2026-09-19), the model
+ * wanders off, and the parser rejects the result. For the same prompt it
+ * does so every time. The agent loop sends such a call once more without
+ * the grammar; an ordinary round, where the fault is sporadic (issue
+ * #25072), is simply sent again.
  */
 export class MalformedReplyError extends LlmServiceUnavailableError {
+  /** Replies of the same turn the loop had already sent once more when it gave up on this one. */
+  repeated = 0;
+
   constructor(reason: string) {
     super(reason);
     this.name = "MalformedReplyError";

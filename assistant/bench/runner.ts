@@ -12,7 +12,7 @@
 import { NO_ANSWER, OUT_OF_ROUNDS, runTurn, WRITE_PLAN_NAME } from "../agent";
 import type { AreaId } from "../areas/index";
 import { estimateTokens } from "../catalog";
-import type { ChatFn, ChatRequest } from "../llm-client";
+import { MalformedReplyError, type ChatFn, type ChatRequest } from "../llm-client";
 import { isRouterRequest, type RoutingStage } from "../router";
 import { isCheckRequest, verifyByDefault } from "../verify";
 import type { AssistantUser, ToolSpec } from "../types";
@@ -246,6 +246,8 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   } catch (err) {
     if (err instanceof BenchCancelledError) throw err;
     error = err instanceof Error ? err.message : String(err);
+    // The replies sent once more before the loop gave up count as well.
+    if (err instanceof MalformedReplyError && err.repeated) malformed_replies = err.repeated;
   }
   return {
     id: c.id,

@@ -431,6 +431,7 @@ these parameters as given.
 | 2026-10-26 | Gemma-4-26B-A4B QAT UD-Q4_K_XL (CUDA, server backend, 30k ctx) | 6 + 1 (stage 2 not yet deployed) | 68 | 85 % (58) | 97 % | 3 | 5,116 | 16 |
 | 2026-10-26 (evening) | same | 1–5 | 75 | 88 % (66); on the 68 cases of the morning run 90 % (61) | 96 % | 3 | 5,250 | 21 |
 | 2026-10-27 | same | 1–5 with the bound-call fix | 75 | 81 % (61); 88 % of the 69 cases llama-server's parser did not lose | 97 % | 3 | 4,231 | 18 |
+| 2026-10-27 (afternoon) | same | 1–5 with one plain retry of an unreadable reply | 75 | 83 % (62); 90 % of the 69 cases the grammar did not lose | 96 % | 3 | 4,340 | 25 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -483,19 +484,46 @@ model wrote, before any tool ran (`expenses-by-tag`, `pv-tax-exempt`,
 `shared-albums-participants`, `followup-photos-album`,
 `redact-price-bundle`, `keep-answer-as-text-document`, all green the
 evening before, four of them on tools whose arguments carry long text).
-That is llama.cpp issue #25072, intermittent and independent of this
-plan; the request path for an ordinary round did not change between the
-two runs. Since the output is sampled, the loop now sends such a request
-once more before giving up (`MalformedReplyError` in `llm-client.ts`, the
-retry in `send` of `agent.ts`, `malformed_replies` per case and in the
-summary) — the next run shows whether one retry is enough. Of the 69
-cases that ran, 61 passed (88 %). Newly failed: `insurer-documents-by-subject`
+That looked like llama.cpp issue #25072, intermittent and independent of
+this plan, so the loop sent such a request once more before giving up
+(`MalformedReplyError` in `llm-client.ts`, `malformed_replies` per case
+and in the summary). The afternoon run of the same day showed otherwise
+(see below). Of the 69 cases that ran, 61 passed (88 %). Newly failed: `insurer-documents-by-subject`
 (answered "nothing found" without a call) and `letter-paid-invoices` (the
 body without the figures the case expects). Checker: 67 checks, 2
 objections (`photos-with-description`, "84 photos, found one", was right;
 `trips-last-year`, "nothing found" over an empty result, was not), no
 answer out with the note, median 1,566 ms. Follow-ups 67 %, all three
 misses the parser errors above.
+
+The afternoon run of 2026-10-27 (the plain retry deployed) settles what
+the parser errors are. Six cases failed on the same message again, each
+after the retry (`nudges` 1, `rounds` 0), five of them the same cases as
+in the morning; and the six are exactly the six plan calls that did not
+come back: 19 cases ask for a plan, 13 planned, 6 died in the plan call.
+Every other round of the run read. The plan call is the one request a
+round makes with a grammar (`tool_choice: "required"`, the bound-call fix
+of the morning); the evening run before that fix, with the same prompts
+and no grammar, lost none of them. That is llama.cpp issue #29089 (fix
+#29115, in builds from 2026-09-19) together with #30256: the grammar
+llama-server builds from Gemma 4's template leaves the tail of a required
+call unconstrained, the model wanders into a thought channel or past the
+call, and the PEG parser rejects what it wrote — deterministically for a
+given prompt at temperature 0.2, so a plain retry cannot help. The loop
+now sends a bound call that failed this way once more as the one tool
+without the grammar (`tool_choice: "auto"`, `unbound` in `agent.ts`): the
+model then calls it by prompt, the way the checker, the summary and the
+router worked before the grammar. The plan call is the only bound call
+on the loop's own path; the checker and the router catch their errors and
+go without. The count of repeated replies now survives a second failure
+(`repeated` on the error, read by the benchmark). A llama-server build
+with #29115 should make the retry idle; `malformed_replies` says whether
+it is. Apart from the plan calls: 62 of 69 passed (90 %), the morning's
+`insurer-documents-by-subject` passes again, `securities-in-depot` lost
+`list_accounts` again, `letter-reply-reads-text` wrote the letter without
+the figures. Checker: 66 checks, 3 objections (`trips-last-year`,
+`best-photos-in-country`, `photos-with-description` — the last two right),
+median 1,265 ms.
 
 ## Risks and what is left out on purpose
 

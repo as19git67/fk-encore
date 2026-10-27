@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import { MalformedReplyError, type ChatRequest, type ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -1170,7 +1170,22 @@ describe("what the GPU run of 2026-10-26 showed (assistent-wegfindung.md, measur
   });
 });
 
-describe("what the GPU run of 2026-10-27 showed: replies llama-server could not parse (llama.cpp issue #25072)", () => {
+describe("unbound: a request without the grammar of its bound call", () => {
+  const tools = [{ type: "function", function: { name: "a" } }, { type: "function", function: { name: "b" } }];
+  it("cuts the tools to the bound one and frees the choice; 'required' keeps its tools", () => {
+    expect(unbound({ messages: [], tools, tool_choice: { type: "function", function: { name: "b" } }, max_tokens: 5 }))
+      .toEqual({ messages: [], tools: [tools[1]], tool_choice: "auto", max_tokens: 5 });
+    expect(unbound({ messages: [], tools, tool_choice: "required" })).toEqual({ messages: [], tools, tool_choice: "auto" });
+  });
+  it("leaves an unbound request as it is", () => {
+    const plain = { messages: [], tools, tool_choice: "auto" as const };
+    expect(unbound(plain)).toBe(plain);
+    const none = { messages: [], tools };
+    expect(unbound(none)).toBe(none);
+  });
+});
+
+describe("what the GPU runs of 2026-10-27 showed: replies llama-server could not parse (llama.cpp issues #25072 and #29089)", () => {
   const unread = () => { throw new MalformedReplyError("The model produced output that does not match the expected peg-gemma4 format"); };
 
   it("asks for the same round once more, withdraws what was streamed, and counts it", async () => {
@@ -1191,10 +1206,46 @@ describe("what the GPU run of 2026-10-27 showed: replies llama-server could not 
     expect(res.answer).toBe("Keine Buchungen vom Baumarkt.");
   });
 
-  it("gives up after the second unreadable reply in a row, and reports none when every reply read", async () => {
+  it("sends a plan call the grammar broke once more as the one tool without the grammar, then follows the plan (llama.cpp issue #29089)", async () => {
+    // The fourth GPU run of 2026-10-27: the six cases llama-server's parser lost were
+    // exactly the six plan calls that failed, twice each — the same prompt, every time.
+    clients.documents.listCorrespondents.mockResolvedValue({ items: [] });
+    clients.documents.listDocuments.mockResolvedValue({ items: [{ id: 201, title: "Rechnung Heizungswartung", doc_date: "2026-09-02", correspondent_display: "Musterfirma Haustechnik" }], total: 1 });
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const events: TurnEvent[] = [];
+    const { fn, requests } = scripted([
+      unread,
+      planReply([["search_documents", "die Rechnungen"], ["list_transactions", "die Zahlungen"]]),
+      calls(["search_documents", { correspondent: "Musterfirma Haustechnik" }]),
+      calls(["list_transactions", { q: "Musterfirma Haustechnik" }]),
+      answer("Eine Rechnung, keine Zahlung."),
+    ]);
+    const question = "Welche Rechnungen der Musterfirma Haustechnik liegen vor, und sind sie alle bezahlt?";
+    const res = await runTurn({ user: USER, history: [], question, tools: catalogFor(USER), chat: fn, now: NOW, emit: (e) => events.push(e) });
+    const bound = requests[0]!;
+    expect(bound.tool_choice).toEqual({ type: "function", function: { name: WRITE_PLAN_NAME } });
+    const names = (req: ChatRequest) => (req.tools ?? []).map((t) => (t as { function: { name: string } }).function.name);
+    expect(names(bound)).toContain("search_documents");
+    // The retry: the same messages, only write_plan on offer, and no grammar.
+    const retry = requests[1]!;
+    expect(retry.messages).toEqual(bound.messages);
+    expect(names(retry)).toEqual([WRITE_PLAN_NAME]);
+    expect(retry.tool_choice).toBe("auto");
+    expect(retry.max_tokens).toBe(bound.max_tokens);
+    // Round 1 then has the full list again and follows the plan.
+    expect(names(requests[2]!)).toEqual(names(bound));
+    expect(res.planOutcome).toBe("plan");
+    expect(res.plan?.map((s) => s.done)).toEqual([true, true]);
+    expect(res.malformedReplies).toBe(1);
+    expect(events.filter((e) => e.type === "retract")).toHaveLength(1);
+    expect(res.answer).toBe("Eine Rechnung, keine Zahlung.");
+  });
+
+  it("gives up after the second unreadable reply in a row, carrying the count, and reports none when every reply read", async () => {
     const { fn } = scripted([unread, unread]);
-    await expect(runTurn({ user: USER, history: [], question: "Zeig mir die Buchungen vom Baumarkt", tools: catalogFor(USER), chat: fn, now: NOW }))
-      .rejects.toBeInstanceOf(MalformedReplyError);
+    const failed = runTurn({ user: USER, history: [], question: "Zeig mir die Buchungen vom Baumarkt", tools: catalogFor(USER), chat: fn, now: NOW });
+    await expect(failed).rejects.toBeInstanceOf(MalformedReplyError);
+    await expect(failed).rejects.toMatchObject({ repeated: 1 });
     const clean = scripted([answer("Gern geschehen!")]);
     const res = await runTurn({ user: USER, history: [], question: "Danke!", tools: catalogFor(USER), chat: clean.fn, now: NOW });
     expect(res.malformedReplies).toBeUndefined();

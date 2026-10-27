@@ -17,7 +17,7 @@ vi.mock("./llm-client", async (importOriginal) => {
 import db from "../db/database";
 import { assistantBenchmarkRun } from "../db/schema";
 import { clients } from "./clients.test-helper";
-import { chat, type ChatReply, type ChatRequest } from "./llm-client";
+import { chat, MalformedReplyError, type ChatReply, type ChatRequest } from "./llm-client";
 import { allTools, catalogFor } from "./catalog";
 import { BENCH_CASES, type BenchCase } from "./bench/cases";
 import { followUps, runBenchCase } from "./bench/runner";
@@ -315,6 +315,14 @@ describe("running a case", () => {
     });
     expect(run.score.passed).toBe(true);
     expect(run).toMatchObject({ tool_errors: 1, errors_corrected: 1 });
+  });
+
+  it("counts the replies sent once more even when the loop gave up on the second", async () => {
+    const c = caseById("multi-invoices-paid");
+    const unread = async (): Promise<ChatReply> => { throw new MalformedReplyError("The model produced output that does not match the expected peg-gemma4 format"); };
+    const run = await runBenchCase(c, { chat: vi.fn(unread), tools, user });
+    expect(run.error).toMatch(/peg-gemma4/);
+    expect(run).toMatchObject({ malformed_replies: 1, rounds: 0, nudges: 1 });
   });
 
   it("a canned $error fails the call as a tool would", async () => {
