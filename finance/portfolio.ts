@@ -623,9 +623,9 @@ export function compareDepotThenName(
   return depotNameCollator.compare(a.depot, b.depot) || depotNameCollator.compare(a.name, b.name);
 }
 
-/** The depot a position sorts under: the first of its depots by label. */
-function positionDepotLabel(p: PortfolioPosition, labelById: ReadonlyMap<number, string>): string {
-  const labels = p.account_ids.map((id) => labelById.get(id) ?? "").sort(depotNameCollator.compare);
+/** The depot a security sorts under: the first of its depots by label. */
+export function firstDepotLabel(accountIds: readonly number[], labelById: ReadonlyMap<number, string>): string {
+  const labels = accountIds.map((id) => labelById.get(id) ?? "").sort(depotNameCollator.compare);
   return labels[0] ?? "";
 }
 
@@ -637,7 +637,7 @@ export function sortPositionsByDepot(
   positions: PortfolioPosition[],
   labelById: ReadonlyMap<number, string>,
 ): PortfolioPosition[] {
-  const sortKey = (p: PortfolioPosition) => ({ depot: positionDepotLabel(p, labelById), name: p.name ?? p.key });
+  const sortKey = (p: PortfolioPosition) => ({ depot: firstDepotLabel(p.account_ids, labelById), name: p.name ?? p.key });
   return [...positions].sort((a, b) => {
     if (a.open !== b.open) return a.open ? -1 : 1;
     return compareDepotThenName(sortKey(a), sortKey(b));
@@ -3003,5 +3003,82 @@ export const resetDocumentReadings = api(
       holdings_removed: holdingsRemoved.length,
       rederived,
     };
+  },
+);
+
+// ----------------------------------------------------------------------
+// POST /finance/portfolio/derive — attach the account bookings of the
+// depots in scope to their transactions (or derive new ones). Runs on its
+// own after every sync; this is the button for a backfill, once per bank
+// contact of the depots the caller may write to.
+// ----------------------------------------------------------------------
+
+interface DeriveFromBookingsParams {
+  accounts?: string;
+}
+
+interface DeriveFromBookingsResponse {
+  /** Transactions derived anew from bookings. */
+  derived: number;
+  /** Bookings attached to a transaction a document created first. */
+  merged: number;
+  /** Bookings already covered by an earlier run. */
+  duplicates: number;
+  /** Bookings that looked like securities bookings and were examined. */
+  candidates: number;
+  skipped_not_classified: number;
+  skipped_no_identifier: number;
+  skipped_no_holding: number;
+  skipped_unconfirmed: number;
+  /** Depots in scope without a bank contact: nothing to derive from. */
+  depots_without_bank: number;
+  errors: string[];
+}
+
+export const deriveFromBookings = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/portfolio/derive",
+    auth: true,
+  },
+  async ({ accounts }: DeriveFromBookingsParams): Promise<DeriveFromBookingsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const depots = await writableDepots(auth, parseAccountIds(accounts));
+    if (depots.length === 0) {
+      throw APIError.permissionDenied("write access to at least one depot is required");
+    }
+    const rows = await db
+      .select({ id: financeAccount.id, bankcontact_id: financeAccount.bankcontact_id })
+      .from(financeAccount)
+      .where(inArray(financeAccount.id, depots.map((d) => d.id)));
+    const bankcontacts = [...new Set(rows.map((r) => r.bankcontact_id).filter((id): id is number => id !== null))];
+
+    const total: DeriveFromBookingsResponse = {
+      derived: 0,
+      merged: 0,
+      duplicates: 0,
+      candidates: 0,
+      skipped_not_classified: 0,
+      skipped_no_identifier: 0,
+      skipped_no_holding: 0,
+      skipped_unconfirmed: 0,
+      depots_without_bank: rows.filter((r) => r.bankcontact_id === null).length,
+      errors: [],
+    };
+    for (const bc of bankcontacts) {
+      const s = await deriveDepotTransactionsForBankcontact(bc);
+      total.derived += s.derived;
+      total.merged += s.merged;
+      total.duplicates += s.duplicates;
+      total.candidates += s.candidates;
+      total.skipped_not_classified += s.skipped_not_classified;
+      total.skipped_no_identifier += s.skipped_no_identifier;
+      total.skipped_no_holding += s.skipped_no_holding;
+      total.skipped_unconfirmed += s.skipped_unconfirmed;
+      total.errors.push(...s.errors);
+    }
+    return total;
   },
 );

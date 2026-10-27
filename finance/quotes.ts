@@ -20,7 +20,7 @@ import db from "../db/database";
 import { financeNewsSeen, financeQuote, financeQuoteNews, financeQuoteSymbol } from "../db/schema";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { latestHoldings, visibleDepots } from "./portfolio";
+import { compareDepotThenName, firstDepotLabel, latestHoldings, visibleDepots } from "./portfolio";
 import { QuoteRateLimitedError, quoteProvider, type HistoryRange } from "./quote-provider";
 import { isoTimestamp, latestQuotes } from "./quote-store";
 
@@ -34,6 +34,8 @@ export interface ActivePosition {
   name: string | null;
   /** Shares across the depots (scale 8). */
   amount: number;
+  /** The depots holding shares of it. */
+  account_ids: number[];
 }
 
 /**
@@ -48,8 +50,9 @@ export async function activePositions(accountIds: number[]): Promise<ActivePosit
     if (!key) continue;
     const amount = Number(h.amount);
     if (!Number.isFinite(amount) || amount <= 0) continue;
-    const p = byKey.get(key) ?? { key, isin: h.isin, wkn: h.wkn, name: h.name, amount: 0 };
+    const p = byKey.get(key) ?? { key, isin: h.isin, wkn: h.wkn, name: h.name, amount: 0, account_ids: [] };
     p.amount += amount;
+    if (!p.account_ids.includes(h.account_id)) p.account_ids.push(h.account_id);
     p.isin ??= h.isin;
     p.wkn ??= h.wkn;
     p.name ??= h.name;
@@ -275,6 +278,8 @@ export function thin<T>(points: T[], max = MAX_POINTS): T[] {
 
 export interface QuoteTile {
   key: string;
+  /** The depot the tile is listed under: the first of the depots holding it, by label. */
+  depot: string;
   isin: string | null;
   wkn: string | null;
   name: string | null;
@@ -345,6 +350,8 @@ export async function buildQuoteTiles(
   range: QuoteRange,
   now = new Date(),
   userId: number | null = null,
+  /** Depot labels by id: the tiles are listed by depot, then name, as in the portfolio. */
+  depotLabels: ReadonlyMap<number, string> = new Map(),
 ): Promise<QuoteTile[]> {
   const positions = await activePositions(accountIds);
   if (positions.length === 0) return [];
@@ -415,6 +422,7 @@ export async function buildQuoteTiles(
       }
       return {
         key: p.key,
+        depot: firstDepotLabel(p.account_ids, depotLabels),
         isin: p.isin,
         wkn: p.wkn,
         name,
@@ -428,7 +436,7 @@ export async function buildQuoteTiles(
         news_unread: unread.get(p.key) ?? 0,
       };
     })
-    .sort((a, b) => (Number(b.value ?? 0) - Number(a.value ?? 0)) || (a.name ?? "").localeCompare(b.name ?? ""));
+    .sort((a, b) => compareDepotThenName({ depot: a.depot, name: a.name ?? a.key }, { depot: b.depot, name: b.name ?? b.key }));
 }
 
 export const getQuotes = api(
@@ -439,7 +447,8 @@ export const getQuotes = api(
     const r = (range ?? "1m") as QuoteRange;
     if (!RANGES.includes(r)) throw APIError.invalidArgument(`range must be one of ${RANGES.join(", ")}`);
     const depots = (await visibleDepots(auth, parseAccountIds(accounts))).filter((d) => !d.closed || accounts);
-    const tiles = await buildQuoteTiles(depots.map((d) => d.id), r, new Date(), Number(auth.userID));
+    const labels = new Map(depots.map((d) => [d.id, d.label]));
+    const tiles = await buildQuoteTiles(depots.map((d) => d.id), r, new Date(), Number(auth.userID), labels);
     const asOf = tiles.reduce<string | null>((max, t) => (t.last && (!max || t.last.at > max) ? t.last.at : max), null);
     return { range: r, tiles, as_of: asOf };
   },

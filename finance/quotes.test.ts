@@ -308,8 +308,9 @@ describe("buildQuoteTiles and getQuotes", () => {
     await refreshQuotes(await activePositions([d]), NOW);
 
     const tiles = await buildQuoteTiles([d], "1d", NOW);
-    expect(tiles.map((t) => t.key)).toEqual([ISIN_A, ISIN_B]);
-    const a = tiles[0]!;
+    // By depot, then name: the security without a symbol keeps its holding's name.
+    expect(tiles.map((t) => t.key)).toEqual([ISIN_B, ISIN_A]);
+    const a = tiles[1]!;
     expect(a).toMatchObject({
       name: "Name of SNN.DE",
       amount: "10.00000000",
@@ -322,15 +323,15 @@ describe("buildQuoteTiles and getQuotes", () => {
     });
     expect(a.points.map((p) => p.price)).toEqual(["10.400000", "10.500000", "10.600000", "10.800000"]);
 
-    const b = tiles[1]!;
+    const b = tiles[0]!;
     expect(b).toMatchObject({ status: "unresolved", last: null, value: null, change: null, points: [] });
 
     // A year's range: closes, change against the oldest in the window.
-    const year = await buildQuoteTiles([d], "1y", NOW);
+    const year = (await buildQuoteTiles([d], "1y", NOW)).find((t) => t.key === ISIN_A)!;
     // The closes, then the newest price finishing the line.
-    expect(year[0]!.points.map((p) => p.price)).toEqual(["9.000000", "10.200000", "10.400000", "10.800000"]);
-    expect(year[0]!.change).toEqual({ absolute: "1.80", percent: "20.00" });
-    expect(year[0]!.last!.price).toBe("10.800000");
+    expect(year.points.map((p) => p.price)).toEqual(["9.000000", "10.200000", "10.400000", "10.800000"]);
+    expect(year.change).toEqual({ absolute: "1.80", percent: "20.00" });
+    expect(year.last!.price).toBe("10.800000");
   });
 
   it("draws a day or a week from the closes while there are no minutes", async () => {
@@ -357,6 +358,22 @@ describe("buildQuoteTiles and getQuotes", () => {
     await db.delete(financeQuote).where(eq(financeQuote.kind, "intraday"));
     const closed = await buildQuoteTiles([d], "1w", NOW);
     expect(closed[0]!.points.map((p) => p.price)).toEqual(["9.500000", "10.000000"]);
+  });
+
+  it("lists the tiles by depot, then name, as the portfolio lists its positions", async () => {
+    const zeta = await insertDepot("Zeta-Depot");
+    const alpha = await insertDepot("Alpha-Depot");
+    await insertHolding(zeta, "2026-02-03", ISIN_A, "100", null, "Aaa Beispiel");
+    await insertHolding(alpha, "2026-02-03", ISIN_B, "1", null, "Zzz Beispiel");
+    await insertHolding(alpha, "2026-02-03", "XF0000000018", "1", null, "Mmm Beispiel");
+
+    const labels = new Map([[zeta, "Zeta-Depot"], [alpha, "Alpha-Depot"]]);
+    const tiles = await buildQuoteTiles([zeta, alpha], "1d", NOW, null, labels);
+    expect(tiles.map((t) => [t.depot, t.name])).toEqual([
+      ["Alpha-Depot", "Mmm Beispiel"],
+      ["Alpha-Depot", "Zzz Beispiel"],
+      ["Zeta-Depot", "Aaa Beispiel"],
+    ]);
   });
 
   it("serves the caller's depots and refuses an unknown range", async () => {

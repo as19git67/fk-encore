@@ -208,6 +208,9 @@ const tiles = computed(() =>
   ),
 )
 
+/** The tiles come by depot (as the portfolio's positions); with more than one, each names its depot. */
+const severalDepots = computed(() => new Set(tiles.value.map((t) => t.depot)).size > 1)
+
 const toolbar = useListToolbar({
   search,
   filter: {
@@ -403,7 +406,7 @@ const STATUS_TEXT: Record<QuoteTile['status'], string> = {
             <div class="qv-tile-top">
               <button type="button" class="qv-tile-head" @click="openPosition(tile)">
                 <span class="qv-tile-name">{{ tile.name ?? tile.key }}</span>
-                <span class="qv-tile-id">{{ tile.isin ?? tile.wkn }}</span>
+                <span class="qv-tile-id">{{ tile.isin ?? tile.wkn }}<template v-if="severalDepots && tile.depot"> · {{ tile.depot }}</template></span>
               </button>
               <button
                 v-if="tile.news_unread > 0"
