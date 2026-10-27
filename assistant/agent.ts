@@ -155,6 +155,19 @@ export function areaPackage(area: Area, tools: ToolSpec[]): string {
 
 // ─── the plan of a multi-step question (stage 3 of assistent-wegfindung.md) ──
 
+/**
+ * The same request without the grammar of a bound call: the tool list cut to
+ * the bound tool, and the model free to call it or not. For an unbound
+ * request, the request itself.
+ */
+export function unbound(request: ChatRequest): ChatRequest {
+  const choice = request.tool_choice;
+  const forced = typeof choice === "object" && choice !== null ? choice.function.name : choice === "required" ? null : undefined;
+  if (forced === undefined) return request;
+  const tools = forced === null ? request.tools : request.tools?.filter((t) => (t as { function?: { name?: string } }).function?.name === forced);
+  return { ...request, tools, tool_choice: "auto" };
+}
+
 export const WRITE_PLAN_NAME = "write_plan";
 /** What the plan call may spend on generation: a few short lines of JSON. */
 const PLAN_TOKENS = 320;
@@ -718,14 +731,26 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     try {
       reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
     } catch (err) {
-      // The model wrote a call llama-server's parser did not read (an
-      // intermittent fault of its Gemma 4 parser, llama.cpp issue #25072).
-      // The output is sampled: the same request once more usually reads.
+      // The model wrote a call llama-server's parser did not read. For a
+      // call bound by grammar that is the grammar's doing (llama.cpp issues
+      // #29089 and #30256: on Gemma 4 it leaves the tail of the call
+      // unconstrained, and the same prompt fails every time), so the call
+      // goes once more as the one tool without the grammar — the model
+      // then calls it by prompt, as the checker and the router did before
+      // the grammar. An ordinary round's reply is sampled, and the sporadic
+      // fault of the parser (issue #25072) seldom strikes twice: the same
+      // request goes again.
       if (!(err instanceof MalformedReplyError)) throw err;
       input.signal?.throwIfAborted();
       malformedReplies++;
       emit({ type: "retract" });
-      reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text }), input.signal));
+      const retry = unbound(request);
+      try {
+        reply = await withSlot(() => input.chat(retry, (text) => emit({ type: "token", text }), input.signal));
+      } catch (again) {
+        if (again instanceof MalformedReplyError) again.repeated = malformedReplies;
+        throw again;
+      }
     }
     const estimated = estimateTokens(request.messages) + estimateTokens(request.tools ?? []);
     usage.estimated = Math.max(usage.estimated, estimated);
