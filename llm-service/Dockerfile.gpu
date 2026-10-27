@@ -35,8 +35,15 @@ RUN python3 -m venv /opt/venv \
 
 # Pinned by tag so an image rebuild is reproducible. Raise it deliberately:
 # newer model architectures (qwen35moe and friends) only load on a build that
-# knows them, and that is the usual reason to move this.
-ARG LLAMA_CPP_REF=b10438
+# knows them, and that is the usual reason to move this. v0.7.0 (2026-10-15)
+# carries the fix for the grammar of a required tool call on Gemma 4
+# (llama.cpp #29089, fix #29115 of 2026-09-19): on b10438 the assistant's plan
+# call, bound with tool_choice "required", died on "does not match the
+# expected peg-gemma4 format" for a fixed set of prompts. After a bump, run
+# the chat benchmark's `--only accounts --verbose` (see README) to confirm the
+# build still parses the model's tool calls; llama-server's default port
+# changed in v0.7.0, which does not matter here since --port is always passed.
+ARG LLAMA_CPP_REF=v0.7.0
 
 # The embedded Web UI is switched off in both of its provisioning paths: the
 # npm build needs a Node toolchain this image does not have, and the prebuilt
