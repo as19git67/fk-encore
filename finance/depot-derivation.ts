@@ -37,6 +37,12 @@
  *     bankcontact whose holdings currently contain the matching ISIN or
  *     WKN. When multiple depots qualify, the one with the most recent
  *     matching holding wins.
+ *   - A payout booking that quotes the holding ("DEPOTBESTAND: <qty>
+ *     <name> <WKN> <currency> <per share>") carries the WKN unlabelled;
+ *     the structure stands in for the prefix.
+ *   - When the holdings carry only the other identifier (ISIN on the
+ *     holding, WKN in the booking), the holding's name decides as below,
+ *     unless an identifier on the holding contradicts the booking's.
  *   - When the purpose text has neither an ISIN nor a WKN-prefixed code
  *     (e.g. "SONNENOBST INC." with no identifier at all), fall back to matching
  *     the holding's own display name against the purpose text. Every
@@ -116,11 +122,23 @@ export function extractIsin(text: string | null | undefined): string | null {
  */
 const WKN_RE = /\b(?:WKN|WPKNR|WPK|WP-?KENN(?:NR|NUMMER)?)[.:\s/]+([A-Z0-9]{6})\b/i;
 
+/**
+ * A payout booking that quotes the holding instead of labelling the WKN
+ * (e.g. "ERTRAEGNISGUTSCHRIFT … DEPOTBESTAND: 10,000 MUSTER AG INH
+ * O.N. MST001 EUR 0,25"): quantity, name, the WKN, then currency and the
+ * amount per share. The structure stands in for the missing label, and
+ * the WKN needs a digit so a word of the name cannot pass for one.
+ */
+const HOLDING_QUOTE_WKN_RE =
+  /\b(?:DEPOTBESTAND|Depotbestand)\b[.:\s]*\d[\d.,]*\s+(?:\S+\s+)*?([A-Z0-9]{6})\s+[A-Z]{3}\s+\d/;
+
 /** Extract the first prefixed WKN appearing in a free-text field, or null. */
 export function extractWkn(text: string | null | undefined): string | null {
   if (!text) return null;
   const m = text.match(WKN_RE);
-  return m ? m[1].toUpperCase() : null;
+  if (m) return m[1].toUpperCase();
+  const quoted = text.match(HOLDING_QUOTE_WKN_RE);
+  return quoted && /\d/.test(quoted[1]!) ? quoted[1]! : null;
 }
 
 /**
@@ -180,6 +198,7 @@ async function matchHoldingByName(
       wkn: financeAccountHolding.wkn,
       name: financeAccountHolding.name,
       currency: financeAccountHolding.currency,
+      source: financeAccountHolding.source,
     })
     .from(financeAccountHolding)
     .innerJoin(
@@ -525,7 +544,7 @@ export async function deriveDepotTransactionsForBankcontact(
             coalesce(${financeTransaction.purpose}, '') || ' ' ||
             coalesce(${financeTransaction.entry_text}, '') || ' ' ||
             coalesce(${financeTransaction.counterparty}, '')
-          ) ~* '([A-Z]{2}[A-Z0-9]{9}[0-9])|(WKN|WPKNR|WPK|WP-?KENN)'`,
+          ) ~* '([A-Z]{2}[A-Z0-9]{9}[0-9])|(WKN|WPKNR|WPK|WP-?KENN|DEPOTBESTAND)'`,
         ),
       ),
     );
@@ -592,6 +611,17 @@ export async function deriveDepotTransactionsForBankcontact(
       // with nothing else) — fall back to matching the holding's own
       // display name against the purpose text.
       holding = await matchHoldingByName(bankcontactId, tx.purpose);
+    }
+
+    if (!holding && (isin || wkn)) {
+      // The holdings may carry only the other identifier (the bank lists
+      // the ISIN, the booking quotes the WKN). The name decides then, as
+      // long as no identifier on the holding contradicts the booking's.
+      const byName = await matchHoldingByName(bankcontactId, tx.purpose);
+      if (byName && (!isin || !byName.isin || byName.isin === isin) && (!wkn || !byName.wkn || byName.wkn === wkn)) {
+        holding = byName;
+        if (byName.source === "document") fromBank = false;
+      }
     }
 
     if (!holding && (isin || wkn)) {

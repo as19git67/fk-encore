@@ -1129,11 +1129,15 @@ async function runDerivation() {
   deriveMessage.value = null
   try {
     const resp = await deriveDepotTransactionsFromGiro(mode.value.accountId)
-    if (resp.derived > 0) {
-      deriveMessage.value = {
-        severity: 'success',
-        text: `${resp.derived} neue Transaktion${resp.derived === 1 ? '' : 'en'} aus Giro-Buchungen abgeleitet.`,
+    if (resp.derived > 0 || resp.merged > 0) {
+      const parts = []
+      if (resp.derived > 0) {
+        parts.push(`${resp.derived} neue Transaktion${resp.derived === 1 ? '' : 'en'} aus Giro-Buchungen abgeleitet`)
       }
+      if (resp.merged > 0) {
+        parts.push(`${resp.merged} Buchung${resp.merged === 1 ? '' : 'en'} einer Transaktion aus einem Beleg zugeordnet`)
+      }
+      deriveMessage.value = { severity: 'success', text: `${parts.join(', ')}.` }
     } else if (resp.duplicates > 0) {
       deriveMessage.value = {
         severity: 'info',

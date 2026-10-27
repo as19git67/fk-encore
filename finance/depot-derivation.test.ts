@@ -206,6 +206,16 @@ describe("extractWkn", () => {
     expect(extractWkn("WP-KENNNR SNN001 STK 10")).toBe("SNN001");
   });
 
+  it("reads the unlabelled WKN of a payout booking that quotes the holding", () => {
+    expect(
+      extractWkn("ERTRAEGNISGUTSCHRIFT VOM 01.02.26 DEPOTBESTAND: 10,000 SONNENOBST AG INH O.N. SNN001 EUR 0,25"),
+    ).toBe("SNN001");
+  });
+
+  it("does not take a word of the name for the WKN of a quoted holding", () => {
+    expect(extractWkn("DEPOTBESTAND: 10,000 SONNENOBST AG MUSTER EUR 0,25")).toBeNull();
+  });
+
   it("returns null on null/empty input", () => {
     expect(extractWkn(null)).toBeNull();
     expect(extractWkn("")).toBeNull();
@@ -691,6 +701,83 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     const stats = await deriveDepotTransactionsForBankcontact(bcId);
     expect(stats.derived).toBe(0);
     expect(stats.skipped_no_holding).toBe(1);
+  });
+
+  it("attaches a payout booking quoting the holding to the row its paper created", async () => {
+    // MT940 gives no BTC domain; the booking names the WKN only through the
+    // quoted holding, while the bank's holdings list just the ISIN.
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-01-15",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST AG INH O.N.",
+    });
+    const [docRow] = await db
+      .insert(financeDepotTransaction)
+      .values({
+        account_id: depot,
+        isin: "XF00SONNE005",
+        wkn: "SNN001",
+        name: "SONNENOBST AG",
+        kind: "dividend",
+        executed_at: "2026-02-02",
+        gross_amount: "3.40",
+        tax: "0.90",
+        net_amount: "2.50",
+        currency: "EUR",
+        source: "document",
+        dedupe_hash: "doc:1",
+      })
+      .returning({ id: financeDepotTransaction.id });
+    const txId = await insertTx({
+      accountId: giro,
+      bookingDate: "2026-02-01",
+      amount: "2.50",
+      purpose: "ERTRAEGNISGUTSCHRIFT VOM 02.02.26 DEPOTBESTAND: 10,000 SONNENOBST AG INH O.N. SNN001 EUR 0,34",
+      funds_code: "R",
+      transaction_code: null,
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.candidates).toBe(1);
+    expect(stats.merged).toBe(1);
+    expect(stats.derived).toBe(0);
+
+    const rows = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.account_id, depot));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(docRow.id);
+    expect(rows[0].linked_transaction_id).toBe(txId);
+  });
+
+  it("does not take the name when the holding's identifier contradicts the booking's", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-01-15",
+      isin: "XF00SONNE005",
+      wkn: "SNN002",
+      name: "SONNENOBST AG",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-02-01",
+      amount: "2.50",
+      purpose: "ERTRAEGNISGUTSCHRIFT DEPOTBESTAND: 10,000 SONNENOBST AG SNN001 EUR 0,25",
+      funds_code: "R",
+      transaction_code: null,
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(0);
+    expect(stats.merged).toBe(0);
   });
 
   it("falls back to matching by holding name when purpose has no ISIN/WKN", async () => {
