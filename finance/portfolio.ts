@@ -2616,8 +2616,12 @@ type InspectionRejection =
   | "insurance"
   /** A cost disclosure (MiFID "Kosteninformation"): the settlement comes separately. */
   | "cost_info"
+  /** A year's summary of capital income (Erträgnisaufstellung, Jahressteuerbescheinigung): each trade it lists has its own paper. */
+  | "tax_summary"
   /** An account statement with no settlement of its own (fees, interest, transfers). */
   | "account_statement"
+  /** An account statement with several securities bookings: none of them is the paper's one trade. */
+  | "several_bookings"
   /** The model says it is something else and the rules found no word only a settlement prints. */
   | "llm_other"
   | "no_kind"

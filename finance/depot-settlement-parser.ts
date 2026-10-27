@@ -114,11 +114,23 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   /** The text is a cost disclosure (MiFID "Kosteninformation"): never a settlement. */
   costInfo: boolean;
   /**
+   * The text is a year's summary of capital income (Erträgnisaufstellung,
+   * Jahressteuerbescheinigung): never a settlement, whatever trades it lists.
+   */
+  taxSummary: boolean;
+  /**
    * An account statement (a depot's settlement account) with no settlement
    * of its own in it: fees, interest, transfers and the back page's
    * boilerplate. Never a settlement; one that carries a trade's booking is.
    */
   accountStatement: boolean;
+  /**
+   * An account statement that carries more than one securities booking
+   * (several funds bought, sold or paid out in one period). Which one a
+   * reader would take is chance: never a settlement, each booking is read
+   * from the giro side or its own paper.
+   */
+  severalBookings: boolean;
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
   /**
@@ -258,6 +270,51 @@ export function looksLikeAccountStatementOnly(text: string): boolean {
   if (!ACCOUNT_STATEMENT_RE.test(text)) return false;
   const prose = (line: string) => line.trim().length > 80 || /\s(?:oder|und)\s|mitteilung|hinweis|bitte/i.test(line);
   return !text.split("\n").some((l) => STRONG_RE.test(l) && !prose(l));
+}
+
+/**
+ * A year's summary of capital income: the bank's Erträgnisaufstellung, the
+ * Jahressteuerbescheinigung or Verlustbescheinigung. It lists every payout,
+ * Vorabpauschale and sale of the year with ISIN, date and amounts ("06.02.
+ * | Fondsverkauf") and explains them in prose full of settlement words —
+ * but books nothing: each of those has its own paper.
+ */
+const TAX_SUMMARY_RE =
+  /ertr(?:ä|a|ae)gnis(?:aufstellung|übersicht|uebersicht)|ertragsaufstellung|steuerbescheinigung|verlustbescheinigung/i;
+
+/**
+ * True when the text's title names a year's tax summary — a short line,
+ * not a settlement's footer prose ("die Jahressteuerbescheinigung erhalten
+ * Sie gesondert") — and that title comes before any settlement heading.
+ */
+export function looksLikeTaxSummary(text: string): boolean {
+  const lines = text.split("\n");
+  const title = lines.findIndex((l) => TAX_SUMMARY_RE.test(l) && l.trim().length <= 80);
+  if (title < 0) return false;
+  const heading = lines.findIndex((l) => STRONG_RE.test(l) && l.trim().length <= 60 && !/\d/.test(l));
+  return heading < 0 || title < heading;
+}
+
+/** A booking's first line on an account statement: booking day and value day ("03.01. 02.01. EFFEKTEN…"). */
+const BOOKING_LINE_RE = /^\s*\d{1,2}\.\d{1,2}\.(?:\d{2,4})?\s+\d{1,2}\.\d{1,2}\.(?:\d{2,4})?\s/;
+
+/**
+ * An account statement with more than one booking that names a security
+ * (ISIN or WKN). One such booking is a settlement the readers take from
+ * its block (settlementBlock); several are not one paper's trade.
+ */
+export function looksLikeSeveralBookings(text: string): boolean {
+  if (!ACCOUNT_STATEMENT_RE.test(text)) return false;
+  const bookings: string[][] = [];
+  for (const line of text.split("\n")) {
+    if (BOOKING_LINE_RE.test(line)) bookings.push([line]);
+    else bookings[bookings.length - 1]?.push(line);
+  }
+  const withSecurity = bookings.filter((b) => {
+    const chunk = b.join("\n");
+    return extractIsin(chunk) !== null || extractWkn(chunk) !== null;
+  });
+  return withSecurity.length > 1;
 }
 
 /** True when the text is a cost disclosure and no line is a settlement's heading. */
@@ -745,7 +802,9 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   // ("Steuerliche Behandlung: <Geschäftsart> vom <Datum>").
   const taxLine = taxStatement ? (whole.split("\n").find((l) => TAX_STATEMENT_RE.test(l)) ?? null) : null;
   const accountStatement = looksLikeAccountStatementOnly(whole);
-  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) || accountStatement
+  const taxSummary = looksLikeTaxSummary(whole);
+  const severalBookings = looksLikeSeveralBookings(whole);
+  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) || accountStatement || taxSummary || severalBookings
     ? null
     : (taxLine ? detectKind(taxLine.toLowerCase()) : null) ?? detectKind(lower);
   const isin = extractIsin(text) ?? extractIsin(whole);
@@ -949,7 +1008,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
 
   // Income a fund kept: the only money that moved is the tax charged on it.
   const accumulation =
-    !looksLikeInsurancePaper(wholeLower) && !looksLikeCostInformation(whole) && looksLikeAccumulation(whole);
+    !looksLikeInsurancePaper(wholeLower) && !looksLikeCostInformation(whole) && !taxSummary && !severalBookings && looksLikeAccumulation(whole);
   if (accumulation) {
     // "kein Steuerabzug": a fund abroad, whose income is taxed in the
     // owner's return — nothing was charged, whatever tax words follow.
@@ -958,7 +1017,9 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       kind: "tax",
       insurance: false,
       costInfo: false,
+      taxSummary: false,
       accountStatement: false,
+      severalBookings: false,
       strong: hasStrongSettlementWording(wholeLower),
       taxStatement: false,
       taxPending: false,
@@ -985,7 +1046,9 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     kind,
     insurance: looksLikeInsurancePaper(wholeLower),
     costInfo: looksLikeCostInformation(whole),
+    taxSummary,
     accountStatement,
+    severalBookings,
     strong: hasStrongSettlementWording(wholeLower),
     taxStatement,
     taxPending,
