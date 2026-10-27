@@ -114,6 +114,7 @@ import {
 } from '../composables/usePhotoMetaCache'
 import {
   albumsViewQueryFromStorage,
+  forgetRememberedAlbumId,
   rememberFocusedAlbumId,
 } from '../utils/albumsViewState'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -123,7 +124,13 @@ import { sharePhotos } from '../utils/sharePhotos'
 
 const route = useRoute()
 const router = useRouter()
-const albumId = computed(() => Number(route.params.id))
+// Follows the route only while it is this page's. While the page fades out the
+// route already carries the next page's id — a photo book's — and a late
+// callback (cursor hydration, map) remembered it as the album the "Alben"
+// entry reopens, which the server then could not find.
+const albumId = computed<number>((previous) =>
+  route.name === 'fotos-album-detail' ? Number(route.params.id) : previous ?? NaN,
+)
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 const photoNav = usePhotoNavStore()
@@ -1309,6 +1316,14 @@ async function loadData() {
       galleryAnchorPhotoId.value = storedPhotoId
     }
   } catch (err: any) {
+    if (err instanceof ApiError && (err.code === 'not_found' || err.code === 'permission_denied')) {
+      // Deleted or no longer shared: the "Alben" entry must not reopen it.
+      forgetRememberedAlbumId(albumId.value)
+      if (photoNav.selectedAlbumId === albumId.value) photoNav.selectedAlbumId = null
+      photoNav.consumeAlbumJump()
+      void router.replace({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
+      return
+    }
     error.value = err.message || 'Fehler beim Laden des Albums'
   } finally {
     loading.value = false
