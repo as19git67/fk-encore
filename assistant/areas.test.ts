@@ -57,7 +57,7 @@ describe("the areas", () => {
     expect(areaRulesSection(photos)).toMatch(/^Rules for photos:\n- Photos \(list_photos, search_photos\) appear as a grid/);
     expect(areaRulesSection(areaById("meters")!)).toBeNull();
     const examples = examplesSection([areaById("meters")!, areaById("depot")!])!;
-    expect(examples.split("\n")).toHaveLength(3);
+    expect(examples.split("\n")).toHaveLength(5);
     expect(examples).toContain("1. \"Wie viel Strom haben wir letztes Jahr verbraucht?\"");
     expect(examples).toContain("2. \"Wie steht mein Depot");
     expect(otherAreasSection([areaById("trips")!])).toContain("- trips: Reisen:");

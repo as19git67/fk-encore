@@ -708,6 +708,13 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let nudge: ChatMessage[] | null = null;
   /** One more request for words after an empty reply; never twice. */
   let emptyRetried = false;
+  /**
+   * The pending nudge is the one for an empty reply. The words that follow
+   * it are a first draft like any other, so the checks below still apply to
+   * them (the benchmark saw "ich konnte keine Dokumente finden" go out
+   * without a tool call after an empty round).
+   */
+  let afterEmptyReply = false;
   /** One push from "bitte bestätigen" in words to the card; never twice. */
   let consentNudged = false;
   const mayPropose = tools.some((t) => t.kind === "write");
@@ -881,6 +888,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     const emptyReply = !reply.tool_calls.length && !(reply.content ?? "").trim();
     if (emptyReply && !calledTools && !last && !emptyRetried) {
       emptyRetried = true;
+      afterEmptyReply = true;
       nudge = [{ role: "user", content: EMPTY_REPLY_NUDGE }];
       continue;
     }
@@ -906,7 +914,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     // own, so it is sent back to it once.
     const planOpen = !reply.tool_calls.length && plan !== null && !planNudged && plan.some((s) => !s.done)
       && !(missingAreas && saysPermissionMissing(reply.content));
-    if (!last && nudge === null && !emptyReply && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision || planOpen)) {
+    if (!last && (nudge === null || afterEmptyReply) && !emptyReply && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision || planOpen)) {
       // Not kept in the transcript: the draft was never the answer.
       const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE
         : claimsRevision ? REVISION_NUDGE : planOpen ? planNudge(plan!) : DATA_QUESTION_NUDGE;
@@ -914,6 +922,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       if (text === REVISION_NUDGE) revisionNudged = true;
       if (planOpen && !fakeCall && !ungrounded && !asksConsent && !claimsRevision) planNudged = true;
       nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: text }];
+      afterEmptyReply = false;
       emit({ type: "retract" });
       continue;
     }
@@ -933,6 +942,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     if (reply.tool_calls.length) {
       calledTools = true;
       nudge = null;
+      afterEmptyReply = false;
     }
     if (!reply.tool_calls.length || last) {
       noRows = wantsNoRows(reply.content);

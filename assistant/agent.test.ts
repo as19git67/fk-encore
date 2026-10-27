@@ -246,11 +246,11 @@ describe("the loop", () => {
       { ...answer("Hallo."), usage: { n_ctx: 30000, prompt_tokens: 900, completion_tokens: 4 } },
     ]);
     const res = await runTurn({
-      user: USER, history, question: "Hallo?", tools: [], chat: fn, now: NOW, contextTokens: 6000,
+      user: USER, history, question: "Hallo?", tools: [], chat: fn, now: NOW, contextTokens: 7000,
     });
-    expect(res.context).toMatchObject({ used: 904, window: 30000, historyTurns: 2, keptTurns: 1, digested: 0, budget: 6000 - 1024 });
+    expect(res.context).toMatchObject({ used: 904, window: 30000, historyTurns: 2, keptTurns: 1, digested: 0, budget: 7000 - 1024 });
     expect(res.context.estimated).toBeGreaterThan(0);
-    expect(res.context.estimated).toBeLessThanOrEqual(6000 - 1024);
+    expect(res.context.estimated).toBeLessThanOrEqual(7000 - 1024);
   });
 
   it("budgets against the model's window, learnt from the first reply, and forgets the oldest first", async () => {
@@ -847,7 +847,7 @@ describe("tools written for the model (stage 2 of assistent-wegfindung.md)", () 
     await runTurn({ user: USER, history: [], question: "Flüge im September?", tools: catalogFor(USER), chat: fn, now: NOW });
     const text = String(requests[1]!.messages.at(-1)!.content);
     expect(text).toContain("(0 rows)");
-    expect(text).toContain('No bookings match. The same call with one filter dropped: without q "Flug": 412; without the period 2026-09-01..2026-09-30: 3. Call again with the one filter dropped that keeps what the user asked for');
+    expect(text).toContain('No bookings match. The same call with one filter dropped: without q "Flug": 412; without the period 2026-09-01..2026-09-30: 3. Call again with the period 2026-09-01..2026-09-30 dropped and every other filter kept: that brings the 3 rows closest to the question. Dropping q "Flug" instead would bring rows the user did not ask for.');
     // The probes ask for one row each, the query otherwise unchanged.
     expect(clients.finance.listTransactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ q: undefined, from: "2026-09-01", limit: 1 }));
     expect(clients.finance.listTransactions).toHaveBeenNthCalledWith(3, expect.objectContaining({ q: "Flug", from: undefined, to: undefined, limit: 1 }));
@@ -1167,6 +1167,24 @@ describe("what the GPU run of 2026-10-26 showed (assistent-wegfindung.md, measur
     expect(res.answer).toBe("Keine Buchungen vom Baumarkt.");
     expect(res.rounds).toBe(3);
     expect(JSON.stringify(res.transcript)).not.toContain('"content":null,"tool_calls":[]');
+  });
+
+  it("words about the user's data after an empty reply are sent back for a tool call like any first draft", async () => {
+    // The fifth GPU run of 2026-10-27: an empty round, then "ich konnte keine
+    // Dokumente der TK finden" without a single call, and the loop let it
+    // through because the empty-reply nudge was still pending.
+    clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [{ id: 61, title: "Gesundheitsdividende: Auszahlung beantragen" }], total: 1 });
+    const { fn, requests } = scripted([
+      answer(""),
+      answer("Ich konnte keine Dokumente der TK finden."),
+      calls(["search_documents", { q: "Gesundheitsdividende", correspondent: "TK" }]),
+      answer("Ein Dokument der TK: Dokument 61."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "Such mir die Dokumente der TK zur Gesundheitsdividende.", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: EMPTY_REPLY_NUDGE });
+    expect(requests[2]!.messages.at(-1)).toEqual({ role: "user", content: DATA_QUESTION_NUDGE });
+    expect(res.answer).toBe("Ein Dokument der TK: Dokument 61.");
+    expect(res.rounds).toBe(4);
   });
 });
 

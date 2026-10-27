@@ -402,6 +402,47 @@ describe("depot tools", () => {
     expect(out.block).toMatchObject({ kind: "news", route: "/finanzen/portfolio/DE0000000001" });
     expect(out.block?.rows[0]).toMatchObject({ url: "https://example.test/a", sentiment: 0.6 });
   });
+
+  it("position_news and position_detail take the security's name and look its key up (the GPU runs called position_news(key = \"Beispiel AG\"))", async () => {
+    clients.finance.getPortfolio.mockResolvedValue({
+      accounts: [{ id: 2, label: "Depot", currency_code: "EUR", closed: false }], closed_hidden: 0, currency: "EUR", mixed_currency: false, summary: SUMMARY,
+      positions: [POSITION, { ...POSITION, key: "DE0000000002", isin: "DE0000000002", wkn: null, name: "Muster ETF", open: false }, { ...POSITION, key: "DE0000000003", isin: "DE0000000003", wkn: null, name: "Muster Fonds" }],
+      years: [],
+    });
+    clients.finance.getPositionNews.mockResolvedValue({ items: [], checked_at: null, seen_at: null });
+    await tool("position_news").run({ key: "beispiel ag" }, ctx());
+    expect(clients.finance.getPositionNews).toHaveBeenLastCalledWith({ key: "DE0000000001", limit: 10 });
+    expect(clients.finance.getPortfolio).toHaveBeenCalledWith({ closed: true });
+    // A sold-out position is found as well; a key, ISIN or WKN passes as it is.
+    await tool("position_news").run({ key: "Muster ETF" }, ctx());
+    expect(clients.finance.getPositionNews).toHaveBeenLastCalledWith({ key: "DE0000000002", limit: 10 });
+    await tool("position_news").run({ key: "000001" }, ctx());
+    expect(clients.finance.getPositionNews).toHaveBeenLastCalledWith({ key: "DE0000000001", limit: 10 });
+    await tool("position_news").run({ key: "XX0" }, ctx());
+    expect(clients.finance.getPositionNews).toHaveBeenLastCalledWith({ key: "XX0", limit: 10 });
+    // Two securities with the word: the error names both, so the next call picks one.
+    await expect(tool("position_news").run({ key: "Muster" }, ctx())).rejects.toThrow('"Muster" matches several securities: Muster ETF (key DE0000000002), Muster Fonds (key DE0000000003); call again with one key');
+    clients.finance.getPortfolioPosition.mockResolvedValue({ currency: "EUR", position: POSITION, accounts: [], transactions: [], sales: [], years: [] });
+    await tool("position_detail").run({ key: "Beispiel" }, ctx());
+    expect(clients.finance.getPortfolioPosition).toHaveBeenLastCalledWith({ key: "DE0000000001", closed: undefined });
+  });
+
+  it("portfolio_overview takes a depot's name in q when no security matches it", async () => {
+    clients.finance.getPortfolio.mockResolvedValue({
+      accounts: [{ id: 2, label: "Depot Beispielbank", currency_code: "EUR", closed: false }, { id: 5, label: "Depot Musterbank", currency_code: "EUR", closed: false }],
+      closed_hidden: 0, currency: "EUR", mixed_currency: false, summary: SUMMARY,
+      positions: [POSITION, { ...POSITION, key: "DE0000000002", isin: "DE0000000002", name: "Muster ETF", account_ids: [5], value: "5000.00" }],
+      years: [],
+    });
+    const out = await tool("portfolio_overview").run({ q: "Beispielbank" }, ctx());
+    expect(out.rowCount).toBe(1);
+    expect(out.block?.rows.map((r) => r.key)).toEqual(["DE0000000001"]);
+    expect(out.text).toContain('q "Beispielbank" named no security but the depot Depot Beispielbank [id 2]: these are its positions.');
+    // A security's name still wins over a depot's.
+    const bank = await tool("portfolio_overview").run({ q: "Muster" }, ctx());
+    expect(bank.block?.rows.map((r) => r.key)).toEqual(["DE0000000002"]);
+    expect(bank.text).not.toContain("named no security");
+  });
 });
 
 describe("search_documents with a sender", () => {
@@ -735,7 +776,7 @@ describe("what an empty list says (stage 2 of assistent-wegfindung.md)", () => {
       .mockResolvedValueOnce({ items: [], total: 0 })   // without direction
       .mockResolvedValueOnce({ items: [], total: 2 });  // without the amount range
     const out = await tool("list_transactions").run({ account_id: 1, tags: ["Reise"], direction: "out", amount_min: 500 }, ctx());
-    expect(out.hint).toBe("No bookings match. The same call with one filter dropped: without account_id 1: 9; without tags Reise: unknown; without direction out: 0; without the amount range: 2. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.");
+    expect(out.hint).toBe("No bookings match. The same call with one filter dropped: without account_id 1: 9; without tags Reise: unknown; without direction out: 0; without the amount range: 2. Call again with the amount range dropped and every other filter kept: that brings the 2 rows closest to the question. Dropping account_id 1 or tags Reise or direction out instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.");
     expect(clients.finance.listTransactions).toHaveBeenCalledTimes(5);
     expect(clients.finance.listTransactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ accountId: undefined, tagsCsv: "Reise", limit: 1 }));
   });
@@ -755,7 +796,7 @@ describe("what an empty list says (stage 2 of assistent-wegfindung.md)", () => {
       .mockResolvedValueOnce({ items: [{ id: 1 }, { id: 2 }] });             // without the sender
     clients.documents.listDocuments.mockResolvedValue({ items: [], total: 12 }); // without q
     const out = await tool("search_documents").run({ q: "Gesundheitsdividende", mode: "fts", correspondent: "Beispiel Versicherung" }, ctx());
-    expect(out.hint).toBe('No documents match. The same call with one filter dropped: without q "Gesundheitsdividende": 12; without mode fts (hybrid instead): 25+; without correspondent "Beispiel Versicherung": 2. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.');
+    expect(out.hint).toBe('No documents match. The same call with one filter dropped: without q "Gesundheitsdividende": 12; without mode fts (hybrid instead): 25+; without correspondent "Beispiel Versicherung": 2. Call again with correspondent "Beispiel Versicherung" dropped and every other filter kept: that brings the 2 rows closest to the question. Dropping q "Gesundheitsdividende" or mode fts (hybrid instead) instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.');
     expect(clients.documents.searchDocumentsEndpoint).toHaveBeenNthCalledWith(2, expect.objectContaining({ mode: "hybrid", correspondent: "beispiel-versicherung", limit: 25 }));
     expect(clients.documents.searchDocumentsEndpoint).toHaveBeenNthCalledWith(3, expect.objectContaining({ mode: "fts", correspondent: undefined, sender: undefined }));
     expect(clients.documents.listDocuments).toHaveBeenCalledWith(expect.objectContaining({ correspondent: "beispiel-versicherung", limit: 1 }));
@@ -774,7 +815,7 @@ describe("what an empty list says (stage 2 of assistent-wegfindung.md)", () => {
       .mockResolvedValueOnce({ photos: [{ id: 1 }, { id: 2 }, { id: 3 }] })            // without the place
       .mockResolvedValueOnce({ photos: [{ id: 9 }] });                                 // hidden included
     const out = await tool("list_photos").run({ place: "Beispielland", date_from: "2024-01-01", date_to: "2024-12-31" }, ctx());
-    expect(out.hint).toBe('No photos match. The same call with one filter dropped: without the period 2024-01-01..2024-12-31: 200+; without place "Beispielland": 3; without hidden photos left out (hidden include instead): 1. Call again with the one filter dropped that keeps what the user asked for, and say which filter you dropped. If the question needs every filter, tell the user nothing matches.');
+    expect(out.hint).toBe('No photos match. The same call with one filter dropped: without the period 2024-01-01..2024-12-31: 200+; without place "Beispielland": 3; without hidden photos left out (hidden include instead): 1. Call again with place "Beispielland" dropped and every other filter kept: that brings the 3 rows closest to the question. Dropping the period 2024-01-01..2024-12-31 or hidden photos left out (hidden include instead) instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.');
     expect(clients.photo.listPhotos).toHaveBeenNthCalledWith(2, expect.objectContaining({ dateFrom: undefined, dateTo: undefined, locationText: "Beispielland", limit: 201 }));
     expect(clients.photo.listPhotos).toHaveBeenNthCalledWith(4, expect.objectContaining({ hiddenMode: "include", locationText: "Beispielland" }));
   });

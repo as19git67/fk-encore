@@ -432,6 +432,7 @@ these parameters as given.
 | 2026-10-26 (evening) | same | 1–5 | 75 | 88 % (66); on the 68 cases of the morning run 90 % (61) | 96 % | 3 | 5,250 | 21 |
 | 2026-10-27 | same | 1–5 with the bound-call fix | 75 | 81 % (61); 88 % of the 69 cases llama-server's parser did not lose | 97 % | 3 | 4,231 | 18 |
 | 2026-10-27 (afternoon) | same | 1–5 with one plain retry of an unreadable reply | 75 | 83 % (62); 90 % of the 69 cases the grammar did not lose | 96 % | 3 | 4,340 | 25 |
+| 2026-10-27 (evening) | same, llama.cpp v0.7.0 | 1–5 with the grammar-free retry | 75 | 91 % (68) | 93 % | 3 | 4,225 | 23 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -525,6 +526,67 @@ retry idle — `malformed_replies` says whether it is. Apart from the plan calls
 the figures. Checker: 66 checks, 3 objections (`trips-last-year`,
 `best-photos-in-country`, `photos-with-description` — the last two right),
 median 1,265 ms.
+
+The evening run of 2026-10-27 (llama-server built from llama.cpp v0.7.0,
+the grammar-free retry deployed) closes the matter: no parser error, 19
+of 19 plan calls came back as a plan, `malformed_replies` 0 — the
+grammar of a required call holds on this build, so the retry never ran.
+68 of 75 (91 %), the best run so far; the six plan cases of the morning
+pass, and `letter-paid-invoices` with them; multi-area pass rate 94 %,
+follow-ups on summarised turns 100 % (9 of 9). Lost against the
+afternoon: `insurer-documents-by-subject` ("nothing found" without a
+call, the same miss as in the morning run — the one case that comes and
+goes between runs). The other six failures are the known ones:
+`fewest-comments-per-year` (no `direction: "asc"`), `empty-then-loosen-period`
+(the text loosened instead of the period), `quote-of-security`
+(`position_news` with the name instead of the key), `securities-in-depot`
+(no `list_accounts`), `property-purchase` (no `list_transactions`),
+`letter-reply-reads-text` (the body without the figures). Checker: 72
+checks, 2 objections (`best-photos-in-country` and `photos-with-description`,
+both right), no answer out with the note, median 1,158 ms.
+
+### The last seven cases
+
+The seven failures of the evening run fell the same way in the three
+runs before it (`insurer-documents-by-subject` in two of them), so each
+got a fix where its cause lies — in the tool, the loop or the area's
+data, never in `GENERAL_RULES`:
+
+- `empty-then-loosen-period`: the hint listed the counts and left the
+  choice to the model, which dropped the text (212 rows) instead of the
+  month (1 row). `loosenHint` now names the filter to drop — the one
+  whose absence brings the fewest rows, the narrowest guess — and says
+  that dropping the others brings rows the user did not ask for. A probe
+  that is a widening the model must not take on its own (hidden photos
+  counted in) carries `recommend: false` and is listed but never named.
+- `insurer-documents-by-subject`: the loop had asked once more after an
+  empty first round, and the words that came back ("ich konnte keine
+  Dokumente finden") went out without a call, because the data-question
+  nudge waits while another nudge is pending. After the empty-reply nudge
+  the next draft is a first draft like any other, so the checks apply.
+- `quote-of-security`: `position_news` and `position_detail` resolve a
+  name to the key of the one position it matches (open or sold out), and
+  name the candidates when several match; the rule of the depot area says
+  the key comes from the rows of `quotes` or `portfolio_overview`, with an
+  example. The case passes with the name as well.
+- `securities-in-depot`: `portfolio_overview(q = "Beispielbank")` named
+  no security, so it narrows to the depot whose label matches, and says
+  so in the note; the depot rule names `list_accounts` plus `account_ids`
+  as the other road, with an example. The case takes either
+  (`anyOf` in `ExpectedCall`).
+- `fewest-comments-per-year`: an example of "die wenigsten" with
+  `direction = "asc"` in the call, and why — `rank_by` alone orders from
+  the most, so the first row of each group is the one with the most.
+- `property-purchase`: an example in the documents area of "alles zum
+  Kauf …" as documents plus bookings, with `switch_area("finance")` when
+  the finance area is not in play.
+- `letter-reply-reads-text`: an example in the writing area of a reply
+  that names the invoice number and the deadline from the text, with the
+  rule that every fact the user asks to have named stands in the body,
+  even one the model would leave out.
+
+Whether that is 100 % is the next run's to say; the prompt grew by the
+examples and one rule in two areas, which `prompt_tokens_first` shows.
 
 ## Risks and what is left out on purpose
 
