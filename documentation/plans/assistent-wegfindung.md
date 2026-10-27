@@ -432,6 +432,7 @@ these parameters as given.
 | 2026-10-26 (evening) | same | 1–5 | 75 | 88 % (66); on the 68 cases of the morning run 90 % (61) | 96 % | 3 | 5,250 | 21 |
 | 2026-10-27 | same | 1–5 with the bound-call fix | 75 | 81 % (61); 88 % of the 69 cases llama-server's parser did not lose | 97 % | 3 | 4,231 | 18 |
 | 2026-10-27 (afternoon) | same | 1–5 with one plain retry of an unreadable reply | 75 | 83 % (62); 90 % of the 69 cases the grammar did not lose | 96 % | 3 | 4,340 | 25 |
+| 2026-10-27 (evening) | same, llama.cpp v0.7.0 | 1–5 with the grammar-free retry | 75 | 91 % (68) | 93 % | 3 | 4,225 | 23 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -525,6 +526,24 @@ retry idle — `malformed_replies` says whether it is. Apart from the plan calls
 the figures. Checker: 66 checks, 3 objections (`trips-last-year`,
 `best-photos-in-country`, `photos-with-description` — the last two right),
 median 1,265 ms.
+
+The evening run of 2026-10-27 (llama-server built from llama.cpp v0.7.0,
+the grammar-free retry deployed) closes the matter: no parser error, 19
+of 19 plan calls came back as a plan, `malformed_replies` 0 — the
+grammar of a required call holds on this build, so the retry never ran.
+68 of 75 (91 %), the best run so far; the six plan cases of the morning
+pass, and `letter-paid-invoices` with them; multi-area pass rate 94 %,
+follow-ups on summarised turns 100 % (9 of 9). Lost against the
+afternoon: `insurer-documents-by-subject` ("nothing found" without a
+call, the same miss as in the morning run — the one case that comes and
+goes between runs). The other six failures are the known ones:
+`fewest-comments-per-year` (no `direction: "asc"`), `empty-then-loosen-period`
+(the text loosened instead of the period), `quote-of-security`
+(`position_news` with the name instead of the key), `securities-in-depot`
+(no `list_accounts`), `property-purchase` (no `list_transactions`),
+`letter-reply-reads-text` (the body without the figures). Checker: 72
+checks, 2 objections (`best-photos-in-country` and `photos-with-description`,
+both right), no answer out with the note, median 1,158 ms.
 
 ## Risks and what is left out on purpose
 
