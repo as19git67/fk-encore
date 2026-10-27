@@ -126,7 +126,7 @@ admin so access checks apply. Tags are left empty where the app can
 suggest them, so the tag suggester has work to show. The depot is a depot
 account at the demo bank; depot transactions are not written directly but
 derived from the giro bookings and settlement PDFs by the existing
-derivation (`deriveDepotTransactionsFromGiro`, the settlement and
+derivation (`deriveFromBookings`, the settlement and
 statement enrichment).
 
 ### Securities and quotes

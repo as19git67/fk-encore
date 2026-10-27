@@ -22,6 +22,7 @@ import { useSort } from '../../composables/useSort'
 import type { FilterChip } from '../../components/layout/listToolbar'
 import { replaceQuerySlice, updateRouteQuery } from '../../utils/routeQueryUpdate'
 import {
+  deriveFromBookings,
   getDocumentEnrichRun,
   startDocumentEnrichRun,
   type EnrichRun,
@@ -574,6 +575,45 @@ async function reportRun(run: EnrichRun) {
   reviewReloadKey.value++
 }
 
+// ── Account bookings (Phase 2b) ──────────────────────────────────────
+// Every sync attaches the securities bookings of the giro accounts to the
+// depots' transactions on its own; the button is the backfill for the
+// depots in scope.
+const deriving = ref(false)
+const deriveNotice = ref<{ severity: 'success' | 'info' | 'warn'; text: string } | null>(null)
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+async function deriveFromAccountBookings() {
+  deriving.value = true
+  deriveNotice.value = null
+  try {
+    const r = await deriveFromBookings(accountIds.value)
+    const parts: string[] = []
+    if (r.derived > 0) parts.push(`${plural(r.derived, 'Transaktion', 'Transaktionen')} neu abgeleitet`)
+    if (r.merged > 0) parts.push(`${plural(r.merged, 'Buchung', 'Buchungen')} einer Transaktion aus einem Beleg zugeordnet`)
+    if (r.skipped_no_holding > 0) parts.push(`${plural(r.skipped_no_holding, 'Buchung passt', 'Buchungen passen')} zu keiner Position`)
+    if (r.skipped_unconfirmed > 0) parts.push(`${plural(r.skipped_unconfirmed, 'Buchung wartet', 'Buchungen warten')} auf ein Wertpapier unter „Zu prüfen“`)
+    if (r.errors.length > 0) parts.push(`${plural(r.errors.length, 'Fehler', 'Fehler')}: ${r.errors[0]}`)
+    const changed = r.derived + r.merged
+    deriveNotice.value = {
+      severity: r.errors.length > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
+      text: parts.length > 0
+        ? `Kontobuchungen geprüft: ${parts.join(', ')}.`
+        : r.candidates === 0
+          ? 'Keine Wertpapier-Buchungen auf den Konten der Banken dieser Depots gefunden.'
+          : 'Keine neuen Zuordnungen — die Kontobuchungen sind schon alle zugeordnet.',
+    }
+    if (changed > 0) await Promise.all([loadPortfolio(), loadTransactions()])
+  } catch (e: any) {
+    deriveNotice.value = { severity: 'warn', text: e?.message ?? 'Kontobuchungen konnten nicht zugeordnet werden' }
+  } finally {
+    deriving.value = false
+  }
+}
+
 onMounted(() => void pollRun())
 onBeforeUnmount(() => {
   if (pollTimer) clearTimeout(pollTimer)
@@ -600,6 +640,16 @@ onBeforeUnmount(() => {
         :loading="enriching"
         :disabled="noDepots"
         @click="enrichFromDocuments"
+      />
+      <Button
+        v-tooltip.bottom="'Wertpapier- und Dividendenbuchungen der Konten den Transaktionen zuordnen oder daraus ableiten'"
+        icon="pi pi-sync"
+        label="Aus Giro ableiten"
+        severity="secondary"
+        text
+        :loading="deriving"
+        :disabled="noDepots"
+        @click="deriveFromAccountBookings"
       />
       <Button
         v-tooltip.bottom="'Alles, was Belege gebucht haben, zurücknehmen und alle Belege neu lesen'"
@@ -672,6 +722,12 @@ onBeforeUnmount(() => {
         closable
         @close="enrichNotice = null"
       >{{ enrichNotice.text }}</Message>
+      <Message
+        v-if="deriveNotice"
+        :severity="deriveNotice.severity"
+        closable
+        @close="deriveNotice = null"
+      >{{ deriveNotice.text }}</Message>
     </template>
 
     <PageSkeleton v-if="loading && !portfolio" variant="list" :count="6" />

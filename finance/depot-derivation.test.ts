@@ -23,7 +23,7 @@ import {
   isSecuritiesCandidate,
 } from "./depot-derivation";
 import { decideSecurity, findSecurity } from "./depot-securities";
-import { deriveDepotTransactionsFromGiro } from "./depot-transactions";
+import { deriveFromBookings } from "./portfolio";
 
 function setAuth(userID: string, perms: string[]) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
@@ -1056,60 +1056,43 @@ describe("deriveDepotTransactionsForBankcontact", () => {
   });
 });
 
-describe("finance/depot-transactions — deriveDepotTransactionsFromGiro endpoint", () => {
-  it("triggers derivation for the bankcontact and reports stats", async () => {
-    const bcId = await insertBankcontact();
-    const giro = await insertAccount(bcId, "giro", "GIRO-1");
-    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
-    await insertHolding({
-      accountId: depot,
-      asOf: "2026-05-15",
-      isin: "DE000A1EWWW0",
-      name: "ADIDAS",
-    });
-    await insertTx({
-      accountId: giro,
-      bookingDate: "2026-05-10",
-      amount: "-1000",
-      purpose: "WERTPAPIERABRECHNUNG KAUF DE000A1EWWW0",
-      funds_code: "SECU",
-      transaction_code: "TRAD",
-    });
+describe("finance/portfolio — deriveFromBookings endpoint", () => {
+  it("derives for every bank contact of the depots in scope and adds up the stats", async () => {
     await ensureUser(1);
-    await db.insert(financeAccountAccess).values({
-      account_id: depot,
-      user_id: 1,
-      level: "write",
-    });
+    for (const n of [1, 2]) {
+      const bcId = await insertBankcontact(`Bank ${n}`);
+      const giro = await insertAccount(bcId, "giro", `GIRO-${n}`);
+      const depot = await insertAccount(bcId, "depot", `DEPOT-${n}`);
+      await insertHolding({ accountId: depot, asOf: "2026-05-15", isin: "DE000A1EWWW0", name: "BEISPIEL AG" });
+      await insertTx({
+        accountId: giro,
+        bookingDate: "2026-05-10",
+        amount: "-1000",
+        purpose: "WERTPAPIERABRECHNUNG KAUF DE000A1EWWW0",
+        funds_code: "SECU",
+        transaction_code: "TRAD",
+      });
+      await db.insert(financeAccountAccess).values({ account_id: depot, user_id: 1, level: "write" });
+    }
+    await insertAccount(null, "depot", "MANUAL-DEPOT");
     setAuth("1", ["finance.view"]);
 
-    const resp = await deriveDepotTransactionsFromGiro({ id: depot });
-    expect(resp.derived).toBe(1);
+    const resp = await deriveFromBookings({});
+    expect(resp.derived).toBe(2);
+    expect(resp.candidates).toBe(2);
     expect(resp.errors).toEqual([]);
+
+    const again = await deriveFromBookings({});
+    expect(again.derived).toBe(0);
+    expect(again.duplicates).toBe(2);
   });
 
-  it("denies derivation with only read ACL", async () => {
+  it("refuses without a depot the caller may write to", async () => {
     const bcId = await insertBankcontact();
-    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertAccount(bcId, "depot", "DEPOT-1");
     await ensureUser(2);
-    await db.insert(financeAccountAccess).values({
-      account_id: depot,
-      user_id: 2,
-      level: "read",
-    });
     setAuth("2", ["finance.view"]);
 
-    await expect(
-      deriveDepotTransactionsFromGiro({ id: depot }),
-    ).rejects.toThrow(/write access required/);
-  });
-
-  it("refuses on a manual account (no bankcontact)", async () => {
-    const depot = await insertAccount(null, "depot", "MANUAL-DEPOT");
-    setAuth("9", ["finance.view", "finance.admin"]);
-
-    await expect(
-      deriveDepotTransactionsFromGiro({ id: depot }),
-    ).rejects.toThrow(/no bankcontact/);
+    await expect(deriveFromBookings({})).rejects.toThrow(/write access/);
   });
 });

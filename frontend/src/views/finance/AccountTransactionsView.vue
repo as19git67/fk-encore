@@ -70,7 +70,6 @@ import type {
 import {
   createDepotTransaction,
   deleteDepotTransaction,
-  deriveDepotTransactionsFromGiro,
   getHoldingsHistory,
   getRealizedByYear,
   listDepotTransactions,
@@ -1108,83 +1107,6 @@ watch(expandedPositionKey, (key) => {
   if (h) void loadDepotTransactions(h)
 })
 
-// ── Derive depot transactions from giro bookings (Phase 2b) ──────────
-//
-// One-click backfill: scans SECU-flagged giro bookings on the same
-// bankcontact, matches via ISIN to holdings, writes source='giro-derived'
-// rows. Idempotent — safe to call after each sync.
-
-const deriveLoading = ref(false)
-const deriveMessage = ref<{ severity: 'success' | 'info' | 'error'; text: string } | null>(null)
-
-// Backend gates this strictly (write ACL + linked bankcontact); the
-// frontend only hides the button on non-depot screens. Manual depots
-// will see a server-side error if they trigger it, which surfaces in
-// `deriveMessage` — acceptable for a rarely-used backfill action.
-const canDeriveDepotTx = computed(() => isDepot.value)
-
-async function runDerivation() {
-  if (!mode.value || mode.value.kind !== 'account') return
-  deriveLoading.value = true
-  deriveMessage.value = null
-  try {
-    const resp = await deriveDepotTransactionsFromGiro(mode.value.accountId)
-    if (resp.derived > 0 || resp.merged > 0) {
-      const parts = []
-      if (resp.derived > 0) {
-        parts.push(`${resp.derived} neue Transaktion${resp.derived === 1 ? '' : 'en'} aus Giro-Buchungen abgeleitet`)
-      }
-      if (resp.merged > 0) {
-        parts.push(`${resp.merged} Buchung${resp.merged === 1 ? '' : 'en'} einer Transaktion aus einem Beleg zugeordnet`)
-      }
-      deriveMessage.value = { severity: 'success', text: `${parts.join(', ')}.` }
-    } else if (resp.duplicates > 0) {
-      deriveMessage.value = {
-        severity: 'info',
-        text: 'Keine neuen Transaktionen — bereits alles abgeleitet.',
-      }
-    } else if (resp.candidates === 0) {
-      deriveMessage.value = {
-        severity: 'info',
-        text:
-          'Keine Wertpapier-Buchungen im Giro-Konto gefunden. Die Buchungen ' +
-          'enthalten weder eine ISIN/WKN im Verwendungszweck noch die ' +
-          'Kennzeichnung „Wertpapiere“ der Bank.',
-      }
-    } else if (resp.skipped_no_holding > 0) {
-      deriveMessage.value = {
-        severity: 'info',
-        text:
-          `${resp.candidates} Wertpapier-Buchung${resp.candidates === 1 ? '' : 'en'} ` +
-          `geprüft, aber ${resp.skipped_no_holding} davon passen zu keiner ` +
-          'Position im Depot. Bitte zuerst die Depot-Bestände synchronisieren.',
-      }
-    } else {
-      deriveMessage.value = {
-        severity: 'info',
-        text:
-          `${resp.candidates} Wertpapier-Buchung${resp.candidates === 1 ? '' : 'en'} ` +
-          'geprüft, aber keine davon war ableitbar ' +
-          `(${resp.skipped_no_identifier} ohne ISIN/WKN, ` +
-          `${resp.skipped_not_classified} ohne Kauf/Verkauf-Charakter).`,
-      }
-    }
-    // Refresh per-position lists that are already loaded so the new
-    // rows show up immediately.
-    for (const key of Object.keys(depotTxByKey.value)) {
-      const h = holdings.value.find((x) => positionKeyOf(x) === key)
-      if (h) await loadDepotTransactions(h)
-    }
-  } catch (e) {
-    deriveMessage.value = {
-      severity: 'error',
-      text: e instanceof Error ? e.message : String(e),
-    }
-  } finally {
-    deriveLoading.value = false
-  }
-}
-
 // ── Transaction grouping (by booking_date) ───────────────────────────
 
 interface DayGroup {
@@ -1653,25 +1575,7 @@ function goBack() {
             ({{ formatShortDate(holdingsAsOf) }})
           </span>
         </h2>
-        <Button
-          v-if="canDeriveDepotTx"
-          label="Aus Giro ableiten"
-          icon="pi pi-sync"
-          size="small"
-          severity="secondary"
-          :loading="deriveLoading"
-          aria-label="Wertpapier-Transaktionen aus Giro-Buchungen ableiten"
-          @click="runDerivation"
-        />
       </div>
-      <Message
-        v-if="deriveMessage"
-        :severity="deriveMessage.severity"
-        :closable="true"
-        @close="deriveMessage = null"
-      >
-        {{ deriveMessage.text }}
-      </Message>
 
       <!-- Depot value over time -->
       <div v-if="historyLoading" class="tx-loading">Lädt Wertverlauf …</div>

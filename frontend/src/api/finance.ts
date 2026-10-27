@@ -543,30 +543,27 @@ export async function deleteDepotTransaction(
   return apiFetch(`/finance/depot-transactions/${txId}`, { method: 'DELETE' })
 }
 
-export interface DeriveDepotTransactionsResponse {
+export interface DeriveFromBookingsResponse {
+  /** Transactions derived anew from bookings. */
   derived: number
-  skipped: number
-  duplicates: number
-  /** Bookings attached to a row a settlement document created first. */
+  /** Bookings attached to a transaction a document created first. */
   merged: number
-  errors: string[]
-  /** Bookings that looked like Wertpapierabrechnungen and were examined. */
+  duplicates: number
+  /** Bookings that looked like securities bookings and were examined. */
   candidates: number
   skipped_not_classified: number
   skipped_no_identifier: number
   skipped_no_holding: number
+  skipped_unconfirmed: number
+  /** Depots in scope without a bank contact. */
+  depots_without_bank: number
+  errors: string[]
 }
 
-export async function deriveDepotTransactionsFromGiro(
-  accountId: number,
-): Promise<DeriveDepotTransactionsResponse> {
-  return apiFetch(
-    `/finance/accounts/${accountId}/depot-transactions/derive`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ id: accountId }),
-    },
-  )
+/** Attach the account bookings of the depots in scope to their transactions. */
+export async function deriveFromBookings(accounts: number[] = []): Promise<DeriveFromBookingsResponse> {
+  const qs = accounts.length > 0 ? `?accounts=${accounts.join(',')}` : ''
+  return apiFetch(`/finance/portfolio/derive${qs}`, { method: 'POST', body: JSON.stringify({}) })
 }
 
 // ----------------------------------------------------------------------
@@ -2822,6 +2819,8 @@ export interface QuotePoint {
 
 export interface QuoteTile {
   key: string
+  /** The depot the tile is listed under: the first of the depots holding it, by label. */
+  depot: string
   isin: string | null
   wkn: string | null
   name: string | null

@@ -700,6 +700,7 @@ export const MOCK_QUOTES: QuotesResponse = {
   tiles: [
     {
       key: PF_ISIN_A,
+      depot: 'Depot Alpha',
       isin: PF_ISIN_A,
       wkn: 'ALP001',
       name: 'Alpha AG',
@@ -714,6 +715,7 @@ export const MOCK_QUOTES: QuotesResponse = {
     },
     {
       key: PF_ISIN_B,
+      depot: 'Depot Alpha',
       isin: PF_ISIN_B,
       wkn: null,
       name: 'Beta ETF',
@@ -728,6 +730,7 @@ export const MOCK_QUOTES: QuotesResponse = {
     },
     {
       key: 'XF00GAMMA007',
+      depot: 'Depot Alpha',
       isin: 'XF00GAMMA007',
       wkn: 'GAM007',
       name: 'Gamma Fonds Anteile',
@@ -742,6 +745,7 @@ export const MOCK_QUOTES: QuotesResponse = {
     },
     {
       key: 'XF00DELTA004',
+      depot: 'Depot Beta',
       isin: 'XF00DELTA004',
       wkn: null,
       name: 'Delta Holding SE',
@@ -756,6 +760,7 @@ export const MOCK_QUOTES: QuotesResponse = {
     },
     {
       key: 'XF00EPSIL001',
+      depot: 'Depot Beta',
       isin: 'XF00EPSIL001',
       wkn: null,
       name: 'Epsilon Inc.',
