@@ -67,6 +67,8 @@ export interface CaseRun {
   checks?: number;
   check_failed?: number;
   check_ms?: number | null;
+  /** Replies llama-server could not parse and the loop asked for once more; absent when none. */
+  malformed_replies?: number;
   unverified?: boolean;
 }
 
@@ -206,6 +208,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
   let checks: number | undefined;
   let check_failed: number | undefined;
   let unverified = false;
+  let malformed_replies: number | undefined;
   try {
     const result = await runTurn({
       user: c.permissions ? { userID: deps.user.userID, permissions: c.permissions } : deps.user,
@@ -237,6 +240,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       plan_done = result.plan.filter((s) => s.done).length;
     }
     plan_reply = result.planOutcome;
+    malformed_replies = result.malformedReplies;
     // The loop's own stand-ins are not the model's answer.
     answer = result.answer === NO_ANSWER || result.answer === OUT_OF_ROUNDS ? null : result.answer;
   } catch (err) {
@@ -264,5 +268,6 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
     ...(plan ? { plan, plan_done } : {}),
     follow_up: (c.history?.length ?? 0) > 0,
     ...(checks !== undefined ? { checks, check_failed, check_ms, unverified } : {}),
+    ...(malformed_replies ? { malformed_replies } : {}),
   };
 }

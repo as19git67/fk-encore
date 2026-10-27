@@ -7,7 +7,7 @@ import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
 import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
-import type { ChatRequest, ChatReply } from "./llm-client";
+import { MalformedReplyError, type ChatRequest, type ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
 import { CHECK_ANSWER_NAME, isCheckRequest, ungroundedNudge, unverifiedNote } from "./verify";
 
@@ -1167,5 +1167,36 @@ describe("what the GPU run of 2026-10-26 showed (assistent-wegfindung.md, measur
     expect(res.answer).toBe("Keine Buchungen vom Baumarkt.");
     expect(res.rounds).toBe(3);
     expect(JSON.stringify(res.transcript)).not.toContain('"content":null,"tool_calls":[]');
+  });
+});
+
+describe("what the GPU run of 2026-10-27 showed: replies llama-server could not parse (llama.cpp issue #25072)", () => {
+  const unread = () => { throw new MalformedReplyError("The model produced output that does not match the expected peg-gemma4 format"); };
+
+  it("asks for the same round once more, withdraws what was streamed, and counts it", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const events: TurnEvent[] = [];
+    const { fn, requests } = scripted([
+      unread,
+      calls(["list_transactions", { q: "Baumarkt" }]),
+      answer("Keine Buchungen vom Baumarkt."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "Zeig mir die Buchungen vom Baumarkt", tools: catalogFor(USER), chat: fn, now: NOW, emit: (e) => events.push(e) });
+    expect(requests).toHaveLength(3);
+    // The same request, sent again.
+    expect(requests[1]!.messages).toEqual(requests[0]!.messages);
+    expect(events.filter((e) => e.type === "retract")).toHaveLength(1);
+    expect(res.malformedReplies).toBe(1);
+    expect(res.rounds).toBe(2);
+    expect(res.answer).toBe("Keine Buchungen vom Baumarkt.");
+  });
+
+  it("gives up after the second unreadable reply in a row, and reports none when every reply read", async () => {
+    const { fn } = scripted([unread, unread]);
+    await expect(runTurn({ user: USER, history: [], question: "Zeig mir die Buchungen vom Baumarkt", tools: catalogFor(USER), chat: fn, now: NOW }))
+      .rejects.toBeInstanceOf(MalformedReplyError);
+    const clean = scripted([answer("Gern geschehen!")]);
+    const res = await runTurn({ user: USER, history: [], question: "Danke!", tools: catalogFor(USER), chat: clean.fn, now: NOW });
+    expect(res.malformedReplies).toBeUndefined();
   });
 });

@@ -155,6 +155,16 @@ describe("scoring", () => {
     expect(summarize([{ rounds_ms: [100], error: null, score: pass }])).toMatchObject({ checks: 0, check_failed: 0, unverified: 0, median_check_ms: null });
   });
 
+  it("counts the replies llama-server could not parse that the loop asked for once more", () => {
+    const pass = { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] };
+    const s = summarize([
+      { rounds_ms: [100, 100], error: null, score: pass, malformed_replies: 1 },
+      { rounds_ms: [100], error: null, score: pass },
+      { rounds_ms: [100, 100, 100], error: null, score: pass, malformed_replies: 2 },
+    ]);
+    expect(s.malformed_replies).toBe(3);
+  });
+
   it("counts empty results followed by another call, and errors followed by a corrected call", () => {
     expect(followUps([
       { tool: "list_transactions", args: { q: "a", from: "2026-09-01" }, rows: 0 },
