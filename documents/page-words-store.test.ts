@@ -143,6 +143,22 @@ describe("stored rows", () => {
     ]));
     expect(await hasPageWords(DOC_IDS[1])).toBe(false);
   });
+
+  it("store words with NUL bytes cleaned instead of failing the insert", async () => {
+    await insertDoc(DOC_IDS[2]);
+    await db.transaction((tx) => replacePageWords(tx, DOC_IDS[2], [
+      {
+        page: 1, width: 612, height: 792, unit: "pt", rotation: 0,
+        words: [
+          { text: "Rechnung", left: 10, top: 10, right: 50, bottom: 20 },
+          { text: "\u0000", left: 50, top: 10, right: 54, bottom: 20 },
+          { text: "RE-0000\u00001", left: 54, top: 10, right: 90, bottom: 20 },
+        ],
+      },
+    ]));
+    const [stored] = await loadPageWords(DOC_IDS[2]);
+    expect(stored.words.map((w) => w.text)).toEqual(["Rechnung", "RE-00001"]);
+  });
 });
 
 describe("the backfill queue", () => {

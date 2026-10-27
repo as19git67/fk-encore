@@ -6,7 +6,7 @@
 import { asc, eq } from "drizzle-orm";
 import db from "../db/database";
 import { documentPageWords } from "../db/schema";
-import { findBoxes, type PageWords, type StoredWord, type TextBoxSearch } from "./page-words";
+import { cleanWordText, findBoxes, type PageWords, type StoredWord, type TextBoxSearch } from "./page-words";
 
 // ── storing ───────────────────────────────────────────────────────────────
 
@@ -18,7 +18,10 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 export async function replacePageWords(tx: Tx, documentId: number, pages: readonly PageWords[]): Promise<void> {
   await tx.delete(documentPageWords).where(eq(documentPageWords.document_id, documentId));
-  const rows = pages.filter((p) => p.words.length > 0 && p.width > 0 && p.height > 0);
+  // The builders clean already; this is the last stop before `jsonb`, so a
+  // word from any other source cannot fail the insert either.
+  const cleaned = pages.map((p) => ({ ...p, words: cleanWords(p.words) }));
+  const rows = cleaned.filter((p) => p.words.length > 0 && p.width > 0 && p.height > 0);
   if (!rows.length) return;
   await tx.insert(documentPageWords).values(rows.map((p) => ({
     document_id: documentId,
@@ -29,6 +32,15 @@ export async function replacePageWords(tx: Tx, documentId: number, pages: readon
     rotation: p.rotation,
     words: p.words,
   })));
+}
+
+function cleanWords(words: readonly StoredWord[]): StoredWord[] {
+  const out: StoredWord[] = [];
+  for (const w of words) {
+    const text = cleanWordText(w.text);
+    if (text) out.push(text === w.text ? w : { ...w, text });
+  }
+  return out;
 }
 
 export async function hasPageWords(documentId: number): Promise<boolean> {

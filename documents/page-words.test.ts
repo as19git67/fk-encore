@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import { layoutTextFromRows, parseTesseractTsv, visualRowsFromWords } from "./ocr-layout";
-import { amountValue, findBoxes, wordsFromOcrRows, wordsFromPdfItems, type PageWords, type StoredWord } from "./page-words";
+import { amountValue, cleanWordText, findBoxes, wordsFromOcrRows, wordsFromPdfItems, type PageWords, type StoredWord } from "./page-words";
 
 const TSV_HEADER = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext";
 
@@ -52,6 +52,21 @@ describe("words from OCR rows", () => {
     const words = wordsFromOcrRows([[{ text: "450.000,00", left: 1, top: 2, right: 3, bottom: 4 }, { text: "  ", left: 5, top: 2, right: 6, bottom: 4 }]]);
     expect(words).toEqual([{ text: "450.000,00", left: 1, top: 2, right: 3, bottom: 4 }]);
   });
+
+  it("drop a word that is nothing but control characters", () => {
+    const words = wordsFromOcrRows([[{ text: "\u0000\u0007", left: 1, top: 2, right: 3, bottom: 4 }, { text: "Musterstadt", left: 5, top: 2, right: 9, bottom: 4 }]]);
+    expect(words.map((w) => w.text)).toEqual(["Musterstadt"]);
+  });
+});
+
+describe("cleanWordText", () => {
+  it("removes what Postgres jsonb rejects and keeps everything else", () => {
+    expect(cleanWordText("ab\u0000c")).toBe("abc");
+    expect(cleanWordText("\u0000")).toBe("");
+    expect(cleanWordText("x\u001fy\u007fz\u0085")).toBe("xyz");
+    expect(cleanWordText("a\ud800b\udc00c")).toBe("abc");
+    expect(cleanWordText("Straße 12,50 € 😀")).toBe("Straße 12,50 € 😀");
+  });
 });
 
 describe("words from a text layer", () => {
@@ -73,6 +88,21 @@ describe("words from a text layer", () => {
     expect(words[1].right).toBeCloseTo(72 + units("Kaufpreis: 450.000,00") * scale);
     expect(words[1].top).toBeCloseTo(842 - 708);
     expect(words[1].bottom).toBeCloseTo(842 - 698);
+  });
+
+  it("drop a run of unmappable glyphs and clean control characters out of a word", () => {
+    // pdf.js reports a glyph its font cannot map as U+0000, here as a run of
+    // its own between two words and inside one — jsonb would reject either.
+    const words = wordsFromPdfItems(
+      [
+        { str: "Nummer AB12", width: 60, height: 9, transform: [9, 0, 0, 9, 100, 700] },
+        { str: "\u0000", width: 4, height: 9, transform: [9, 0, 0, 9, 160, 700] },
+        { str: "00\u000007", width: 20, height: 9, transform: [9, 0, 0, 9, 164, 700] },
+      ],
+      [0, 0, 595, 842],
+    );
+    expect(words.map((w) => w.text)).toEqual(["Nummer", "AB12", "0007"]);
+    expect(words[2].left).toBeCloseTo(164);
   });
 
   it("skip items without text or geometry", () => {
