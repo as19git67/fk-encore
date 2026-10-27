@@ -76,10 +76,12 @@ export interface SettlementReading {
  */
 export function rejectedAsOtherPaper(
   r: SettlementReading,
-): "insurance" | "cost_info" | "account_statement" | "llm_other" | null {
+): "insurance" | "cost_info" | "tax_summary" | "account_statement" | "several_bookings" | "llm_other" | null {
   if (r.rules?.insurance) return "insurance";
   if (r.rules?.costInfo) return "cost_info";
+  if (r.rules?.taxSummary) return "tax_summary";
   if (r.rules?.accountStatement) return "account_statement";
+  if (r.rules?.severalBookings) return "several_bookings";
   // A tax statement is not a settlement, and the model may well say so —
   // the rules recognise it by its heading and read it as what it is.
   if (r.llmSaysSettlement === false && !r.rules?.strong && !r.rules?.taxStatement && !r.rules?.accumulation) return "llm_other";
@@ -231,7 +233,7 @@ export function rulesValues(r: SettlementInspection | null): SettlementValues | 
 
 /** Paper the rules settle on their own: the model is never asked about it. */
 function rulesAlone(rules: SettlementInspection | null): boolean {
-  return Boolean(rules?.insurance || rules?.costInfo || rules?.accountStatement);
+  return Boolean(rules?.insurance || rules?.costInfo || rules?.taxSummary || rules?.accountStatement || rules?.severalBookings);
 }
 
 /**

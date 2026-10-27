@@ -348,6 +348,65 @@ Kosteninformation: Ihre Kosten für diese Order betrugen 4,90 EUR.`;
   });
 });
 
+describe("parseSettlement — a year's tax summary is not a settlement", () => {
+  // An Erträgnisaufstellung lists the year's trades and payouts one by one,
+  // and its prose names Wertpapierabrechnungen, Ausschüttungen and the
+  // Vorabpauschale. None of that is a booking.
+  const SUMMARY = `Beispielbank AG
+Erstellt am: 10.02.2026
+Erträgnisaufstellung 2025 für private Kapitalerträge
+Sehr geehrte Kundin, sehr geehrter Kunde,
+anbei erhalten Sie die Erträgnisaufstellung über Ihre privaten Kapitalerträge des Jahres 2025. Damit können Sie den Inhalt der
+Jahressteuerbescheinigung besser nachvollziehen. Sofern Sie Investmentanteile gehalten haben, sind die hieraus erzielten Investmenterträge (Ausschüttungen, Vorabpau-
+schalen sowie Veräußerungsgewinne und -verluste) enthalten. Sofern Sie dem Finanzamt anhand Ihrer Wertpapierabrechnungen
+einen niedrigeren Gewinn nachweisen können, erhalten Sie die Differenz erstattet.
+Geschäftsdatum
+Art der Kapitalerträge
+16.01.2025 | Vorabpauschale
+0000000000   DE000000AAA1,ALPHA FONDS A
+Teilfreist. Aktienfonds € 10,00
+Vorabpauschale eines Investmentfonds
+12.03.2025 | Fondsverkauf
+0000000000   DE000000BBB2,BETA FONDS B
+00000000000, Valuta 10.03.2025
+Teilfreist. Aktienfonds € 5,00
+Gewinn Investmentfonds ab 01.01.2018
+VAP bei Veräußerung € 1,00
+Einbehaltene Kapitalertragsteuer
+20,00   37`;
+
+  it("reads no kind and no accumulation from it", () => {
+    const i = inspectSettlement(SUMMARY)!;
+    expect(i.taxSummary).toBe(true);
+    expect(i.kind).toBeNull();
+    expect(i.accumulation).toBe(false);
+    expect(parseSettlement(SUMMARY)).toBeNull();
+  });
+
+  it("is a tax summary under the Jahressteuerbescheinigung's title as well", () => {
+    const text = `Beispielbank AG
+Jahressteuerbescheinigung 2025
+12.03.2025 Fondsverkauf DE000000BBB2 Beta Fonds B
+Höhe der Kapitalerträge 100,00 EUR`;
+    expect(inspectSettlement(text)!.taxSummary).toBe(true);
+    expect(parseSettlement(text)).toBeNull();
+  });
+
+  it("does not reject a settlement whose footer mentions the tax certificate", () => {
+    const text = `Beispielbank AG
+Wertpapierabrechnung Verkauf
+ISIN DE000000AAA1
+Schlusstag 14.03.2026
+Kurswert 1.000,00 EUR
+Provision 4,90 EUR
+Ausmachender Betrag 995,10 EUR
+Steuerbescheinigung folgt
+Die Jahressteuerbescheinigung erhalten Sie im Folgejahr gesondert.`;
+    expect(inspectSettlement(text)!.taxSummary).toBe(false);
+    expect(parseSettlement(text)!.kind).toBe("sell");
+  });
+});
+
 describe("parseSettlement — a settlement with its tax statement appended", () => {
   // A broker's sale settlement whose second part is the tax statement:
   // the first "Zu Ihren Gunsten" is before taxes, the amount booked is after.
@@ -868,6 +927,40 @@ Bitte prüfen Sie diesen Kontoauszug, jede Mitteilung oder Dividendenabrechnung 
   it("is one when it carries a trade's booking", () => {
     const s = inspectSettlement(STATEMENT.replace("Übertrag vom Girokonto 200,00", "Wertpapierabrechnung Verkauf ISIN DE000000AAA1 990,00"))!;
     expect(s.accountStatement).toBe(false);
+  });
+});
+
+describe("an account statement with several securities bookings", () => {
+  // Synthetic: a payout for one fund and a sale of another in the same
+  // period. Neither is the paper's one trade.
+  const STATEMENT = `Beispielbank AG
+Kontoauszug Nr. 1
+alter Kontostand vom 31.12.2025 0,00 H
+05.01. 05.01. ENTGELT PN:100
+  DEPOTPREIS Q4/2025 NETTO 10,00 EUR
+09.01. 08.01. EFFEKTENGUTSCHRIFT PN:100
+  WP-ERTRÄGNISGUTSCHRIFT DEPOT-NR 7654321
+  ALPHA FONDS A WKN AAA111 / DE000000AAA1
+  ABRECHNUNGSTAG 08.01.2026 MENGE 10,0000
+20.01. 20.01. EFFEKTENGUTSCHRIFT PN:100
+  WERTPAPIERABRECHNUNG DEPOT-NR 7654321
+  BETA FONDS B ISIN DE000000BBB2
+  HANDELSTAG 16.01.2026 MENGE 1,0000
+  KURS 50,0000
+neuer Kontostand vom 31.01.2026 50,00 H`;
+
+  it("is no settlement", () => {
+    const s = inspectSettlement(STATEMENT)!;
+    expect(s.severalBookings).toBe(true);
+    expect(s.kind).toBeNull();
+    expect(parseSettlement(STATEMENT)).toBeNull();
+  });
+
+  it("still reads a statement that carries one securities booking", () => {
+    const one = STATEMENT.split("20.01. 20.01.")[0] + "neuer Kontostand vom 31.01.2026 50,00 H";
+    const s = inspectSettlement(one)!;
+    expect(s.severalBookings).toBe(false);
+    expect(s.kind).toBe("dividend");
   });
 });
 
