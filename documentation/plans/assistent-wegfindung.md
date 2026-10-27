@@ -516,9 +516,10 @@ model then calls it by prompt, the way the checker, the summary and the
 router worked before the grammar. The plan call is the only bound call
 on the loop's own path; the checker and the router catch their errors and
 go without. The count of repeated replies now survives a second failure
-(`repeated` on the error, read by the benchmark). A llama-server build
-with #29115 should make the retry idle; `malformed_replies` says whether
-it is. Apart from the plan calls: 62 of 69 passed (90 %), the morning's
+(`repeated` on the error, read by the benchmark). The deployed
+build was `b10438` (2026-08-14), before the fix; `Dockerfile.gpu` now pins
+llama.cpp v0.7.0 (2026-10-15), which carries #29115 and should make the
+retry idle — `malformed_replies` says whether it is. Apart from the plan calls: 62 of 69 passed (90 %), the morning's
 `insurer-documents-by-subject` passes again, `securities-in-depot` lost
 `list_accounts` again, `letter-reply-reads-text` wrote the letter without
 the figures. Checker: 66 checks, 3 objections (`trips-last-year`,
