@@ -62,12 +62,27 @@ export type TextBoxSearch =
 
 // ── building ──────────────────────────────────────────────────────────────
 
+/**
+ * A word's text as Postgres will take it inside `jsonb`: control characters
+ * and lone surrogates removed. pdf.js reports a glyph its font cannot map as
+ * U+0000 — often a whole run of its own between two words — and `jsonb`
+ * rejects `\u0000` (and an unpaired surrogate) outright, which failed the
+ * whole document's insert. A word that is nothing but such characters
+ * comes back empty and is dropped by the caller.
+ */
+export function cleanWordText(text: string): string {
+  return text
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "")
+    .trim();
+}
+
 /** The corrected OCR rows of one page, flattened in reading order. */
 export function wordsFromOcrRows(rows: readonly OcrWord[][]): StoredWord[] {
   const words: StoredWord[] = [];
   for (const row of rows) {
     for (const w of row) {
-      const text = w.text.trim();
+      const text = cleanWordText(w.text);
       if (!text) continue;
       words.push({
         text,
@@ -146,8 +161,13 @@ export function wordsFromPdfItems(items: readonly PdfTextItem[], view: readonly 
       }
       let j = i;
       while (j < chars.length && !/\s/.test(chars[j])) j++;
+      const text = cleanWordText(chars.slice(i, j).join(""));
+      if (!text) {
+        i = j;
+        continue;
+      }
       words.push({
-        text: chars.slice(i, j).join(""),
+        text,
         left: x - x0 + offsets[i] * scale,
         top,
         right: x - x0 + offsets[j] * scale,
