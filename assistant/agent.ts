@@ -407,6 +407,34 @@ export function claimsChange(text: string | null): boolean {
   return !!text && CLAIMS_CHANGE_RE.test(text);
 }
 
+/** A bare go-ahead: "Ja.", "ok", "ja, bitte", "mach das", "yes". */
+const BARE_YES_RE = /^\s*(?:ja|yes|ok|okay|gerne|bitte|genau|einverstanden)(?:[,\s]+(?:bitte|gerne|genau|mach(?:e|en)? (?:das|es|so)|do it|please))*[.!\s]*$/i;
+
+export function isBareYes(text: string): boolean {
+  return BARE_YES_RE.test(text);
+}
+
+/**
+ * The question the previous answer left open — one that ends on a question
+ * mark or asks for consent in words — so a bare "Ja." has something to
+ * answer; null when the previous answer asked nothing.
+ */
+export function openQuestion(history: ChatMessage[]): string | null {
+  const previous = [...history].reverse().find((m) => m.role === "assistant" && typeof m.content === "string" && m.content.trim());
+  const text = typeof previous?.content === "string" ? previous.content.trim() : "";
+  if (!text) return null;
+  return /\?\s*$/.test(text) || asksForConsent(text) ? text : null;
+}
+
+/**
+ * Sent back once when the user said yes to the previous answer's question
+ * and the model asked what the yes refers to (the seventh GPU run of
+ * 2026-10-28): the go-ahead is the user's, the step is the model's own.
+ */
+export function yesNudge(reply: string, asked: string): string {
+  return `The user's "${reply.trim()}" answers your previous question «${asked.replace(/\s+/g, " ").slice(0, 300)}». That is the go-ahead: do what you asked by calling the tool now — a write tool makes the card the user confirms, and the rows it concerns are in the earlier tool results (from_previous_result = true where the tool takes it). Do not ask what the yes refers to.`;
+}
+
 /** An earlier turn of the conversation ended with a proposal card. */
 function proposedEarlier(history: ChatMessage[], writeTools: Set<string>): boolean {
   return history.some((m) =>
@@ -722,6 +750,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     conversationId: input.conversationId,
     previous: (type: RefType) => refs.get(type),
     context: input.context?.refs ?? [],
+    turnResults: () => turnResults(messages.slice(questionIndex), metaTools),
   };
 
   let answer: string | null = null;
@@ -746,6 +775,9 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let afterEmptyReply = false;
   /** One push from "bitte bestätigen" in words to the card; never twice. */
   let consentNudged = false;
+  /** The question the previous answer asked, when this message is a bare yes to it; one push, never twice. */
+  const openAsk = isBareYes(input.question) ? openQuestion(input.history) : null;
+  let yesNudged = false;
   const mayPropose = tools.some((t) => t.kind === "write");
   let revisionNudged = false;
   /** The checker's tally (stage 5); `null` until an answer was checked. */
@@ -943,13 +975,17 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     // own, so it is sent back to it once.
     const planOpen = !reply.tool_calls.length && plan !== null && !planNudged && plan.some((s) => !s.done)
       && !(missingAreas && saysPermissionMissing(reply.content));
-    if (!last && (nudge === null || afterEmptyReply) && !emptyReply && (fakeCall || dataQuestion || ungrounded || asksConsent || claimsRevision || planOpen)) {
+    // "Ja." to the previous answer's question, and the model answers in
+    // words again instead of taking the step it asked about.
+    const answersYes = !reply.tool_calls.length && !calledTools && !yesNudged && openAsk !== null;
+    if (!last && (nudge === null || afterEmptyReply) && !emptyReply && (fakeCall || answersYes || dataQuestion || ungrounded || asksConsent || claimsRevision || planOpen)) {
       // Not kept in the transcript: the draft was never the answer.
-      const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE
+      const text = fakeCall ? FAKE_CALL_NUDGE : answersYes ? yesNudge(input.question, openAsk) : ungrounded ? GROUNDING_NUDGE : asksConsent ? CONSENT_NUDGE
         : claimsRevision ? REVISION_NUDGE : planOpen ? planNudge(plan!) : DATA_QUESTION_NUDGE;
+      if (answersYes && !fakeCall) yesNudged = true;
       if (text === CONSENT_NUDGE) consentNudged = true;
       if (text === REVISION_NUDGE) revisionNudged = true;
-      if (planOpen && !fakeCall && !ungrounded && !asksConsent && !claimsRevision) planNudged = true;
+      if (planOpen && !fakeCall && !answersYes && !ungrounded && !asksConsent && !claimsRevision) planNudged = true;
       nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: text }];
       afterEmptyReply = false;
       emit({ type: "retract" });

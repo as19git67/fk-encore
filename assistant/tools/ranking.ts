@@ -55,6 +55,16 @@ export function rankProperties<F extends string>(fields: Record<F, RankField>, f
   };
 }
 
+/**
+ * The schema's `dependentRequired` for the ranking: `rank_by` needs its
+ * order. The loop's argument check refuses the call before the tool runs
+ * (`checkArguments`), so the refusal holds in the benchmark too, whose
+ * tools never run; `parseRanking` below is the same rule inside the tool.
+ */
+export function rankRequires(orderKey = ORDER_KEY): Record<string, string[]> {
+  return { rank_by: [orderKey] };
+}
+
 /** `group_by` and `per_group` for a tool's parameters, from its group table. */
 export function groupProperties<G extends string>(groups: Record<G, string>): Record<string, unknown> {
   const names = Object.keys(groups) as G[];

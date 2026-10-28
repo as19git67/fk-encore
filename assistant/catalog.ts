@@ -226,8 +226,18 @@ export function catalogLines(tools: ToolSpec[]): string {
 export function toolDefinition(tool: Pick<ToolSpec, "name" | "summary" | "parameters">) {
   return {
     type: "function" as const,
-    function: { name: tool.name, description: tool.summary, parameters: tool.parameters },
+    function: { name: tool.name, description: tool.summary, parameters: modelSchema(tool.parameters) },
   };
+}
+
+/**
+ * The schema as the model reads it: without `dependentRequired`, which
+ * llama-server's grammar builder does not know (the loop's argument check
+ * enforces it; the property's description tells the model).
+ */
+export function modelSchema(parameters: JsonSchema): Omit<JsonSchema, "dependentRequired"> {
+  const { dependentRequired: _, ...rest } = parameters;
+  return rest;
 }
 
 export const DESCRIBE_TOOLS_NAME = "describe_tools";
@@ -254,7 +264,7 @@ export function describeTools(
     .filter((t): t is ToolSpec => !!t)
     .slice(0, DESCRIBE_MAX);
   const unknown = wanted.filter((n) => !tools.some((t) => t.name === n));
-  const parts = described.map((t) => `${t.name}: ${t.summary}\nparameters: ${JSON.stringify(t.parameters)}`);
+  const parts = described.map((t) => `${t.name}: ${t.summary}\nparameters: ${JSON.stringify(modelSchema(t.parameters))}`);
   if (unknown.length) parts.push(`not in the catalog: ${unknown.join(", ")}`);
   if (wanted.length > DESCRIBE_MAX) parts.push(`only the first ${DESCRIBE_MAX} are described per call`);
   return { text: parts.join("\n\n") || "no tool names given", described };

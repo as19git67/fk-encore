@@ -8,7 +8,7 @@ import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { taxWorksheet } from "./tax";
 import { findInDocuments } from "./text-boxes";
-import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
+import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
@@ -184,6 +184,7 @@ export const searchDocuments: ToolSpec = {
       ...rankProperties(RANK_FIELDS, "relevance"),
       ...groupProperties(GROUPS),
     },
+    dependentRequired: rankRequires(),
   },
   async run(args) {
     const q = str(args.q);

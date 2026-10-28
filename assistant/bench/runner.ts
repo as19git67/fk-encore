@@ -142,7 +142,7 @@ function cannedTools(c: BenchCase, tools: ToolSpec[]): ToolSpec[] {
   const calls = new Map<string, number>();
   return tools.map((tool) => ({
     ...tool,
-    async run() {
+    async run(args) {
       const n = calls.get(tool.name) ?? 0;
       calls.set(tool.name, n + 1);
       let result: unknown = c.results[tool.name] ?? { error: "no data for this tool in the benchmark" };
@@ -152,8 +152,10 @@ function cannedTools(c: BenchCase, tools: ToolSpec[]): ToolSpec[] {
       }
       const record = result && typeof result === "object" && !Array.isArray(result) ? result as Record<string, unknown> : null;
       if (typeof record?.$error === "string") throw new Error(record.$error);
-      const { hint, loosen, ...rest } = record ?? {};
+      const { hint: hinted, loosen, ...rest } = record ?? {};
       const rows = Array.isArray(rest.rows) ? rest.rows.length : undefined;
+      // A hint may depend on the call (what a letter left out): a function of the arguments.
+      const hint = typeof hinted === "function" ? (hinted as (a: Record<string, unknown>) => string | undefined)(args) : hinted;
       return {
         text: JSON.stringify(record ? rest : result),
         digest: `[benchmark result of ${tool.name}]`,

@@ -6,7 +6,7 @@
 import { feed, photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
-import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
+import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const PHOTOS = ["module.photos", "photos.view"];
@@ -216,6 +216,7 @@ export const listPhotos: ToolSpec = {
       from_previous_result: { type: "boolean", description: "narrow the previous answer's photos" },
       hidden: HIDDEN_PARAM,
     },
+    dependentRequired: rankRequires(),
   },
   async run(args, ctx) {
     const hidden = hiddenOf(args.hidden);
