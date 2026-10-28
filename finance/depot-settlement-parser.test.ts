@@ -4,6 +4,7 @@ import {
   dropTaxBases,
   dropTaxRates,
   extractDepotNumber,
+  unreadTaxesFromRates,
   inspectSettlement,
   isPersonName,
   isUsableSettlement,
@@ -1148,5 +1149,54 @@ Ausmachender Betrag EUR 908,60`;
   it("takes the total, under its other spellings too", () => {
     expect(parseSettlement(SALE)!.tax).toBe(86.4);
     expect(parseSettlement(SALE.replace("Steuern insgesamt", "Summe der Steuern"))!.tax).toBe(86.4);
+  });
+});
+
+describe("parseSettlement — a fund sale under one row of column heads", () => {
+  // Synthetic: the bank's logo is the first line of each page, the column
+  // heads stand once above the row, the name wraps into a second line and
+  // the WKN follows the ISIN in brackets. The church tax's amount is split
+  // off its line, so only its rate and base can be read there.
+  const SALE = `® BEISPIELBANK
+Beispielbank AG · Musterweg 1 · 12345 Musterstadt
+Wertpapier Abrechnung Verkauf
+Nominale   Wertpapierbezeichnung   ISIN   (WKN)
+Stück 12,5   ALPHA GLOBAL FUND   LU0000000AA1   (A0B1C2)
+INHABER-ANTEILE A O.N
+Schlusstag   05.08.2026
+Ausführungskurs   80,00 EUR
+Kurswert   1.000,00   EUR
+Steuerberechnung
+Kapitalertragsteuer 24,51% auf 200,00 EUR   49,02-   EUR
+Solidaritätszuschlag 5,50% auf 49,02 EUR   2,69-   EUR
+Kirchensteuer 8,00% auf 49,02 EUR
+Ausmachender Betrag   944,37   EUR
+3,9 2-   EUR
+® BEISPIELBANK
+Hinweise zum Wertpapier
+Musterhinweis`;
+
+  it("reads the name off the row with the identifiers", () => {
+    expect(parseSettlement(SALE)!.name).toBe("ALPHA GLOBAL FUND");
+  });
+
+  it("takes the taxes that make the figures add up when one amount cannot be read", () => {
+    const s = parseSettlement(SALE)!;
+    expect(s.tax).toBe(55.63);
+    expect(s.gross! - s.tax!).toBeCloseTo(s.net!, 2);
+  });
+
+  it("estimates the unread tax from its rate and base", () => {
+    expect(unreadTaxesFromRates(SALE)).toEqual([3.92]);
+    expect(unreadTaxesFromRates(SALE.replace("Kirchensteuer 8,00% auf 49,02 EUR", "Kirchensteuer 8,00% auf 49,02 EUR   3,92-   EUR"))).toEqual([]);
+  });
+
+  it("keeps the taxes it read when the estimate does not add up", () => {
+    expect(parseSettlement(SALE.replace("944,37", "900,00"))!.tax).toBe(51.71);
+  });
+
+  it("prefers the model's name when it is the wrapped name the rules read part of, or the rules read a letterhead", () => {
+    expect(nameNearerIdentifier(SALE, "LU0000000AA1", "ALPHA GLOBAL FUND", "ALPHA GLOBAL FUND INHABER-ANTEILE A O.N")).toBe("llm");
+    expect(nameNearerIdentifier(SALE, "LU0000000AA1", "® BEISPIELBANK", "ALPHA GLOBAL FUND INHABER-ANTEILE A O.N")).toBe("llm");
   });
 });

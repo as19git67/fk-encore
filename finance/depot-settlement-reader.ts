@@ -128,8 +128,11 @@ export function llmInEuro(llm: SettlementValues, fx: ExchangeRate | null): Settl
  * Rules and model name the security differently. No check reaches the
  * name, so the text decides: the one printed nearer the security's
  * identifier (ISIN or WKN) is its name — the other came from a table or an
- * address block further away. A name not in the text at all loses; a tie
- * stays with the rules.
+ * address block further away. A name may run over two or three lines, as
+ * a table cell wraps it ("ALPHA GLOBAL FUND" / "INHABER-ANTEILE A"). A name
+ * not in the text at all loses. On a tie the fuller name wins when it holds
+ * the other (the cell's first line is all one source read); otherwise the
+ * rules keep it.
  */
 export function nameNearerIdentifier(
   text: string | null,
@@ -138,21 +141,58 @@ export function nameNearerIdentifier(
   llmName: string | null,
 ): "rules" | "llm" | null {
   if (!text || !identifier || !rulesName || !llmName) return null;
-  const lines = text.toLowerCase().split("\n").map((l) => l.replace(/\s+/g, " "));
+  const lines = text.toLowerCase().split("\n").map((l) => l.replace(/\s+/g, " ").trim());
   const idLine = lines.findIndex((l) => l.includes(identifier.toLowerCase()));
   if (idLine < 0) return null;
+  const norm = (name: string) => name.toLowerCase().replace(/\s+/g, " ").trim();
   const distance = (name: string): number => {
-    const n = name.toLowerCase().replace(/\s+/g, " ").trim();
+    const n = norm(name);
+    const words = n.split(" ");
     let best = Infinity;
-    lines.forEach((l, i) => {
-      if (l.includes(n)) best = Math.min(best, Math.abs(i - idLine));
-    });
+    for (let i = 0; i < lines.length; i++) {
+      // The lines the name starts on and wraps to; its distance is that of
+      // the line nearest the identifier.
+      for (let span = 1; span <= NAME_LINES && i + span <= lines.length; span++) {
+        const window = lines.slice(i, i + span).join(" ");
+        if (!window.includes(n) && !(span > 1 && wordsInOrder(window.split(" "), words))) continue;
+        const near = Math.min(...Array.from({ length: span }, (_, k) => Math.abs(i + k - idLine)));
+        best = Math.min(best, near);
+        break;
+      }
+    }
     return best;
   };
   const r = distance(rulesName);
   const l = distance(llmName);
   if (l < r) return "llm";
+  if (l === r && l < Infinity && norm(llmName).length > norm(rulesName).length && norm(llmName).includes(norm(rulesName))) return "llm";
   return r < Infinity ? "rules" : null;
+}
+
+/** How many lines a security's name may wrap over. */
+const NAME_LINES = 3;
+
+/** Columns a wrapped name may have between its parts: the ISIN and the WKN of its row. */
+const NAME_GAP_WORDS = 3;
+
+/**
+ * Whether `words` stand in `tokens` in their order, with no more than
+ * NAME_GAP_WORDS other tokens between them in all — a name whose first line
+ * ends in the identifier columns ("ALPHA FUND LU000… (A1B2C3)") before it
+ * wraps.
+ */
+function wordsInOrder(tokens: string[], words: string[]): boolean {
+  for (let start = 0; start < tokens.length; start++) {
+    if (tokens[start] !== words[0]) continue;
+    let w = 1;
+    let skipped = 0;
+    for (let t = start + 1; t < tokens.length && w < words.length && skipped <= NAME_GAP_WORDS; t++) {
+      if (tokens[t] === words[w]) w++;
+      else skipped++;
+    }
+    if (w === words.length && skipped <= NAME_GAP_WORDS) return true;
+  }
+  return false;
 }
 
 /** The name the text puts nearer the identifier, whichever source read it; the merge's choice otherwise. */
