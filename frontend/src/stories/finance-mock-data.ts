@@ -660,6 +660,7 @@ export const MOCK_SETTLEMENT_INSPECTION: SettlementInspection = {
     llm_status: 'cached',
   },
   links: [],
+  statement: null,
 }
 
 export const MOCK_SETTLEMENT_INSPECTION_REJECTED: SettlementInspection = {
@@ -679,6 +680,29 @@ export const MOCK_SETTLEMENT_INSPECTION_REJECTED: SettlementInspection = {
   },
   labels: {},
   depot: null,
+}
+
+/** A bank's report listing the whole depot; one row did not reach the holdings of its day. */
+export const MOCK_STATEMENT_INSPECTION: SettlementInspection = {
+  ...MOCK_SETTLEMENT_INSPECTION_REJECTED,
+  document_id: 307,
+  title: 'Finanzreport per 31.12.2025',
+  rejection: 'insurance',
+  statement: {
+    as_of: '2025-12-31',
+    depot_number: null,
+    account_label: 'Depot Alpha',
+    result: {
+      outcome: 'stored', account_id: 1, positions_found: 3, positions_stored: 3, positions_proposed: 0,
+      positions_ignored: 0, positions_unreadable: 0, detail: null, ignored: false, llm_status: 'cached',
+    },
+    positions: [
+      { isin: PF_ISIN_A, wkn: 'ALP001', name: 'ALPHA AG NA O.N.', quantity: '8.00000000', price: '124.300000', value: '994.40', currency: 'EUR', checked: true, source: 'both', stored: true },
+      { isin: PF_ISIN_B, wkn: 'BET002', name: 'BETA ETF', quantity: '25.00000000', price: '41.120000', value: '1028.00', currency: 'EUR', checked: true, source: 'rules', stored: true },
+      { isin: null, wkn: 'GAM003', name: 'GAMMA SYSTEMS DL-,10', quantity: '12.00000000', price: '150.000000', value: '1800.00', currency: 'EUR', checked: true, source: 'rules', stored: false },
+    ],
+    stored_only: [],
+  },
 }
 
 // ── Quotes (invented securities and prices) ────────────────────────────

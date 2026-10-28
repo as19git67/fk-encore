@@ -229,3 +229,46 @@ describe("mergeStatement", () => {
     expect(m.positions[0]!.source).toBe("rules");
   });
 });
+
+describe("holdings table rows as OCR reads a second page", () => {
+  // Synthetic: the table continues on the next page, OCR read the slash
+  // after a WKN as "2", a thousands point as a space, and moved one row's
+  // price and value off its line.
+  const PAGE = `Finanzreport per 30.06.2025 - Seite 12
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal letzter Währung Kurswert Kaufwert Gewinn / Verlust
+Bezeichnung Kurs Stückzinsen
+EEE555 2 Girosammelverwahrung 100,000 50,000 EUR 5.000,00 4.000,00 +1.000,00
+EPSILON INDEX U.ETF +0,00
+FFF666 / Girosammelverwahrung 10,000 200,000 EUR 2.000,00 1 500, 00 +500,00
+ZETA CORP. DL-,10
+GGG777 / Girosammelverwahrung 30,000
++0,00
+EUR 1.200,00 +300,00
+ETA DL-,10
+SYSTEMS
+HHH888 2 Girosammelverwahrung 40,000 100,000 EUR 4.000,00 +900,00
+THETA INC. +0,00
+Gesamtkurswert 11.000,00`;
+
+  it("reads every row the table lists", () => {
+    const r = inspectDepotStatement(PAGE)!;
+    expect(r.tableWkns).toEqual(["EEE555", "FFF666", "GGG777", "HHH888"]);
+    expect(r.positions.map((p) => [p.wkn, p.quantity])).toEqual([
+      ["EEE555", 100],
+      ["FFF666", 10],
+      ["GGG777", 30],
+      ["HHH888", 40],
+    ]);
+  });
+
+  it("keeps the quantity of a row whose figures went elsewhere, and its name past them", () => {
+    const row = inspectDepotStatement(PAGE)!.positions.find((p) => p.wkn === "GGG777")!;
+    expect(row).toMatchObject({ quantity: 30, price: null, value: null, name: "ETA DL-,10" });
+  });
+
+  it("reads a thousands point OCR read as a space", () => {
+    const row = inspectDepotStatement(PAGE)!.positions.find((p) => p.wkn === "FFF666")!;
+    expect(row.acquisitionPrice).toBe(150);
+  });
+});

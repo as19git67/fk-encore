@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3'
 import { http, HttpResponse } from 'msw'
 import SettlementDocumentDialog from '../components/finance/SettlementDocumentDialog.vue'
 import { defaultHandlers } from './handlers'
-import { MOCK_SETTLEMENT_INSPECTION, MOCK_SETTLEMENT_INSPECTION_REJECTED } from './finance-mock-data'
+import { MOCK_SETTLEMENT_INSPECTION, MOCK_SETTLEMENT_INSPECTION_REJECTED, MOCK_STATEMENT_INSPECTION } from './finance-mock-data'
 
 /** A settlement document with what the parser read from it (issue #1336). */
 
@@ -32,6 +32,19 @@ export const KeineAbrechnung: Story = {
     msw: {
       handlers: [
         http.get('/api/finance/portfolio/documents/:id/inspection', () => HttpResponse.json(MOCK_SETTLEMENT_INSPECTION_REJECTED)),
+        ...defaultHandlers,
+      ],
+    },
+  },
+}
+
+export const Depotbestand: Story = {
+  name: 'Depotbestand mit fehlender Position',
+  args: { documentId: 307 },
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/finance/portfolio/documents/:id/inspection', () => HttpResponse.json(MOCK_STATEMENT_INSPECTION)),
         ...defaultHandlers,
       ],
     },
