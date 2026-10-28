@@ -945,6 +945,43 @@ export interface SettlementInspection {
   /** What enrichment would do now (dry run). */
   depot: (DepotEnrichResult & { account_label: string | null }) | null
   links: SettlementInspectionLink[]
+  /** A depot statement: the positions it lists and whether each went into the holdings. */
+  statement: StatementInspection | null
+}
+
+export interface StatementInspectionPosition {
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  quantity: string | null
+  price: string | null
+  value: string | null
+  currency: string | null
+  checked: boolean | null
+  source: 'llm' | 'rules' | 'both'
+  /** A holdings row for this security was stored from this paper. */
+  stored: boolean
+}
+
+export interface StatementInspection {
+  as_of: string | null
+  depot_number: string | null
+  account_label: string | null
+  result: {
+    outcome: string
+    account_id: number | null
+    positions_found: number
+    positions_stored: number
+    positions_proposed: number
+    positions_ignored: number
+    positions_unreadable: number
+    detail: string | null
+    ignored: boolean
+    llm_status: string | null
+  }
+  positions: StatementInspectionPosition[]
+  /** Holdings rows stored from this paper that the reading no longer lists. */
+  stored_only: Array<{ isin: string | null; wkn: string | null; name: string | null; quantity: string | null }>
 }
 
 export async function inspectSettlementDocument(documentId: number): Promise<SettlementInspection> {

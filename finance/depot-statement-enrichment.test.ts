@@ -47,7 +47,7 @@ import {
   financeTransaction,
   users,
 } from "../db/schema";
-import { enrichPendingStatements, pruneStatementHoldings, readDepotStatement } from "./depot-statement-enrichment";
+import { enrichPendingStatements, inspectStatement, pruneStatementHoldings, readDepotStatement } from "./depot-statement-enrichment";
 import { reconcileHoldings } from "./depot-holding-reconciliation";
 import { admitSecurity, listSecurities } from "./depot-securities";
 import {
@@ -232,6 +232,35 @@ describe("finance/depot-statement-enrichment", () => {
     const again = await readDepotStatement(docId);
     expect(again.outcome).toBe("already_stored");
     expect(await holdingsOf(depot)).toHaveLength(2);
+  });
+
+  it("shows which listed positions went into the holdings of the paper's day", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(STATEMENT_WITH_NUMBER);
+    await readDepotStatement(docId);
+    // A row the reading stored, removed again: the paper lists it, the day misses it.
+    await db.delete(financeAccountHolding).where(and(eq(financeAccountHolding.document_id, docId), eq(financeAccountHolding.isin, ISIN_A)));
+
+    const view = (await inspectStatement(docId, STATEMENT_WITH_NUMBER, [depot]))!;
+    expect(view.as_of).toBe("2025-12-31");
+    expect(view.positions.map((p) => [p.isin, p.quantity, p.stored])).toEqual([
+      [ISIN_A, "20.00000000", false],
+      [ISIN_B, "10.50000000", false],
+    ]);
+    expect(view.result.outcome).toBe("stored");
+    expect(view.result.positions_proposed).toBe(1);
+
+    await readDepotStatement(docId);
+    const again = (await inspectStatement(docId, STATEMENT_WITH_NUMBER, [depot]))!;
+    expect(again.positions.find((p) => p.isin === ISIN_A)!.stored).toBe(true);
+    expect(again.stored_only).toEqual([]);
+  });
+
+  it("has nothing to show for a paper that is no statement", async () => {
+    const { depot } = await setup();
+    const text = "Wertpapierabrechnung Kauf\nISIN DE000000AAA1\nStück 1 Kurs 10,00 EUR\nKurswert 10,00 EUR\nAusmachender Betrag 10,00 EUR";
+    const docId = await insertDocument(text);
+    expect(await inspectStatement(docId, text, [depot])).toBeNull();
   });
 
   it("finds the depot through its securities master when no depot number is printed", async () => {

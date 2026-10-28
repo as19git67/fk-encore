@@ -436,6 +436,89 @@ export async function readDepotStatement(
   return result;
 }
 
+/** One position as a statement lists it, for the document dialog. */
+export interface StatementPositionView {
+  isin: string | null;
+  wkn: string | null;
+  name: string | null;
+  quantity: string | null;
+  price: string | null;
+  value: string | null;
+  currency: string | null;
+  /** quantity × price ≈ value; null when a figure is missing. */
+  checked: boolean | null;
+  source: MergedPosition["source"];
+  /** A holdings row for this security was stored from this paper. */
+  stored: boolean;
+}
+
+/** What a depot statement says and what was taken from it into the holdings. */
+export interface StatementView {
+  as_of: string | null;
+  depot_number: string | null;
+  /** What reading it now would do (dry run, the model's stored answer only). */
+  result: StatementResult;
+  positions: StatementPositionView[];
+  /** Holdings rows stored from this paper that the reading no longer lists. */
+  stored_only: Array<{ isin: string | null; wkn: string | null; name: string | null; quantity: string | null }>;
+}
+
+/**
+ * The positions a statement lists, as the dialog shows them: the rules'
+ * and the model's merged reading, each marked with whether a holdings row
+ * was stored from this paper for it. A position the paper lists but the
+ * holdings miss is the one the reconciliation then sees as sold. Null when
+ * the paper is no statement.
+ */
+export async function inspectStatement(documentId: number, text: string | null, accountIds: number[]): Promise<StatementView | null> {
+  const rules = inspectDepotStatement(text);
+  if (!rules || !text) return null;
+  if (!rules.statement && (await storedPaperType(documentId)) !== "statement") return null;
+  const reading = await readStatement(documentId, rules, text, "cache-only");
+  const merged = mergeStatement(rules, reading.llm);
+  const identity = await securityIdentity();
+  const inTable = rules.tableWkns.length > 0 ? tableMembership(rules.tableWkns, identity) : null;
+  const positions = merged.positions.filter((p) => (p.isin || p.wkn) && (inTable === null || inTable(p)));
+  const stored = (
+    await db
+      .select({
+        isin: financeAccountHolding.isin,
+        wkn: financeAccountHolding.wkn,
+        name: financeAccountHolding.name,
+        amount: financeAccountHolding.amount,
+      })
+      .from(financeAccountHolding)
+      .where(eq(financeAccountHolding.document_id, documentId))
+  ).map((r) => identity.complete(r));
+  const same = (a: { isin: string | null; wkn: string | null }, b: { isin: string | null; wkn: string | null }) =>
+    (a.isin !== null && a.isin === b.isin) || (a.wkn !== null && b.wkn !== null && repairWkn(a.wkn) === repairWkn(b.wkn));
+  const result = await readDepotStatement(documentId, accountIds, { dryRun: true, llm: "cache-only", includeIgnored: true });
+  const views = positions.map((p): StatementPositionView => {
+    const c = identity.complete(p);
+    return {
+      isin: c.isin,
+      wkn: c.wkn,
+      name: p.name,
+      quantity: fixed(p.quantity, 8),
+      price: fixed(p.price, 6),
+      value: fixed(p.value, 2),
+      currency: p.currency,
+      checked: p.checked,
+      source: p.source,
+      stored: stored.some((s) => same(s, c)),
+    };
+  });
+  return {
+    as_of: merged.asOf,
+    depot_number: merged.depotNumber,
+    result,
+    positions: views,
+    stored_only: stored
+      .filter((s) => !views.some((v) => same(s, v)))
+      .map((s) => ({ isin: s.isin, wkn: s.wkn, name: s.name, quantity: s.amount })),
+  };
+}
+
 /**
  * A document that was just classified, read for the depots: the model is
  * asked which kind of paper it is when the rules do not recognise its

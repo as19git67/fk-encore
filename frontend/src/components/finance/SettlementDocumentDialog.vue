@@ -239,6 +239,37 @@ const MATCHED_BY_TEXT: Record<string, string> = {
   booking: 'über die Girobuchung, der der Beleg zugeordnet ist',
 }
 
+/** Positions the statement lists that went into no holdings row of its day. */
+const missingFromHoldings = computed(() =>
+  (inspection.value?.statement?.positions ?? []).filter((p) => !p.stored),
+)
+
+const statementOutcomeLine = computed(() => {
+  const r = inspection.value?.statement?.result
+  if (!r) return null
+  if (r.ignored) return 'Der Beleg ist für die Depots ignoriert.'
+  if (r.outcome === 'no_depot') return 'Kein Depot gefunden: weder über die Depotnummer noch über ein bestätigtes Wertpapier.'
+  const lines: string[] = []
+  if (r.outcome === 'stored') lines.push('Erneutes Einlesen würde Positionen ergänzen, die im Bestand dieses Tages fehlen.')
+  const parts: string[] = []
+  if (r.positions_proposed > 0) parts.push(`${r.positions_proposed} Wertpapier(e) im Depot noch nicht bestätigt`)
+  if (r.positions_ignored > 0) parts.push(`${r.positions_ignored} im Depot ignoriert`)
+  if (r.positions_unreadable > 0) parts.push(`${r.positions_unreadable} ohne lesbare Stückzahl`)
+  if (parts.length > 0) lines.push(`Nicht übernommen: ${parts.join(', ')}.`)
+  return lines.length > 0 ? lines.join(' ') : null
+})
+
+const methodLine = computed(() => {
+  const i = inspection.value
+  if (!i) return ''
+  if (i.statement) {
+    return i.statement.result.llm_status === 'cached'
+      ? 'Gelesen mit festen Regeln und dem KI-Modell (gespeicherte Antwort).'
+      : 'Gelesen mit festen Regeln.'
+  }
+  return LLM_STATUS_TEXT[i.llm_status] ?? 'Gelesen mit festen Regeln.'
+})
+
 const depotLine = computed(() => {
   const d = inspection.value?.depot
   if (!d) return null
@@ -313,9 +344,73 @@ function openInDocuments() {
         <template v-else-if="inspection">
           <p class="sd-method">
             <i class="pi pi-info-circle" aria-hidden="true" />
-            {{ LLM_STATUS_TEXT[inspection.llm_status] ?? 'Gelesen mit festen Regeln.' }}
+            {{ methodLine }}
           </p>
 
+          <template v-if="inspection.statement">
+            <p class="sd-status sd-ok">
+              Als Depotbestand{{ inspection.statement.as_of ? ` per ${formatIsoDate(inspection.statement.as_of)}` : '' }} erkannt ·
+              {{ inspection.statement.positions.length }} Positionen
+            </p>
+            <p v-if="missingFromHoldings.length > 0" class="sd-status sd-warn">
+              {{ missingFromHoldings.length === 1 ? 'Eine Position steht' : `${missingFromHoldings.length} Positionen stehen` }}
+              auf dem Beleg, aber nicht im Bestand dieses Tages — der Bestandsabgleich sieht sie dort als 0 Stück.
+            </p>
+
+            <table class="sd-fields">
+              <thead>
+                <tr>
+                  <th>Wertpapier</th>
+                  <th>Stück</th>
+                  <th>Kurswert</th>
+                  <th>Quelle</th>
+                  <th>Im Bestand</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="p in inspection.statement.positions"
+                  :key="`${p.isin ?? ''}|${p.wkn ?? ''}`"
+                  :class="{ 'sd-disagree': !p.stored }"
+                >
+                  <td class="sd-field">
+                    {{ p.name ?? '–' }}
+                    <span class="sd-label-after">{{ [p.wkn, p.isin].filter(Boolean).join(' · ') }}</span>
+                  </td>
+                  <td class="sd-value">{{ p.quantity === null ? 'nicht gefunden' : formatQuantity(p.quantity) }}</td>
+                  <td class="sd-value">
+                    {{ p.value === null ? '–' : formatCurrency(p.value, p.currency ?? 'EUR') }}
+                    <span v-if="p.checked === false" class="sd-label-after">Stück × Kurs ergibt nicht den Kurswert</span>
+                  </td>
+                  <td class="sd-src">
+                    <span class="sd-source" :class="`sd-source-${p.source}`">{{ SOURCE_TEXT[p.source] }}</span>
+                  </td>
+                  <td class="sd-value">
+                    <i
+                      :class="p.stored ? 'pi pi-check-circle sd-stored' : 'pi pi-times-circle sd-not-stored'"
+                      :aria-label="p.stored ? 'Im Bestand gespeichert' : 'Nicht im Bestand gespeichert'"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div v-if="inspection.statement.stored_only.length > 0" class="sd-links">
+              <h3>Im Bestand, aber nicht mehr auf dem Beleg gelesen</h3>
+              <ul>
+                <li v-for="s in inspection.statement.stored_only" :key="`${s.isin ?? ''}|${s.wkn ?? ''}|${s.name ?? ''}`">
+                  {{ s.name ?? s.isin ?? s.wkn }} · {{ formatQuantity(s.quantity) }} Stück
+                </li>
+              </ul>
+            </div>
+
+            <div class="sd-depot">
+              <p v-if="inspection.statement.account_label">Depot: {{ inspection.statement.account_label }}.</p>
+              <p v-if="statementOutcomeLine">{{ statementOutcomeLine }}</p>
+            </div>
+          </template>
+
+          <template v-else>
           <p v-if="inspection.is_settlement && inspection.tax_statement" class="sd-status sd-ok">
             Als Steuermitteilung ({{ depotKindLabel(inspection.fields.kind ?? '') }}) erkannt · ergänzt nur die Steuer einer vorhandenen Transaktion
           </p>
@@ -396,6 +491,8 @@ function openInDocuments() {
             <p v-if="depotLine">{{ depotLine }}</p>
             <p v-if="outcomeLine" :class="{ 'sd-warn': inspection.depot?.outcome === 'conflict' }">{{ outcomeLine }}</p>
           </div>
+
+          </template>
 
           <div v-if="inspection.links.length > 0" class="sd-links">
             <h3>Verknüpft mit</h3>
@@ -556,6 +653,12 @@ function openInDocuments() {
 }
 .sd-check-ok .pi {
   color: var(--p-green-600);
+}
+.sd-stored {
+  color: var(--p-green-600);
+}
+.sd-not-stored {
+  color: var(--p-red-600);
 }
 .sd-check-failed {
   color: var(--p-red-600);

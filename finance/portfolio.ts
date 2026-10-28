@@ -73,9 +73,11 @@ import {
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
 import {
   enrichPendingStatements,
+  inspectStatement,
   pruneStatementHoldings,
   readDepotStatement,
   type StatementStats,
+  type StatementView,
 } from "./depot-statement-enrichment";
 import { classifyPendingPapers } from "./depot-paper-type";
 import {
@@ -2712,6 +2714,11 @@ interface DocumentInspectionResponse {
   /** What enrichment would do now (dry run), with the depot's label. */
   depot: (EnrichResult & { account_label: string | null }) | null;
   links: InspectionLink[];
+  /**
+   * A depot statement: the positions it lists and whether each went into
+   * the holdings. Null for any other paper.
+   */
+  statement: (StatementView & { account_label: string | null }) | null;
 }
 
 interface InspectDocumentParams {
@@ -2803,6 +2810,7 @@ export const inspectSettlementDocument = api(
           ? linkRows[0]!.net_amount
           : null;
     const shown = bookingNet !== null ? rereadAgainstBooking(reading, Number(bookingNet)) : reading;
+    const statement = ids.length > 0 ? await inspectStatement(documentId, doc.extracted_text, ids) : null;
     const sv = shown.merge.values;
 
     const show = (field: MergeField, raw: string | number | null): string | null => {
@@ -2871,6 +2879,12 @@ export const inspectSettlementDocument = api(
           executed_at: dateOnly(r.executed_at),
           net_amount: r.net_amount,
         })),
+      statement: statement
+        ? {
+            ...statement,
+            account_label: statement.result.account_id === null ? null : labelById.get(statement.result.account_id) ?? null,
+          }
+        : null,
     };
   },
 );
