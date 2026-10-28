@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, loosenGuard, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isBareYes, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, loosenGuard, openQuestion, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import { MalformedReplyError, type ChatRequest, type ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -1222,6 +1222,48 @@ describe("loosenGuard: the next call after an empty result, held to its advice",
     expect(clients.finance.listTransactions).toHaveBeenCalledTimes(4);
     expect(clients.finance.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ q: "Musterfirma Haustechnik", from: undefined, to: undefined }));
     expect(res.answer).toBe("Im September nichts; eine Buchung vom 12.08.2026.");
+  });
+});
+
+describe("a bare yes to the previous answer's question (the seventh GPU run of 2026-10-28)", () => {
+  const asked = "Soll ich den drei Buchungen den Tag „Renovierung“ hinzufügen? Bitte bestätige die Änderung.";
+  const history: ChatMessage[] = [
+    { role: "user", content: "Zeig mir die Buchungen vom Baumarkt im September." },
+    { role: "assistant", content: "Drei Buchungen." },
+    { role: "user", content: "Gib denen den Tag Renovierung." },
+    { role: "assistant", content: asked },
+  ];
+
+  it("knows a go-ahead and the question it answers", () => {
+    for (const yes of ["Ja.", "ja", "Ja, bitte!", "OK", "okay, mach das", "Gerne.", "yes please"]) expect(isBareYes(yes), yes).toBe(true);
+    for (const no of ["Ja, aber nur die erste.", "Nein.", "Welche Buchungen?", "Ja und die Fotos auch"]) expect(isBareYes(no), no).toBe(false);
+    expect(openQuestion(history)).toBe(asked);
+    expect(openQuestion([{ role: "user", content: "x" }, { role: "assistant", content: "Soll ich die Mappe anlegen?" }])).toBe("Soll ich die Mappe anlegen?");
+    expect(openQuestion([{ role: "user", content: "x" }, { role: "assistant", content: "Drei Buchungen." }])).toBeNull();
+    expect(openQuestion([])).toBeNull();
+  });
+
+  it("sends the words-only reply back once with the question it answers, then lets the next words stand", async () => {
+    const { fn, requests } = scripted([
+      answer("Da ich nicht weiß, worauf sich dein „Ja“ bezieht, beschreibe mir bitte kurz, was ich tun soll."),
+      answer("Verstanden, ich lege nichts an."),
+    ]);
+    const res = await runTurn({ user: USER, history, question: "Ja.", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(requests).toHaveLength(2);
+    const nudge = requests[1]!.messages.at(-1) as { role: string; content: string };
+    expect(nudge.role).toBe("user");
+    expect(nudge.content).toContain('The user\'s "Ja." answers your previous question «Soll ich den drei Buchungen den Tag „Renovierung“ hinzufügen? Bitte bestätige die Änderung.»');
+    expect(nudge.content).toContain("Do not ask what the yes refers to.");
+    expect(res.answer).toBe("Verstanden, ich lege nichts an.");
+  });
+
+  it("does not push when the message is more than a yes, or the previous answer asked nothing", async () => {
+    const more = scripted([answer("Zu welchen Buchungen?")]);
+    await runTurn({ user: USER, history, question: "Ja, aber nur, wenn es schnell geht.", tools: catalogFor(USER), chat: more.fn, now: NOW });
+    expect(more.requests).toHaveLength(1);
+    const plain = scripted([answer("Wobei kann ich helfen?")]);
+    await runTurn({ user: USER, history: history.slice(0, 2), question: "Ja.", tools: catalogFor(USER), chat: plain.fn, now: NOW });
+    expect(plain.requests).toHaveLength(1);
   });
 });
 

@@ -14,6 +14,12 @@ export interface JsonSchema {
   type: "object";
   properties: Record<string, Record<string, unknown>>;
   required?: string[];
+  /**
+   * Arguments required once another is set (JSON Schema 2019-09): `rank_by`
+   * needs its order. Checked by the loop before the tool runs; not sent to
+   * the model, whose grammar builder knows only the draft-7 keywords.
+   */
+  dependentRequired?: Record<string, string[]>;
   additionalProperties?: boolean;
 }
 
@@ -103,6 +109,8 @@ export interface ToolContext {
   previous?: (type: RefType) => number[] | undefined;
   /** The working set the user handed over for this conversation (#1534). */
   context?: Array<{ type: RefType; id: number }>;
+  /** The tool results of this turn so far, with the call behind each: what a letter can be held against. */
+  turnResults?: () => Array<{ tool: string; arguments: string; content: string }>;
 }
 
 export type ToolKind = "read" | "write";

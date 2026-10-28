@@ -14,6 +14,7 @@
 
 import type { ChatMessage, RefType } from "../types";
 import { summarizedTurn as replaySummarized, summaryNote } from "../summary";
+import { factsLeftOut, leftOutNote } from "../tools/letters";
 
 export const BENCH_TODAY = "2026-10-15";
 
@@ -145,6 +146,8 @@ const OLDER_BOOKINGS_HISTORY: ChatMessage[] = [
 ];
 
 const PROPOSAL = (summary: string) => ({ proposal: { id: 1, summary, status: "pending — the user confirms on the card" } });
+
+const MAHNUNG_TEXT = "Beispiel Versand GmbH · Beispielstraße 1 · 12345 Musterstadt\n\nMahnung\n\nZu unserer Rechnung BV-77-0042 vom 01.09.2026 über 59,90 € konnten wir noch keinen Zahlungseingang feststellen. Bitte überweisen Sie den Betrag bis zum 30.10.2026.";
 
 export const BENCH_CASES: BenchCase[] = [
   // ── reading (stage 2) ───────────────────────────────────────────────────
@@ -651,7 +654,8 @@ export const BENCH_CASES: BenchCase[] = [
     title: "Zwei Module verbinden",
     question: "Zeige mir alles, was beim Kauf der Immobilie in Musterstadt relevant war.",
     firstTools: ["list_categories", "search_documents", "list_transactions"],
-    expect: [{ tool: "search_documents", args: { q: { $present: true } } }, { tool: "list_transactions" }],
+    // Two right roads to the documents: a search word, or the property's category from list_categories.
+    expect: [{ tool: "search_documents", args: { q: { $present: true } }, anyOf: [{ category: { $present: true } }] }, { tool: "list_transactions" }],
     results: {
       list_categories: { rows: [{ slug: "kapitalanlage-immobilie-musterstadt", path: "Kapitalanlage › Immobilie Musterstadt" }] },
       search_documents: { rows: [{ id: 40, title: "Kaufvertrag Wohnung", date: "2019-04-02" }, { id: 41, title: "Grundbuchauszug", date: "2019-06-10" }], total: 2 },
@@ -886,9 +890,13 @@ export const BENCH_CASES: BenchCase[] = [
     ],
     results: {
       get_document_text: {
-        text: "Beispiel Versand GmbH · Beispielstraße 1 · 12345 Musterstadt\n\nMahnung\n\nZu unserer Rechnung BV-77-0042 vom 01.09.2026 über 59,90 € konnten wir noch keinen Zahlungseingang feststellen. Bitte überweisen Sie den Betrag bis zum 30.10.2026.",
+        text: MAHNUNG_TEXT,
       },
-      render_letter: PROPOSAL("Brief „Ihre Mahnung zur Rechnung BV-77-0042“ an Beispiel Versand GmbH"),
+      // The note the real tool adds when the letter leaves out what the text read this turn names.
+      render_letter: {
+        ...PROPOSAL("Brief „Ihre Mahnung zur Rechnung BV-77-0042“ an Beispiel Versand GmbH"),
+        hint: (args: Record<string, unknown>) => leftOutNote(factsLeftOut([MAHNUNG_TEXT], `${String(args.subject ?? "")}\n${String(args.body ?? "")}`)),
+      },
     },
   },
   {

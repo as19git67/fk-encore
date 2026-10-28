@@ -31,7 +31,7 @@ import {
   setConversationContext,
 } from "./assistant";
 import { DIN5008_B, gapsIn, MM, renderLetterPdf, signatureSplit } from "./letter-pdf";
-import { signed } from "./tools/letters";
+import { factsLeftOut, leftOutNote, signed } from "./tools/letters";
 import { getDocumentText } from "./tools/documents";
 import type { ProposalRow } from "./proposals";
 
@@ -336,3 +336,20 @@ describe("signing a letter", () => {
   });
 });
 
+
+describe("factsLeftOut: what the texts read this turn name and the letter does not", () => {
+  const text = "text of document 401:\nBeispiel Versand GmbH · Beispielstraße 1 · 12345 Musterstadt\n\nMahnung\n\nZu unserer Rechnung BV-77-0042 vom 01.09.2026 über 59,90 € konnten wir noch keinen Zahlungseingang feststellen. Bitte überweisen Sie den Betrag bis zum 30.10.2026.";
+
+  it("lists dates, amounts and reference numbers in the order the text names them, once each", () => {
+    expect(factsLeftOut([text], "Betreff\nhiermit widerspreche ich der Mahnung zur Rechnung BV-77-0042.")).toEqual(["01.09.2026", "30.10.2026", "59,90 €"]);
+    expect(factsLeftOut([text, text], "Widerspruch zur Mahnung (Rechnung BV-77-0042)\nFrist 30.10.2026, Betrag 59,90 €, Rechnung vom 01.09.2026.")).toEqual([]);
+    expect(factsLeftOut([], "x")).toEqual([]);
+    // The document id in the header and plain numbers are no facts the letter owes.
+    expect(factsLeftOut(["text of document 401:\nSeite 2 von 3, 12345 Musterstadt"], "")).toEqual([]);
+  });
+
+  it("the note names them and asks for another call only when the user wanted one of them", () => {
+    expect(leftOutNote([])).toBeUndefined();
+    expect(leftOutNote(["30.10.2026", "59,90 €"])).toBe("The document text read this turn also names 30.10.2026, 59,90 €, which the letter does not. If the user asked for one of them (a deadline, an amount, a reference number), call render_letter again with it in the body before you answer; never say the letter names what it does not.");
+  });
+});

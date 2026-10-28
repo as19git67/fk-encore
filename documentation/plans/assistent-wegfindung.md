@@ -434,6 +434,7 @@ these parameters as given.
 | 2026-10-27 (afternoon) | same | 1–5 with one plain retry of an unreadable reply | 75 | 83 % (62); 90 % of the 69 cases the grammar did not lose | 96 % | 3 | 4,340 | 25 |
 | 2026-10-27 (evening) | same, llama.cpp v0.7.0 | 1–5 with the grammar-free retry | 75 | 91 % (68) | 93 % | 3 | 4,225 | 23 |
 | 2026-10-28 | same | 1–5 with the seven fixes below | 75 | 95 % (71) | 95 % | 3 | 4,355 | 21 |
+| 2026-10-28 (noon) | same | 1–5 with the order, the guard and the proposal rule | 75 | 91 % (68); 95 % (71) on the expectations of the morning run | 93 % | 3 | 4,402 | 21 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -631,6 +632,68 @@ a bug on the way:
 - `rule-folder-by-month` carries rows for `list_transactions`, so the
   detour is not a dead end, and the finance area says a Mappe is
   `create_transaction_folder`, never `transaction_report`.
+
+### What the run at noon showed
+
+The run of 2026-10-28 at noon answered 68 of 75 (91 %) — three fewer,
+and the three are the measurement's own doing. The `direction` fix held:
+`largest-booking-per-month` and `expenses-by-tag` sent `direction: "out"`
+with `order: "desc"` and were not refused; `loosenGuard` held
+`empty-then-loosen-period` to the month (`tool_errors` 1, then the right
+call); `rule-folder-by-month` and `fewest-comments-per-year` pass. But
+four cases sent `rank_by` without its order, as every run before, and
+were not refused: `parseRanking` sits inside the tool, and the benchmark
+never runs a tool — its `run` is canned (`cannedTools` in
+`bench/runner.ts`). So the refusal holds in production and not in the
+measurement, while the expectations the same PR tightened to demand the
+order hold in the measurement only. `best-photos-in-country`,
+`best-photo-per-year-into-album`, `largest-document-per-sender` and
+`older-turn-largest-booking` passed in the morning with the same calls
+and fell at noon on the stricter expectation. The rule now sits where
+both see it: the schemas carry `dependentRequired: { rank_by: [order] }`
+and `checkArguments` enforces it in the loop before any tool runs, with
+the order's values and their meaning in the error; `parseRanking` stays
+as the tool's own guard. The model never sees the keyword
+(`modelSchema` strips it from the definition): llama-server's grammar
+builder knows the draft-7 keywords only, and the property's description
+already says "required with rank_by".
+
+The other three:
+
+- `tag-bookings-after-yes` — "Ja." to the previous answer's "Soll ich
+  … hinzufügen? Bitte bestätige die Änderung." got "Da ich nicht weiß,
+  worauf sich dein Ja bezieht …" in one round, without a tool. The
+  general rules say what to do with a yes, and the morning run did it; a
+  rule is a hope. The loop now knows a bare go-ahead (`isBareYes`: "Ja.",
+  "ok", "ja, bitte", "mach das") and the question the previous answer
+  left open (`openQuestion`: a question mark at the end, or a request
+  for consent in words); a words-only reply to that goes back once with
+  the question quoted and the instruction to take the step it asked
+  about (`yesNudge`). A message that is more than a yes ("Ja, aber nur
+  die erste") is not touched.
+- `letter-reply-reads-text` — the same failure as in every run: the
+  letter names the invoice number, not the deadline; the answer claims
+  both; the checker, which now has the rule for it, still said grounded.
+  Two model judgements in a row missed the same fact, so the tool now
+  states it: `render_letter` reads the texts the turn read
+  (`get_document_text`, `find_text_in_document`, through
+  `ToolContext.turnResults`) and lists in the proposal's note the dates,
+  amounts and reference numbers they name and the letter does not
+  (`factsLeftOut`), with the instruction to call again with the one the
+  user asked for before answering. It is a hint with the fact in it, not
+  a guard — a guard would have to know which fact the user wanted — and
+  whether a named fact moves the model where a rule did not is this
+  run's question; the fixture's hint is the real function over the
+  canned text, so the benchmark measures the same note production gets.
+- `property-purchase` — the model went by the property's category from
+  `list_categories` instead of a search word, which is a right road the
+  expectation did not know: `anyOf` with the category present.
+
+Two things the run confirms once more: `plan_asked` 19 of 19 planned,
+`malformed_replies` 0, so the llama.cpp v0.7.0 build holds; and
+`check_failed` 1 on `largest-document-per-sender`, where the checker sent
+back an answer that lacked nothing the results did not hold — a false
+alarm that cost a round and did no harm.
 
 ## Risks and what is left out on purpose
 

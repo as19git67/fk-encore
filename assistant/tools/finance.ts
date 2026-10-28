@@ -6,7 +6,7 @@
 import { finance } from "~encore/clients";
 import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
-import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, type RankField } from "./ranking";
+import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe } from "./hints";
 import { parseAmountBound, parseDirection, type TransactionCriteria } from "../../finance/transaction-conditions";
 import { parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
@@ -168,6 +168,7 @@ export const listTransactions: ToolSpec = {
       ...groupProperties(GROUPS),
       limit: { type: "integer", description: "rows to return, at most 50 (default 25); with group_by: groups shown" },
     },
+    dependentRequired: rankRequires("order"),
   },
   async run(args) {
     const limit = int(args.limit, { min: 1, max: 50 }) ?? 25;

@@ -10,7 +10,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
 
 import { clients, resetClients } from "./clients.test-helper";
-import { HAND_TOOLS } from "./catalog";
+import { checkArguments } from "./arguments";
+import { HAND_TOOLS, toolDefinition } from "./catalog";
 import type { ToolContext } from "./types";
 
 const PERMS = ["module.finance", "finance.view", "module.photos", "photos.view", "module.documents", "documents.view", "module.assistant"];
@@ -266,8 +267,22 @@ describe("list_photos", () => {
     const schema = tool("list_transactions").parameters.properties as Record<string, { enum?: string[] }>;
     expect(schema.direction!.enum).toEqual(["out", "in"]);
     expect(schema.order!.enum).toEqual(["desc", "asc"]);
+  });
+
+  it("the schemas carry the rule, so the loop's argument check refuses the call before the tool runs (the benchmark's tools never run)", () => {
+    for (const [name, field] of [["list_photos", "quality"], ["search_documents", "size_bytes"]]) {
+      expect(checkArguments(tool(name!), { rank_by: field })).toEqual([expect.stringMatching(/^direction is required with rank_by — one of desc, asc \(desc = highest/)]);
+      expect(checkArguments(tool(name!), { rank_by: field, direction: "desc" })).toEqual([]);
+    }
+    expect(checkArguments(tool("list_transactions"), { rank_by: "amount", direction: "out" })).toEqual([expect.stringMatching(/^order is required with rank_by/)]);
+    expect(checkArguments(tool("list_transactions"), { rank_by: "amount", direction: "out", order: "desc" })).toEqual([]);
+    // The model's copy of the schema has no dependentRequired: llama-server's grammar builder does not know the keyword.
+    expect(tool("list_photos").parameters.dependentRequired).toEqual({ rank_by: ["direction"] });
+    expect(toolDefinition(tool("list_photos")).function.parameters).not.toHaveProperty("dependentRequired");
+  });
+
+  it("without rank_by the order is optional: 'das älteste Foto' is direction asc on the default field", async () => {
     expect(tool("list_photos").parameters.properties).not.toHaveProperty("order");
-    // Without rank_by the order is optional: "das älteste Foto" is direction asc on the default field.
     clients.photo.listPhotos.mockResolvedValue({ photos: [] });
     await tool("list_photos").run({ direction: "asc", limit: 1 }, ctx());
     expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortDir: "asc" }));

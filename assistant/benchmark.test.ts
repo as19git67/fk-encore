@@ -351,6 +351,26 @@ describe("running a case", () => {
     const wrong = await runBenchCase(c, { chat: scripted([], "Im System sind keine Konten angelegt."), tools, user });
     expect(wrong.score).toMatchObject({ passed: false, missing: ["answer matching /berechtigung/"] });
   });
+
+  it("a fixture's hint may depend on the call: the letter without the deadline gets the note, the one with it does not", async () => {
+    const c = caseById("letter-reply-reads-text");
+    const without = scripted([
+      { tool: "get_document_text", args: { id: 401 } },
+      { tool: "render_letter", args: { body: "hiermit widerspreche ich der Mahnung zur Rechnung BV-77-0042." } },
+    ]);
+    const run = await runBenchCase(c, { chat: without, tools, user });
+    expect(run.score.passed).toBe(false);
+    const seen = without.mock.calls.map((x) => JSON.stringify((x[0] as ChatRequest).messages)).join("\n");
+    expect(seen).toContain("also names 01.09.2026, 30.10.2026, 59,90 €, which the letter does not");
+
+    const withIt = scripted([
+      { tool: "get_document_text", args: { id: 401 } },
+      { tool: "render_letter", args: { body: "Rechnung BV-77-0042 vom 01.09.2026 über 59,90 €, Frist 30.10.2026." } },
+    ]);
+    const ok = await runBenchCase(c, { chat: withIt, tools, user });
+    expect(ok.score.passed).toBe(true);
+    expect(withIt.mock.calls.map((x) => JSON.stringify((x[0] as ChatRequest).messages)).join("\n")).not.toContain("which the letter does not");
+  });
 });
 
 describe("benchmark runs", () => {

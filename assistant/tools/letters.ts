@@ -42,6 +42,46 @@ export async function senderOf(userId: number): Promise<string> {
   return [u?.name?.trim() || "[[Ihr Name]]", address || ADDRESS_GAP].join("\n");
 }
 
+const DATE_RE = /\b\d{1,2}\.\d{1,2}\.\d{4}\b/g;
+const AMOUNT_RE = /\b\d{1,3}(?:\.\d{3})*,\d{2}\s?(?:€|EUR)/g;
+/** A reference number: letters, then digits with hyphens or slashes (BV-77-0042, RE-2026-0002, KD/12345). */
+const REFERENCE_RE = /\b[A-Z]{1,6}[-/]?\d[\dA-Z/-]{3,}\b/g;
+const FACTS_MAX = 8;
+
+/**
+ * The dates, amounts and reference numbers the texts read this turn name
+ * and the letter does not — in the order the texts name them. The seventh
+ * GPU run of 2026-10-28 wrote a letter that named the invoice number but
+ * not the deadline the user asked for, and the answer claimed both; the
+ * proposal's note now lists what the letter left out, so the next call can
+ * carry it.
+ */
+export function factsLeftOut(texts: string[], letter: string): string[] {
+  const out: string[] = [];
+  for (const text of texts) {
+    for (const re of [DATE_RE, AMOUNT_RE, REFERENCE_RE]) {
+      for (const m of text.matchAll(re)) {
+        const fact = m[0];
+        if (!letter.includes(fact) && !out.includes(fact)) out.push(fact);
+      }
+    }
+  }
+  return out.slice(0, FACTS_MAX);
+}
+
+/** The note of a proposal whose letter leaves these facts out; undefined when none. */
+export function leftOutNote(facts: string[]): string | undefined {
+  if (!facts.length) return undefined;
+  return `The document text read this turn also names ${facts.join(", ")}, which the letter does not. If the user asked for one of them (a deadline, an amount, a reference number), call render_letter again with it in the body before you answer; never say the letter names what it does not.`;
+}
+
+/** The texts the turn read so far: full document texts and found passages. */
+function textsReadThisTurn(ctx: ToolContext): string[] {
+  return (ctx.turnResults?.() ?? [])
+    .filter((r) => r.tool === "get_document_text" || r.tool === "find_text_in_document")
+    .map((r) => r.content);
+}
+
 function attachmentsOf(v: unknown): LetterAttachment[] {
   return Array.isArray(v)
     ? v.flatMap((a) => {
@@ -161,13 +201,19 @@ export const renderLetter: WriteToolDefinition = {
     const parts = [`Brief „${subject}“ an ${firstLine(recipient) || "?"}`];
     if (attachments.length) parts.push(`${plural(attachments.length, "Anlage", "Anlagen")}`);
     if (draft.gaps.length) parts.push(`${plural(draft.gaps.length, "Lücke", "Lücken")} zum Ausfüllen`);
+    const leftOut = factsLeftOut(textsReadThisTurn(ctx), `${subject}\n${written}`);
+    const notes = [
+      draft.gaps.length
+        ? `The card cannot run until the user fills in these gaps on it: ${draft.gaps.join("; ")}. Name them in plain words and say so; do not tell the user to press "Ausführen" before.`
+        : "The letter has no gaps; the user can still change it on the card.",
+    ];
+    const left = leftOutNote(leftOut);
+    if (left) notes.push(left);
     return {
       summary: parts.join(", "),
       arguments: { sender, recipient, subject, body, attachments, destinations: ["document"] },
       count: attachments.length || undefined,
-      note: draft.gaps.length
-        ? `The card cannot run until the user fills in these gaps on it: ${draft.gaps.join("; ")}. Name them in plain words and say so; do not tell the user to press "Ausführen" before.`
-        : "The letter has no gaps; the user can still change it on the card.",
+      note: notes.join(" "),
     };
   },
   async execute(args, ctx) {

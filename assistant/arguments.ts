@@ -147,8 +147,7 @@ export function checkArguments(tool: Pick<ToolSpec, "parameters">, args: Record<
     problems.push(`unknown argument ${name}${meant ? `; did you mean ${meant}?` : known.length ? `; the arguments are ${known.join(", ")}` : "; it takes no arguments"}`);
   }
   for (const name of schema.required ?? []) {
-    const v = args[name];
-    if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) problems.push(`${name} is required`);
+    if (!isSet(args[name])) problems.push(`${name} is required`);
   }
   for (const [name, value] of Object.entries(args)) {
     const prop = properties[name];
@@ -156,7 +155,24 @@ export function checkArguments(tool: Pick<ToolSpec, "parameters">, args: Record<
     const problem = checkValue(name, prop, value);
     if (problem) problems.push(problem);
   }
+  // `rank_by` without its order: the seventh GPU run of 2026-10-28 showed
+  // that a refusal inside the tool holds in production but not in the
+  // benchmark, whose tools are canned; here it holds in both.
+  for (const [name, deps] of Object.entries(schema.dependentRequired ?? {})) {
+    if (!isSet(args[name])) continue;
+    for (const dep of deps) {
+      if (isSet(args[dep])) continue;
+      const prop = properties[dep];
+      const values = Array.isArray(prop?.enum) ? ` — one of ${(prop!.enum as unknown[]).map(String).join(", ")}` : "";
+      const about = typeof prop?.description === "string" ? ` (${prop.description})` : "";
+      problems.push(`${dep} is required with ${name}${values}${about}`);
+    }
+  }
   return problems;
+}
+
+function isSet(v: unknown): boolean {
+  return !(v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0));
 }
 
 /** The tool result of a refused call: what is wrong and what to do. */

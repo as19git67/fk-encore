@@ -87,3 +87,28 @@ describe("checkArguments", () => {
     expect(nearestName("x", [])).toBeUndefined();
   });
 });
+
+describe("dependentRequired: an argument another one needs (rank_by and its order)", () => {
+  const ranked = { parameters: {
+    ...SCHEMA,
+    properties: {
+      ...SCHEMA.properties,
+      rank_by: { type: "string", enum: ["amount", "booking_date"] },
+      order: { type: "string", enum: ["desc", "asc"], description: "desc = highest first; asc = lowest first" },
+    },
+    dependentRequired: { rank_by: ["order"] },
+  } as JsonSchema };
+
+  it("refuses rank_by without the order and names the values and what they mean", () => {
+    expect(checkArguments(ranked, { q: "x", rank_by: "amount" })).toEqual([
+      "order is required with rank_by — one of desc, asc (desc = highest first; asc = lowest first)",
+    ]);
+    expect(checkArguments(ranked, { q: "x", rank_by: "amount", order: "" })).toContain("order is required with rank_by — one of desc, asc (desc = highest first; asc = lowest first)");
+  });
+
+  it("lets the call through with the order, or without rank_by", () => {
+    expect(checkArguments(ranked, { q: "x", rank_by: "amount", order: "asc" })).toEqual([]);
+    expect(checkArguments(ranked, { q: "x", order: "asc" })).toEqual([]);
+    expect(checkArguments(ranked, { q: "x" })).toEqual([]);
+  });
+});
