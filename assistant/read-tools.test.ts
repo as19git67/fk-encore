@@ -67,7 +67,7 @@ describe("list_transactions", () => {
       { id: 2, account_id: 1, booking_date: "2026-09-10", amount: "-80.00", counterparty: "Beispiel Markt", purpose: "Einkauf" },
       { id: 3, account_id: 1, booking_date: "2026-08-03", amount: "-60.00", counterparty: "Beispiel Markt", purpose: "Einkauf" },
     ], total: 900 });
-    const out = await tool("list_transactions").run({ direction: "out", rank_by: "amount", group_by: "month" }, ctx());
+    const out = await tool("list_transactions").run({ direction: "out", rank_by: "amount", order: "desc", group_by: "month" }, ctx());
     expect(clients.finance.listTransactions).toHaveBeenCalledWith(expect.objectContaining({ sortBy: "amount", sortDir: "desc", limit: 500 }));
     expect(out.text).toContain("2026-09 | 1 | 2026-09-03 | -1250.00");
     expect(out.text).toContain("2026-08 | 3 | 2026-08-03 | -60.00");
@@ -147,7 +147,7 @@ describe("list_album_shares", () => {
 describe("search_documents", () => {
   it("passes a date order to the search and the list link, and says so in the note", async () => {
     clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [] });
-    const out = await tool("search_documents").run({ q: "KinderPolice", rank_by: "doc_date" }, ctx());
+    const out = await tool("search_documents").run({ q: "KinderPolice", rank_by: "doc_date", direction: "desc" }, ctx());
     expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledWith(expect.objectContaining({ sort_by: "doc_date", sort_dir: "desc" }));
     expect(out.text).toContain("ordered by doc_date descending");
     expect(out.block?.route).toBe("/dokumente?q=KinderPolice&sortBy=doc_date&sortDir=desc");
@@ -165,7 +165,7 @@ describe("search_documents", () => {
     await tool("search_documents").run({ category: "versicherung" }, ctx());
     expect(clients.documents.searchDocumentsEndpoint).not.toHaveBeenCalled();
     expect(clients.documents.listDocuments).toHaveBeenCalledWith(expect.objectContaining({ category: "versicherung", sort_by: "doc_date", sort_dir: "desc", limit: 15 }));
-    await expect(tool("search_documents").run({ rank_by: "relevance" }, ctx())).rejects.toThrow("needs q");
+    await expect(tool("search_documents").run({ rank_by: "relevance", direction: "desc" }, ctx())).rejects.toThrow("needs q");
   });
 
   it("keeps the largest document of each sender", async () => {
@@ -174,7 +174,7 @@ describe("search_documents", () => {
       { id: 2, title: "Brief", doc_date: "2025-03-01", correspondent_display: "Beispielkasse", size_bytes: 120000 },
       { id: 3, title: "Police", doc_date: "2024-01-01", sender: "Beispiel Versicherung AG", size_bytes: 90000 },
     ], total: 3 });
-    const out = await tool("search_documents").run({ rank_by: "size_bytes", group_by: "correspondent" }, ctx());
+    const out = await tool("search_documents").run({ rank_by: "size_bytes", direction: "desc", group_by: "correspondent" }, ctx());
     expect(clients.documents.listDocuments).toHaveBeenCalledWith(expect.objectContaining({ sort_by: "size_bytes", sort_dir: "desc", limit: 200 }));
     expect(out.text).toContain("group | id | date | size_bytes | title");
     expect(out.text).toContain("Beispielkasse | 1 | 2025-02-01 | 4820000 | Jahresbericht");
@@ -187,7 +187,7 @@ describe("search_documents", () => {
     clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [
       { id: 1, title: "Protokoll 2025", doc_date: "2025-06-12" }, { id: 2, title: "Protokoll 2024", doc_date: "2024-06-20" }, { id: 3, title: "Protokoll 2024 b", doc_date: "2024-07-20" },
     ] });
-    const out = await tool("search_documents").run({ q: "Protokoll", rank_by: "doc_date", group_by: "year" }, ctx());
+    const out = await tool("search_documents").run({ q: "Protokoll", rank_by: "doc_date", direction: "desc", group_by: "year" }, ctx());
     expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, sort_by: "doc_date" }));
     expect(out.ref?.ids).toEqual([1, 2]);
     expect(out.text).toContain("Only the 100 best matches were grouped");
@@ -212,7 +212,7 @@ describe("list_photos", () => {
 
   it("asks the server for the best first, and links the gallery in the same order", async () => {
     clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 2, taken_at: "2024-04-02T10:00:00Z" }] });
-    const out = await tool("list_photos").run({ rank_by: "quality", limit: 20 }, ctx());
+    const out = await tool("list_photos").run({ rank_by: "quality", direction: "desc", limit: 20 }, ctx());
     expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortBy: "quality", sortDir: "desc" }));
     expect(out.text).toContain("ordered by quality descending");
     expect(out.block?.route).toBe("/fotos/galerie?sortBy=ai_quality_score&sortDir=desc");
@@ -225,7 +225,7 @@ describe("list_photos", () => {
       { id: 7, taken_at: "2023-05-19T10:00:00Z", rank_value: 1 },
       { id: 8, rank_value: 0 },
     ] });
-    const out = await tool("list_photos").run({ person_ids: [41], rank_by: "favorites_count", group_by: "year" }, ctx());
+    const out = await tool("list_photos").run({ person_ids: [41], rank_by: "favorites_count", direction: "desc", group_by: "year" }, ctx());
     expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ personIds: "41", sortBy: "favorites", sortDir: "desc" }));
     expect(out.text).toContain("group | id | taken | favorites_count | place");
     expect(out.text).toContain("2024 | 5 | 2024-07-02 | 4");
@@ -251,16 +251,32 @@ describe("list_photos", () => {
   });
 
   it("rates a person's face only with person_ids", async () => {
-    await expect(tool("list_photos").run({ rank_by: "person_face" }, ctx())).rejects.toThrow("person_ids");
+    await expect(tool("list_photos").run({ rank_by: "person_face", direction: "desc" }, ctx())).rejects.toThrow("person_ids");
     clients.photo.listPhotos.mockResolvedValue({ photos: [] });
-    await tool("list_photos").run({ rank_by: "person_face", person_ids: [3] }, ctx());
+    await tool("list_photos").run({ rank_by: "person_face", direction: "desc", person_ids: [3] }, ctx());
     expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortBy: "face", personIds: "3" }));
+  });
+
+  it("refuses rank_by without its order, and names both values (the GPU runs never set asc for 'die wenigsten')", async () => {
+    await expect(tool("list_photos").run({ rank_by: "comments_count", group_by: "year" }, ctx()))
+      .rejects.toThrow('rank_by comments_count needs direction: "desc" for the largest, most or newest first, "asc" for the smallest, fewest or oldest first');
+    await expect(tool("search_documents").run({ rank_by: "size_bytes" }, ctx())).rejects.toThrow("rank_by size_bytes needs direction");
+    // list_transactions calls its order `order`: `direction` is money in or out there.
+    await expect(tool("list_transactions").run({ rank_by: "amount", direction: "out" }, ctx())).rejects.toThrow("rank_by amount needs order");
+    const schema = tool("list_transactions").parameters.properties as Record<string, { enum?: string[] }>;
+    expect(schema.direction!.enum).toEqual(["out", "in"]);
+    expect(schema.order!.enum).toEqual(["desc", "asc"]);
+    expect(tool("list_photos").parameters.properties).not.toHaveProperty("order");
+    // Without rank_by the order is optional: "das älteste Foto" is direction asc on the default field.
+    clients.photo.listPhotos.mockResolvedValue({ photos: [] });
+    await tool("list_photos").run({ direction: "asc", limit: 1 }, ctx());
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortDir: "asc" }));
   });
 
   it("re-reads an earlier result from the server when the field is one the server computes", async () => {
     clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 2, rank_value: 3 }, { id: 9, rank_value: 1 }] });
     const c = { ...ctx(), previous: () => [1, 2, 3] };
-    const out = await tool("list_photos").run({ from_previous_result: true, rank_by: "favorites_count" }, c);
+    const out = await tool("list_photos").run({ from_previous_result: true, rank_by: "favorites_count", direction: "desc" }, c);
     expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortBy: "favorites" }));
     expect(out.ref?.ids).toEqual([2]);
   });
@@ -777,6 +793,7 @@ describe("what an empty list says (stage 2 of assistent-wegfindung.md)", () => {
       .mockResolvedValueOnce({ items: [], total: 2 });  // without the amount range
     const out = await tool("list_transactions").run({ account_id: 1, tags: ["Reise"], direction: "out", amount_min: 500 }, ctx());
     expect(out.hint).toBe("No bookings match. The same call with one filter dropped: without account_id 1: 9; without tags Reise: unknown; without direction out: 0; without the amount range: 2. Call again with the amount range dropped and every other filter kept: that brings the 2 rows closest to the question. Dropping account_id 1 or tags Reise or direction out instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.");
+    expect(out.loosen).toEqual({ drop: ["amount_min", "amount_max"], keep: ["account_id", "tags", "direction"], label: "the amount range" });
     expect(clients.finance.listTransactions).toHaveBeenCalledTimes(5);
     expect(clients.finance.listTransactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ accountId: undefined, tagsCsv: "Reise", limit: 1 }));
   });
@@ -797,6 +814,8 @@ describe("what an empty list says (stage 2 of assistent-wegfindung.md)", () => {
     clients.documents.listDocuments.mockResolvedValue({ items: [], total: 12 }); // without q
     const out = await tool("search_documents").run({ q: "Gesundheitsdividende", mode: "fts", correspondent: "Beispiel Versicherung" }, ctx());
     expect(out.hint).toBe('No documents match. The same call with one filter dropped: without q "Gesundheitsdividende": 12; without mode fts (hybrid instead): 25+; without correspondent "Beispiel Versicherung": 2. Call again with correspondent "Beispiel Versicherung" dropped and every other filter kept: that brings the 2 rows closest to the question. Dropping q "Gesundheitsdividende" or mode fts (hybrid instead) instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.');
+    // The mode probe is a change, not a dropped argument: no guard for this result.
+    expect(out.loosen).toBeUndefined();
     expect(clients.documents.searchDocumentsEndpoint).toHaveBeenNthCalledWith(2, expect.objectContaining({ mode: "hybrid", correspondent: "beispiel-versicherung", limit: 25 }));
     expect(clients.documents.searchDocumentsEndpoint).toHaveBeenNthCalledWith(3, expect.objectContaining({ mode: "fts", correspondent: undefined, sender: undefined }));
     expect(clients.documents.listDocuments).toHaveBeenCalledWith(expect.objectContaining({ correspondent: "beispiel-versicherung", limit: 1 }));
@@ -816,6 +835,7 @@ describe("what an empty list says (stage 2 of assistent-wegfindung.md)", () => {
       .mockResolvedValueOnce({ photos: [{ id: 9 }] });                                 // hidden included
     const out = await tool("list_photos").run({ place: "Beispielland", date_from: "2024-01-01", date_to: "2024-12-31" }, ctx());
     expect(out.hint).toBe('No photos match. The same call with one filter dropped: without the period 2024-01-01..2024-12-31: 200+; without place "Beispielland": 3; without hidden photos left out (hidden include instead): 1. Call again with place "Beispielland" dropped and every other filter kept: that brings the 3 rows closest to the question. Dropping the period 2024-01-01..2024-12-31 or hidden photos left out (hidden include instead) instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.');
+    expect(out.loosen).toEqual({ drop: ["place"], keep: ["date_from", "date_to", "hidden"], label: 'place "Beispielland"' });
     expect(clients.photo.listPhotos).toHaveBeenNthCalledWith(2, expect.objectContaining({ dateFrom: undefined, dateTo: undefined, locationText: "Beispielland", limit: 201 }));
     expect(clients.photo.listPhotos).toHaveBeenNthCalledWith(4, expect.objectContaining({ hiddenMode: "include", locationText: "Beispielland" }));
   });

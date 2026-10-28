@@ -19,6 +19,23 @@ export interface Probe {
    * counted in): its count is listed, but never recommended.
    */
   recommend?: false;
+  /** The tool arguments this probe drops, so the loop can hold the next call to the advice. */
+  args?: string[];
+}
+
+/** The advice of an empty result: the hint text, and which arguments to drop and keep when the hint names some. */
+export interface LoosenAdvice {
+  hint: string;
+  loosen?: Loosen;
+}
+
+export interface Loosen {
+  /** The arguments to drop (one filter; a period is two). */
+  drop: string[];
+  /** The arguments to keep. */
+  keep: string[];
+  /** How the hint named what to drop. */
+  label: string;
 }
 
 /** A count, or "at least" when the probe read a capped page. */
@@ -40,39 +57,48 @@ export function countText(c: ProbeCount | undefined): string {
  * loosen, and the hint says so: the user has none of these at all.
  */
 export async function loosenHint(what: string, probes: Probe[]): Promise<string> {
+  return (await loosenAdvice(what, probes)).hint;
+}
+
+export async function loosenAdvice(what: string, probes: Probe[]): Promise<LoosenAdvice> {
   if (!probes.length) {
-    return `No ${what} at all: no filter was set, so the user has none. Say so; do not search again.`;
+    return { hint: `No ${what} at all: no filter was set, so the user has none. Say so; do not search again.` };
   }
   const counts = await Promise.all(probes.slice(0, PROBE_CAP).map(async (p) => {
     try {
-      return { label: p.label, count: await p.count(), recommend: p.recommend !== false };
+      return { label: p.label, count: await p.count(), recommend: p.recommend !== false, args: p.args ?? [] };
     } catch {
-      return { label: p.label, count: undefined, recommend: p.recommend !== false };
+      return { label: p.label, count: undefined, recommend: p.recommend !== false, args: p.args ?? [] };
     }
   }));
   const parts = counts.map((c) => `without ${c.label}: ${countText(c.count)}`);
   if (counts.length === 1) {
     // One filter: without it the result is everything, which answers nothing.
     const only = counts[0]!;
-    return `No ${what} match ${only.label} (without it: ${countText(only.count)}, which is everything). Tell the user nothing matches; search once more only with another spelling or a broader word the user's own wording allows. Do not repeat the same call.`;
+    return { hint: `No ${what} match ${only.label} (without it: ${countText(only.count)}, which is everything). Tell the user nothing matches; search once more only with another spelling or a broader word the user's own wording allows. Do not repeat the same call.` };
   }
-  const useful = counts.filter((c): c is { label: string; count: ProbeCount; recommend: boolean } => !!c.count && c.count.n > 0 && c.recommend);
+  const useful = counts.filter((c): c is { label: string; count: ProbeCount; recommend: boolean; args: string[] } => !!c.count && c.count.n > 0 && c.recommend);
   if (!useful.length) {
-    return `No ${what} match. The same call with one filter dropped: ${parts.join("; ")}. No single filter explains it; tell the user nothing matches these criteria and name them. Do not search again with the same arguments.`;
+    return { hint: `No ${what} match. The same call with one filter dropped: ${parts.join("; ")}. No single filter explains it; tell the user nothing matches these criteria and name them. Do not search again with the same arguments.` };
   }
   // The filter whose absence brings the fewest rows was the narrowest guess
   // (the month, the account); the one that brings hundreds was the question
   // itself (the sender). Name the first, so the model does not drop the second.
   const fewest = Math.min(...useful.map((c) => c.count.n));
   const drop = useful.filter((c) => c.count.n === fewest);
-  const keep = counts.filter((c) => !drop.includes(c));
+  const keep = counts.filter((c) => !(drop as typeof counts).includes(c));
   const dropText = drop.length === 1
     ? `Call again with ${drop[0]!.label} dropped and every other filter kept: that brings the ${countText(drop[0]!.count)} row${drop[0]!.count.n === 1 && !drop[0]!.count.atLeast ? "" : "s"} closest to the question.`
     : `Call again with one of ${drop.map((c) => c.label).join(" or ")} dropped and every other filter kept.`;
   const keepText = keep.length
     ? ` Dropping ${keep.map((c) => c.label).join(" or ")} instead would bring rows the user did not ask for.`
     : "";
-  return `No ${what} match. The same call with one filter dropped: ${parts.join("; ")}. ${dropText}${keepText} Say which filter you dropped; if the question needs every filter, tell the user nothing matches.`;
+  const hint = `No ${what} match. The same call with one filter dropped: ${parts.join("; ")}. ${dropText}${keepText} Say which filter you dropped; if the question needs every filter, tell the user nothing matches.`;
+  // One clear filter to drop, and every probe knows its arguments: the loop
+  // can then hold the next call to it (`loosenGuard` in agent.ts).
+  const one = drop.length === 1 ? drop[0]! : undefined;
+  if (!one || !one.args.length || keep.some((c) => !c.args.length)) return { hint };
+  return { hint, loosen: { drop: one.args, keep: keep.flatMap((c) => c.args), label: one.label } };
 }
 
 /** The label of a date range, from what the call set. */

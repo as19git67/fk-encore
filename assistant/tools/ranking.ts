@@ -33,18 +33,24 @@ export interface Grouping<G extends string> {
 export const PER_GROUP_MAX = 10;
 
 /** `rank_by` and `direction` for a tool's parameters, from its field table. */
-export function rankProperties<F extends string>(fields: Record<F, RankField>, fallback: NoInfer<F>): Record<string, unknown> {
+/**
+ * The name of the order argument: `direction` unless the tool already uses
+ * that word for something else (list_transactions: money in or out).
+ */
+export const ORDER_KEY = "direction";
+
+export function rankProperties<F extends string>(fields: Record<F, RankField>, fallback: NoInfer<F>, orderKey = ORDER_KEY): Record<string, unknown> {
   const names = Object.keys(fields) as F[];
   return {
     rank_by: {
       type: "string",
       enum: names,
-      description: `order (default ${fallback}): ${names.map((n) => `${n} = ${fields[n].description}`).join("; ")}`,
+      description: `order (default ${fallback}): ${names.map((n) => `${n} = ${fields[n].description}`).join("; ")}; always with ${orderKey}`,
     },
-    direction: {
+    [orderKey]: {
       type: "string",
       enum: ["desc", "asc"],
-      description: "desc (default) = highest/newest first; asc = lowest/oldest ('die wenigsten')",
+      description: "desc = highest/newest/most first ('die größte', 'die meisten', 'die besten'); asc = lowest/oldest/fewest first ('die kleinste', 'die wenigsten', 'das älteste'). Required with rank_by.",
     },
   };
 }
@@ -62,10 +68,20 @@ export function groupProperties<G extends string>(groups: Record<G, string>): Re
   };
 }
 
-export function parseRanking<F extends string>(args: Record<string, unknown>, fields: Record<F, RankField>, fallback: NoInfer<F>): Ranking<F> {
+/**
+ * `rank_by` without its order is refused: the GPU runs of 2026-10-27/28
+ * never set `asc` for "die wenigsten" on their own, and a wrong default
+ * answers the opposite question with a confident row. The error names
+ * both values, and the corrected call comes a round later.
+ */
+export function parseRanking<F extends string>(args: Record<string, unknown>, fields: Record<F, RankField>, fallback: NoInfer<F>, orderKey = ORDER_KEY): Ranking<F> {
   const s = str(args.rank_by);
   const field = s && Object.prototype.hasOwnProperty.call(fields, s) ? (s as F) : fallback;
-  return { field, direction: str(args.direction) === "asc" ? "asc" : "desc" };
+  const order = str(args[orderKey]);
+  if (s && !order) {
+    throw new Error(`rank_by ${s} needs ${orderKey}: "desc" for the largest, most or newest first, "asc" for the smallest, fewest or oldest first`);
+  }
+  return { field, direction: order === "asc" ? "asc" : "desc" };
 }
 
 export function parseGrouping<G extends string>(args: Record<string, unknown>, groups: Record<G, string>): Grouping<G> | undefined {

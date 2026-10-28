@@ -15,7 +15,7 @@ import { estimateTokens } from "../catalog";
 import { MalformedReplyError, type ChatFn, type ChatRequest } from "../llm-client";
 import { isRouterRequest, type RoutingStage } from "../router";
 import { isCheckRequest, verifyByDefault } from "../verify";
-import type { AssistantUser, ToolSpec } from "../types";
+import type { AssistantUser, ToolOutcome, ToolSpec } from "../types";
 import { BENCH_TODAY, type BenchCase } from "./cases";
 import { scoreCase, type BenchCall, type CaseScore } from "./scoring";
 
@@ -135,8 +135,8 @@ export function benchNow(): Date {
  * A canned result as the case wrote it. `{ $sequence: [a, b] }` hands the
  * first call a, the second b and every later call the last entry, so a case
  * can show an empty result and then rows. `rows: []` counts as no rows,
- * `hint` goes along as the tool's hint, and `{ $error: "…" }` fails the call
- * as a tool would.
+ * `hint` goes along as the tool's hint (`loosen` as its drop/keep advice),
+ * and `{ $error: "…" }` fails the call as a tool would.
  */
 function cannedTools(c: BenchCase, tools: ToolSpec[]): ToolSpec[] {
   const calls = new Map<string, number>();
@@ -152,13 +152,14 @@ function cannedTools(c: BenchCase, tools: ToolSpec[]): ToolSpec[] {
       }
       const record = result && typeof result === "object" && !Array.isArray(result) ? result as Record<string, unknown> : null;
       if (typeof record?.$error === "string") throw new Error(record.$error);
-      const { hint, ...rest } = record ?? {};
+      const { hint, loosen, ...rest } = record ?? {};
       const rows = Array.isArray(rest.rows) ? rest.rows.length : undefined;
       return {
         text: JSON.stringify(record ? rest : result),
         digest: `[benchmark result of ${tool.name}]`,
         rowCount: rows ?? 1,
         hint: typeof hint === "string" ? hint : undefined,
+        loosen: loosen && typeof loosen === "object" ? loosen as ToolOutcome["loosen"] : undefined,
       };
     },
   }));
