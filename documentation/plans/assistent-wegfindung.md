@@ -435,6 +435,7 @@ these parameters as given.
 | 2026-10-27 (evening) | same, llama.cpp v0.7.0 | 1–5 with the grammar-free retry | 75 | 91 % (68) | 93 % | 3 | 4,225 | 23 |
 | 2026-10-28 | same | 1–5 with the seven fixes below | 75 | 95 % (71) | 95 % | 3 | 4,355 | 21 |
 | 2026-10-28 (noon) | same | 1–5 with the order, the guard and the proposal rule | 75 | 91 % (68); 95 % (71) on the expectations of the morning run | 93 % | 3 | 4,402 | 21 |
+| 2026-10-28 (afternoon) | same | 1–5 with the schema rule, the yes nudge and the letter note | 75 | 100 % (75) | 96 % | 3 | 4,402 | 23 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -694,6 +695,45 @@ Two things the run confirms once more: `plan_asked` 19 of 19 planned,
 `check_failed` 1 on `largest-document-per-sender`, where the checker sent
 back an answer that lacked nothing the results did not hold — a false
 alarm that cost a round and did no harm.
+
+### What the run in the afternoon showed
+
+The run of 2026-10-28 in the afternoon answered 75 of 75 (100 %), the
+first full pass, and each of the four changes did what it was built for:
+
+- The schema rule refused `rank_by` without its order before any tool
+  ran, and the model took the correction in one extra round:
+  `best-photos-in-country`, `best-photo-per-year-into-album` and
+  `largest-document-per-sender` show `tool_errors` 1 and then the right
+  call, `older-turn-largest-booking` resent with `order: "desc"`. The
+  refusal costs a round; the model does not yet send the order on its
+  own, and the description "required with rank_by" alone does not move
+  it. That is the one place left where a deterministic check pays for a
+  rule the prompt does not deliver.
+- `tag-bookings-after-yes` passed with two nudges: the words-only reply
+  to "Ja." went back with the question quoted, and the second attempt
+  called `tag_transactions` with `from_previous_result`.
+- `letter-reply-reads-text` passed for the first time: the body names the
+  reference number, the invoice date and the deadline. The note from
+  `factsLeftOut` brought the model back once (one nudge), and the second
+  letter carried the fact — a named fact moved the model where the rule
+  in the prompt and the checker's rule did not.
+- `property-purchase` passed over the category road the expectation now
+  accepts.
+
+`largest-booking-per-month` took seven rounds and still passed; it is the
+longest path in the set and the one to watch when the loop changes. The
+checker sent back `best-photos-in-country` and `photos-with-description`
+once each (`check_failed` 2), both false alarms that cost a round and
+changed nothing in the answer; `unverified` stays 0. Plan 19 of 19 and
+`malformed_replies` 0 confirm the v0.7.0 build again; `first_tool` 96 %,
+median 3 rounds, 4,402 prompt tokens in round 1, 23 nudges in all.
+
+What the pass rate does not say: 75 cases with canned results measure the
+way to the tool and the words of the answer, not the data. The open
+measurement is the benchmark against a synthetic database (stage 6, part
+2), and the open stage is the router's embedding step. A new failure from
+daily use becomes a case only after every real value is replaced.
 
 ## Risks and what is left out on purpose
 
