@@ -821,6 +821,11 @@ const TAX_RATE_LINE_RE = new RegExp(
  * or alone on the next line.
  */
 export function unreadTaxesFromRates(text: string): number[] {
+  return taxesFromRates(text, true);
+}
+
+/** Every tax line's rate times its base, or only those whose amount cannot be read. */
+function taxesFromRates(text: string, onlyUnread: boolean): number[] {
   const lines = text.split("\n");
   const out: number[] = [];
   lines.forEach((line, i) => {
@@ -830,7 +835,7 @@ export function unreadTaxesFromRates(text: string): number[] {
     const base = parseGermanNumber(m[3]!);
     if (rate === null || base === null || rate <= 0 || rate >= 100) return;
     const joined = dropTaxRates(`${line.slice(m.index)}\n${lines[i + 1] ?? ""}`).split("\n")[0]!;
-    if (new RegExp(String.raw`${m[1]}${GAP}${AMOUNT}`, "i").test(joined)) return;
+    if (onlyUnread && new RegExp(String.raw`${m[1]}${GAP}${AMOUNT}`, "i").test(joined)) return;
     out.push(Math.round(rate * base) / 100);
   });
   return out;
@@ -1014,11 +1019,17 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     // its base says roughly what is missing. Banks round each tax their own
     // way, so the estimate only confirms that the figures add up; the tax
     // taken is what lies between Kurswert, charges and the final amount.
-    const missing = unreadTaxesFromRates(dropTaxBases(text));
-    if (missing.length === 0 || gross === null || netAbs === null || !kind) return read;
+    if (gross === null || netAbs === null || !kind) return read;
     const implied = Math.round((isMoneyOut(kind) ? netAbs - gross - (fees ?? 0) : gross - (fees ?? 0) - netAbs) * 100) / 100;
-    const estimate = (read ?? 0) + missing.reduce((a, b) => a + b, 0);
-    if (implied <= 0 || Math.abs(estimate - implied) > RATE_ROUNDING * missing.length) return read;
+    if (implied <= 0) return read;
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const missing = unreadTaxesFromRates(dropTaxBases(text));
+    const fits = (estimate: number, n: number) => n > 0 && Math.abs(estimate - implied) <= RATE_ROUNDING * n;
+    // An amount the rules took for a tax's may belong to another line
+    // (OCR moves amounts about): when every tax line prints its rate and
+    // base, those alone say whether the figures add up.
+    const all = taxesFromRates(dropTaxBases(text), false);
+    if (!fits((read ?? 0) + sum(missing), missing.length) && !fits(sum(all), all.length)) return read;
     markers.push("Steuersatz × Grundlage");
     return implied;
   })());

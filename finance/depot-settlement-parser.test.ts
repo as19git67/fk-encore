@@ -1191,6 +1191,13 @@ Musterhinweis`;
     expect(unreadTaxesFromRates(SALE.replace("Kirchensteuer 8,00% auf 49,02 EUR", "Kirchensteuer 8,00% auf 49,02 EUR   3,92-   EUR"))).toEqual([]);
   });
 
+  it("takes the taxes that add up when OCR garbled one amount on its own line", () => {
+    const garbled = SALE.replace("Kirchensteuer 8,00% auf 49,02 EUR", "Kirchensteuer 8,00% auf 49,02 EUR   0,39-   EUR").replace("3,9 2-   EUR\n", "");
+    expect(unreadTaxesFromRates(garbled)).toEqual([]);
+    expect(parseSettlement(garbled)!.tax).toBe(55.63);
+    expect(parseSettlement(garbled.replace("944,37", "900,00"))!.tax).toBe(52.1);
+  });
+
   it("keeps the taxes it read when the estimate does not add up", () => {
     expect(parseSettlement(SALE.replace("944,37", "900,00"))!.tax).toBe(51.71);
   });
