@@ -234,7 +234,7 @@ describe("holdings table rows as OCR reads a second page", () => {
   // Synthetic: the table continues on the next page, OCR read the slash
   // after a WKN as "2", a thousands point as a space, and moved one row's
   // price and value off its line.
-  const PAGE = `Finanzreport per 02.03.2026 - Seite 12
+  const PAGE = `Finanzreport per 30.06.2025 - Seite 12
 Depotbestand EUR EUR EUR
 WKN / Verwahrart Anzahl / Nominal letzter Währung Kurswert Kaufwert Gewinn / Verlust
 Bezeichnung Kurs Stückzinsen
