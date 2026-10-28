@@ -706,7 +706,11 @@ function nameOnIdentifierLine(text: string, isin: string | null, wkn: string | n
   if (ids.length === 0) return null;
   const line = text.split("\n").find((l) => ids.some((id) => l.includes(id)));
   if (!line) return null;
-  const m = /^\s*(?:(?:Stk\.?|Stück|STK)\s*)*[\d.,]+\s+(.+?)\s*,?\s*(?:WKN|ISIN)\b/i.exec(line);
+  const m =
+    /^\s*(?:(?:Stk\.?|Stück|STK)\s*)*[\d.,]+\s+(.+?)\s*,?\s*(?:WKN|ISIN)\b/i.exec(line) ??
+    // A table row under column heads printed once above it, the ISIN and
+    // the WKN in brackets ending the row: "Stück 4,5 ALPHA FUND  LU000…  (A1B2C3)".
+    /^\s*(?:(?:Stk\.?|Stück|STK)\s*)*[\d.,]+\s+(.+?)\s+[A-Z]{2}[A-Z0-9]{9}\d\s+\((?=[A-Z0-9]*\d)[A-Z0-9]{6}\)\s*$/i.exec(line);
   if (!m) return null;
   const candidate = m[1]!.trim().replace(/\s{2,}/g, " ");
   return looksLikeName(candidate) ? candidate : null;
@@ -726,6 +730,8 @@ export function cleanSecurityName(raw: string): string | null {
     .replace(/^(?:per\s+)?\d{1,2}\.\d{1,2}\.\d{2,4}\s+/i, "")
     // "Stück" as OCR also reads it ("Stiick", "Stuck").
     .replace(/^(?:STK|St(?:ü|ii|u)ck|St\.)\s*[\d.,]+\s+/i, "")
+    // A WKN in brackets after the ISIN: "Alpha Fund LU0000000000 (A1B2C3)".
+    .replace(/\s+\((?=[A-Z0-9]*\d)[A-Z0-9]{6}\)$/, "")
     // The identifier column at the end: an ISIN, or a WKN (six characters,
     // at least one digit) — or one OCR read a character too many into
     // ("A1LJ5RX" for "A1J5RX"): seven, with letters and digits.
@@ -780,6 +786,54 @@ export function extractDepotNumber(text: string): string | null {
   if (!m) return null;
   const digits = m[1]!.replace(/\D/g, "");
   return digits.length >= 5 ? digits : null;
+}
+
+/** The single taxes a settlement lists, added up when it prints no total. */
+const SINGLE_TAX_LABELS = [
+  String.raw`Kapitalertrag(?:s)?steuer(?!satz)`,
+  String.raw`KESt`,
+  String.raw`KapSt`,
+  // OCR drops the umlaut ("Solidaritatszuschlag").
+  String.raw`Solidarit(?:ä|a|ae)tszuschlag`,
+  String.raw`Soli(?:daritätszuschlag)?\b`,
+  String.raw`SolZ\b`,
+  String.raw`Kirchensteuer(?!satz)`,
+  String.raw`KiSt`,
+  // Credited foreign tax is not withheld from this booking.
+  String.raw`(?<!angerechnete\s(?:\S+\s)?)Quellensteuer`,
+  String.raw`QuSt`,
+  String.raw`Finanztransaktionssteuer`,
+  String.raw`Stempelsteuer`,
+];
+
+/** How far a tax computed from its rate and base may be from the printed one, per tax. */
+const RATE_ROUNDING = 0.02;
+
+/** A tax line that states its rate and base: "Kirchensteuer 8,00 % auf 50,00 EUR". */
+const TAX_RATE_LINE_RE = new RegExp(
+  String.raw`(Kapitalertrag(?:s)?steuer|Solidarit(?:ä|a|ae)tszuschlag|Kirchensteuer)[^\d\n]{0,20}?(\d{1,3}(?:,\d{1,4})?)[ \t]*%[ \t]*(?:auf|von)[ \t]*(\d{1,3}(?:\.\d{3})*(?:,\d{1,8})?)`,
+  "i",
+);
+
+/**
+ * The taxes, estimated from rate and base, of every tax line whose amount
+ * cannot be read where it should stand — on its own line after the rate,
+ * or alone on the next line.
+ */
+export function unreadTaxesFromRates(text: string): number[] {
+  const lines = text.split("\n");
+  const out: number[] = [];
+  lines.forEach((line, i) => {
+    const m = TAX_RATE_LINE_RE.exec(line);
+    if (!m) return;
+    const rate = parseGermanNumber(m[2]!);
+    const base = parseGermanNumber(m[3]!);
+    if (rate === null || base === null || rate <= 0 || rate >= 100) return;
+    const joined = dropTaxRates(`${line.slice(m.index)}\n${lines[i + 1] ?? ""}`).split("\n")[0]!;
+    if (new RegExp(String.raw`${m[1]}${GAP}${AMOUNT}`, "i").test(joined)) return;
+    out.push(Math.round(rate * base) / 100);
+  });
+  return out;
 }
 
 /**
@@ -953,26 +1007,21 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     if (!taxStatement || gross === null || netAbs === null) return null;
     markers.push("vor − nach Steuern");
     return Math.round((gross - netAbs) * 100) / 100;
-  })() ?? sumAfter(
-    dropTaxRates(dropTaxBases(text)),
-    [
-      String.raw`Kapitalertrag(?:s)?steuer(?!satz)`,
-      String.raw`KESt`,
-      String.raw`KapSt`,
-      // OCR drops the umlaut ("Solidaritatszuschlag").
-      String.raw`Solidarit(?:ä|a|ae)tszuschlag`,
-      String.raw`Soli(?:daritätszuschlag)?\b`,
-      String.raw`SolZ\b`,
-      String.raw`Kirchensteuer(?!satz)`,
-      String.raw`KiSt`,
-      // Credited foreign tax is not withheld from this booking.
-      String.raw`(?<!angerechnete\s(?:\S+\s)?)Quellensteuer`,
-      String.raw`QuSt`,
-      String.raw`Finanztransaktionssteuer`,
-      String.raw`Stempelsteuer`,
-    ],
-    markers,
-  ));
+  })() ?? (() => {
+    const read = sumAfter(dropTaxRates(dropTaxBases(text)), SINGLE_TAX_LABELS, markers);
+    // A tax line whose amount the rules cannot read ("Kirchensteuer 8,00 %
+    // auf 50,00 EUR" with the amount split off or garbled): its rate times
+    // its base says roughly what is missing. Banks round each tax their own
+    // way, so the estimate only confirms that the figures add up; the tax
+    // taken is what lies between Kurswert, charges and the final amount.
+    const missing = unreadTaxesFromRates(dropTaxBases(text));
+    if (missing.length === 0 || gross === null || netAbs === null || !kind) return read;
+    const implied = Math.round((isMoneyOut(kind) ? netAbs - gross - (fees ?? 0) : gross - (fees ?? 0) - netAbs) * 100) / 100;
+    const estimate = (read ?? 0) + missing.reduce((a, b) => a + b, 0);
+    if (implied <= 0 || Math.abs(estimate - implied) > RATE_ROUNDING * missing.length) return read;
+    markers.push("Steuersatz × Grundlage");
+    return implied;
+  })());
 
 
   const executedAt = track("executedAt", () =>
