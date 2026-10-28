@@ -268,7 +268,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "best-photos-in-country",
     title: "Beste Fotos eines Landes",
     question: "Zeige mir die 20 besten Fotos aus Beispielland.",
-    expect: [{ tool: "list_photos", args: { place: { $contains: "beispielland" }, rank_by: "quality" } }],
+    expect: [{ tool: "list_photos", args: { place: { $contains: "beispielland" }, rank_by: "quality", direction: "desc" } }],
     results: { list_photos: { rows: [{ id: 902, taken: "2023-04-02", place: "Beispielstadt, Beispielland" }], total: 312 } },
   },
   {
@@ -312,7 +312,7 @@ export const BENCH_CASES: BenchCase[] = [
     question: "Such für jedes Jahr das Foto mit Max mit den meisten Likes und füge es dem Album \"Beste Kinder\" hinzu.",
     expect: [
       { tool: "list_persons" },
-      { tool: "list_photos", args: { person_ids: { $contains: "41" }, rank_by: "favorites_count", group_by: "year" } },
+      { tool: "list_photos", args: { person_ids: { $contains: "41" }, rank_by: "favorites_count", direction: "desc", group_by: "year" } },
       { tool: "add_photos_to_album", args: { album_id: 7, from_previous_result: true } },
     ],
     results: {
@@ -339,14 +339,14 @@ export const BENCH_CASES: BenchCase[] = [
     id: "largest-booking-per-month",
     title: "Größte Buchung je Monat",
     question: "Was war dieses Jahr in jedem Monat meine größte Ausgabe?",
-    expect: [{ tool: "list_transactions", args: { direction: "out", rank_by: "amount", group_by: "month", from: "2026-01-01" } }],
+    expect: [{ tool: "list_transactions", args: { direction: "out", rank_by: "amount", order: "desc", group_by: "month", from: "2026-01-01" } }],
     results: { list_transactions: { rows: [{ group: "2026-09", id: 9501, date: "2026-09-03", amount: "-1250.00", counterparty: "Beispiel Vermietung", purpose: "Miete" }], total: 1 } },
   },
   {
     id: "largest-document-per-sender",
     title: "Größtes Dokument je Absender",
     question: "Zeig mir je Absender das größte Dokument.",
-    expect: [{ tool: "search_documents", args: { rank_by: "size_bytes", group_by: "correspondent", q: { $absent: true } } }],
+    expect: [{ tool: "search_documents", args: { rank_by: "size_bytes", direction: "desc", group_by: "correspondent", q: { $absent: true } } }],
     results: { search_documents: { rows: [{ group: "Beispielkasse", id: 310, date: "2025-02-01", size_bytes: 4820000, title: "Jahresbericht" }], total: 1 } },
   },
   {
@@ -399,6 +399,7 @@ export const BENCH_CASES: BenchCase[] = [
           {
             rows: [],
             hint: 'No bookings match. The same call with one filter dropped: without q "Musterfirma Haustechnik": 212; without the period 2026-09-01..2026-09-30: 1. Call again with the period 2026-09-01..2026-09-30 dropped and every other filter kept: that brings the 1 row closest to the question. Dropping q "Musterfirma Haustechnik" instead would bring rows the user did not ask for. Say which filter you dropped; if the question needs every filter, tell the user nothing matches.',
+            loosen: { drop: ["from", "to"], keep: ["q"], label: "the period 2026-09-01..2026-09-30" },
           },
           { rows: [{ id: 9101, date: "2026-08-12", counterparty: "Musterfirma Haustechnik GmbH", purpose: "Rechnung RE-2026-0101", amount: -120.5 }], total: -120.5, count: 1 },
         ],
@@ -733,7 +734,7 @@ export const BENCH_CASES: BenchCase[] = [
     question: "Welche der Baumarkt-Buchungen war die größte, und wann war sie?",
     history: OLDER_BOOKINGS_HISTORY,
     previous: { transaction: [9401, 9402, 9403] },
-    expect: [{ tool: "list_transactions", args: { q: { $contains: "baumarkt" }, rank_by: "amount" } }],
+    expect: [{ tool: "list_transactions", args: { q: { $contains: "baumarkt" }, rank_by: "amount", order: { $present: true } } }],
     results: {
       list_transactions: { rows: [
         { id: 9402, date: "2026-09-12", amount: "-250.00", counterparty: "Baumarkt Musterstadt", purpose: "Fliesen" },
@@ -847,6 +848,9 @@ export const BENCH_CASES: BenchCase[] = [
     }],
     results: {
       transaction_totals: { total: -1250.4, count: 9 },
+      // The sixth run listed first and, with no rows for the tool, declared
+      // there were none: the detour finds rows too.
+      list_transactions: { rows: [{ id: 9101, date: "2026-08-12", counterparty: "Musterfirma Haustechnik GmbH", purpose: "Rechnung RE-2026-0101", amount: -120.5 }, { id: 9044, date: "2026-05-03", counterparty: "Musterfirma Haustechnik GmbH", purpose: "Wartung", amount: -180.0 }], total: 9, note: "2 of 9 rows shown" },
       create_transaction_folder: PROPOSAL("Regel-Sammelmappe „Haustechnik 2026“ für Buchungen: Suche „Musterfirma Haustechnik“, ab 01.01.2026; jetzt 9 Buchungen, Summe −1.250,40 €; Zwischensummen je Monat"),
     },
   },

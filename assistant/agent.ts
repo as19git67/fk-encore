@@ -620,6 +620,33 @@ function narrowingFamily(kind: string): string | null {
 export const EMPTY_RESULT_HINT = "No rows. Before you tell the user nothing exists, drop or widen one filter (the period, the text, the category) and call once more; if the question needs every filter, say that nothing matches and name the criteria.";
 
 /** The result text with its hint, or with the loop's general hint when it found nothing and said nothing about it. */
+/** What the last empty result of a tool advised, held against the tool's next call. */
+export interface LoosenMemory {
+  args: Record<string, unknown>;
+  drop: string[];
+  keep: string[];
+  label: string;
+}
+
+const unset = (v: unknown) => v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length);
+
+/**
+ * The guard behind an empty result's advice (stage 2 of
+ * assistent-wegfindung.md): the result said which filter to drop, and the
+ * runs of 2026-10-27/28 dropped the other one anyway — the sender instead
+ * of the month, which lists every booking of the month as if it were the
+ * answer. A next call of the same tool that drops a filter the advice
+ * said to keep, while the one to drop stays, is refused with the advice
+ * repeated. Null when the call may run.
+ */
+export function loosenGuard(memory: LoosenMemory, args: Record<string, unknown>): string | null {
+  const removed = Object.keys(memory.args).filter((k) => !unset(memory.args[k]) && unset(args[k]));
+  const droppedAdvised = memory.drop.some((k) => removed.includes(k));
+  const droppedKept = memory.keep.filter((k) => removed.includes(k));
+  if (droppedAdvised || !droppedKept.length) return null;
+  return `error: you dropped ${droppedKept.join(", ")}, which the empty result above said to keep; it said to drop ${memory.label} (${memory.drop.join(", ")}). Call again with the earlier arguments, minus ${memory.drop.join(" and ")} only.`;
+}
+
 export function withHint(outcome: ToolOutcome, args: Record<string, unknown>): string {
   if (outcome.hint) return `${outcome.text}\n\n${outcome.hint}`;
   const filtered = Object.values(args).some((v) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length));
@@ -704,6 +731,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let calledTools = false;
   /** Calls already made in this turn, by tool and arguments: a repeat is answered from above. */
   const seenCalls = new Set<string>();
+  /** Per tool, the advice of its last empty result, until the tool runs again. */
+  const loosenMemory = new Map<string, LoosenMemory>();
   /** The ungrounded answer and the nudge, sent along until the model calls a tool or answers again. */
   let nudge: ChatMessage[] | null = null;
   /** One more request for words after an empty reply; never twice. */
@@ -1097,6 +1126,16 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         input.log?.({ tool: name, arguments: args, rows: 0, ms: 0, error: message });
         continue;
       }
+      // The next call after an empty result, held to that result's advice.
+      const advised = loosenMemory.get(name);
+      const held = advised ? loosenGuard(advised, args) : null;
+      if (held) {
+        result(held);
+        emit({ type: "tool_result", tool: name, rowCount: 0, error: held });
+        input.log?.({ tool: name, arguments: args, rows: 0, ms: 0, error: held });
+        continue;
+      }
+      loosenMemory.delete(name);
       // Only a call that runs counts; a refused one may come again.
       seenCalls.add(key);
 
@@ -1125,6 +1164,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           blocks.push(outcome.block);
         }
         result(withHint(outcome, args));
+        if (outcome.rowCount === 0 && outcome.loosen) loosenMemory.set(name, { args, ...outcome.loosen });
         ranOk.push(name);
         emit({ type: "tool_result", tool: name, rowCount: outcome.rowCount, block: outcome.block });
         input.log?.({ tool: name, arguments: args, rows: outcome.rowCount, ms: Date.now() - started });

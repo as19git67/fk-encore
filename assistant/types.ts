@@ -89,6 +89,8 @@ export interface ToolOutcome {
    * and without rows gets the loop's general hint.
    */
   hint?: string;
+  /** With `hint` on no rows: the arguments the hint says to drop and keep, for the loop's guard on the next call. */
+  loosen?: { drop: string[]; keep: string[]; label: string };
 }
 
 export interface ToolContext {

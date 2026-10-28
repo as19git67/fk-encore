@@ -433,6 +433,7 @@ these parameters as given.
 | 2026-10-27 | same | 1–5 with the bound-call fix | 75 | 81 % (61); 88 % of the 69 cases llama-server's parser did not lose | 97 % | 3 | 4,231 | 18 |
 | 2026-10-27 (afternoon) | same | 1–5 with one plain retry of an unreadable reply | 75 | 83 % (62); 90 % of the 69 cases the grammar did not lose | 96 % | 3 | 4,340 | 25 |
 | 2026-10-27 (evening) | same, llama.cpp v0.7.0 | 1–5 with the grammar-free retry | 75 | 91 % (68) | 93 % | 3 | 4,225 | 23 |
+| 2026-10-28 | same | 1–5 with the seven fixes below | 75 | 95 % (71) | 95 % | 3 | 4,355 | 21 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -587,6 +588,49 @@ data, never in `GENERAL_RULES`:
 
 Whether that is 100 % is the next run's to say; the prompt grew by the
 examples and one rule in two areas, which `prompt_tokens_first` shows.
+
+The run of 2026-10-28 answered: 71 of 75 (95 %), the median prompt 130
+tokens larger. The three fixes in a tool or the loop held every time —
+`quote-of-security` (the model even sent the key), `securities-in-depot`
+(by the depot's name in `q`), `property-purchase` (`list_transactions`
+after the search) and `insurer-documents-by-subject` all pass. The three
+fixes that were an example or a rule alone did not move the model at all:
+`fewest-comments-per-year` still without `direction`, `empty-then-loosen-period`
+still dropping the sender although the hint now named the month in so
+many words, `letter-reply-reads-text` still without the deadline — and
+this time the answer claimed the letter named it. `rule-folder-by-month`
+fell for the first time: the model listed the bookings first, the
+benchmark had no rows for that tool, and "no data" became "no bookings".
+The lesson is the plan's own: a rule the model reads is a hope, a check
+the loop runs is a guarantee.
+
+Two of the four are therefore held by the loop now, and the run exposed
+a bug on the way:
+
+- `list_transactions` had `direction` twice since the ranking stage
+  (#1728): the money filter (`out`/`in`) and the order (`desc`/`asc`)
+  spread into the same schema key, the order won, and the argument check
+  of stage 2 refused every `direction: "out"` — the run shows it as
+  `tool_errors` on `largest-booking-per-month` and `expenses-by-tag`, each
+  "corrected" by dropping the expense filter. The order of
+  `list_transactions` is `order` now; `direction` stays money in or out
+  there and the order everywhere else.
+- `rank_by` without its order is refused by the tool, with both values
+  in the error: the model never set `asc` on its own in six runs, and a
+  default of `desc` answers "die wenigsten" with the most.
+- An empty result's advice is structured (`loosen` on the outcome:
+  which arguments to drop, which to keep) and the loop holds the tool's
+  next call to it (`loosenGuard`): a call that drops a filter the advice
+  said to keep while the one to drop stays is refused with the advice
+  repeated. A widening the model must not take on its own (hidden
+  photos) is never the advice; a change of mode is listed, not guarded.
+- The checker reads a write tool's call as the proposal it is: when the
+  answer says the letter names something, it has to stand in the call's
+  arguments, or the answer goes back once. That is still the model
+  checking the model, but with the one rule it lacked.
+- `rule-folder-by-month` carries rows for `list_transactions`, so the
+  detour is not a dead end, and the finance area says a Mappe is
+  `create_transaction_folder`, never `transaction_report`.
 
 ## Risks and what is left out on purpose
 

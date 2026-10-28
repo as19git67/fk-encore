@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, loosenGuard, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import { MalformedReplyError, type ChatRequest, type ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -1185,6 +1185,43 @@ describe("what the GPU run of 2026-10-26 showed (assistent-wegfindung.md, measur
     expect(requests[2]!.messages.at(-1)).toEqual({ role: "user", content: DATA_QUESTION_NUDGE });
     expect(res.answer).toBe("Ein Dokument der TK: Dokument 61.");
     expect(res.rounds).toBe(4);
+  });
+});
+
+describe("loosenGuard: the next call after an empty result, held to its advice", () => {
+  const memory = { args: { q: "Musterfirma", from: "2026-09-01", to: "2026-09-30" }, drop: ["from", "to"], keep: ["q"], label: "the period 2026-09-01..2026-09-30" };
+  it("refuses a call that drops the filter to keep while the one to drop stays", () => {
+    expect(loosenGuard(memory, { from: "2026-09-01", to: "2026-09-30" }))
+      .toBe("error: you dropped q, which the empty result above said to keep; it said to drop the period 2026-09-01..2026-09-30 (from, to). Call again with the earlier arguments, minus from and to only.");
+    expect(loosenGuard(memory, { q: "", from: "2026-09-01", to: "2026-09-30" })).toContain("you dropped q");
+  });
+  it("lets through the advised call, a call that drops both, a changed spelling and any other tool", () => {
+    expect(loosenGuard(memory, { q: "Musterfirma" })).toBeNull();
+    expect(loosenGuard(memory, { q: "Musterfirma", from: "2026-01-01" })).toBeNull();
+    expect(loosenGuard(memory, {})).toBeNull();
+    expect(loosenGuard(memory, { q: "Musterfirma GmbH", from: "2026-09-01", to: "2026-09-30" })).toBeNull();
+  });
+
+  it("in the loop: the call that drops the sender is refused, the one that drops the month runs (the sixth GPU run of 2026-10-28)", async () => {
+    clients.finance.listTransactions
+      .mockResolvedValueOnce({ items: [], total: 0 })  // the call
+      .mockResolvedValueOnce({ items: [], total: 212 }) // probe without q
+      .mockResolvedValueOnce({ items: [], total: 1 })   // probe without the period
+      .mockResolvedValueOnce({ items: [{ id: 9101, booking_date: "2026-08-12", amount: "-120.50", counterparty_name: "Musterfirma Haustechnik GmbH", purpose: "Rechnung", tags: [] }], total: 1 });
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { q: "Musterfirma Haustechnik", from: "2026-09-01", to: "2026-09-30" }]),
+      calls(["list_transactions", { from: "2026-09-01", to: "2026-09-30" }]),
+      calls(["list_transactions", { q: "Musterfirma Haustechnik" }]),
+      answer("Im September nichts; eine Buchung vom 12.08.2026."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "Was habe ich im September an die Musterfirma Haustechnik gezahlt?", tools: catalogFor(USER), chat: fn, now: NOW });
+    const refused = requests[2]!.messages.at(-1) as { role: string; content: string };
+    expect(refused.role).toBe("tool");
+    expect(refused.content).toBe("error: you dropped q, which the empty result above said to keep; it said to drop the period 2026-09-01..2026-09-30 (from, to). Call again with the earlier arguments, minus from and to only.");
+    // Three model calls with tools, four list_transactions service calls: the refused call never ran.
+    expect(clients.finance.listTransactions).toHaveBeenCalledTimes(4);
+    expect(clients.finance.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ q: "Musterfirma Haustechnik", from: undefined, to: undefined }));
+    expect(res.answer).toBe("Im September nichts; eine Buchung vom 12.08.2026.");
   });
 });
 
