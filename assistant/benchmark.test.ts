@@ -222,7 +222,7 @@ describe("the cases", () => {
 
   it("are listed for the page", async () => {
     vi.mocked(getAuthData).mockReturnValue({ userID: "1", permissions: ["data.manage"] });
-    const res = await listBenchmarkCases();
+    const res = await listBenchmarkCases({});
     expect(res.cases).toHaveLength(BENCH_CASES.length);
     expect(res.cases.find((c) => c.id === "letter-reply-reads-text")?.tools).toEqual(["get_document_text", "render_letter"]);
   });

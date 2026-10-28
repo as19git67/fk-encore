@@ -405,22 +405,54 @@ these parameters as given.
   latency per answer is `median_check_ms` on top of the rounds. Both go
   into the table below after the next GPU run.
 
-### Stage 6, part 2 (open)
+### Stage 6, part 2 (implemented)
 
-- A benchmark mode against a synthetic test database, so that search,
-  0-row hints and follow-ups are measured with real tools.
+- A second data source for the benchmark: `synthetic`, next to the canned
+  results. The KI-Benchmark page offers both as a radio; `POST
+  /assistant/benchmark/runs` takes `data: "synthetic"` and `keep_data`,
+  `GET /assistant/benchmark/cases?data=synthetic` lists the cases of that
+  source, `DELETE /assistant/benchmark/synthetic-data` removes what a run
+  left behind. The run is stored with its `data_source`.
 - Finding (2026-10-26): the tools call the services through
   `~encore/clients`, and Encore hands the caller's auth along, so a
   benchmark run's real tools act as whoever started the run — never as a
-  stand-in user. Real tools over synthetic data therefore need a dedicated
-  benchmark account that owns the seeded data and starts the run itself:
-  seeders for finance (accounts, categories, bookings), meters (meters,
-  readings) and document metadata (rows with extracted text, pipeline
-  states set to done so no queue picks them up), photos left out because of
-  the file pipeline; cases of their own whose expectations name content
-  (sender, period, sum), never ids the sequences assign; a marker on every
-  seeded row so a run can remove its data again. Not started; decided after
-  the next GPU run.
+  stand-in user. The answer is a dedicated benchmark account
+  (`assistant-benchmark@system.local`, `ensureBenchAccount` in
+  `assistant/bench/synthetic.ts`) that owns every seeded row. The admin
+  who presses start only prepares the run; the start handler then calls
+  the internal endpoint `launchSyntheticRun` (not exposed) with the
+  benchmark account as `authData` of the call, and that endpoint seeds,
+  runs and cleans up as that account. Because the hand-over cannot be
+  exercised without the Encore runtime, every synthetic run begins with a
+  sight check (`verifySight`): `finance.listAccounts` as the running user
+  must list exactly the seeded account labels, nothing else. If it does
+  not, the run fails before the first case, with the reason in the error,
+  and the seeded data is removed. The first real run on the GPU is what
+  confirms the hand-over.
+- The seed (`seedSyntheticData`): two accounts at a made-up bank, eleven
+  bookings over August to October 2026 (three hardware-store purchases in
+  September summing to 185,89 €, an electricity debit in every month but
+  July, two salaries, an insurance premium, a donation marked tax
+  relevant), two meters with readings since January 2025, and seven
+  documents with extracted text, status `ready`, correspondent, category
+  and tax sections — so search, text and tax tools find them without any
+  queue. Photos are left out because of the file pipeline. Every top-level
+  row is registered in `assistant_benchmark_seed`; children go with their
+  parent, bookings are deleted explicitly, and shared tags are only
+  removed when the seed created them.
+- Ten cases of their own (`syn-*`, built by `syntheticCases(ids)`) whose
+  expectations name content — the account labels, the sum, the month
+  without a debit, the consumption of 2025, the deadline of the reminder
+  letter — never ids the sequences assign. They run with `realTools` in
+  `assistant/bench/runner.ts`: the tools run as they do for a user, the
+  canned fixtures are not consulted.
+- Tested without the model: `assistant/synthetic.test.ts` wires the
+  mocked clients to the real service functions and plays a scripted model
+  through router, plan and tools, so seeding, removal, the 0-row hint on
+  the empty month, the text search and the sight check are checked
+  end-to-end against the test database.
+- Open from this part: the three-run rule before each later stage, and
+  the first synthetic run itself (the measurement row below).
 - Before each later stage the benchmark runs three times (temperature 0.2
   scatters); the means go into the table below.
 
@@ -730,9 +762,9 @@ changed nothing in the answer; `unverified` stays 0. Plan 19 of 19 and
 median 3 rounds, 4,402 prompt tokens in round 1, 23 nudges in all.
 
 What the pass rate does not say: 75 cases with canned results measure the
-way to the tool and the words of the answer, not the data. The open
-measurement is the benchmark against a synthetic database (stage 6, part
-2), and the open stage is the router's embedding step. A new failure from
+way to the tool and the words of the answer, not the data. That is what
+the synthetic data source (stage 6, part 2) measures; it is built, its
+first run is pending. The open stage is the router's embedding step. A new failure from
 daily use becomes a case only after every real value is replaced.
 
 ## Risks and what is left out on purpose

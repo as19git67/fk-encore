@@ -28,9 +28,14 @@ export interface BenchModel {
 /** `loaded` measures what llm-service is running; `cpu` lends the GPU for the run and measures the CPU twin. */
 export type BenchDevice = 'loaded' | 'cpu'
 
-/** Stand-ins in `current_case` while the GPU changes hands. */
+/** What the tools read: the canned results of the cases, or the synthetic database through the real services (stage 6 part 2 of assistent-wegfindung.md). */
+export type BenchDataSource = 'canned' | 'synthetic'
+
+/** Stand-ins in `current_case` while the GPU changes hands, and while the synthetic data is seeded or removed. */
 export const PHASE_LEND = 'gpu:lend'
 export const PHASE_RETURN = 'gpu:return'
+export const PHASE_SEED = 'data:seed'
+export const PHASE_REMOVE = 'data:remove'
 
 export interface BenchSummary {
   cases: number
@@ -76,6 +81,8 @@ export interface BenchRunSummary {
   label: string
   model: BenchModel | null
   status: BenchStatus
+  /** Missing on runs filed before the synthetic database existed: those are canned. */
+  data_source?: BenchDataSource
   cases_total: number
   cases_done: number
   current_case: string | null
@@ -148,8 +155,8 @@ export interface BenchRunDetail extends BenchRunSummary {
   results: BenchCaseRun[]
 }
 
-export function listBenchCases(): Promise<{ today: string; cases: BenchCaseInfo[] }> {
-  return apiFetch('/assistant/benchmark/cases')
+export function listBenchCases(data: BenchDataSource = 'canned'): Promise<{ today: string; cases: BenchCaseInfo[] }> {
+  return apiFetch(`/assistant/benchmark/cases?data=${data}`)
 }
 
 export function listBenchRuns(): Promise<{ runs: BenchRunSummary[] }> {
@@ -160,8 +167,13 @@ export function getBenchRun(id: number): Promise<BenchRunDetail> {
   return apiFetch(`/assistant/benchmark/runs/${id}`)
 }
 
-export function startBenchRun(body: { label?: string; case_ids?: string[]; device?: BenchDevice }): Promise<BenchRunDetail> {
+export function startBenchRun(body: { label?: string; case_ids?: string[]; device?: BenchDevice; data?: BenchDataSource; keep_data?: boolean }): Promise<BenchRunDetail> {
   return apiFetch('/assistant/benchmark/runs', { method: 'POST', body: JSON.stringify(body) })
+}
+
+/** Removes what a synthetic run left in the database (kept on request, or after a crash). */
+export function removeSyntheticData(): Promise<{ removed: number }> {
+  return apiFetch('/assistant/benchmark/synthetic-data', { method: 'DELETE' })
 }
 
 export function cancelBenchRun(id: number): Promise<BenchRunSummary> {

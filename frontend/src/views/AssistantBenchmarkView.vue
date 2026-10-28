@@ -6,13 +6,17 @@
  * model under "KI-Modell" and running again compares the two. A run can
  * also ask for the CPU twin of the loaded model: the GPU is lent for the
  * run, as the nightly aesthetic job does it, and handed back afterwards.
+ * And it can read a synthetic database through the real tools instead of
+ * canned results (stage 6 part 2 of assistent-wegfindung.md): the run then
+ * acts as the benchmark account, which owns that data and nothing else.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import MultiSelect from 'primevue/multiselect'
 import ProgressBar from 'primevue/progressbar'
+import RadioButton from 'primevue/radiobutton'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
 import PageLayout from '../components/layout/PageLayout.vue'
@@ -29,10 +33,14 @@ import {
   listBenchCases,
   listBenchRuns,
   listFeedback,
+  removeSyntheticData,
   startBenchRun,
   PHASE_LEND,
+  PHASE_REMOVE,
   PHASE_RETURN,
+  PHASE_SEED,
   type BenchCaseInfo,
+  type BenchDataSource,
   type FeedbackEntry,
   type BenchModel,
   type BenchCaseRun,
@@ -45,29 +53,43 @@ import {
 const POLL_MS = 2000
 
 const confirm = useConfirm()
-const cases = ref<BenchCaseInfo[]>([])
+const casesBySource = ref<Record<BenchDataSource, BenchCaseInfo[]>>({ canned: [], synthetic: [] })
+const dataSource = ref<BenchDataSource>('canned')
+const cases = computed(() => casesBySource.value[dataSource.value])
 const today = ref('')
 const runs = ref<BenchRunSummary[]>([])
 const selected = ref<BenchRunDetail | null>(null)
 const label = ref('')
 const chosenCases = ref<string[]>([])
 const onCpu = ref(false)
+const keepData = ref(false)
+const removedNote = ref<string | null>(null)
 const loaded = ref(false)
-const busy = ref<'start' | 'cancel' | null>(null)
+const busy = ref<'start' | 'cancel' | 'remove' | null>(null)
+// The cases belong to their data source: a choice made for one does not carry over.
+watch(dataSource, () => { chosenCases.value = [] })
 const error = ref<string | null>(null)
 
 const feedback = ref<FeedbackEntry[]>([])
 const copiedDraft = ref<number | null>(null)
 
 const running = computed(() => runs.value.find((r) => r.status === 'running') ?? null)
-const caseTitle = (id: string | null) => cases.value.find((c) => c.id === id)?.title ?? id ?? ''
+const caseTitle = (id: string | null) =>
+  [...casesBySource.value.canned, ...casesBySource.value.synthetic].find((c) => c.id === id)?.title ?? id ?? ''
 
 /** What a running run is doing right now, in words. */
 function phaseText(run: BenchRunSummary): string {
   if (run.current_case === PHASE_LEND) return 'GPU wird verliehen, das Modell lädt auf der CPU'
   if (run.current_case === PHASE_RETURN) return 'GPU kommt zurück, das Modell lädt wieder auf der GPU'
+  if (run.current_case === PHASE_SEED) return 'die synthetischen Daten werden angelegt'
+  if (run.current_case === PHASE_REMOVE) return 'die synthetischen Daten werden entfernt'
   if (run.current_case) return `gerade „${caseTitle(run.current_case)}“`
   return ''
+}
+
+/** Which data a run read, for the table and the heading. */
+function sourceText(run: BenchRunSummary): string {
+  return run.data_source === 'synthetic' ? 'Synthetisch' : 'Fest'
 }
 
 /** GPU or CPU, read from where the model's layers were. */
@@ -214,8 +236,8 @@ async function poll() {
 
 onMounted(async () => {
   try {
-    const [c] = await Promise.all([listBenchCases(), refreshRuns(), refreshFeedback()])
-    cases.value = c.cases
+    const [c, syn] = await Promise.all([listBenchCases('canned'), listBenchCases('synthetic'), refreshRuns(), refreshFeedback()])
+    casesBySource.value = { canned: c.cases, synthetic: syn.cases }
     today.value = c.today
     const first = running.value ?? runs.value[0]
     if (first) await select(first.id)
@@ -239,12 +261,27 @@ async function start() {
       label: label.value.trim() || undefined,
       case_ids: chosenCases.value.length ? chosenCases.value : undefined,
       device: onCpu.value ? 'cpu' : 'loaded',
+      data: dataSource.value,
+      keep_data: dataSource.value === 'synthetic' && keepData.value ? true : undefined,
     })
     selected.value = run
     await refreshRuns()
     schedulePoll()
   } catch (e) {
     error.value = message(e, 'Der Benchmark konnte nicht gestartet werden')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function removeData() {
+  busy.value = 'remove'
+  error.value = null
+  try {
+    const { removed } = await removeSyntheticData()
+    removedNote.value = removed ? `${removed} synthetische Zeilen entfernt.` : 'Es lagen keine synthetischen Daten mehr vor.'
+  } catch (e) {
+    error.value = message(e, 'Die synthetischen Daten konnten nicht entfernt werden')
   } finally {
     busy.value = null
   }
@@ -318,8 +355,10 @@ function remove(run: BenchRunSummary) {
         <h2 id="bench-start" class="card-title">Neuer Lauf</h2>
         <p class="muted">
           {{ cases.length }} Fälle laufen nacheinander durch die echte Agent-Schleife des Assistenten – mit dem
-          echten Systemprompt und Werkzeugkatalog, aber mit festen, erfundenen Werkzeugergebnissen und
-          dem festen Datum {{ today }}. Es werden keine Daten gelesen oder geändert. Jede Runde wartet
+          echten Systemprompt und Werkzeugkatalog und dem festen Datum {{ today }}. Mit festen
+          Werkzeugergebnissen werden keine Daten gelesen oder geändert; die synthetische Datenbank legt
+          erfundene Konten, Zähler und Dokumente für ein eigenes Benchmark-Konto an, lässt die echten
+          Werkzeuge darauf laufen und räumt sie danach wieder weg. Jede Runde wartet
           im KI-Slot hinter den Fragen der Nutzer; gemessen wird nur die Zeit des Modells. Zum Vergleich:
           unter <em>KI-Modell</em> ein anderes Modell aktivieren und erneut laufen lassen, oder denselben
           Lauf auf dem CPU-Zwilling starten – so läuft das Modell nachts, wenn die GPU die Fotos bewertet.
@@ -365,18 +404,44 @@ function remove(run: BenchRunSummary) {
               selected-items-label="{0} Fälle"
             />
           </div>
+          <fieldset class="field field-radio">
+            <legend>Datenquelle</legend>
+            <div class="radio">
+              <RadioButton v-model="dataSource" input-id="bench-data-canned" value="canned" />
+              <label for="bench-data-canned">Feste Werkzeugergebnisse – misst den Weg des Modells, liest keine Daten</label>
+            </div>
+            <div class="radio">
+              <RadioButton v-model="dataSource" input-id="bench-data-synthetic" value="synthetic" />
+              <label for="bench-data-synthetic">Synthetische Datenbank – echte Werkzeuge als Benchmark-Konto über erfundene Konten, Zähler und Dokumente</label>
+            </div>
+          </fieldset>
+          <div v-if="dataSource === 'synthetic'" class="field field-check">
+            <Checkbox v-model="keepData" input-id="bench-keep" binary />
+            <label for="bench-keep">Synthetische Daten nach dem Lauf behalten (zum Nachsehen; „Entfernen“ räumt sie weg)</label>
+          </div>
           <div class="field field-check">
             <Checkbox v-model="onCpu" input-id="bench-cpu" binary />
             <label for="bench-cpu">Auf dem CPU-Zwilling messen (GPU wird für den Lauf verliehen)</label>
           </div>
-          <Button
-            label="Benchmark starten"
-            icon="pi pi-play"
-            class="start"
-            :loading="busy === 'start'"
-            :disabled="!cases.length"
-            @click="start"
-          />
+          <div class="start-row">
+            <Button
+              label="Benchmark starten"
+              icon="pi pi-play"
+              class="start"
+              :loading="busy === 'start'"
+              :disabled="!cases.length"
+              @click="start"
+            />
+            <Button
+              label="Synthetische Daten entfernen"
+              icon="pi pi-eraser"
+              severity="secondary"
+              text
+              :loading="busy === 'remove'"
+              @click="removeData"
+            />
+            <span v-if="removedNote" class="muted">{{ removedNote }}</span>
+          </div>
         </div>
       </section>
 
@@ -388,6 +453,7 @@ function remove(run: BenchRunSummary) {
         <p class="muted">
           Gestartet {{ when(selected.started_at) }}<template v-if="selected.model">
             · {{ selected.model.model_filename }} · {{ selected.model.backend }} · Kontext {{ selected.model.ctx_size }}<template v-if="selected.model.gpu_layers !== undefined"> · {{ device(selected.model) }}</template></template>
+          · Daten: {{ sourceText(selected) }}
         </p>
         <p v-if="selected.error" class="failure" role="alert">{{ selected.error }}</p>
 
@@ -474,6 +540,7 @@ function remove(run: BenchRunSummary) {
                 <th scope="col">Bezeichnung</th>
                 <th scope="col">Status</th>
                 <th scope="col">Gerät</th>
+                <th scope="col">Daten</th>
                 <th scope="col" class="num">Bestanden</th>
                 <th scope="col" class="num">Werkzeug</th>
                 <th scope="col" class="num">Argumente</th>
@@ -490,6 +557,7 @@ function remove(run: BenchRunSummary) {
                 </td>
                 <td><Tag :value="STATUS[r.status].label" :severity="STATUS[r.status].severity" /></td>
                 <td>{{ device(r.model) }}</td>
+                <td>{{ sourceText(r) }}</td>
                 <td class="num">{{ r.summary ? `${r.summary.passed} / ${r.summary.cases}` : `${r.cases_done} / ${r.cases_total}` }}</td>
                 <td class="num">{{ percent(r.summary?.tool_hit_rate) }}</td>
                 <td class="num">{{ percent(r.summary?.args_hit_rate) }}</td>
@@ -631,6 +699,38 @@ function remove(run: BenchRunSummary) {
 
 .field-check label {
   color: var(--p-text-color);
+}
+
+.field-radio {
+  flex-basis: 100%;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  gap: var(--space-2);
+}
+
+.field-radio legend {
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+  margin-bottom: var(--space-1);
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.radio label {
+  color: var(--p-text-color);
+}
+
+.start-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  flex-basis: 100%;
 }
 
 .progress {
