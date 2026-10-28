@@ -279,19 +279,29 @@ function nameNear(lines: string[], line: number, isin: string | null, wkn: strin
 // before its name. OCR reads "/" as "7", a WKN's 0 as O, and splits
 // amounts after their separators ("7. 953, 00").
 
+/** The slash between WKN and custody type, as OCR reads it too ("/", "|", "7", "2"). */
+const ROW_SLASH = String.raw`[/|72]`;
 const NUM = String.raw`[+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?|[+-]?\d+(?:,\d+)?`;
 const HOLDING_ROW_RE = new RegExp(
-  String.raw`^\s*([A-Z0-9]{6})\s*[/|7]\s*(\S*(?:verwahrung|rechnung))\s+(${NUM})\s+(${NUM})\s+([A-Z]{3})\s+(${NUM})(?:\s+(${NUM}))?`,
+  String.raw`^\s*([A-Z0-9]{6})\s*${ROW_SLASH}\s*(\S*(?:verwahrung|rechnung))\s+(${NUM})\s+(${NUM})\s+([A-Z]{3})\s+(${NUM})(?:\s+(${NUM}))?`,
   "i",
 );
 /** A line that heads a table or a page, never a name. */
 const TABLE_CHROME_RE = /depotbestand|^\s*wkn\b|^\s*bezeichnung\b|verwahrart|seite\s+\d|finanzreport|kundennummer/i;
+/** A line of amounts and currency codes only, no name. */
+const FIGURES_ONLY_RE = /^(?:(?:EUR|USD|CHF|GBP)\b|[+-]?\d[\d.,]*|\s)+$/;
 /** The custodian line of a security held abroad ("Irland über AKV"). */
 const CUSTODIAN_RE = /\b(?:über|uber|ueber)\s+AKV\b|\bAKV\b/i;
 
 /** "7. 953, 00" → "7.953,00": amounts OCR split after a separator. */
 function rejoinSplitAmounts(line: string): string {
-  return line.replace(/(\d)\. (\d{3})(?!\d)/g, "$1.$2").replace(/(\d), (\d{2,3})(?!\d)/g, "$1,$2");
+  return line
+    .replace(/(\d)\. (\d{3})(?!\d)/g, "$1.$2")
+    .replace(/(\d), (\d{2,3})(?!\d)/g, "$1,$2")
+    // "1 234,00": a thousands point OCR read as a space. Only before an
+    // amount with two decimals, never after a comma — "12,000 345,600" are
+    // two columns.
+    .replace(/(?<![\d,.])(\d{1,3}) (\d{3},\d{2})(?!\d)/g, "$1.$2");
 }
 
 function num(raw: string | undefined): number | null {
@@ -307,6 +317,8 @@ function rowName(lines: string[], row: number): string | null {
     if (HOLDING_ROW_RE.test(rejoinSplitAmounts(line)) || TABLE_CHROME_RE.test(line)) return null;
     const stripped = rejoinSplitAmounts(line).replace(/\s*[+-]\s*\d[\d.,]*\s*$/, "").trim();
     if (stripped.length === 0 || CUSTODIAN_RE.test(stripped)) continue;
+    // The row's figures OCR put on a line of their own ("EUR 1.000,00 +50,00").
+    if (FIGURES_ONLY_RE.test(stripped)) continue;
     return cleanSecurityName(stripped);
   }
   return null;
@@ -316,7 +328,9 @@ function rowName(lines: string[], row: number): string | null {
  * A holdings-table row as far as its WKN and custody type: looser than
  * HOLDING_ROW_RE, so a row whose figures OCR garbled still counts as one.
  */
-const TABLE_ROW_START_RE = /^\s*([A-Z0-9]{6})\s*[/|7]\s*\S*(?:verwahrung|rechnung)\b/i;
+const TABLE_ROW_START_RE = new RegExp(String.raw`^\s*([A-Z0-9]{6})\s*${ROW_SLASH}\s*\S*(?:verwahrung|rechnung)\b`, "i");
+/** A row whose figures OCR moved off its line: the quantity is all that stands after the custody type. */
+const ROW_QUANTITY_RE = new RegExp(String.raw`^\s*([A-Z0-9]{6})\s*${ROW_SLASH}\s*(\S*(?:verwahrung|rechnung))\s+(${NUM})\s*$`, "i");
 
 /** The WKNs the holdings table of a paper lists, from every row that starts like one. */
 export function tableRowWkns(lines: string[]): string[] {
@@ -335,7 +349,15 @@ export function holdingRows(lines: string[]): Array<StatementPosition & { line: 
   const rows: Array<StatementPosition & { line: number }> = [];
   lines.forEach((raw, i) => {
     const m = HOLDING_ROW_RE.exec(rejoinSplitAmounts(raw));
-    if (!m) return;
+    if (!m) {
+      // The figures after the quantity went elsewhere: the row still says
+      // how many the depot holds, which is what the holdings need.
+      const q = ROW_QUANTITY_RE.exec(rejoinSplitAmounts(raw));
+      const wkn = q ? repairWkn(q[1]!) : null;
+      if (!q || !wkn || !/\d/.test(wkn)) return;
+      rows.push({ line: i, isin: null, wkn, name: rowName(lines, i), quantity: num(q[3]), price: null, value: null, currency: null, acquisitionPrice: null });
+      return;
+    }
     const wkn = repairWkn(m[1]!);
     // Six characters before a custody type, but a WKN has a digit.
     if (!/\d/.test(wkn)) return;
