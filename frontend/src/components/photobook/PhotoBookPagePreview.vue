@@ -33,6 +33,34 @@ function focal(s: PhotoBookSlot): string {
   return f ? `${f.x * 100}% ${f.y * 100}%` : '50% 50%'
 }
 
+// The caption as the PDF sets it (`fitCaptionSize` in photo-book-layout.ts):
+// at most 8 pt, shrinking to 5 pt before the text would be cut, lines 1.2
+// times the size apart. The PDF measures the font; here an average glyph
+// width stands in for that. Sizes are shares of the page width, so the
+// preview keeps the proportions at any width.
+const PT_PER_MM = 72 / 25.4
+const CAPTION_MAX_PT = 8
+const CAPTION_MIN_PT = 5
+const CAPTION_LINE_HEIGHT = 1.2
+const AVERAGE_GLYPH_EM = 0.52
+
+function captionStyle(s: PhotoBookSlot) {
+  const r = s.caption_rect!
+  const pad = s.caption_overlay ? 2 * 2 * PT_PER_MM : 0
+  const w = r.w * props.widthMm * PT_PER_MM - pad
+  const h = r.h * props.heightMm * PT_PER_MM - (s.caption_overlay ? 2 * PT_PER_MM : 0)
+  const len = (s.caption ?? '').length
+  const linesAt = (size: number) => Math.max(1, Math.ceil((len * AVERAGE_GLYPH_EM * size) / Math.max(1, w)))
+  let size = CAPTION_MAX_PT
+  while (size > CAPTION_MIN_PT && linesAt(size) * CAPTION_LINE_HEIGHT * size > h) size -= 0.25
+  const lines = Math.max(1, Math.floor(h / (CAPTION_LINE_HEIGHT * size)))
+  return {
+    ...box(r),
+    fontSize: `${(size / (props.widthMm * PT_PER_MM)) * 100}cqw`,
+    '--pbp-caption-lines': String(lines),
+  }
+}
+
 function slotLabel(s: PhotoBookSlot): string {
   const base = `Foto ${s.slot + 1} der Seite`
   return s.low_dpi ? `${base}, nur ${s.dpi} dpi` : base
@@ -67,7 +95,7 @@ function slotLabel(s: PhotoBookSlot): string {
         v-if="s.caption_rect && s.caption"
         class="pbp-caption"
         :class="{ 'pbp-caption--overlay': s.caption_overlay }"
-        :style="box(s.caption_rect)"
+        :style="captionStyle(s)"
       ><span class="pbp-caption-text">{{ s.caption }}</span></span>
     </template>
   </div>
@@ -81,6 +109,8 @@ function slotLabel(s: PhotoBookSlot): string {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   overflow: hidden;
   font-size: var(--text-sm);
+  /* Caption sizes are shares of the page width, as on paper. */
+  container-type: inline-size;
 }
 .pbp-text {
   position: absolute;
@@ -123,26 +153,28 @@ function slotLabel(s: PhotoBookSlot): string {
   height: 100%;
   object-fit: cover;
 }
+/* The strip is as high as its lines; descenders of the last one hang below
+   it, so the strip does not clip and the text clips only below them. */
 .pbp-caption {
   position: absolute;
-  overflow: hidden;
-  font-size: 0.55em;
   line-height: 1.2;
   color: #666666; /* audit-ok: muted ink on the white paper */
   pointer-events: none;
 }
 .pbp-caption-text {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: var(--pbp-caption-lines, 2);
+  line-clamp: var(--pbp-caption-lines, 2);
   -webkit-box-orient: vertical;
   overflow: hidden;
+  padding-bottom: 0.25em;
 }
 .pbp-caption--overlay {
   display: flex;
   align-items: flex-end;
 }
 .pbp-caption--overlay .pbp-caption-text {
-  padding: 1px 4px;
+  padding: 0.1em 0.5em 0.25em;
   background: rgba(0, 0, 0, 0.5);
   color: #ffffff; /* audit-ok: white on the dark band, as in the PDF */
 }

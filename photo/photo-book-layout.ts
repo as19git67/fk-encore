@@ -161,9 +161,28 @@ export function textRect(format: PhotoBookFormat, layout: BookLayout): RectMm | 
 }
 
 /** Height of the strip under a framed photo that holds its caption (stage 2). */
-export const CAPTION_STRIP_MM = 7;
+export const CAPTION_STRIP_MM = 8;
 /** Space between a photo and its caption, taken from the strip. */
 const CAPTION_GAP_MM = 1.2;
+
+/** Font size of a caption (pt): the largest, and the smallest it shrinks to before it is cut. */
+export const CAPTION_MAX_PT = 8;
+export const CAPTION_MIN_PT = 5;
+/** Distance of a caption's lines, as a multiple of its size. */
+export const CAPTION_LINE_HEIGHT = 1.2;
+
+/**
+ * The largest caption size between `CAPTION_MAX_PT` and `CAPTION_MIN_PT` at
+ * which the text fits `heightPt`; `heightAt` measures the wrapped text at a
+ * size. A strip of two lines at the largest size holds three at a smaller one,
+ * so a long caption shrinks before it loses its end.
+ */
+export function fitCaptionSize(heightPt: number, heightAt: (sizePt: number) => number): number {
+  for (let size = CAPTION_MAX_PT; size > CAPTION_MIN_PT; size -= 0.25) {
+    if (heightAt(size) <= heightPt) return size;
+  }
+  return CAPTION_MIN_PT;
+}
 
 export interface SlotGeometry {
   /** Where the photo goes. */

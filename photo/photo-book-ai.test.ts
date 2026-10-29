@@ -23,13 +23,15 @@ import {
 } from "../db/schema";
 import { createUserLogic } from "../user/user.service";
 import * as service from "./photo.service";
-import { CAPTION_STRIP_MM, PAGE_MARGIN_MM, bookLayouts, cellRect, rankLayouts, slotGeometry, type BookPhoto } from "./photo-book-layout";
+import { CAPTION_LINE_HEIGHT, CAPTION_MAX_PT, CAPTION_MIN_PT, CAPTION_STRIP_MM, PAGE_MARGIN_MM, fitCaptionSize, bookLayouts, cellRect, rankLayouts, slotGeometry, type BookPhoto } from "./photo-book-layout";
 import {
   MAX_CAPTION_LENGTH,
   articleExtract,
   buildCaptionPrompt,
   buildLayoutPrompt,
   captionNamesAFact,
+  captionWorthKeeping,
+  descriptiveWords,
   hasConcreteFacts,
   parseCaption,
   parseChapterTitle,
@@ -100,6 +102,31 @@ describe("photo book captions: geometry and prompts", () => {
     expect(captionNamesAFact("Erika auf der Treppe", ctx)).toBe(true);
     expect(captionNamesAFact("Ein alter Keller", ctx)).toBe(false);
     expect(captionNamesAFact("Urlaub am Samstag", ctx)).toBe(false);
+  });
+
+  it("shrinks a long caption before it would be cut", () => {
+    // A text of 120 glyphs at half a size wide each, in a strip 150 pt wide and 19 pt high.
+    const heightAt = (len: number) => (size: number) => Math.ceil((len * 0.5 * size) / 150) * CAPTION_LINE_HEIGHT * size;
+    expect(fitCaptionSize(19, heightAt(20))).toBe(CAPTION_MAX_PT);
+    const size = fitCaptionSize(19, heightAt(120));
+    expect(size).toBeLessThan(CAPTION_MAX_PT);
+    expect(heightAt(120)(size)).toBeLessThanOrEqual(19);
+    expect(fitCaptionSize(5, heightAt(500))).toBe(CAPTION_MIN_PT);
+  });
+
+  it("drops captions that mostly describe what the picture shows", () => {
+    const ctx = { when: null, place: "Altstadt, Musterstadt", poi: { name: "Alter Turm", description: "Aussichtsturm", extract: "Der Alte Turm wurde im Mittelalter erbaut." }, people: ["Erika"], description: null, keywords: [] };
+    // Named the place, but what they say one sees anyway.
+    expect(captionWorthKeeping("Schmiedeeisernes Detail in einer Gasse von Musterstadt", ctx)).toBe(false);
+    expect(captionWorthKeeping("Das kunstvoll bemalte Gewölbe in Musterstadt", ctx)).toBe(false);
+    expect(captionWorthKeeping("Blick auf die prachtvolle Decke und die Arkaden in Musterstadt", ctx)).toBe(false);
+    expect(descriptiveWords("Das kunstvoll bemalte Gewölbe in Musterstadt", ctx)).toEqual(["kunstvoll", "bemalte", "gewölbe"]);
+    // What one cannot see: the place, the name of the landmark, a fact about it.
+    expect(captionWorthKeeping("Musterstadt", ctx)).toBe(true);
+    expect(captionWorthKeeping("Altstadt von Musterstadt", ctx)).toBe(true);
+    expect(captionWorthKeeping("Abendlicht am Alten Turm", ctx)).toBe(true);
+    expect(captionWorthKeeping("Der Alte Turm wurde im Mittelalter erbaut", ctx)).toBe(true);
+    expect(captionWorthKeeping("Erika vor dem Alten Turm", ctx)).toBe(true);
   });
 
   it("reads captions and titles strictly", () => {

@@ -19,7 +19,7 @@ export interface LlmPrompt {
 }
 
 /** A caption stays on one or two lines under a photo. */
-export const MAX_CAPTION_LENGTH = 140;
+export const MAX_CAPTION_LENGTH = 100;
 /** A chapter title fits one line on the opener. */
 export const MAX_CHAPTER_TITLE_LENGTH = 60;
 /** Wikipedia's lead is cut to this many characters before it goes into a prompt. */
@@ -62,12 +62,15 @@ export const CAPTION_SCHEMA: Record<string, unknown> = {
 
 const CAPTION_SYSTEM =
   "Du schreibst Bildunterschriften für ein privates Fotobuch auf Deutsch. " +
-  "Eine Bildunterschrift ist ein kurzer, natürlicher Satz oder eine Wortgruppe, höchstens fünfzehn Wörter. " +
-  "Sie sagt etwas Konkretes: den Ort, die Sehenswürdigkeit, den Spot der Reise, die Personen, was die Beschreibung des Fotos sagt oder was auf einem Schild im Bild steht. " +
-  "Eine bloße Beschreibung dessen, was man sieht (\"Ein alter Keller\", \"Blick auf das Meer\"), ist keine Bildunterschrift. " +
+  "Eine Bildunterschrift sagt, was man dem Bild nicht ansieht: wo es ist (Ort, Viertel, Straße), wie die Sehenswürdigkeit heißt, " +
+  "wer darauf ist, was auf einem Schild steht, was die Beschreibung des Fotos sagt oder eine kurze Tatsache aus dem Wikipedia-Text. " +
+  "Was man ohnehin sieht, beschreibst du nicht: kein \"Blick auf\", kein \"Detail\", keine Decke, kein Gewölbe, keine Gasse, " +
+  "keine Adjektive über das Aussehen wie prachtvoll, kunstvoll, malerisch oder bemalt. " +
+  "Kurz: eine Wortgruppe, höchstens zehn Wörter, oft nur ein Name. " +
   "Das Bild hilft dir nur zu entscheiden, welche Fakten passen. " +
   "Du erfindest keine Namen, Orte, Daten oder Ereignisse. Personen nennst du nur mit den angegebenen Namen. " +
-  "Keine Anführungszeichen, keine Emojis, keine Hashtags, keine Bewertung des Fotos.";
+  "Keine Anführungszeichen, keine Emojis, keine Hashtags, keine Bewertung des Fotos. " +
+  "Gibt es nichts zu sagen, was man nicht sieht, bleibt die Bildunterschrift leer.";
 
 /**
  * Whether there is something concrete to say: a place, a landmark, people the
@@ -113,6 +116,56 @@ export function captionNamesAFact(caption: string, ctx: CaptionContext): boolean
   return terms.some((t) => namesTerm(text, t));
 }
 
+/** Short words that say nothing about the picture: articles, prepositions, conjunctions. */
+const FUNCTION_WORDS = new Set([
+  "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer", "eines", "einem", "einen",
+  "und", "oder", "mit", "von", "vom", "zum", "zur", "beim", "aus", "auf", "über", "unter", "vor",
+  "hinter", "neben", "zwischen", "nach", "durch", "für", "gegen", "ohne", "bei", "seit", "bis",
+  "ist", "sind", "war", "waren", "wird", "wurde", "wurden", "hat", "haben", "sich", "auch", "dort",
+  "hier", "sein", "seine", "seiner", "seinem", "seinen", "ihre", "ihrer", "ihrem", "ihren", "diese",
+  "dieser", "dieses", "diesem", "diesen", "heute", "noch", "schon", "steht", "liegt",
+]);
+
+/** Whether `word` is (an inflection of) one of `facts`: the same start, as German endings vary. */
+function isFactWord(word: string, facts: Set<string>): boolean {
+  if (facts.has(word)) return true;
+  for (const f of facts) {
+    const n = Math.min(word.length, f.length);
+    if (n >= 4 && word.length - n <= 3 && f.length - n <= 3 && word.slice(0, n - 1) === f.slice(0, n - 1)) return true;
+  }
+  return false;
+}
+
+/**
+ * How many words of a caption only describe what the picture shows: words
+ * that are neither a function word nor a word of the facts (place, landmark
+ * and its Wikipedia text, people, the photo's description, sign text, trip
+ * spot). "Das kunstvoll bemalte Gewölbe in Musterstadt" names the place, but
+ * three words of it describe the picture.
+ */
+export function descriptiveWords(caption: string, ctx: CaptionContext): string[] {
+  const factText = [
+    ctx.place, ctx.poi?.name, ctx.poi?.description, ctx.poi?.extract, ctx.description, ctx.signText,
+    ctx.tripSpot?.spot, ctx.tripSpot?.trip, ...ctx.people,
+  ].filter(Boolean).join(" ").toLowerCase();
+  const facts = new Set(factText.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3));
+  return caption.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) =>
+    w.length >= 4 && !/^\p{N}+$/u.test(w) && !FUNCTION_WORDS.has(w) && !isFactWord(w, facts));
+}
+
+/** At most this many words of a caption may say what one sees anyway ("Gassen in Musterstadt"). */
+export const MAX_DESCRIPTIVE_WORDS = 1;
+
+/**
+ * Whether a caption is worth printing: it names a concrete fact and says
+ * little more than that. One that mostly describes what the picture shows
+ * ("Blick auf die prachtvolle Decke in Musterstadt") is not kept, even with
+ * a place in it: the reader sees the ceiling, the place is what they learn.
+ */
+export function captionWorthKeeping(caption: string, ctx: CaptionContext): boolean {
+  return captionNamesAFact(caption, ctx) && descriptiveWords(caption, ctx).length <= MAX_DESCRIPTIVE_WORDS;
+}
+
 /** Lines for the facts the app knows; empty when it knows nothing. */
 export function captionFacts(ctx: CaptionContext): string[] {
   const lines: string[] = [];
@@ -143,8 +196,10 @@ export function buildCaptionPrompt(ctx: CaptionContext, withImage: boolean): Llm
     ctx.onPage?.length
       ? `Auf derselben Seite stehen schon diese Bildunterschriften: ${ctx.onPage.map((c) => `„${c}“`).join(", ")}. Wiederhole sie nicht; sag etwas anderes oder nichts.`
       : "",
-    "Nenne mindestens einen der Fakten (Ort, Sehenswürdigkeit, Spot der Reise, Personen, Beschreibung oder Text im Bild) beim Namen. " +
-      'Gibt es nichts Konkretes zu sagen, antworte mit {"caption": ""}.',
+    "Nenne mindestens einen der Fakten (Ort, Sehenswürdigkeit, Spot der Reise, Personen, Beschreibung oder Text im Bild) beim Namen, und sonst fast nichts. " +
+      "Nicht: „Das kunstvoll bemalte Gewölbe in Musterstadt“, „Blick auf die prachtvolle Decke in Musterstadt“. " +
+      "Sondern: „Dom von Musterstadt“, „Altstadt, Musterstadt“ oder nur „Musterstadt“. " +
+      'Gibt es nichts zu sagen, was man dem Bild nicht ansieht, antworte mit {"caption": ""}.',
     "Das Datum gehört nicht in die Bildunterschrift; es steht schon am Kapitelanfang.",
     'Antworte als JSON-Objekt {"caption": "…"}.',
   ]
