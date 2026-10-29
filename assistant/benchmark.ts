@@ -17,13 +17,25 @@
  * the llm-service for the length of the run and returned afterwards, so the
  * same cases measure the night-time configuration against the day-time one.
  *
+ * A run can read real data instead of canned results (`data: "synthetic"`,
+ * stage 6 part 2 of documentation/plans/assistent-wegfindung.md): the cases
+ * of `bench/synthetic.ts` run with the real tools against a dataset seeded
+ * for the benchmark account, and the run runs as that account. The tools
+ * call the services through `~encore/clients`, which hand the caller's auth
+ * along, so the admin's request starts the run through an internal call that
+ * carries the benchmark account's auth (`launchSyntheticRun`); everything the
+ * run reads is then that account's, and nothing of the admin's. The seeded
+ * rows are removed when the run ends unless asked to stay.
+ *
+ *   DELETE /assistant/benchmark/synthetic-data   remove what a run left
+ *
  * Permission: `data.manage`, like the other model tools.
  */
 
-import { api, APIError } from "encore.dev/api";
+import { api, APIError, type Query } from "encore.dev/api";
 import log from "encore.dev/log";
 import { getAuthData } from "~encore/auth";
-import { user } from "~encore/clients";
+import { assistant, user } from "~encore/clients";
 import { and, desc, eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { assistantBenchmarkRun } from "../db/schema";
@@ -34,7 +46,17 @@ import { chat } from "./llm-client";
 import { BENCH_CASES, BENCH_TODAY, type BenchCase } from "./bench/cases";
 import { BenchCancelledError, runBenchCase, type CaseRun } from "./bench/runner";
 import { summarize, type BenchSummary } from "./bench/scoring";
-import type { AssistantUser } from "./types";
+import {
+  benchAccountUser,
+  ensureBenchAccount,
+  removeSyntheticData,
+  seedSyntheticData,
+  syntheticCases,
+  syntheticRowCount,
+  UNSEEDED,
+  verifySight,
+} from "./bench/synthetic";
+import type { AssistantUser, ToolSpec } from "./types";
 
 /** Behind someone waiting for an answer, ahead of nothing urgent. */
 const SLOT_PRIORITY = 5;
@@ -66,13 +88,25 @@ export interface BenchCaseInfo {
   tools: string[];
 }
 
+/** What the tools read: the canned results of the cases, or the synthetic database through the real services. */
+export type BenchDataSource = "canned" | "synthetic";
+
+function dataSource(value: unknown): BenchDataSource {
+  return value === "synthetic" ? "synthetic" : "canned";
+}
+
+/** The cases of a data source; the synthetic ones before a seeding, for listing. */
+function casesOf(data: BenchDataSource): BenchCase[] {
+  return data === "synthetic" ? syntheticCases(UNSEEDED) : BENCH_CASES;
+}
+
 export const listBenchmarkCases = api(
   { expose: true, method: "GET", path: "/assistant/benchmark/cases", auth: true },
-  async (): Promise<{ today: string; cases: BenchCaseInfo[] }> => {
+  async ({ data }: { data?: Query<BenchDataSource> }): Promise<{ today: string; cases: BenchCaseInfo[] }> => {
     admin();
     return {
       today: BENCH_TODAY,
-      cases: BENCH_CASES.map((c) => ({ id: c.id, title: c.title, question: c.question, tools: c.expect.map((e) => e.tool) })),
+      cases: casesOf(dataSource(data)).map((c) => ({ id: c.id, title: c.title, question: c.question, tools: c.expect.map((e) => e.tool) })),
     };
   },
 );
@@ -100,6 +134,9 @@ export type BenchDevice = "loaded" | "cpu";
  */
 export const PHASE_LEND = "gpu:lend";
 export const PHASE_RETURN = "gpu:return";
+/** The same while the synthetic data is seeded and removed. */
+export const PHASE_SEED = "data:seed";
+export const PHASE_REMOVE = "data:remove";
 
 /** How long a model swap may take before the run gives up on it. */
 const LEASE_TIMEOUT_MS = 30 * 60_000;
@@ -110,6 +147,8 @@ export interface BenchRunSummary {
   label: string;
   model: BenchModel | null;
   status: "running" | "done" | "failed" | "cancelled";
+  /** Canned results, or the synthetic database through the real tools. */
+  data_source: BenchDataSource;
   cases_total: number;
   cases_done: number;
   current_case: string | null;
@@ -131,6 +170,7 @@ function toSummary(row: RunRow): BenchRunSummary {
     label: row.label,
     model: (row.model as unknown as BenchModel | null) ?? null,
     status: row.status,
+    data_source: row.data_source,
     cases_total: row.cases_total,
     cases_done: row.cases_done,
     current_case: row.current_case,
@@ -213,6 +253,14 @@ export interface StartBenchRequest {
    * loaded model, and returns it when the run ends.
    */
   device?: BenchDevice;
+  /**
+   * `canned` (default) answers every tool with the case's fixture;
+   * `synthetic` seeds the dataset of `bench/synthetic.ts` for the benchmark
+   * account and runs its cases with the real tools, as that account.
+   */
+  data?: BenchDataSource;
+  /** With `synthetic`: leave the seeded rows for a look afterwards; `DELETE …/synthetic-data` removes them. */
+  keep_data?: boolean;
 }
 
 export const startBenchmarkRun = api(
@@ -221,8 +269,10 @@ export const startBenchmarkRun = api(
     const auth = admin();
     if (active) throw APIError.alreadyExists("a benchmark run is already in progress");
 
+    const data = dataSource(req.data);
     const wanted = req.case_ids?.length ? new Set(req.case_ids) : null;
-    const cases = wanted ? BENCH_CASES.filter((c) => wanted.has(c.id)) : BENCH_CASES;
+    const pool = casesOf(data);
+    const cases = wanted ? pool.filter((c) => wanted.has(c.id)) : pool;
     if (!cases.length) throw APIError.invalidArgument("no known case selected");
 
     // A run marked running that this process does not hold was cut off by a restart.
@@ -243,17 +293,120 @@ export const startBenchmarkRun = api(
         model: model as unknown as Record<string, unknown> | null,
         case_ids: cases.map((c) => c.id),
         cases_total: cases.length,
-        current_case: device === "cpu" ? PHASE_LEND : null,
+        data_source: data,
+        current_case: data === "synthetic" ? PHASE_SEED : device === "cpu" ? PHASE_LEND : null,
       })
       .returning();
 
+    if (data === "synthetic") {
+      // The run must act as the benchmark account, not as the admin: the
+      // internal call carries that account's auth, and the tools of the run
+      // inherit it from there.
+      const account = await ensureBenchAccount();
+      try {
+        await assistant.launchSyntheticRun(
+          { run_id: row.id, case_ids: cases.map((c) => c.id), device, keep_data: req.keep_data === true },
+          { authData: benchAccountUser(account, benchUser().permissions) },
+        );
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await db
+          .update(assistantBenchmarkRun)
+          .set({ status: "failed", error: `the synthetic run could not start: ${detail}`, current_case: null, finished_at: sql`now()` })
+          .where(eq(assistantBenchmarkRun.id, row.id));
+        throw err;
+      }
+      log.info("assistant benchmark started", { run_id: row.id, cases: cases.length, label, device, data });
+      return toDetail(await loadRun(row.id));
+    }
+
     const controller = new AbortController();
-    const done = execute(row.id, cases, device, controller.signal).finally(() => {
+    const done = execute(row.id, cases, device, controller.signal, { user: benchUser() }).finally(() => {
       if (active?.id === row.id) active = null;
     });
     active = { id: row.id, controller, done };
-    log.info("assistant benchmark started", { run_id: row.id, cases: cases.length, label, device });
+    log.info("assistant benchmark started", { run_id: row.id, cases: cases.length, label, device, data });
     return toDetail(row);
+  },
+);
+
+export interface LaunchSyntheticRequest {
+  run_id: number;
+  case_ids: string[];
+  device: BenchDevice;
+  keep_data: boolean;
+}
+
+/**
+ * Starts a synthetic run in the background, as whoever calls: the admin's
+ * request calls it with the benchmark account's auth, so the seeding, the
+ * real tools and the self-check all act as that account. Not exposed.
+ */
+export const launchSyntheticRun = api(
+  { expose: false, method: "POST", path: "/assistant/benchmark/synthetic/launch" },
+  async (req: LaunchSyntheticRequest): Promise<{ started: boolean }> => {
+    const auth = getAuthData();
+    if (!auth) throw APIError.unauthenticated("the synthetic run needs the benchmark account's auth");
+    if (active) throw APIError.alreadyExists("a benchmark run is already in progress");
+    const row = await loadRun(req.run_id);
+    if (row.status !== "running") throw APIError.failedPrecondition(`the run is already ${row.status}`);
+
+    const as: AssistantUser = { userID: auth.userID, permissions: auth.permissions };
+    const controller = new AbortController();
+    const done = executeSynthetic(row.id, req.case_ids, req.device, req.keep_data, as, controller.signal).finally(() => {
+      if (active?.id === row.id) active = null;
+    });
+    active = { id: row.id, controller, done };
+    return { started: true };
+  },
+);
+
+/**
+ * Seeds the dataset for the account the run runs as, checks that the run
+ * sees it through the services, runs the cases with the real tools, and
+ * removes the data again unless asked to keep it.
+ */
+async function executeSynthetic(runId: number, caseIds: string[], device: BenchDevice, keep: boolean, as: AssistantUser, signal: AbortSignal): Promise<void> {
+  const fail = async (error: string) => {
+    await db
+      .update(assistantBenchmarkRun)
+      .set({ status: "failed", error, current_case: null, summary: summarize([]) as unknown as Record<string, unknown>, finished_at: sql`now()`, updated_at: sql`now()` })
+      .where(eq(assistantBenchmarkRun.id, runId));
+  };
+  let cases: BenchCase[];
+  try {
+    const ids = await seedSyntheticData(Number(as.userID));
+    // The one thing that cannot be tested without the runtime: that the
+    // tools act as the benchmark account. Checked once, before any case.
+    await verifySight();
+    const wanted = new Set(caseIds);
+    cases = syntheticCases(ids).filter((c) => wanted.has(c.id));
+  } catch (err) {
+    log.error(err, "assistant benchmark: the synthetic data is not in place", { run_id: runId });
+    await fail(err instanceof Error ? err.message : String(err));
+    if (!keep) await removeSyntheticData().catch((e) => log.error(e, "assistant benchmark: removing the synthetic data failed", { run_id: runId }));
+    return;
+  }
+  await execute(runId, cases, device, signal, {
+    user: as,
+    realTools: true,
+    afterwards: keep
+      ? undefined
+      : async () => {
+          await db.update(assistantBenchmarkRun).set({ current_case: PHASE_REMOVE, updated_at: sql`now()` }).where(eq(assistantBenchmarkRun.id, runId));
+          await removeSyntheticData();
+        },
+  });
+}
+
+export const removeSyntheticBenchmarkData = api(
+  { expose: true, method: "DELETE", path: "/assistant/benchmark/synthetic-data", auth: true },
+  async (): Promise<{ removed: number }> => {
+    admin();
+    if (active) throw APIError.failedPrecondition("a benchmark run is in progress");
+    const removed = await syntheticRowCount();
+    await removeSyntheticData();
+    return { removed };
   },
 );
 
@@ -284,12 +437,30 @@ async function lendForRun(runId: number, signal: AbortSignal): Promise<() => Pro
   };
 }
 
-async function execute(runId: number, cases: BenchCase[], device: BenchDevice, signal: AbortSignal): Promise<void> {
-  const benchAs = benchUser();
-  const tools = catalogFor(benchAs);
+interface ExecuteOptions {
+  /** Who the cases run as; the tools offered are what this user may use. */
+  user: AssistantUser;
+  /** The tools run for real against the user's data instead of answering with the case's fixture. */
+  realTools?: boolean;
+  /** Runs when the cases are through, however they ended; its failure is filed on the run. */
+  afterwards?: () => Promise<void>;
+}
+
+async function execute(runId: number, cases: BenchCase[], device: BenchDevice, signal: AbortSignal, opts: ExecuteOptions): Promise<void> {
+  const benchAs = opts.user;
+  const tools: ToolSpec[] = catalogFor(benchAs);
   const results: CaseRun[] = [];
   let giveBack: (() => Promise<void>) | null = null;
   const finish = async (status: "done" | "failed" | "cancelled", error: string | null = null) => {
+    if (opts.afterwards) {
+      try {
+        await opts.afterwards();
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        log.error(err, "assistant benchmark: the step after the cases failed", { run_id: runId });
+        error = error ? `${error}; ${detail}` : `synthetic data not removed: ${detail}`;
+      }
+    }
     if (giveBack) {
       try {
         await giveBack();
@@ -325,6 +496,7 @@ async function execute(runId: number, cases: BenchCase[], device: BenchDevice, s
       const run = await runBenchCase(c, {
         chat,
         tools,
+        realTools: opts.realTools,
         user: benchAs,
         signal,
         withSlot: (fn) => withAiSlot("llm", SLOT_PRIORITY, "assistant-benchmark", fn),

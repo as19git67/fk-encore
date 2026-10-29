@@ -4881,12 +4881,28 @@ export const assistantBenchmarkRun = pgTable(
     results: jsonb("results").$type<unknown[]>().notNull().default([]),
     summary: jsonb("summary").$type<Record<string, unknown>>(),
     error: text("error"),
+    // What the tools read (migration 0282, stage 6 part 2 of
+    // assistent-wegfindung.md): the canned results of bench/cases.ts, or the
+    // synthetic rows the benchmark account owns, through the real services.
+    data_source: text("data_source").$type<"canned" | "synthetic">().notNull().default("canned"),
     started_at: timestamp("started_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
   },
   (table) => [index("assistant_benchmark_run_by_start").on(table.started_at)],
 );
+
+/**
+ * The top-level rows the synthetic benchmark seeded (migration 0282): one
+ * entry per account, meter, document and created tag, so a run removes
+ * exactly its own data again. Children fall with their parent.
+ */
+export const assistantBenchmarkSeed = pgTable("assistant_benchmark_seed", {
+  id: serial("id").primaryKey(),
+  table_name: text("table_name").notNull(),
+  row_id: bigint("row_id", { mode: "number" }).notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * A thumbs-up or -down under an answer (migration 0276, stage 6 of

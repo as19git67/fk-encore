@@ -3,7 +3,9 @@
  * system prompt, the real catalog (deferred schemas and describe_tools
  * included, when the catalog is that large), the real context budget. Only
  * the tools are replaced by the case's canned results, so nothing is read
- * from or written to the user's data.
+ * from or written to the user's data — unless the run is a synthetic one
+ * (`realTools`), where the tools run as the benchmark account against the
+ * data seeded for it.
  *
  * Each model round is timed inside the ai-queue slot, so time spent waiting
  * behind other work does not count.
@@ -111,8 +113,10 @@ function isPlanRequest(req: ChatRequest): boolean {
 
 export interface RunnerDeps {
   chat: ChatFn;
-  /** Every tool the benchmark user may use; their `run` is replaced. */
+  /** Every tool the benchmark user may use; their `run` is replaced unless `realTools`. */
   tools: ToolSpec[];
+  /** Run the tools for real (the synthetic database, stage 6 part 2) instead of answering with the case's fixture. */
+  realTools?: boolean;
   user: AssistantUser;
   withSlot?: <T>(fn: () => Promise<T>) => Promise<T>;
   signal?: AbortSignal;
@@ -217,7 +221,7 @@ export async function runBenchCase(c: BenchCase, deps: RunnerDeps): Promise<Case
       user: c.permissions ? { userID: deps.user.userID, permissions: c.permissions } : deps.user,
       history: c.history ?? [],
       question: c.question,
-      tools: cannedTools(c, deps.tools),
+      tools: deps.realTools ? deps.tools : cannedTools(c, deps.tools),
       chat: timed,
       now: benchNow(),
       previousRefs: c.previous,

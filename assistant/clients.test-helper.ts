@@ -16,6 +16,7 @@ export const clients = {
     getQuotes: vi.fn(),
     getPositionNews: vi.fn(),
     listTransactions: vi.fn(),
+    transactionTotals: vi.fn(),
     query: vi.fn(),
     listUpcomingDebits: vi.fn(),
     batchTag: vi.fn(),
@@ -86,6 +87,7 @@ export const clients = {
   },
   realtime: { publishEvent: vi.fn(async () => {}) },
   user: { getLlmStatus: vi.fn(), lendLlmGpu: vi.fn(), returnLlmGpu: vi.fn(), getLlmGpuLease: vi.fn() },
+  assistant: { launchSyntheticRun: vi.fn() },
 };
 
 /** Forget scripted answers and recorded calls of the service endpoints. */

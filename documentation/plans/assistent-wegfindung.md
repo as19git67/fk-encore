@@ -405,22 +405,54 @@ these parameters as given.
   latency per answer is `median_check_ms` on top of the rounds. Both go
   into the table below after the next GPU run.
 
-### Stage 6, part 2 (open)
+### Stage 6, part 2 (implemented)
 
-- A benchmark mode against a synthetic test database, so that search,
-  0-row hints and follow-ups are measured with real tools.
+- A second data source for the benchmark: `synthetic`, next to the canned
+  results. The KI-Benchmark page offers both as a radio; `POST
+  /assistant/benchmark/runs` takes `data: "synthetic"` and `keep_data`,
+  `GET /assistant/benchmark/cases?data=synthetic` lists the cases of that
+  source, `DELETE /assistant/benchmark/synthetic-data` removes what a run
+  left behind. The run is stored with its `data_source`.
 - Finding (2026-10-26): the tools call the services through
   `~encore/clients`, and Encore hands the caller's auth along, so a
   benchmark run's real tools act as whoever started the run — never as a
-  stand-in user. Real tools over synthetic data therefore need a dedicated
-  benchmark account that owns the seeded data and starts the run itself:
-  seeders for finance (accounts, categories, bookings), meters (meters,
-  readings) and document metadata (rows with extracted text, pipeline
-  states set to done so no queue picks them up), photos left out because of
-  the file pipeline; cases of their own whose expectations name content
-  (sender, period, sum), never ids the sequences assign; a marker on every
-  seeded row so a run can remove its data again. Not started; decided after
-  the next GPU run.
+  stand-in user. The answer is a dedicated benchmark account
+  (`assistant-benchmark@system.local`, `ensureBenchAccount` in
+  `assistant/bench/synthetic.ts`) that owns every seeded row. The admin
+  who presses start only prepares the run; the start handler then calls
+  the internal endpoint `launchSyntheticRun` (not exposed) with the
+  benchmark account as `authData` of the call, and that endpoint seeds,
+  runs and cleans up as that account. Because the hand-over cannot be
+  exercised without the Encore runtime, every synthetic run begins with a
+  sight check (`verifySight`): `finance.listAccounts` as the running user
+  must list exactly the seeded account labels, nothing else. If it does
+  not, the run fails before the first case, with the reason in the error,
+  and the seeded data is removed. The first real run on the GPU is what
+  confirms the hand-over.
+- The seed (`seedSyntheticData`): two accounts at a made-up bank, eleven
+  bookings over August to October 2026 (three hardware-store purchases in
+  September summing to 185,89 €, an electricity debit in every month but
+  July, two salaries, an insurance premium, a donation marked tax
+  relevant), two meters with readings since January 2025, and seven
+  documents with extracted text, status `ready`, correspondent, category
+  and tax sections — so search, text and tax tools find them without any
+  queue. Photos are left out because of the file pipeline. Every top-level
+  row is registered in `assistant_benchmark_seed`; children go with their
+  parent, bookings are deleted explicitly, and shared tags are only
+  removed when the seed created them.
+- Ten cases of their own (`syn-*`, built by `syntheticCases(ids)`) whose
+  expectations name content — the account labels, the sum, the month
+  without a debit, the consumption of 2025, the deadline of the reminder
+  letter — never ids the sequences assign. They run with `realTools` in
+  `assistant/bench/runner.ts`: the tools run as they do for a user, the
+  canned fixtures are not consulted.
+- Tested without the model: `assistant/synthetic.test.ts` wires the
+  mocked clients to the real service functions and plays a scripted model
+  through router, plan and tools, so seeding, removal, the 0-row hint on
+  the empty month, the text search and the sight check are checked
+  end-to-end against the test database.
+- Open from this part: the three-run rule before each later stage, and
+  the first synthetic run itself (the measurement row below).
 - Before each later stage the benchmark runs three times (temperature 0.2
   scatters); the means go into the table below.
 
@@ -435,6 +467,7 @@ these parameters as given.
 | 2026-10-27 (evening) | same, llama.cpp v0.7.0 | 1–5 with the grammar-free retry | 75 | 91 % (68) | 93 % | 3 | 4,225 | 23 |
 | 2026-10-28 | same | 1–5 with the seven fixes below | 75 | 95 % (71) | 95 % | 3 | 4,355 | 21 |
 | 2026-10-28 (noon) | same | 1–5 with the order, the guard and the proposal rule | 75 | 91 % (68); 95 % (71) on the expectations of the morning run | 93 % | 3 | 4,402 | 21 |
+| 2026-10-28 (afternoon) | same | 1–5 with the schema rule, the yes nudge and the letter note | 75 | 100 % (75) | 96 % | 3 | 4,402 | 23 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -694,6 +727,45 @@ Two things the run confirms once more: `plan_asked` 19 of 19 planned,
 `check_failed` 1 on `largest-document-per-sender`, where the checker sent
 back an answer that lacked nothing the results did not hold — a false
 alarm that cost a round and did no harm.
+
+### What the run in the afternoon showed
+
+The run of 2026-10-28 in the afternoon answered 75 of 75 (100 %), the
+first full pass, and each of the four changes did what it was built for:
+
+- The schema rule refused `rank_by` without its order before any tool
+  ran, and the model took the correction in one extra round:
+  `best-photos-in-country`, `best-photo-per-year-into-album` and
+  `largest-document-per-sender` show `tool_errors` 1 and then the right
+  call, `older-turn-largest-booking` resent with `order: "desc"`. The
+  refusal costs a round; the model does not yet send the order on its
+  own, and the description "required with rank_by" alone does not move
+  it. That is the one place left where a deterministic check pays for a
+  rule the prompt does not deliver.
+- `tag-bookings-after-yes` passed with two nudges: the words-only reply
+  to "Ja." went back with the question quoted, and the second attempt
+  called `tag_transactions` with `from_previous_result`.
+- `letter-reply-reads-text` passed for the first time: the body names the
+  reference number, the invoice date and the deadline. The note from
+  `factsLeftOut` brought the model back once (one nudge), and the second
+  letter carried the fact — a named fact moved the model where the rule
+  in the prompt and the checker's rule did not.
+- `property-purchase` passed over the category road the expectation now
+  accepts.
+
+`largest-booking-per-month` took seven rounds and still passed; it is the
+longest path in the set and the one to watch when the loop changes. The
+checker sent back `best-photos-in-country` and `photos-with-description`
+once each (`check_failed` 2), both false alarms that cost a round and
+changed nothing in the answer; `unverified` stays 0. Plan 19 of 19 and
+`malformed_replies` 0 confirm the v0.7.0 build again; `first_tool` 96 %,
+median 3 rounds, 4,402 prompt tokens in round 1, 23 nudges in all.
+
+What the pass rate does not say: 75 cases with canned results measure the
+way to the tool and the words of the answer, not the data. That is what
+the synthetic data source (stage 6, part 2) measures; it is built, its
+first run is pending. The open stage is the router's embedding step. A new failure from
+daily use becomes a case only after every real value is replaced.
 
 ## Risks and what is left out on purpose
 
