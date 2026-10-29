@@ -480,6 +480,12 @@ export interface UpdateAnyCollectionRequest {
   archived?: boolean;
   /** The caller's own star. */
   favourite?: boolean;
+  /**
+   * Narrow a mixed manual collection to the one type it holds, or open a
+   * typed one to every type (null). A document folder gets its ordered
+   * folder page back that way.
+   */
+  entity_type?: CollectionEntityType | null;
 }
 
 export const updateAnyCollection = api(
@@ -502,6 +508,9 @@ export const updateAnyCollection = api(
       await assertCollectionAdministrable(row, c.userId, isAdmin(c));
       patch.archived_at = req.archived ? (row.archived_at ?? new Date().toISOString()) : null;
     }
+    if (req.entity_type !== undefined) {
+      patch.entity_type = await checkTypeChange(row, req.entity_type, c);
+    }
     if (Object.keys(patch).length > 0) {
       await dbExec(
         db
@@ -516,6 +525,31 @@ export const updateAnyCollection = api(
     return await buildDetail(fresh, c);
   },
 );
+
+/**
+ * The type a collection may change to: only a manual folder (a rule names its
+ * own type, dossiers and the basket keep theirs), and a type only when every
+ * stored member — also those the caller cannot see — is of it.
+ */
+async function checkTypeChange(
+  row: CollectionRow,
+  wanted: CollectionEntityType | null,
+  c: Caller,
+): Promise<CollectionEntityType | null> {
+  if (row.kind !== "manual") {
+    throw APIError.failedPrecondition("only a manual collection changes its type");
+  }
+  await assertCollectionAdministrable(row, c.userId, isAdmin(c));
+  if (wanted === null) return null;
+  const type = parseEntityType(wanted, "entity_type");
+  if (!mayUseType(c, type)) throw APIError.permissionDenied(`no access to ${type} items`);
+  const counts = (await loadCounts([row.id])).get(row.id) ?? {};
+  const others = (Object.keys(counts) as CollectionEntityType[]).filter((t) => t !== type && (counts[t] ?? 0) > 0);
+  if (others.length > 0) {
+    throw APIError.failedPrecondition(`this collection also holds ${others.join(", ")} items`);
+  }
+  return type;
+}
 
 export const deleteAnyCollection = api(
   { expose: true, method: "DELETE", path: "/collections/:id", auth: true },

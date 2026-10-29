@@ -47,7 +47,7 @@ import {
   type CollectionEntityType,
   type CollectionMember,
 } from '../api/collections'
-import { memberRoute, typeListRoute } from '../utils/collectionRoute'
+import { collectionRoute, memberRoute, typeListRoute } from '../utils/collectionRoute'
 import { parseLocalDate } from '../utils/dateFormat'
 import { updateRouteQuery } from '../utils/routeQueryUpdate'
 
@@ -351,6 +351,36 @@ async function toggleFavourite() {
   }
 }
 
+// ── Narrowing a mixed folder to its one type ────────────────────────────────
+
+/**
+ * The one type a mixed manual folder holds, when it holds only one: such a
+ * folder can become a folder of that type (a document folder gets its order
+ * back). Null when the folder is typed, of another kind or holds several.
+ */
+const narrowableTo = computed<CollectionEntityType | null>(() => {
+  const d = detail.value
+  if (!d || d.entity_type !== null || d.kind !== 'manual' || !d.can_administer) return null
+  const types = (Object.keys(d.counts) as CollectionEntityType[]).filter((t) => (d.counts[t] ?? 0) > 0)
+  return types.length === 1 ? types[0]! : null
+})
+
+async function narrowType() {
+  const d = detail.value
+  const type = narrowableTo.value
+  if (!d || !type) return
+  busy.value = true
+  error.value = ''
+  try {
+    const updated = await updateAnyCollection(d.id, { entity_type: type })
+    void router.replace(collectionRoute(updated))
+  } catch (err: unknown) {
+    error.value = err instanceof Error ? err.message : 'Umwandeln fehlgeschlagen.'
+  } finally {
+    busy.value = false
+  }
+}
+
 // ── Rule and album (#1548, stage 5) ──────────────────────────────────────────
 
 /** The folder's own actions; on a phone the row folds into a "more" menu. */
@@ -503,6 +533,22 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
     <template #notice>
       <Message v-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
       <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = ''" />
+      <Message v-if="narrowableTo" severity="info" :closable="false">
+        <div class="cd-narrow">
+          <span>
+            Diese Sammelmappe enthält nur {{ ENTITY_LABELS[narrowableTo].plural }}.
+            <template v-if="narrowableTo === 'document'">
+              Als Dokumentenmappe lässt sich die Reihenfolge wieder festlegen.
+            </template>
+          </span>
+          <Button
+            :label="`Nur für ${ENTITY_LABELS[narrowableTo].plural}`"
+            size="small"
+            :loading="busy"
+            @click="narrowType"
+          />
+        </div>
+      </Message>
       <Message v-if="detail && detail.hidden_count > 0" severity="secondary" :closable="false">
         {{ detail.hidden_count }} {{ detail.hidden_count === 1 ? 'Eintrag ist' : 'Einträge sind' }}
         für dich nicht sichtbar.
@@ -601,6 +647,12 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
   gap: var(--space-2);
   padding: var(--space-3) var(--page-gutter);
   border-top: 1px solid var(--p-content-border-color);
+}
+.cd-narrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
 }
 .cd-group {
   margin-bottom: var(--space-5);

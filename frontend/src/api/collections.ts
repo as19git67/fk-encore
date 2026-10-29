@@ -470,7 +470,14 @@ export function describeCounts(
 
 export function updateAnyCollection(
   id: number,
-  patch: { name?: string; description?: string | null; archived?: boolean; favourite?: boolean },
+  patch: {
+    name?: string
+    description?: string | null
+    archived?: boolean
+    favourite?: boolean
+    /** Narrow a mixed manual collection to the one type it holds; null opens it to all. */
+    entity_type?: CollectionEntityType | null
+  },
 ): Promise<CollectionDetail> {
   return apiFetch(`/collections/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
 }
