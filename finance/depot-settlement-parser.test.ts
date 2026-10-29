@@ -15,7 +15,7 @@ import {
   settlementBlock,
   SETTLEMENT_CANDIDATE_PATTERN,
 } from "./depot-settlement-parser";
-import { nameNearerIdentifier } from "./depot-settlement-reader";
+import { nameNearerIdentifier, rulesValues, taxWithModelFigures } from "./depot-settlement-reader";
 import { mergeSettlement } from "./depot-settlement-merge";
 
 // Synthetic settlement texts in the layouts German brokers print. Every
@@ -1196,6 +1196,18 @@ Musterhinweis`;
     expect(unreadTaxesFromRates(garbled)).toEqual([]);
     expect(parseSettlement(garbled)!.tax).toBe(55.63);
     expect(parseSettlement(garbled.replace("944,37", "900,00"))!.tax).toBe(52.1);
+  });
+
+  it("confirms the taxes with the model's Kurswert and final amount when the rules read neither", () => {
+    const split = SALE.replace("Kurswert   1.000,00   EUR", "Kurswert").replace("Ausmachender Betrag   944,37   EUR", "Ausmachender Betrag");
+    const rules = inspectSettlement(split)!;
+    expect([rules.gross, rules.net, rules.tax]).toEqual([null, null, 51.71]);
+    const llm = { ...rulesValues(rules)!, gross: 1000, net: 944.37, tax: -52.02 };
+    const confirmed = taxWithModelFigures(rules, llm, split)!;
+    expect(confirmed.tax).toBe(55.63);
+    expect(mergeSettlement(rulesValues(confirmed), llm).checks.find((c) => c.name === "net_equation")!.result).toBe("ok");
+    // Figures that do not fit the rates leave the rules' taxes as read.
+    expect(taxWithModelFigures(rules, { ...llm, net: 900 }, split)!.tax).toBe(51.71);
   });
 
   it("keeps the taxes it read when the estimate does not add up", () => {

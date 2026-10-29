@@ -25,6 +25,7 @@ import {
   paperTypeOf,
   parseGermanNumber,
   settlementBlock,
+  taxFromRates,
   type ExchangeRate,
   type SettlementInspection,
 } from "./depot-settlement-parser";
@@ -271,6 +272,28 @@ export function rulesValues(r: SettlementInspection | null): SettlementValues | 
   };
 }
 
+/**
+ * The rules read the taxes but not the Kurswert or the final amount (a
+ * column-split table the model reads better): with the model's figures,
+ * the tax lines' rates and bases may still confirm the tax that lies
+ * between them, where the rules missed a line (see taxFromRates).
+ */
+export function taxWithModelFigures(
+  rules: SettlementInspection | null,
+  llm: SettlementValues | null,
+  text: string | null,
+): SettlementInspection | null {
+  if (!rules || !llm || !text || (rules.gross !== null && rules.net !== null)) return rules;
+  const tax = taxFromRates(text, rules.tax, {
+    kind: rules.kind ?? llm.kind,
+    gross: rules.gross ?? llm.gross,
+    fees: rules.fees ?? llm.fees,
+    net: rules.net ?? llm.net,
+  });
+  if (tax === null || tax === rules.tax) return rules;
+  return { ...rules, tax, labels: { ...rules.labels, tax: "Steuersatz × Grundlage" } };
+}
+
 /** Paper the rules settle on their own: the model is never asked about it. */
 function rulesAlone(rules: SettlementInspection | null): boolean {
   return Boolean(rules?.insurance || rules?.costInfo || rules?.taxSummary || rules?.accountStatement || rules?.severalBookings);
@@ -299,8 +322,7 @@ export async function readSettlement(
   text: string | null,
   mode: LlmMode,
 ): Promise<SettlementReading> {
-  const rules = inspectSettlement(text);
-  const fromRules = rulesValues(rules);
+  let rules = inspectSettlement(text);
 
   let llm: SettlementValues | null = null;
   let llmSaysSettlement: boolean | null = null;
@@ -347,6 +369,8 @@ export async function readSettlement(
   // the amount the model reads there is the income kept, never a net.
   // Nor is it a trade or a payout, whatever kind the model reads.
   if (llm && rules?.accumulation) llm = { ...llm, kind: "tax", net: llm.tax === null ? null : -Math.abs(llm.tax) };
+  rules = taxWithModelFigures(rules, llm, text);
+  const fromRules = rulesValues(rules);
   const nameFrom = nameNearerIdentifier(text, rules?.isin ?? rules?.wkn ?? null, rules?.name ?? null, llm?.name ?? null);
   const grounding = groundingOf(text, llm);
   const known = await knownSecurities();

@@ -841,6 +841,44 @@ function taxesFromRates(text: string, onlyUnread: boolean): number[] {
   return out;
 }
 
+/** The figures a settlement's taxes lie between. */
+export interface TaxFigures {
+  kind: SettlementKind | null;
+  gross: number | null;
+  fees: number | null;
+  net: number | null;
+}
+
+/**
+ * What lies between Kurswert, charges and the final amount, when the tax
+ * lines' rates and bases say it is the tax; else null. Either the taxes
+ * read plus an estimate for each line whose amount cannot be read add up
+ * to it, or — an amount the rules took for a tax's may belong to another
+ * line (OCR moves amounts about) — every tax line's rate times its base
+ * does.
+ */
+function taxBetweenFigures(text: string, read: number | null, f: TaxFigures): number | null {
+  if (f.gross === null || f.net === null || !f.kind) return null;
+  const net = Math.abs(f.net);
+  const fees = f.fees ?? 0;
+  const implied = Math.round((isMoneyOut(f.kind) ? net - f.gross - fees : f.gross - fees - net) * 100) / 100;
+  if (implied <= 0) return null;
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const fits = (estimate: number, n: number) => n > 0 && Math.abs(estimate - implied) <= RATE_ROUNDING * n;
+  const missing = unreadTaxesFromRates(dropTaxBases(text));
+  const all = taxesFromRates(dropTaxBases(text), false);
+  return fits((read ?? 0) + sum(missing), missing.length) || fits(sum(all), all.length) ? implied : null;
+}
+
+/**
+ * The same check on a whole document, with figures the rules may not have
+ * read themselves (the model read the Kurswert off a column-split table).
+ */
+export function taxFromRates(raw: string, read: number | null, f: TaxFigures): number | null {
+  const whole = rejoinColumnAmounts(normalize(raw));
+  return taxBetweenFigures(settlementBlock(whole) ?? whole, read, f);
+}
+
 /**
  * Read every field the parser knows from one document's text, whether or
  * not it adds up to a settlement — the "what was recognised" view shows
@@ -1019,19 +1057,10 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     // its base says roughly what is missing. Banks round each tax their own
     // way, so the estimate only confirms that the figures add up; the tax
     // taken is what lies between Kurswert, charges and the final amount.
-    if (gross === null || netAbs === null || !kind) return read;
-    const implied = Math.round((isMoneyOut(kind) ? netAbs - gross - (fees ?? 0) : gross - (fees ?? 0) - netAbs) * 100) / 100;
-    if (implied <= 0) return read;
-    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
-    const missing = unreadTaxesFromRates(dropTaxBases(text));
-    const fits = (estimate: number, n: number) => n > 0 && Math.abs(estimate - implied) <= RATE_ROUNDING * n;
-    // An amount the rules took for a tax's may belong to another line
-    // (OCR moves amounts about): when every tax line prints its rate and
-    // base, those alone say whether the figures add up.
-    const all = taxesFromRates(dropTaxBases(text), false);
-    if (!fits((read ?? 0) + sum(missing), missing.length) && !fits(sum(all), all.length)) return read;
+    const confirmed = taxBetweenFigures(text, read, { kind, gross, fees, net: netAbs });
+    if (confirmed === null) return read;
     markers.push("Steuersatz × Grundlage");
-    return implied;
+    return confirmed;
   })());
 
 
