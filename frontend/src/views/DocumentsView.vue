@@ -48,6 +48,7 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import { upTo, useMediaQuery } from '../composables/useBreakpoint'
 import { useSplitView } from '../composables/useSplitView'
 import { resolveActiveId, stepActiveId } from '../utils/activeListItem'
 import DocumentPreviewPane from '../components/documents/DocumentPreviewPane.vue'
@@ -68,6 +69,11 @@ import { anchorKey, focusListAnchor, saveListAnchor } from '../utils/listAnchor'
 import type { ListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
+
+// On a phone in portrait the title row runs out of width: the menu already
+// says "Dokumente", so the heading goes (kept for screen readers) and
+// "Schreiben" and "Hochladen" shrink to their icons.
+const compactHeader = useMediaQuery(`${upTo('md')} and (orientation: portrait)`)
 const auth = useAuthStore()
 /** The list's own key for the anchor and the offset — one per list, not per filter. */
 const ANCHOR_KEY = 'dokumente'
@@ -768,6 +774,7 @@ onMounted(async () => {
 <template>
   <PageLayout
     title="Dokumente"
+    :title-hidden="compactHeader"
     width="full"
     :ready="!loading"
     :anchor-key="ANCHOR_KEY"
@@ -799,7 +806,8 @@ onMounted(async () => {
         />
         <Button
           v-if="auth.hasPermission('documents.upload')"
-          label="Schreiben"
+          :label="compactHeader ? undefined : 'Schreiben'"
+          aria-label="Schreiben"
           icon="pi pi-pen-to-square"
           severity="secondary"
           outlined
@@ -808,8 +816,10 @@ onMounted(async () => {
         />
         <Button
           v-if="auth.hasPermission('documents.upload')"
-          label="Hochladen"
+          :label="compactHeader ? undefined : 'Hochladen'"
+          aria-label="Hochladen"
           icon="pi pi-upload"
+          v-tooltip.bottom="compactHeader ? 'Dokumente hochladen' : undefined"
           @click="router.push({ name: 'dokumente-upload' })"
         />
     </template>

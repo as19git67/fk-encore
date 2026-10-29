@@ -95,6 +95,12 @@ const props = withDefaults(
     legacyAnchorKey?: 'documents'
     /** Lift the title row and `#actions` into the sticky stack (detail pages). */
     stickyHeader?: boolean
+    /**
+     * Keep the <h1> for screen readers and document.title, but do not show it:
+     * for a list whose module the menu already names, where a phone in portrait
+     * needs the line for the actions.
+     */
+    titleHidden?: boolean
   }>(),
   {
     hint: undefined,
@@ -105,6 +111,7 @@ const props = withDefaults(
     anchorKey: undefined,
     legacyAnchorKey: undefined,
     stickyHeader: false,
+    titleHidden: false,
   },
 )
 
@@ -249,7 +256,7 @@ defineExpose({ contentEl })
               <div v-if="slots.back" class="page-back" data-testid="page-back">
                 <slot name="back" />
               </div>
-              <h1 class="page-title" :title="slots.back ? title : undefined">{{ title }}</h1>
+              <h1 class="page-title" :class="{ 'page-title--hidden': titleHidden }" :title="slots.back ? title : undefined">{{ title }}</h1>
             </div>
           </div>
           <div v-if="slots.actions" class="page-actions">
@@ -277,7 +284,7 @@ defineExpose({ contentEl })
           <div v-if="slots.back" class="page-back" data-testid="page-back">
             <slot name="back" />
           </div>
-          <h1 class="page-title" :title="slots.back ? title : undefined">{{ title }}</h1>
+          <h1 class="page-title" :class="{ 'page-title--hidden': titleHidden }" :title="slots.back ? title : undefined">{{ title }}</h1>
         </div>
         <p v-if="hint" class="page-hint">{{ hint }}</p>
       </div>
@@ -400,6 +407,14 @@ defineExpose({ contentEl })
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;
+}
+.page-title--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .page-hint {
   margin: var(--space-1) 0 0;
