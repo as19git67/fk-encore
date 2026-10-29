@@ -56,7 +56,7 @@ import {
   buildCaptionPrompt,
   buildChapterTitlePrompt,
   buildLayoutPrompt,
-  captionNamesAFact,
+  captionWorthKeeping,
   hasConcreteFacts,
   parseCaption,
   parseChapterTitle,
@@ -386,7 +386,7 @@ async function writeCaptions(
     if (!answer) answer = await deps.askText(buildCaptionPrompt(ctx, false));
     const parsed = answer ? parseCaption(answer.result) : null;
     const repeats = parsed != null && (ctx.onPage ?? []).some((c) => captionKey(c) === captionKey(parsed));
-    const text = parsed && !repeats && captionNamesAFact(parsed, ctx) ? parsed : null;
+    const text = parsed && !repeats && captionWorthKeeping(parsed, ctx) ? parsed : null;
     if (text && answer) {
       await saveCaption(loaded.book.id, id, text, answer.model);
       loaded.captions.set(id, { text, source: "llm" });

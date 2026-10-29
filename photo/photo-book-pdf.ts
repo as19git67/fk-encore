@@ -23,7 +23,9 @@ import { useFont } from "../lib/pdf-fonts";
 import { coverCrop } from "./recap-export.service";
 import {
   PHOTO_BOOK_FORMATS,
+  CAPTION_LINE_HEIGHT,
   RENDER_DPI,
+  fitCaptionSize,
   slotGeometry,
   spineWidthMm,
   textRect,
@@ -168,23 +170,38 @@ class Renderer {
     }
   }
 
-  /** A caption under its photo, or over it in a dark band when the photo fills the page. */
+  /**
+   * A caption under its photo, or over it in a dark band when the photo fills
+   * the page. It takes as many lines as fit its strip, and a long one gets a
+   * smaller font before it would be cut (`fitCaptionSize`).
+   */
   caption(doc: PDFKit.PDFDocument, raw: string, rect: RectMm, overlay: boolean): void {
-    const size = Math.min(8.5, Math.max(6, pt(rect.h) * 0.4));
     const text = useFont(doc, raw);
-    doc.fontSize(size);
+    const pad = overlay ? 2 : 0;
+    const width = pt(rect.w) - pt(2 * pad);
+    // Lines 1.2 times the size apart, whatever the font's own leading:
+    // Noto Sans spaces its lines 1.36 apart, and a strip meant for two lines
+    // held only one.
+    const gapAt = (s: number) => {
+      doc.fontSize(s);
+      return CAPTION_LINE_HEIGHT * s - doc.currentLineHeight(true);
+    };
+    const size = fitCaptionSize(pt(rect.h) - pt(pad), (s) => {
+      const lineGap = gapAt(s);
+      return doc.heightOfString(text, { width, lineGap });
+    });
+    const lineGap = gapAt(size);
     if (overlay) {
-      const pad = 2;
       const w = Math.min(pt(rect.w), doc.widthOfString(text) + pt(2 * pad));
-      const h = Math.min(pt(rect.h), doc.heightOfString(text, { width: pt(rect.w) - pt(2 * pad) }) + pt(pad));
+      const h = Math.min(pt(rect.h), doc.heightOfString(text, { width: w - pt(2 * pad), lineGap }) + pt(pad));
       const top = pt(rect.y + rect.h) - h;
       doc.save().rect(pt(rect.x), top, w, h).fillOpacity(0.5).fill("#000000").restore();
       doc.fillColor("#ffffff").text(text, pt(rect.x + pad), top + pt(pad) / 2, {
-        width: w - pt(2 * pad), height: h, ellipsis: true, lineBreak: true,
+        width: w - pt(2 * pad), height: h, ellipsis: true, lineBreak: true, lineGap,
       });
       return;
     }
-    doc.fillColor(MUTED).text(text, pt(rect.x), pt(rect.y), { width: pt(rect.w), height: pt(rect.h), ellipsis: true, lineBreak: true });
+    doc.fillColor(MUTED).text(text, pt(rect.x), pt(rect.y), { width: pt(rect.w), height: pt(rect.h), ellipsis: true, lineBreak: true, lineGap });
   }
 
   /** The front: cover photo over the whole panel and a band with the title. */

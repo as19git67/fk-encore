@@ -86,15 +86,21 @@ played as a slideshow.
    the recognition read on a sign in it (lines at confidence ≥ 0.8) or the
    spot of one of the owner's trips it was taken at (a planned stop that day
    or a stay in the visit diary, within 150 m) —
-   and is kept only when it names one of them (`captionNamesAFact`); a
-   caption that merely describes the picture ("Ein alter Keller") is dropped,
-   and "neu schreiben" removes such an earlier one. A page says a caption once:
+   and is kept only when it names one of them (`captionNamesAFact`) and says
+   little else (`captionWorthKeeping`: at most one word that is neither a
+   function word nor a word of the facts). A caption says what one cannot see
+   — where, what the landmark is called, who — never what one sees anyway:
+   "Ein alter Keller" and "Das kunstvoll bemalte Gewölbe in Musterstadt" are
+   both dropped, and "neu schreiben" removes such an earlier one. A page says a caption once:
    the model is told the captions already on the page and a repeat is
    dropped, and the same text under several photos of a page (also the
    user's) is shown and printed only under the first (`repeatedCaptions`).
    Captions on/off for the book and per page (`photo_book_page.captions`,
    null follows the book); in the PDF a strip below a framed photo or a band
-   inside a full-bleed one (`slotGeometry`). Captions live in
+   inside a full-bleed one (`slotGeometry`). The strip holds two lines at
+   8 pt, lines 1.2 times the size apart; a longer caption shrinks down to
+   5 pt before it is cut (`fitCaptionSize`), and the preview sizes it the
+   same way as a share of the page width. Captions live in
    `photo_book_caption` with `source` `llm`/`user`; a user caption is never
    overwritten.
 3. **LLM picks the layout** (implemented) — `rankLayouts` gives every layout
