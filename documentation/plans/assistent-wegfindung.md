@@ -468,6 +468,8 @@ these parameters as given.
 | 2026-10-28 | same | 1–5 with the seven fixes below | 75 | 95 % (71) | 95 % | 3 | 4,355 | 21 |
 | 2026-10-28 (noon) | same | 1–5 with the order, the guard and the proposal rule | 75 | 91 % (68); 95 % (71) on the expectations of the morning run | 93 % | 3 | 4,402 | 21 |
 | 2026-10-28 (afternoon) | same | 1–5 with the schema rule, the yes nudge and the letter note | 75 | 100 % (75) | 96 % | 3 | 4,402 | 23 |
+| 2026-10-29 (evening) | same, on the CPU twin (GPU lent, `gpu_layers` 0) | 1–5 unchanged, canned results | 75 | 95 % (71); two cases lost to the request limit, two to borderline decisions | 95 % | 3 | 4,402 | 25 |
+| 2026-10-30 | same (CUDA) | stage 6 part 2: synthetic data, real tools | 10 | 100 % (10) | 90 % | 3 | 4,463 | 2 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -763,9 +765,62 @@ median 3 rounds, 4,402 prompt tokens in round 1, 23 nudges in all.
 
 What the pass rate does not say: 75 cases with canned results measure the
 way to the tool and the words of the answer, not the data. That is what
-the synthetic data source (stage 6, part 2) measures; it is built, its
-first run is pending. The open stage is the router's embedding step. A new failure from
+the synthetic data source (stage 6, part 2) measures; its first run is
+below. The open stage is the router's embedding step. A new failure from
 daily use becomes a case only after every real value is replaced.
+
+### What the CPU twin showed (2026-10-29)
+
+The same 75 cases with the canned results on the CPU twin (GPU lent, the
+model's own CPU configuration, 30k context) answered 71 of 75 (95 %) in
+2 h 24 min; the GPU run of the day before took 26 min. The weights are the
+same, so the four misses are not the model getting worse:
+
+- Two cases went to the clock. `thanks-no-tool` ended with `terminated`:
+  the llm-service closed the stream before a reply came. On the CPU,
+  reading an uncached prompt (4,000–7,000 tokens after an area switch)
+  takes 70–150 s, the 19,000-token follow-up 210 s; the case came right
+  behind a 90-second round and ran into the request limit of the
+  configuration. The next case, `balance-without-finance`, got a 503
+  `inference busy` at once, because llama-server was still finishing the
+  aborted request (the slot is waited for 10 s). On the GPU the same
+  rounds take 1–4 s. A benchmark on the CPU twin needs a higher
+  `request_timeout_s` on the CPU configuration, otherwise one or two of 75
+  cases are lost to the limit every time.
+- Two cases are borderline decisions that fell the other way:
+  `groceries-last-month` took `list_transactions` instead of
+  `transaction_totals` (and, with no canned rows for that tool, answered
+  "no bookings"); `letter-paid-invoices` put the `[[…]]` gap into the
+  recipient instead of the body and wrote "the payments should arrive
+  shortly" where the body wanted a gap. At temperature 0.2 these are close
+  calls; CPU and GPU kernels round differently, the probabilities shift a
+  little, and a close call flips.
+
+Everything else is level with the GPU run: 25 nudges against 23, the
+checker wrong three times against two, plan 19 of 19 in both. What differs
+is the speed: median 8 s per round against 1.3 s, p90 91 s against 3.9 s,
+the checker 17 s against 1.1 s. Of the 75 first rounds, 30 took longer than
+a minute — all of them after an area switch, where llama-server's prompt
+cache does not help; the cases that reuse the previous case's system prompt
+start in 2–4 s.
+
+### What the first synthetic run showed (2026-10-30)
+
+The ten `syn-*` cases against the seeded database with the real tools
+answered 10 of 10 on the GPU in 70 s. The sight check passed, so the
+hand-over to the benchmark account works: `finance.listAccounts` as the
+running user listed exactly the two seeded accounts. The tools returned the
+seeded facts — 185,89 € for the hardware store in September over three
+rows, 3,500 kWh for 2025 from the meter readings, the 30.10.2026 deadline
+from the reminder's text, the 0-row hint on the empty July naming the
+search term as the filter to drop (the model offered to drop it instead of
+answering "no bookings"). Two things to watch: `syn-mahnung-deadline` took
+eight rounds, because the model tried `find_text_in_document` three times
+with other words ("Fälligkeit", "bis", "Zahlungsfrist") before reading the
+whole text with `get_document_text` — a candidate for a rule in the
+documents area once it shows up in daily use; and the checker flagged
+`syn-tax-2025` once wrongly (the case passed). The remaining open stage is
+the router's embedding step.
 
 ## Risks and what is left out on purpose
 
