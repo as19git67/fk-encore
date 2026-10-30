@@ -47,6 +47,27 @@ function isUsableKind(kind: unknown): kind is string {
   return typeof kind === 'string' && kind.length > 0 && !kind.includes(':')
 }
 
+/**
+ * The module lists' anchor keys and row kinds, shared between the list (which
+ * saves on opening a row) and the detail page (which saves on load). The
+ * detail page saving too is what makes a shared link behave like a click: who
+ * opens `/dokumente/42` from a message and goes back lands on that row,
+ * marked, even though no list was ever clicked.
+ */
+export const MODULE_LIST_ANCHORS = {
+  meter: { key: 'zaehler', kind: 'meter' },
+  photoBook: { key: 'fotos-fotobuecher', kind: 'photo-book' },
+  document: { key: 'dokumente', kind: 'document' },
+  transaction: { key: 'finance-transactions', kind: 'transaction' },
+  album: { key: 'fotos-alben', kind: 'album' },
+} as const satisfies Record<string, { key: string; kind: string }>
+
+/** `saveListAnchor` for a module list, from the entity name alone. */
+export function saveModuleListAnchor(entity: keyof typeof MODULE_LIST_ANCHORS, id: number): void {
+  const { key, kind } = MODULE_LIST_ANCHORS[entity]
+  saveListAnchor(key, { kind, id })
+}
+
 /** The value a row carries in `data-anchor`; `anchorSelector` looks for it. */
 export function anchorKey(kind: string, id: number): string {
   return `${kind}:${id}`

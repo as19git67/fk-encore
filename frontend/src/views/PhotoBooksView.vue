@@ -11,9 +11,9 @@ import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import { PHOTO_BOOK_FORMATS, listPhotoBooks, photoBookThumbUrl, type PhotoBookSummary } from '../api/photoBooks'
-import { anchorKey, saveListAnchor } from '../utils/listAnchor'
+import { MODULE_LIST_ANCHORS, anchorKey, saveListAnchor } from '../utils/listAnchor'
 
-const ANCHOR_KEY = 'fotos-fotobuecher'
+const ANCHOR_KEY = MODULE_LIST_ANCHORS.photoBook.key
 
 const router = useRouter()
 const books = ref<PhotoBookSummary[]>([])

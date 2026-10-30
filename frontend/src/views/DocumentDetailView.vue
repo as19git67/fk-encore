@@ -61,7 +61,8 @@ import { useBasketNavigation } from '../composables/useBasketNavigation'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
 import { assistantLocation } from '../utils/assistantContext'
-import { collectionAnchorKey, saveListAnchor } from '../utils/listAnchor'
+import { collectionAnchorKey, saveListAnchor, saveModuleListAnchor } from '../utils/listAnchor'
+import { useShareLink } from '../composables/useShareLink'
 import PageLayout from '../components/layout/PageLayout.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import MarkdownView from '../components/documents/MarkdownView.vue'
@@ -79,6 +80,7 @@ import { getDocumentTransactionLinks, unlinkTransactionDocument } from '../api/f
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const { shareLinkItem } = useShareLink()
 const confirmDialog = useConfirm()
 
 const docId = computed(() => parseInt(route.params.id as string, 10))
@@ -482,6 +484,9 @@ async function load() {
       getDocumentTransactionLinks(id).catch(() => []),
     ])
     doc.value = detail
+    // A shared link lands here without a list click; going back still has to
+    // mark this document in the list.
+    saveModuleListAnchor('document', id)
     void loadDuplicateNotice(id)
     categories.value = cats.items
     documentTypes.value = docTypes.items
@@ -917,6 +922,7 @@ const headerActions = computed<ToolbarItem[]>(() => {
       text: true,
       command: () => { followUpOpen.value = true },
     },
+    shareLinkItem({ name: 'dokumente-detail', params: { id: d.id } }, d.title ?? undefined),
   )
   if (auth.hasPermission('module.assistant') && !isTextDocument.value) {
     items.push({

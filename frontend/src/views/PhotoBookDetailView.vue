@@ -17,6 +17,8 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { saveModuleListAnchor } from '../utils/listAnchor'
+import { useShareLink } from '../composables/useShareLink'
 import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -102,12 +104,16 @@ function nextTrack() {
 }
 
 const bookId = computed(() => Number(route.params.id))
+const { shareLinkItem } = useShareLink()
 
 async function load() {
   loading.value = true
   loadError.value = ''
   try {
     book.value = await getPhotoBook(bookId.value)
+    // A shared link lands here without a list click; going back still has to
+    // mark this book in the list.
+    saveModuleListAnchor('photoBook', bookId.value)
   } catch (err: any) {
     loadError.value = err?.message ?? 'Das Fotobuch konnte nicht geladen werden.'
   } finally {
@@ -326,6 +332,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
   { key: 'ai', label: 'KI', title: 'Vorschläge der KI', icon: 'pi pi-sparkles', disabled: !book.value, command: () => (aiOpen.value = true) },
   { key: 'settings', label: 'Buch', title: 'Titel, Format und Bildunterschriften', icon: 'pi pi-pencil', disabled: !book.value || busy.value, command: openSettings },
   { key: 'narrowing', label: 'Auswahl', title: 'Auswahl ändern: Qualität, Ästhetik, Gesichter, Höchstzahl, Gewichte', icon: 'pi pi-filter', disabled: !book.value || busy.value, command: () => (narrowingOpen.value = true) },
+  shareLinkItem({ name: 'fotos-photo-book', params: { id: bookId.value } }, book.value?.title),
   { key: 'rebuild', title: 'Neu verteilen', icon: 'pi pi-refresh', disabled: !book.value || busy.value, menuOnly: true, command: confirmRebuild },
   { key: 'delete', title: 'Fotobuch löschen', icon: 'pi pi-trash', severity: 'danger', disabled: !book.value, menuOnly: true, command: confirmDelete },
 ])

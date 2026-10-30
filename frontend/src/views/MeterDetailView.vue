@@ -2,6 +2,8 @@
 import FileButton from '../components/collections/FileButton.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { saveModuleListAnchor } from '../utils/listAnchor'
+import ShareLinkButton from '../components/ShareLinkButton.vue'
 import { useMediaQuery } from '../composables/useBreakpoint'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -156,6 +158,9 @@ async function loadDetail() {
   error.value = ''
   try {
     detail.value = await getMeter(meterId.value)
+    // A shared link lands here without a list click; going back still has to
+    // mark this meter in the list.
+    saveModuleListAnchor('meter', meterId.value)
     await Promise.all([
       loadReadings(),
       loadReport(),
@@ -783,6 +788,7 @@ watch(meterId, () => loadDetail())
     <template #actions>
       <template v-if="!loading && detail">
         <FileButton :members="[{ entity_type: 'meter', entity_id: meterId }]" :title="detail.name" />
+        <ShareLinkButton :to="{ name: 'zaehler-detail', params: { id: meterId } }" :title="detail.name" />
         <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />
         <Button v-if="canManageMeter" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
         <Button v-if="canManageMeter" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
