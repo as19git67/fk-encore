@@ -1,6 +1,8 @@
 <script lang="ts" setup>
 import { computed, defineAsyncComponent, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { saveModuleListAnchor } from '../utils/listAnchor'
+import { useShareLink } from '../composables/useShareLink'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
@@ -131,6 +133,12 @@ const router = useRouter()
 const albumId = computed<number>((previous) =>
   route.name === 'fotos-album-detail' ? Number(route.params.id) : previous ?? NaN,
 )
+
+const { shareLinkItem } = useShareLink()
+/** Internal link of a photo in this album (FullscreenOverlay, "Link teilen"). */
+function photoLinkTo(id: number) {
+  return { name: 'fotos-album-detail', params: { id: albumId.value }, query: { photoId: String(id) } }
+}
 const auth = useAuthStore()
 const serviceHealth = useServiceHealthStore()
 const photoNav = usePhotoNavStore()
@@ -1275,6 +1283,9 @@ async function loadData() {
     ])
     album.value = albumRes
     photoGroupsList.value = groupsRes.groups
+    // A shared link lands here without a list click; going back still has to
+    // mark this album in the albums list.
+    saveModuleListAnchor('album', albumId.value)
 
     // Legacy view presets (favorites / consensus / others-favorites) are
     // replaced by the client-side FilterMenu. If a user has a non-default
@@ -2396,6 +2407,12 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
     })
   }
 
+  // Internal link for other users of the app — distinct from the public
+  // share link, which lives in the album settings dialog.
+  if (album.value && !selectMode.value) {
+    items.push(shareLinkItem({ name: 'fotos-album-detail', params: { id: albumId.value } }, album.value.name))
+  }
+
   if (jumpButton.value && viewMode.value !== 'map') {
     items.push({
       key: 'jump',
@@ -2954,6 +2971,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :variant-photo="variantPhoto"
       @toggle-variant="variantCursor.toggle()"
       :can-share="true"
+      :link-to="photoLinkTo"
       :text-layer="true"
       :sharing="sharingPhotos"
       @close="closeGridFullscreen"
@@ -3038,6 +3056,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :currentIndex="mapFullscreenIndex + 1"
       :totalCount="mapFullscreenPhotos.length"
       :can-share="true"
+      :link-to="photoLinkTo"
       :text-layer="true"
       :sharing="sharingPhotos"
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"

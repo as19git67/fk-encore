@@ -56,7 +56,7 @@ import {
 } from '../utils/albumsViewState'
 import ServiceStatusBar from "../components/ServiceStatusBar.vue";
 import PageLayout from "../components/layout/PageLayout.vue";
-import { saveListAnchor } from '../utils/listAnchor'
+import { MODULE_LIST_ANCHORS, saveListAnchor } from '../utils/listAnchor'
 import type { ListAnchor } from '../utils/listAnchor'
 
 // The list shares the app-wide cache with album pickers and filters. This
@@ -84,7 +84,7 @@ const rememberedAlbumId = ref<number | null>(readRememberedAlbumId() ?? photoNav
 const gridRef = ref<InstanceType<typeof VirtualAlbumGrid> | null>(null)
 
 /** This list's key for the anchor and the scroll offset (issue #1272, stage 4). */
-const ANCHOR_KEY = 'fotos-alben'
+const ANCHOR_KEY = MODULE_LIST_ANCHORS.album.key
 
 function openAlbum(album: Album) {
   rememberFocusedAlbumId(album.id)

@@ -75,7 +75,7 @@ import {
   listDepotTransactions,
   listHoldings,
 } from '../../api/finance'
-import { anchorKey, saveListAnchor } from '../../utils/listAnchor'
+import { MODULE_LIST_ANCHORS, anchorKey, saveListAnchor } from '../../utils/listAnchor'
 
 const route = useRoute()
 const router = useRouter()
@@ -94,7 +94,7 @@ const PAGE_LIMIT = 500
  * stale anchor up against a fresh one. PageLayout stores the scroll offset
  * under it as well.
  */
-const ANCHOR_KEY = 'finance-transactions'
+const ANCHOR_KEY = MODULE_LIST_ANCHORS.transaction.key
 
 // ── Mode resolution ───────────────────────────────────────────────────
 //

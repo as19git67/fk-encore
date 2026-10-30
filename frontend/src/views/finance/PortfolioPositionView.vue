@@ -4,6 +4,7 @@ import { useBasketStore } from '../../stores/basket'
 import type { MemberRef } from '../../api/collections'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import ShareLinkButton from '../../components/ShareLinkButton.vue'
 import Button from 'primevue/button'
 import Chart from 'primevue/chart'
 import SelectButton from 'primevue/selectbutton'
@@ -428,6 +429,11 @@ function transactionCash(tx: PortfolioTransaction): string {
     </template>
 
     <template #actions>
+      <ShareLinkButton
+        v-if="position"
+        :to="{ name: 'finance-portfolio-position', params: { key: positionKey } }"
+        :title="title"
+      />
       <Button
         icon="pi pi-refresh"
         label="Aktualisieren"

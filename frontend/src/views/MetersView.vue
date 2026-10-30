@@ -35,10 +35,10 @@ import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { decimalInputPt } from '../utils/inputNumberPt'
 import { sortMetersByTypeAndName } from '../utils/meterSort'
-import { anchorKey, saveListAnchor } from '../utils/listAnchor'
+import { MODULE_LIST_ANCHORS, anchorKey, saveListAnchor } from '../utils/listAnchor'
 
 /** One key for this list — anchor and scroll offset are stored under it. */
-const ANCHOR_KEY = 'zaehler'
+const ANCHOR_KEY = MODULE_LIST_ANCHORS.meter.key
 
 const router = useRouter()
 const route = useRoute()

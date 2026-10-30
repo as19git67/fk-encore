@@ -9,6 +9,7 @@ import ProfileView from '../views/ProfileView.vue'
 import SharedAlbumView from '../views/SharedAlbumView.vue'
 import { isStaleChunkLoadError } from '../utils/appUpdate'
 import { markNavigation, saveScrollOffset } from '../utils/scrollMemory'
+import { safeLoginRedirect } from '../utils/loginRedirect'
 
 // ── Last-view persistence ────────────────────────────────────────────────────
 // We save the most recent authenticated route path to localStorage so that
@@ -122,7 +123,11 @@ router.beforeEach(async (to) => {
   auth.loadFromStorage()
 
   if (!auth.isAuthenticated && !PUBLIC_ROUTE_NAMES.has(to.name as string)) {
-    return { name: 'login' }
+    // Keep the target: a shared link to a detail page must survive the login
+    // wall. The login page navigates to `?redirect=` after signing in
+    // (validated there — see `utils/loginRedirect.ts`).
+    const redirect = safeLoginRedirect(to.fullPath)
+    return { name: 'login', query: redirect ? { redirect } : {} }
   }
 
   // The stored user is a copy from login. Fetch the current roles once per

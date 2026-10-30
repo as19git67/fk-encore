@@ -1961,6 +1961,7 @@ void refreshReviewSequence()
       :can-delete="canDelete"
       :details-active="detailsActive"
       :can-share="true"
+      :link-to="(id: number) => ({ name: 'fotos-gallery', query: { photoId: String(id) } })"
       :text-layer="true"
       :sharing="sharingPhotos"
       :auto-advance-ms="5000"

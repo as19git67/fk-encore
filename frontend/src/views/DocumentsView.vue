@@ -65,7 +65,7 @@ import { useListSearch, useListToolbar, useListView } from '../composables/useLi
 import { useListSelection } from '../composables/useListSelection'
 import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
-import { anchorKey, focusListAnchor, saveListAnchor } from '../utils/listAnchor'
+import { MODULE_LIST_ANCHORS, anchorKey, focusListAnchor, saveListAnchor } from '../utils/listAnchor'
 import type { ListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
@@ -76,7 +76,7 @@ const router = useRouter()
 const compactHeader = useMediaQuery(`${upTo('md')} and (orientation: portrait)`)
 const auth = useAuthStore()
 /** The list's own key for the anchor and the offset — one per list, not per filter. */
-const ANCHOR_KEY = 'dokumente'
+const ANCHOR_KEY = MODULE_LIST_ANCHORS.document.key
 
 const items = ref<DocumentSummary[]>([])
 const categories = ref<DocumentCategory[]>([])

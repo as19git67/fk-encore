@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Card from 'primevue/card'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
@@ -8,10 +8,21 @@ import Divider from 'primevue/divider'
 import Message from 'primevue/message'
 import PageLayout from '../components/layout/PageLayout.vue'
 import { useAuthStore } from '../stores/auth'
+import { safeLoginRedirect } from '../utils/loginRedirect'
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+
+/**
+ * After signing in, go where the visitor wanted: a shared link that hit the
+ * login wall put its target into `?redirect=`. Without one, `/` restores the
+ * last-visited page as before.
+ */
+function afterLogin() {
+  router.push(safeLoginRedirect(route.query.redirect) ?? '/')
+}
 
 const email = ref('')
 const password = ref('')
@@ -26,7 +37,7 @@ async function handleLogin() {
   loading.value = true
   try {
     await auth.login(email.value, password.value)
-    router.push('/')
+    afterLogin()
   } catch (err: any) {
     error.value = err.message || 'Anmeldung fehlgeschlagen'
   } finally {
@@ -39,7 +50,7 @@ async function handlePasskeyLogin() {
   passkeyLoading.value = true
   try {
     await auth.loginWithPasskey()
-    router.push('/')
+    afterLogin()
   } catch (err: any) {
     if (err.name === 'NotAllowedError') {
       error.value = 'Passkey-Anmeldung abgebrochen'

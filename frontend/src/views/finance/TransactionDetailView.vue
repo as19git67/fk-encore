@@ -3,6 +3,8 @@ import { searchInputAttrs } from '../../utils/searchInputAttrs'
 import FileButton from '../../components/collections/FileButton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { saveModuleListAnchor } from '../../utils/listAnchor'
+import ShareLinkButton from '../../components/ShareLinkButton.vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Checkbox from 'primevue/checkbox'
@@ -332,6 +334,9 @@ async function loadTransaction(id: number) {
   try {
     error.value = null
     tx.value = await api.getTransaction(id)
+    // A shared link lands here without a list click; going back still has to
+    // mark this transaction in the list.
+    saveModuleListAnchor('transaction', id)
     // Splits are optional supplementary data. A missing migration, an older
     // backend during a rolling deployment or a transient request failure must
     // never make the successfully loaded transaction detail disappear.
@@ -758,6 +763,11 @@ const extractedFields = computed(() => {
         v-if="tx"
         :members="[{ entity_type: 'transaction', entity_id: tx.id }]"
         :basket="txBasket"
+      />
+      <ShareLinkButton
+        v-if="tx"
+        :to="{ name: 'finance-transaction-detail', params: { id: tx.id } }"
+        :title="tx.counterparty || 'Buchung'"
       />
       <Button
         v-if="tx"

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, useSlots } from 'vue'
+import type { RouteLocationRaw } from 'vue-router'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
 import Menu from 'primevue/menu'
@@ -7,6 +8,7 @@ import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import PhotoTextLayer from './PhotoTextLayer.vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
+import { useShareLink } from '../composables/useShareLink'
 import { getPhotoOcrCached } from '../composables/usePhotoMetaCache'
 import type { ViewTransform } from '../utils/ocrLayout'
 import { getPhotoUrl, type Photo, type CurationStatus, type PhotoLinkVisibility, type PhotoOcrBlock } from '../api/photos'
@@ -49,6 +51,13 @@ const props = withDefaults(defineProps<{
   canShare?: boolean
   /** True while the host is fetching/handing over the photo. */
   sharing?: boolean
+  /**
+   * Route of this photo's internal link ("Link teilen"): the gallery or the
+   * album with `?photoId=`. The link opens the app for another signed-in
+   * user; nothing is made public. Absent, the button is not shown (the guest
+   * view of a shared album has no in-app route to offer).
+   */
+  linkTo?: ((id: number) => RouteLocationRaw) | null
   /**
    * Offer the selectable text layer (#1029): recognised text laid over the
    * photo, with a text-mode toggle and copy-all in the toolbar. Off by
@@ -107,6 +116,13 @@ const props = withDefaults(defineProps<{
   variantPhoto: null,
 })
 
+// "Link teilen": share sheet on mobile, clipboard (check-mark feedback) else.
+const { copied: linkCopied, shareLink } = useShareLink()
+function sharePhotoLink() {
+  const to = props.linkTo?.(props.photo.id)
+  if (to) void shareLink(to, 'Foto')
+}
+
 /** Label of the side the `R` button switches to. */
 const variantLabel = computed(() => {
   const o = props.variantPhoto?.orientation
@@ -121,6 +137,7 @@ const hasActionBar = computed(() => {
   if (props.showDetailsButton !== false) return true
   if (props.canDelete) return true
   if (props.canShare) return true
+  if (props.linkTo) return true
   if (props.variantPhoto) return true
   if (props.textLayer) return true
   if (canEditTransform.value) return true
@@ -1356,6 +1373,17 @@ onUnmounted(() => {
               :loading="props.sharing"
               @click="emit('share', photo.id)"
               v-tooltip.top="'Foto teilen'"
+            />
+            <!-- Internal link to this photo for another user of the app —
+                 unlike "Foto teilen", which hands over the image file. -->
+            <Button
+              v-if="props.linkTo"
+              :icon="linkCopied ? 'pi pi-check' : 'pi pi-link'"
+              rounded text
+              severity="secondary"
+              :aria-label="linkCopied ? 'Link kopiert' : 'Link teilen'"
+              @click="sharePhotoLink"
+              v-tooltip.top="linkCopied ? 'Link kopiert' : 'Link teilen'"
             />
             <!-- Text mode (#1029): only offered when the photo has recognised
                  text, so the button never promises a layer that is empty. -->
