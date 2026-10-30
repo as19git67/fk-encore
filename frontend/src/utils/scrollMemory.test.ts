@@ -3,6 +3,7 @@ import {
   clearScrollOffset,
   currentScrollTop,
   markNavigation,
+  markNextNavigationAsReturn,
   navigatedFromHistory,
   readScrollOffset,
   saveScrollOffset,
@@ -51,5 +52,24 @@ describe('scrollMemory', () => {
     expect(navigatedFromHistory()).toBe(true)
     markNavigation(false)
     expect(navigatedFromHistory()).toBe(false)
+  })
+})
+
+describe('markNextNavigationAsReturn', () => {
+  it('turns exactly the next push into a return', () => {
+    // The "Zurück" button of a link-opened detail pushes the list; the list
+    // must still restore the anchor the detail saved (see useModuleBack).
+    markNextNavigationAsReturn()
+    markNavigation(false)
+    expect(navigatedFromHistory()).toBe(true)
+    // Consumed: the navigation after it is a fresh start again.
+    markNavigation(false)
+    expect(navigatedFromHistory()).toBe(false)
+  })
+
+  it('does not downgrade a real history navigation', () => {
+    markNextNavigationAsReturn()
+    markNavigation(true)
+    expect(navigatedFromHistory()).toBe(true)
   })
 })

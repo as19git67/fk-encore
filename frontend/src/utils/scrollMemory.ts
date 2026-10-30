@@ -18,6 +18,7 @@
 const PREFIX = 'scroll_offset:'
 
 let cameFromHistory = false
+let nextIsReturn = false
 
 export function currentScrollTop(): number {
   return Math.round(window.scrollY)
@@ -60,7 +61,23 @@ export function clearScrollOffset(routeKey: string): void {
  * and forward (vue-router hands `scrollBehavior` a saved position only then).
  */
 export function markNavigation(fromHistory: boolean): void {
-  cameFromHistory = fromHistory
+  cameFromHistory = fromHistory || nextIsReturn
+  nextIsReturn = false
+}
+
+/**
+ * Declare the navigation about to happen a return, even though it is a push.
+ *
+ * The "Zurück" button of a detail page opened from a shared link has no
+ * in-module history entry to go back to, so `useModuleBack` pushes the
+ * module's list instead. For the reader that push is still "back": the list
+ * must land on the entry they came from (the detail page saved the anchor on
+ * load), not start at the top as if picked from the menu. The flag covers
+ * exactly one navigation — `markNavigation`, which the router calls for every
+ * confirmed navigation, consumes it.
+ */
+export function markNextNavigationAsReturn(): void {
+  nextIsReturn = true
 }
 
 /** Whether the page now showing was reached by going back or forward. */
