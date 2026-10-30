@@ -1,4 +1,5 @@
 import { useRouter } from 'vue-router'
+import { markNextNavigationAsReturn } from '../utils/scrollMemory'
 
 export function isPathInsideModule(path: string | null | undefined, basePath: string): boolean {
   if (!path) return false
@@ -39,6 +40,10 @@ export function useModuleBack(basePath: string, fallbackRouteName: string) {
     if (isReturnableOrigin(back, basePath)) {
       router.back()
     } else {
+      // No in-module history (the detail was opened from a shared link): the
+      // push to the list is still a return, so the list restores the anchor
+      // the detail page saved instead of starting at the top.
+      markNextNavigationAsReturn()
       void router.push({ name: fallbackRouteName })
     }
   }

@@ -3,6 +3,7 @@ import FileButton from '../components/collections/FileButton.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { saveModuleListAnchor } from '../utils/listAnchor'
+import { useModuleBack } from '../composables/useModuleBack'
 import ShareLinkButton from '../components/ShareLinkButton.vue'
 import { useMediaQuery } from '../composables/useBreakpoint'
 import Button from 'primevue/button'
@@ -74,6 +75,10 @@ const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
 const canManageMeter = computed(() => canManage.value && (detail.value?.canManage ?? false))
 
 const meterId = computed(() => Number(route.params.id))
+// "Zurück" goes through history within the module (keeps the list's filters),
+// and from a shared link it pushes the list as a return, so the meter the
+// detail saved as anchor is marked there.
+const { goBack } = useModuleBack('/zaehler', 'zaehler-list')
 
 function readingTitle(reading: Reading): string {
   return `${detail.value?.name ?? 'Zähler'}: ${reading.value} ${detail.value?.unit ?? ''}`.trim()
@@ -782,7 +787,7 @@ watch(meterId, () => loadDetail())
 <template>
   <PageLayout :title="detail?.name ?? 'Zähler'" width="normal" :ready="!loading" sticky-header>
     <template #back>
-      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="router.push({ name: 'zaehler-list' })" />
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
     </template>
 
     <template #actions>
