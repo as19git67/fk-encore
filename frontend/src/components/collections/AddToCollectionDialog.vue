@@ -65,7 +65,9 @@ const saving = ref(false)
 const error = ref('')
 const search = ref('')
 const newName = ref('')
-const typed = ref(false)
+// Things of one kind make a folder of that kind by default: a document
+// folder keeps its own page with a manual order, a mixed one does not.
+const typed = ref(true)
 const asDossier = ref(false)
 
 const single = computed(() => props.members.length === 1)
@@ -99,7 +101,7 @@ watch(
     error.value = ''
     search.value = ''
     newName.value = ''
-    typed.value = false
+    typed.value = true
     asDossier.value = false
     void basketStore.load()
     void load()
@@ -241,7 +243,7 @@ async function createAndAdd() {
       <Checkbox v-model="asDossier" binary />
       <span>Als Akte anlegen: Korrespondent, Referenznummern und Herkunftsordner werden zur Regel</span>
     </label>
-    <label v-else-if="onlyType" class="atc-typed">
+    <label v-if="onlyType && !(seedUsable && asDossier)" class="atc-typed">
       <Checkbox v-model="typed" binary />
       <span>Neue Mappe nur für {{ ENTITY_LABELS[onlyType].plural }}</span>
     </label>

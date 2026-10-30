@@ -344,6 +344,48 @@ describe("mixed collections", () => {
   });
 });
 
+describe("changing a collection's type", () => {
+  it("narrows a mixed folder of documents to a document folder and opens it again", async () => {
+    const a = await document(OWNER, "Brief A");
+    const b = await document(OWNER, "Brief B");
+    const col = await createAnyCollection({
+      name: "Nur Briefe",
+      members: [{ entity_type: "document", entity_id: a }, { entity_type: "document", entity_id: b }],
+    });
+    expect(col.entity_type).toBeNull();
+
+    const typed = await updateAnyCollection({ id: col.id, entity_type: "document" });
+    expect(typed.entity_type).toBe("document");
+    expect(typed.total).toBe(2);
+    // The documents keep their folder positions: nothing moves.
+    expect(typed.members.map((m) => m.entity_id)).toEqual([a, b]);
+
+    const mixed = await updateAnyCollection({ id: col.id, entity_type: null });
+    expect(mixed.entity_type).toBeNull();
+  });
+
+  it("refuses a type that not every member has", async () => {
+    const docId = await document(OWNER, "Rechnung");
+    const own = await photo(OWNER);
+    const col = await createAnyCollection({
+      name: "Gemischt",
+      members: [{ entity_type: "document", entity_id: docId }, { entity_type: "photo", entity_id: own }],
+    });
+    await expect(updateAnyCollection({ id: col.id, entity_type: "document" })).rejects.toThrow(/also holds photo/);
+  });
+
+  it("leaves rule collections and the basket alone", async () => {
+    const basket = await getBasket();
+    await expect(updateAnyCollection({ id: basket.id, entity_type: "document" })).rejects.toThrow(/manual/);
+  });
+
+  it("lets only who administers the folder change its type", async () => {
+    const col = await createAnyCollection({ name: "Gemeinsam", visibility: "group", group_id: GROUP });
+    as(MEMBER);
+    await expect(updateAnyCollection({ id: col.id, entity_type: "document" })).rejects.toThrow();
+  });
+});
+
 describe("finding collections", () => {
   it("filters by archive, type, contents, favourite and search", async () => {
     const own = await photo(OWNER);
