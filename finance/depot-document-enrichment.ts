@@ -51,6 +51,7 @@ import type { SettlementValues } from "./depot-settlement-merge";
 import { admitSecurity } from "./depot-securities";
 import { isinChecksumValid } from "./isin";
 import { documentsOfPaperType, SETTLEMENT_PAPER_TYPES } from "./depot-paper-type";
+import { reportTrades, type ReportTrade } from "./depot-statement-parser";
 import {
   asksModel,
   readSettlement,
@@ -708,6 +709,129 @@ async function linkToBookingRow(
   return result;
 }
 
+/** Whether a report's trade line describes this row: same kind, same amount, within the window. */
+function listsRow(t: ReportTrade, row: Pick<DepotRow, "kind" | "net_amount" | "executed_at">): boolean {
+  const net = num(row.net_amount);
+  if (row.kind !== t.kind || net === null || Math.abs(Math.abs(net) - t.amount) > NET_TOLERANCE) return false;
+  const days = Math.abs(Date.parse(`${row.executed_at.slice(0, 10)}T00:00:00Z`) - Date.parse(`${t.executedAt}T00:00:00Z`)) / 86_400_000;
+  return days <= SETTLEMENT_MATCH_WINDOW_DAYS;
+}
+
+/**
+ * What a periodic report booked while it was still read as a settlement
+ * (its prose mentions "Ausschüttungen", so a sale it lists became a
+ * dividend): the row only it created goes, a link to a row none of its
+ * listed trades describes is taken back. A removed row that carried an
+ * account booking is derived from that booking again, with today's rules.
+ */
+async function undoReportBookings(documentId: number, trades: ReportTrade[]): Promise<void> {
+  const rows = await db
+    .select({ row: financeDepotTransaction })
+    .from(financeDepotTransactionDocument)
+    .innerJoin(
+      financeDepotTransaction,
+      eq(financeDepotTransaction.id, financeDepotTransactionDocument.depot_transaction_id),
+    )
+    .where(eq(financeDepotTransactionDocument.document_id, documentId));
+  const rederive = new Set<number>();
+  for (const { row } of rows) {
+    const others = await db
+      .select({ id: financeDepotTransactionDocument.document_id })
+      .from(financeDepotTransactionDocument)
+      .where(
+        and(
+          eq(financeDepotTransactionDocument.depot_transaction_id, row.id),
+          sql`${financeDepotTransactionDocument.document_id} <> ${documentId}`,
+        ),
+      )
+      .limit(1);
+    const ownRow = row.source === "document" && row.dedupe_hash === `doc:${documentId}` && others.length === 0;
+    if (ownRow) {
+      await db.delete(financeDepotTransaction).where(eq(financeDepotTransaction.id, row.id));
+      if (row.linked_transaction_id !== null) rederive.add(row.account_id);
+    } else if (!trades.some((t) => listsRow(t, row))) {
+      await db
+        .delete(financeDepotTransactionDocument)
+        .where(
+          and(
+            eq(financeDepotTransactionDocument.depot_transaction_id, row.id),
+            eq(financeDepotTransactionDocument.document_id, documentId),
+          ),
+        );
+    }
+  }
+  if (rederive.size === 0) return;
+  const contacts = await db
+    .selectDistinct({ id: financeAccount.bankcontact_id })
+    .from(financeAccount)
+    .where(inArray(financeAccount.id, [...rederive]));
+  // Imported here: the derivation runs the papers of its bookings through this module.
+  const { deriveDepotTransactionsForBankcontact } = await import("./depot-derivation");
+  for (const c of contacts) if (c.id !== null) await deriveDepotTransactionsForBankcontact(c.id);
+}
+
+/**
+ * Link a periodic report to the trades its transaction overview lists
+ * (reportTrades): per line the one row of the report's depot with the same
+ * kind and amount within the settlement window — typically the row
+ * derived from the account booking a few days later. Nothing on the row
+ * changes; a line with no such row, or with several, links nothing.
+ */
+async function linkReportTrades(
+  result: EnrichResult,
+  documentId: number,
+  text: string | null,
+  depotNumber: string | null,
+  scope: number[] | null,
+  dryRun: boolean,
+): Promise<EnrichResult> {
+  const trades = reportTrades(text);
+  if (trades.length === 0 || (scope && scope.length === 0)) return result;
+  const depot = depotNumber ? await findDepotByNumber(depotNumber, scope) : null;
+  const accounts = depot !== null ? [depot] : scope;
+  let linked = 0;
+  let already = 0;
+  for (const t of trades) {
+    const conditions = [
+      eq(financeDepotTransaction.kind, t.kind),
+      sql`${financeDepotTransaction.executed_at} >= ${shiftDate(t.executedAt, -SETTLEMENT_MATCH_WINDOW_DAYS)}::date`,
+      sql`${financeDepotTransaction.executed_at} <= ${shiftDate(t.executedAt, SETTLEMENT_MATCH_WINDOW_DAYS)}::date`,
+      sql`abs(abs(${financeDepotTransaction.net_amount}) - ${t.amount}) <= ${NET_TOLERANCE}`,
+    ];
+    if (accounts) conditions.push(inArray(financeDepotTransaction.account_id, accounts));
+    const rows = await db
+      .select({ id: financeDepotTransaction.id, account_id: financeDepotTransaction.account_id, net_amount: financeDepotTransaction.net_amount })
+      .from(financeDepotTransaction)
+      .where(and(...conditions))
+      .limit(2);
+    if (rows.length !== 1) continue;
+    const row = rows[0]!;
+    const [existing] = await db
+      .select({ id: financeDepotTransactionDocument.depot_transaction_id })
+      .from(financeDepotTransactionDocument)
+      .where(
+        and(
+          eq(financeDepotTransactionDocument.depot_transaction_id, row.id),
+          eq(financeDepotTransactionDocument.document_id, documentId),
+        ),
+      )
+      .limit(1);
+    if (existing) already++;
+    else {
+      linked++;
+      if (!dryRun) await linkDocument(row.id, documentId);
+    }
+    if (result.depot_transaction_id === null) {
+      result.depot_transaction_id = row.id;
+      result.account_id = row.account_id;
+      result.transaction_net = row.net_amount;
+    }
+  }
+  if (linked > 0) result.outcome = "linked";
+  else if (already > 0) result.outcome = "already_linked";
+  return result;
+}
+
 export async function enrichDocument(
   documentId: number,
   accountIds: number[] | null = null,
@@ -759,6 +883,12 @@ export async function enrichDocument(
   );
   result.llm_status = reading.llmStatus;
   const otherPaper = rejectedAsOtherPaper(reading);
+  if (otherPaper === "depot_statement") {
+    result.detail = otherPaper;
+    const scope = accountIds ?? (await accessibleAccountIds(doc.user_id));
+    if (!dryRun) await undoReportBookings(documentId, reportTrades(doc.extracted_text));
+    return linkReportTrades(result, documentId, doc.extracted_text, reading.rules?.depotNumber ?? null, scope, dryRun);
+  }
   if (otherPaper) {
     result.detail = otherPaper;
     return result;

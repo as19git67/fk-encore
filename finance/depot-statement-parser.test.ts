@@ -7,6 +7,7 @@ import {
   parseLlmStatement,
   positionAddsUp,
   repairWkn,
+  reportTrades,
   statementDate,
 } from "./depot-statement-parser";
 
@@ -270,5 +271,22 @@ Gesamtkurswert 11.000,00`;
   it("reads a thousands point OCR read as a space", () => {
     const row = inspectDepotStatement(PAGE)!.positions.find((p) => p.wkn === "FFF666")!;
     expect(row.acquisitionPrice).toBe(150);
+  });
+});
+
+describe("reportTrades", () => {
+  it("reads the trades a report's transaction overview lists", () => {
+    const text = `Transaktionsübersicht vom 01. Januar 2026 bis 31. März 2026
+Handelsdatum   Transaktion   Betrag   AGS/Soli/KIST   Anteilspreis
+14.03.26   Verkauf   120,00 EUR   12,0000 EUR
+02.02.2026   Kauf   1.500,00 EUR   15,0000 EUR
+20.03.26   Ausschüttung   8,40 EUR
+Keine Transaktionen im vergangenen Quartal
+vom 01.01.2026 bis 31.03.2026`;
+    expect(reportTrades(text)).toEqual([
+      { executedAt: "2026-03-14", kind: "sell", amount: 120 },
+      { executedAt: "2026-02-02", kind: "buy", amount: 1500 },
+      { executedAt: "2026-03-20", kind: "dividend", amount: 8.4 },
+    ]);
   });
 });

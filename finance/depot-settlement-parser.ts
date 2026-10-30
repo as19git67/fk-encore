@@ -131,6 +131,12 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
    * from the giro side or its own paper.
    */
   severalBookings: boolean;
+  /**
+   * A depot statement or periodic report (see looksLikePeriodicReport):
+   * never a settlement. Its holdings go to the statement reader; the
+   * trades its overview lists are only linked to the rows already booked.
+   */
+  periodicReport: boolean;
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
   /**
@@ -323,6 +329,47 @@ export function looksLikeCostInformation(text: string): boolean {
   // A settlement that appends a cost section still has its heading: a
   // short line with a strong word and no figures ("Wertpapierabrechnung Kauf").
   return !text.split("\n").some((l) => STRONG_RE.test(l) && l.trim().length <= 60 && !/\d/.test(l));
+}
+
+/** Headings a depot statement, a wealth overview or a reporting prints. */
+export const STATEMENT_WORDS = [
+  "depotauszug",
+  "depotbestand",
+  "depotübersicht",
+  "depotbewertung",
+  "depotaufstellung",
+  "depotstatus",
+  "vermögensübersicht",
+  "vermögensaufstellung",
+  "vermögensstatus",
+  "vermögensreporting",
+  "bestandsübersicht",
+  "bestandsaufstellung",
+  "bestandsmitteilung",
+  "bestandsliste",
+  "reporting",
+] as const;
+
+const STATEMENT_HEADING_RE = new RegExp(STATEMENT_WORDS.join("|"), "i");
+
+/**
+ * A depot statement or a bank's periodic report (Depotübersicht,
+ * Reporting, Finanzreport): it names itself so, prints a value column
+ * ("Kurswert"), and no line of it is a settlement's or a credit note's
+ * heading — a short line with a word only those print and no figures
+ * ("Wertpapierabrechnung Verkauf", "Ertragsgutschrift"). Its prose
+ * mentions "Ausschüttungen" and its transaction overview lists sales, but
+ * it books nothing: each trade there has its booking or its own paper.
+ * A weak word ("Ausschüttung") as a heading does not count — a report may
+ * well title a section so.
+ */
+export function looksLikePeriodicReport(text: string): boolean {
+  if (!STATEMENT_HEADING_RE.test(text) || !/kurswert/i.test(text)) return false;
+  const heading = (l: string) => {
+    const t = l.trim();
+    return t.length <= 60 && !/\d/.test(t) && STRONG_RE.test(t);
+  };
+  return !text.split("\n").some(heading);
 }
 
 /** Regex sources for SQL pre-filters (Postgres `~*`), same words as above. */
@@ -901,7 +948,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const accountStatement = looksLikeAccountStatementOnly(whole);
   const taxSummary = looksLikeTaxSummary(whole);
   const severalBookings = looksLikeSeveralBookings(whole);
-  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) || accountStatement || taxSummary || severalBookings
+  const periodicReport = looksLikePeriodicReport(whole);
+  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) || accountStatement || taxSummary || severalBookings || periodicReport
     ? null
     : (taxLine ? detectKind(taxLine.toLowerCase()) : null) ?? detectKind(lower);
   const isin = extractIsin(text) ?? extractIsin(whole);
@@ -1097,7 +1145,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
 
   // Income a fund kept: the only money that moved is the tax charged on it.
   const accumulation =
-    !looksLikeInsurancePaper(wholeLower) && !looksLikeCostInformation(whole) && !taxSummary && !severalBookings && looksLikeAccumulation(whole);
+    !looksLikeInsurancePaper(wholeLower) && !looksLikeCostInformation(whole) && !taxSummary && !severalBookings && !periodicReport && looksLikeAccumulation(whole);
   if (accumulation) {
     // "kein Steuerabzug": a fund abroad, whose income is taxed in the
     // owner's return — nothing was charged, whatever tax words follow.
@@ -1109,6 +1157,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       taxSummary: false,
       accountStatement: false,
       severalBookings: false,
+      periodicReport: false,
       strong: hasStrongSettlementWording(wholeLower),
       taxStatement: false,
       taxPending: false,
@@ -1138,6 +1187,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     taxSummary,
     accountStatement,
     severalBookings,
+    periodicReport,
     strong: hasStrongSettlementWording(wholeLower),
     taxStatement,
     taxPending,

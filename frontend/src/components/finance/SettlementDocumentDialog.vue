@@ -225,6 +225,7 @@ const REJECTION_TEXT: Record<string, string> = {
   tax_summary: 'Das ist eine Erträgnisaufstellung bzw. Steuerbescheinigung über ein ganzes Jahr, keine Abrechnung — die Käufe, Verkäufe und Ausschüttungen darin haben jeweils einen eigenen Beleg.',
   account_statement: 'Das ist ein Kontoauszug des Verrechnungskontos ohne eigene Wertpapierabrechnung (Gebühren, Zinsen, Überträge) — er betrifft die Depots nicht.',
   several_bookings: 'Das ist ein Kontoauszug mit mehreren Wertpapierbuchungen (verschiedene Käufe, Verkäufe oder Ausschüttungen) — er wird nicht als einzelne Abrechnung gelesen; die Buchungen kommen über „Aus Giro ableiten“ oder ihre eigenen Belege.',
+  depot_statement: 'Das ist ein Depotauszug bzw. Reporting, keine Abrechnung — gelesen wird der Bestand; die Käufe und Verkäufe, die es auflistet, werden nur mit den schon gebuchten Transaktionen verknüpft.',
   llm_other: 'Das KI-Modell hält den Beleg nicht für eine Wertpapierabrechnung, und die Regeln finden keine eindeutige Überschrift dagegen.',
   no_kind: 'Kein Hinweis auf Kauf, Verkauf oder Dividende gefunden — der Beleg gilt nicht als Abrechnung.',
   no_identifier: 'Weder ISIN noch WKN gefunden — ohne Wertpapierkennung kann nichts zugeordnet werden.',

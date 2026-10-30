@@ -8,6 +8,7 @@ import {
   inspectSettlement,
   isPersonName,
   isUsableSettlement,
+  looksLikePeriodicReport,
   parseGermanNumber,
   paperTypeOf,
   parseSettlement,
@@ -1217,5 +1218,40 @@ Musterhinweis`;
   it("prefers the model's name when it is the wrapped name the rules read part of, or the rules read a letterhead", () => {
     expect(nameNearerIdentifier(SALE, "LU0000000AA1", "ALPHA GLOBAL FUND", "ALPHA GLOBAL FUND INHABER-ANTEILE A O.N")).toBe("llm");
     expect(nameNearerIdentifier(SALE, "LU0000000AA1", "® BEISPIELBANK", "ALPHA GLOBAL FUND INHABER-ANTEILE A O.N")).toBe("llm");
+  });
+});
+
+describe("inspectSettlement — a periodic report is no settlement", () => {
+  // A quarterly report: holdings, one sale in its transaction overview and
+  // footer prose that mentions "Ausschüttungen" — which used to make the
+  // whole report a dividend.
+  const REPORT = `Reporting für Ihre Konten und Depots zum 1. Quartal 2026
+Depotübersicht
+WKN   Bezeichnung
+AAA111   Alpha Industries AG
+Anzahl / Wertpapierkurs   Kurswert
+25,000   118,4000 EUR   2.960,00 EUR
+Transaktionsübersicht vom 01. Januar 2026 bis 31. März 2026
+Handelsdatum   Transaktion   Betrag   AGS/Soli/KIST   Anteilspreis
+14.03.26   Verkauf   120,00 EUR   12,0000 EUR
+Ausgabeaufschläge sind bei Wertpapierkäufen im Anteilspreis schon enthalten.
+Zinsen, Ausschüttungen, Gebühren bzw. weitere Kosten kön-   Besteht kein Freistellungsauftrag`;
+
+  it("reads no kind from it", () => {
+    expect(looksLikePeriodicReport(REPORT)).toBe(true);
+    const s = inspectSettlement(REPORT)!;
+    expect(s.periodicReport).toBe(true);
+    expect(s.kind).toBeNull();
+  });
+
+  it("keeps a settlement a settlement, even one that prints a holdings word", () => {
+    const sale = `Wertpapierabrechnung Verkauf
+Depotbestand nach Ausführung
+ISIN DE000000AAA1
+Stück 10
+Kurswert 120,00 EUR
+Ausmachender Betrag 120,00 EUR`;
+    expect(looksLikePeriodicReport(sale)).toBe(false);
+    expect(inspectSettlement(sale)!.kind).toBe("sell");
   });
 });
