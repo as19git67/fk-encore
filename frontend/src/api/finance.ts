@@ -882,6 +882,7 @@ export type SettlementRejection =
   | 'tax_summary'
   | 'account_statement'
   | 'several_bookings'
+  | 'depot_statement'
   | 'llm_other'
   | 'no_kind'
   | 'no_identifier'

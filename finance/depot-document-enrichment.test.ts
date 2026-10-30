@@ -1712,3 +1712,93 @@ Zu Ihren Gunsten nach Steuern EUR 2.953,60`;
     expect(rows[0]!.linked_transaction_id).toBe(booking!.id);
   });
 });
+
+describe("finance/depot-document-enrichment — a periodic report", () => {
+  // A bank's quarterly report: holdings, a transaction overview with one
+  // sale, and footer prose that mentions "Ausschüttungen".
+  const REPORT_TEXT = `Beispielbank AG
+Reporting für Ihre Konten und Depots zum 1. Quartal 2026
+Depotübersicht
+WKN   Bezeichnung
+AAA111   Alpha Industries AG
+Anzahl / Wertpapierkurs   Kurswert
+25,000   118,4000 EUR   2.960,00 EUR
+Transaktionsübersicht vom 01. Januar 2026 bis 31. März 2026
+Bezeichnung   Alpha Industries AG
+Handelsdatum   Transaktion   Betrag   AGS/Soli/KIST   Anteilspreis
+14.03.26   Verkauf   120,00 EUR   12,0000 EUR
+WKN   AAA111
+Zinsen, Ausschüttungen, Gebühren bzw. weitere Kosten kön-   Besteht kein Freistellungsauftrag
+nen den Gegenwert der Käufe und Verkäufe erhöhen oder   oder ist dieser bereits ausgeschöpft`;
+
+  const SELL_TEXT = `Beispielbank AG
+Wertpapierabrechnung Verkauf
+Stück 10
+Wertpapierbezeichnung
+Alpha Industries AG
+ISIN ${ISIN_A}
+Schlusstag 14.03.2026
+Ausführungskurs 12,00 EUR
+Kurswert 120,00 EUR
+Ausmachender Betrag 120,00 EUR`;
+
+  async function linksOf(docId: number) {
+    return db
+      .select({ id: financeDepotTransactionDocument.depot_transaction_id })
+      .from(financeDepotTransactionDocument)
+      .where(eq(financeDepotTransactionDocument.document_id, docId));
+  }
+
+  it("is no settlement: it books nothing and links the sale its overview lists", async () => {
+    const { depot } = await setup();
+    // The sale as the account booking two days later brought it in.
+    const [sale] = await db
+      .insert(financeDepotTransaction)
+      .values({ account_id: depot, isin: ISIN_A, kind: "sell", executed_at: "2026-03-16", net_amount: "120.00", currency: "EUR", source: "giro-derived" })
+      .returning({ id: financeDepotTransaction.id });
+    const docId = await insertDocument(REPORT_TEXT);
+    // What an earlier reading booked from the report: the sale as a dividend.
+    const [wrong] = await db
+      .insert(financeDepotTransaction)
+      .values({ account_id: depot, isin: ISIN_A, kind: "dividend", executed_at: "2026-03-14", net_amount: "120.00", currency: "EUR", source: "document", dedupe_hash: `doc:${docId}` })
+      .returning({ id: financeDepotTransaction.id });
+    await db.insert(financeDepotTransactionDocument).values({ depot_transaction_id: wrong!.id, document_id: docId });
+
+    const r = await enrichDocument(docId);
+    expect(r.detail).toBe("depot_statement");
+    expect(r.outcome).toBe("linked");
+    expect(r.depot_transaction_id).toBe(sale!.id);
+    const rows = await depotRows(depot);
+    expect(rows.map((x) => x.kind)).toEqual(["sell"]);
+    expect(rows[0]!.net_amount).toBe("120.00");
+    expect((await linksOf(docId)).map((l) => l.id)).toEqual([sale!.id]);
+    // The model is never asked about it.
+    expect(extractSettlementValues).not.toHaveBeenCalled();
+
+    expect((await enrichDocument(docId)).outcome).toBe("already_linked");
+    expect(await depotRows(depot)).toHaveLength(1);
+  });
+
+  it("joins the sale its own settlement booked", async () => {
+    const { depot } = await setup();
+    const sellDoc = await insertDocument(SELL_TEXT);
+    expect((await enrichDocument(sellDoc)).outcome).toBe("created");
+    const reportDoc = await insertDocument(REPORT_TEXT);
+
+    const r = await enrichDocument(reportDoc);
+    expect(r.outcome).toBe("linked");
+    const rows = await depotRows(depot);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("sell");
+    expect((await linksOf(reportDoc)).map((l) => l.id)).toEqual([rows[0]!.id]);
+  });
+
+  it("links nothing when no booked row has the listed kind and amount", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(REPORT_TEXT);
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("not_settlement");
+    expect(r.detail).toBe("depot_statement");
+    expect(await depotRows(depot)).toHaveLength(0);
+  });
+});

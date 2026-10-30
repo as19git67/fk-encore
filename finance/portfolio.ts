@@ -2624,6 +2624,8 @@ type InspectionRejection =
   | "account_statement"
   /** An account statement with several securities bookings: none of them is the paper's one trade. */
   | "several_bookings"
+  /** A depot statement or periodic report: its holdings are read as such, the trades it lists are only linked. */
+  | "depot_statement"
   /** The model says it is something else and the rules found no word only a settlement prints. */
   | "llm_other"
   | "no_kind"

@@ -30,26 +30,10 @@ import {
   normalizeText,
   parseGermanNumber,
   rejoinColumnAmounts,
+  STATEMENT_WORDS,
 } from "./depot-settlement-parser";
 
-/** Headings a depot statement, a wealth overview or a reporting prints. */
-export const STATEMENT_WORDS = [
-  "depotauszug",
-  "depotbestand",
-  "depotübersicht",
-  "depotbewertung",
-  "depotaufstellung",
-  "depotstatus",
-  "vermögensübersicht",
-  "vermögensaufstellung",
-  "vermögensstatus",
-  "vermögensreporting",
-  "bestandsübersicht",
-  "bestandsaufstellung",
-  "bestandsmitteilung",
-  "bestandsliste",
-  "reporting",
-] as const;
+export { STATEMENT_WORDS };
 
 /** Regex source for the SQL pre-filter (Postgres `~*`), same words as above. */
 export const STATEMENT_CANDIDATE_PATTERN = STATEMENT_WORDS.join("|");
@@ -174,6 +158,46 @@ export function statementDate(text: string): string | null {
   const day = Number(m[1]);
   if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1990 || year > 2100) return null;
   return `${m[3]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** One line of a report's transaction overview ("14.03.26   Verkauf   120,00 EUR …"). */
+export interface ReportTrade {
+  executedAt: string;
+  kind: "buy" | "sell" | "dividend";
+  /** The amount the line prints, unsigned. */
+  amount: number;
+}
+
+const REPORT_TRADE_RE =
+  /^\s*(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\s+(Verkauf|Kauf|Sparplan(?:kauf)?|Zeichnung|Ausschüttung|Dividende|Ertrag)\s+-?(\d{1,3}(?:\.\d{3})*,\d{2})\s*(?:EUR|€)/i;
+
+/**
+ * The trades a periodic report's transaction overview lists, one per line
+ * that starts with a date, a kind of trade and an amount. The report books
+ * none of them — each has its account booking or its own paper — but it
+ * shows which ones the quarter had, so it is linked to them.
+ */
+export function reportTrades(raw: string | null | undefined): ReportTrade[] {
+  if (!raw) return [];
+  const out: ReportTrade[] = [];
+  for (const line of normalizeText(raw).split("\n")) {
+    const m = REPORT_TRADE_RE.exec(line);
+    if (!m) continue;
+    const day = Number(m[1]);
+    const month = Number(m[2]);
+    const year = m[3]!.length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    if (day < 1 || day > 31 || month < 1 || month > 12) continue;
+    const amount = parseGermanNumber(m[5]!);
+    if (amount === null || amount === 0) continue;
+    const word = m[4]!.toLowerCase();
+    const kind = word === "verkauf" ? "sell" : /kauf|sparplan|zeichnung/.test(word) ? "buy" : "dividend";
+    out.push({
+      executedAt: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      kind,
+      amount: Math.abs(amount),
+    });
+  }
+  return out;
 }
 
 /** Digits of the depot number the statement prints, when it does. */
