@@ -160,6 +160,31 @@ export function statementDate(text: string): string | null {
   return `${m[3]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+const HOLDINGS_HEADING_RE = /depotbestand|depotübersicht|depotauszug|bestandsübersicht|vermögensaufstellung/i;
+
+function squash(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9äöüß]/g, "");
+}
+
+/**
+ * Whether a statement's holdings part names the position — by ISIN, WKN
+ * or its full name — although no row of it could be read (OCR swallowed
+ * the identifier or the quantity). Such a position is not "not held" that
+ * day; the paper simply could not be read for it.
+ */
+export function statementNamesPosition(
+  raw: string | null | undefined,
+  position: { isins: string[]; wkns: string[]; names: string[] },
+): boolean {
+  if (!raw) return false;
+  const lines = normalizeText(raw).split("\n");
+  const start = lines.findIndex((l) => HOLDINGS_HEADING_RE.test(l));
+  const part = squash((start < 0 ? lines : lines.slice(start)).join("\n"));
+  const ids = [...position.isins, ...position.wkns].map(squash).filter((s) => s.length >= 6);
+  const names = position.names.map(squash).filter((s) => s.length >= 5);
+  return ids.some((s) => part.includes(s)) || names.some((s) => part.includes(s));
+}
+
 /** One line of a report's transaction overview ("14.03.26   Verkauf   120,00 EUR …"). */
 export interface ReportTrade {
   executedAt: string;
