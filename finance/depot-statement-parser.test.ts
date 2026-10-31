@@ -9,6 +9,7 @@ import {
   repairWkn,
   reportTrades,
   statementDate,
+  statementNamesPosition,
 } from "./depot-statement-parser";
 
 // Synthetic identifiers and texts only — see CLAUDE.md "Keine PII".
@@ -272,6 +273,43 @@ Gesamtkurswert 11.000,00`;
     const row = inspectDepotStatement(PAGE)!.positions.find((p) => p.wkn === "FFF666")!;
     expect(row.acquisitionPrice).toBe(150);
   });
+
+  // Synthetic: the table broke over a page and the second page's header
+  // has no quantity or price columns. The row prints value, purchase value
+  // and gain alone.
+  const VALUE_ONLY = `Finanzreport per 01.12.2025 - Seite 6
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal Kurswert Kaufwert Gewinn / Verlust
+Bezeichnung Stückzinsen
+JJJ999 / Girosammelverwahrung 12.345,00 10.000,00 +2.345,00
+IOTA INC. +0,00
+Gesamtkurswert 12.345,00 10.000,00 +2.345,00`;
+
+  it("keeps a row printed without its quantity, with the value and no quantity", () => {
+    const r = inspectDepotStatement(VALUE_ONLY)!;
+    expect(r.tableWkns).toEqual(["JJJ999"]);
+    expect(r.positions).toEqual([
+      expect.objectContaining({ wkn: "JJJ999", name: "IOTA INC.", quantity: null, price: null, value: 12345, noQuantityPrinted: true }),
+    ]);
+  });
+
+  it("does not take a row's value for its quantity when the model does", () => {
+    const rules = inspectDepotStatement(VALUE_ONLY)!;
+    for (const quantity of [12345, 12.345]) {
+      const m = mergeStatement(rules, {
+        asOf: null,
+        depotNumber: null,
+        positions: [{ isin: null, wkn: "JJJ999", name: "IOTA INC.", quantity, price: null, value: 12345, currency: "EUR", acquisitionPrice: null }],
+      });
+      expect(m.positions).toHaveLength(1);
+      expect(m.positions[0]).toMatchObject({ wkn: "JJJ999", quantity: null, value: 12345, source: "rules" });
+    }
+  });
+
+  it("does not read three amounts as value, purchase value and gain unless they add up", () => {
+    const r = inspectDepotStatement(VALUE_ONLY.replace("+2.345,00\nIOTA", "+2.000,00\nIOTA"))!;
+    expect(r.positions).toEqual([]);
+  });
 });
 
 describe("reportTrades", () => {
@@ -288,5 +326,25 @@ vom 01.01.2026 bis 31.03.2026`;
       { executedAt: "2026-02-02", kind: "buy", amount: 1500 },
       { executedAt: "2026-03-20", kind: "dividend", amount: 8.4 },
     ]);
+  });
+});
+
+describe("statementNamesPosition", () => {
+  const TEXT = `Kontoübersicht
+Wertpapiere   GAMMA WERKE AG
+Depotbestand   EUR
+BBB222 / Girosammelverwahrung   10,000   95,200   EUR   952,00
+BETA GLOBAL FONDS   +0,00
+8   / Girosammelverwahrung   25,
+ALPHA INDUSTRIES AG   +0,00`;
+
+  it("finds a position by name or identifier in the holdings part", () => {
+    expect(statementNamesPosition(TEXT, { isins: [], wkns: [], names: ["Alpha Industries AG"] })).toBe(true);
+    expect(statementNamesPosition(TEXT, { isins: [], wkns: ["BBB222"], names: [] })).toBe(true);
+  });
+
+  it("does not count a name the paper prints only before its holdings", () => {
+    expect(statementNamesPosition(TEXT, { isins: [], wkns: [], names: ["Gamma Werke AG"] })).toBe(false);
+    expect(statementNamesPosition(TEXT, { isins: ["DE000000DDD4"], wkns: [], names: [] })).toBe(false);
   });
 });

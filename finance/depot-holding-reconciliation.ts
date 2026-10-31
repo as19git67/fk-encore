@@ -26,6 +26,10 @@
  * or a split / corporate action is among them — is counted as
  * unverifiable, not reported as a gap.
  *
+ * A position missing from a statement that still names it in its holdings
+ * (a row OCR garbled) was not read that day, not sold: the day is left out
+ * for it instead of counting as 0.
+ *
  * A security the depot ignores (taken out by the user, or a proposal
  * turned down) is left out: its read transactions are gone, so the
  * bank's old snapshots of it would otherwise show as gaps forever.
@@ -34,7 +38,8 @@
 import { asc, inArray } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeAccountHolding, financeDepotTransaction } from "../db/schema";
+import { documents, financeAccountHolding, financeDepotTransaction } from "../db/schema";
+import { statementNamesPosition } from "./depot-statement-parser";
 import { ignoredSecurities, isIgnoredIn } from "./depot-securities";
 import { dedupeSnapshotRows, securityIdentity } from "./security-identity";
 
@@ -292,14 +297,41 @@ export async function reconcileHoldings(
     txsById.set(id, list);
   }
 
+  // What each position is called, to find it in a statement that left it out.
+  const namings = new Map<string, { isins: string[]; wkns: string[]; names: string[] }>();
+  for (const h of holdings) {
+    const key = keyOf(h);
+    if (!key) continue;
+    const id = `${h.account_id}|${key}`;
+    const n = namings.get(id) ?? { isins: [], wkns: [], names: [] };
+    if (h.isin && !n.isins.includes(h.isin)) n.isins.push(h.isin);
+    if (h.wkn && !n.wkns.includes(h.wkn)) n.wkns.push(h.wkn);
+    if (h.name && !n.names.includes(h.name)) n.names.push(h.name);
+    namings.set(id, n);
+  }
+  const paperIds = [...new Set([...dayPapers.values()].flatMap((m) => [...m.values()]))];
+  const texts = new Map<number, string | null>();
+  if (paperIds.length > 0) {
+    const rows = await db
+      .select({ id: documents.id, text: documents.extracted_text })
+      .from(documents)
+      .where(inArray(documents.id, paperIds));
+    for (const r of rows) texts.set(r.id, r.text);
+  }
+
   for (const [id, byDay] of amounts) {
     const sep = id.indexOf("|");
     const accountId = Number(id.slice(0, sep));
     const key = id.slice(sep + 1);
     const days = daysByAccount.get(accountId) ?? [];
     const firstSeen = [...byDay.keys()].sort()[0]!;
+    const unread = (d: string): boolean => {
+      if (byDay.has(d)) return false;
+      const paper = dayPapers.get(accountId)?.get(d);
+      return paper !== undefined && statementNamesPosition(texts.get(paper), namings.get(id)!);
+    };
     const points: SnapshotPoint[] = days
-      .filter((d) => d >= firstSeen)
+      .filter((d) => d >= firstSeen && !unread(d))
       .map((d) => ({
         as_of: d,
         amount: byDay.get(d) ?? 0,

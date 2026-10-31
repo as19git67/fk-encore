@@ -393,6 +393,41 @@ Alpha Industries AG ${ISIN_A}
     expect(gaps[0]).toMatchObject({ from_document_id: docId, to_document_id: null });
   });
 
+  it("takes a position a statement names but could not read as not read that day, not as sold", async () => {
+    const { depot } = await setup();
+    await db.insert(financeAccountHolding).values([
+      { account_id: depot, as_of: "2026-01-01", isin: ISIN_A, name: "Alpha Industries AG", amount: "25", currency: "EUR" },
+      { account_id: depot, as_of: "2026-03-01", isin: ISIN_B, name: "Beta Global Fonds", amount: "10", currency: "EUR" },
+    ]);
+    // OCR swallowed Alpha's identifier and quantity; only Beta's row reads.
+    const garbled = await insertDocument(`Finanzreport per 01.02.2026
+Depotbestand   EUR
+WKN / Verwahrart   Anzahl / Nominal   Kurswert
+BBB222 / Girosammelverwahrung   10,000   95,200   EUR   952,00
+BETA GLOBAL FONDS   +0,00
+8   / Girosammelverwahrung   25,
+ALPHA INDUSTRIES AG   +0,00`);
+    const statementRow = (documentId: number) => ({
+      account_id: depot, as_of: "2026-02-01", isin: ISIN_B, name: "Beta Global Fonds", amount: "10", currency: "EUR",
+      source: "document" as const, document_id: documentId,
+    });
+    await db.insert(financeAccountHolding).values(statementRow(garbled));
+    expect((await reconcileHoldings([depot])).gaps).toHaveLength(0);
+
+    // A statement that does not name it says it was gone that day.
+    await db.delete(financeAccountHolding).where(eq(financeAccountHolding.document_id, garbled));
+    const without = await insertDocument(`Finanzreport per 01.02.2026
+Depotbestand   EUR
+BBB222 / Girosammelverwahrung   10,000   95,200   EUR   952,00
+BETA GLOBAL FONDS   +0,00`);
+    await db.insert(financeAccountHolding).values(statementRow(without));
+    const gaps = (await reconcileHoldings([depot])).gaps;
+    expect(gaps.map((g) => [g.from, g.to, g.unexplained])).toEqual([
+      ["2026-02-01", "2026-03-01", "25.00000000"],
+      ["2026-01-01", "2026-02-01", "-25.00000000"],
+    ]);
+  });
+
   it("reads pending statements in the background run and skips those stored already", async () => {
     const { depot } = await setup();
     const stored = await insertDocument(STATEMENT_WITH_NUMBER);

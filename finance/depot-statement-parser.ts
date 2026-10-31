@@ -81,6 +81,8 @@ export interface StatementPosition {
   currency: string | null;
   /** The bank's cost basis per unit, where the statement prints one. */
   acquisitionPrice: number | null;
+  /** A table row that prints no quantity at all, only the value (set by the rules). */
+  noQuantityPrinted?: boolean;
 }
 
 export interface StatementReadingValues {
@@ -158,6 +160,31 @@ export function statementDate(text: string): string | null {
   const day = Number(m[1]);
   if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1990 || year > 2100) return null;
   return `${m[3]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+const HOLDINGS_HEADING_RE = /depotbestand|depotübersicht|depotauszug|bestandsübersicht|vermögensaufstellung/i;
+
+function squash(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9äöüß]/g, "");
+}
+
+/**
+ * Whether a statement's holdings part names the position — by ISIN, WKN
+ * or its full name — although no row of it could be read (OCR swallowed
+ * the identifier or the quantity). Such a position is not "not held" that
+ * day; the paper simply could not be read for it.
+ */
+export function statementNamesPosition(
+  raw: string | null | undefined,
+  position: { isins: string[]; wkns: string[]; names: string[] },
+): boolean {
+  if (!raw) return false;
+  const lines = normalizeText(raw).split("\n");
+  const start = lines.findIndex((l) => HOLDINGS_HEADING_RE.test(l));
+  const part = squash((start < 0 ? lines : lines.slice(start)).join("\n"));
+  const ids = [...position.isins, ...position.wkns].map(squash).filter((s) => s.length >= 6);
+  const names = position.names.map(squash).filter((s) => s.length >= 5);
+  return ids.some((s) => part.includes(s)) || names.some((s) => part.includes(s));
 }
 
 /** One line of a report's transaction overview ("14.03.26   Verkauf   120,00 EUR …"). */
@@ -356,6 +383,28 @@ const TABLE_ROW_START_RE = new RegExp(String.raw`^\s*([A-Z0-9]{6})\s*${ROW_SLASH
 /** A row whose figures OCR moved off its line: the quantity is all that stands after the custody type. */
 const ROW_QUANTITY_RE = new RegExp(String.raw`^\s*([A-Z0-9]{6})\s*${ROW_SLASH}\s*(\S*(?:verwahrung|rechnung))\s+(${NUM})\s*$`, "i");
 
+/**
+ * A row printed without quantity and price — the report broke the table
+ * over a page and the second page's header has no such columns: value,
+ * purchase value and the signed gain, nothing else.
+ */
+const VALUE_ONLY_ROW_RE = new RegExp(
+  String.raw`^\s*([A-Z0-9]{6})\s*${ROW_SLASH}\s*(\S*(?:verwahrung|rechnung))\s+(${NUM})\s+(${NUM})\s+([+-]\s*${NUM})\s*$`,
+  "i",
+);
+
+/** Value − purchase value = gain, to the cent: the three figures are those three columns. */
+function valueOnlyRow(line: string): { wkn: string; value: number } | null {
+  const m = VALUE_ONLY_ROW_RE.exec(line);
+  if (!m) return null;
+  const value = num(m[3]);
+  const purchase = num(m[4]);
+  const gain = parseGermanNumber(m[5]!.replace(/\s+/g, "").replace(/^\+/, ""));
+  if (value === null || purchase === null || gain === null) return null;
+  if (Math.abs(value - purchase - gain) > 0.011) return null;
+  return { wkn: repairWkn(m[1]!), value };
+}
+
 /** The WKNs the holdings table of a paper lists, from every row that starts like one. */
 export function tableRowWkns(lines: string[]): string[] {
   const out = new Set<string>();
@@ -376,7 +425,14 @@ export function holdingRows(lines: string[]): Array<StatementPosition & { line: 
     if (!m) {
       // The figures after the quantity went elsewhere: the row still says
       // how many the depot holds, which is what the holdings need.
-      const q = ROW_QUANTITY_RE.exec(rejoinSplitAmounts(raw));
+      const line = rejoinSplitAmounts(raw);
+      // Only the value is printed: the row is there, how many is not.
+      const valueOnly = valueOnlyRow(line);
+      if (valueOnly && /\d/.test(valueOnly.wkn)) {
+        rows.push({ line: i, isin: null, wkn: valueOnly.wkn, name: rowName(lines, i), quantity: null, price: null, value: valueOnly.value, currency: null, acquisitionPrice: null, noQuantityPrinted: true });
+        return;
+      }
+      const q = ROW_QUANTITY_RE.exec(line);
       const wkn = q ? repairWkn(q[1]!) : null;
       if (!q || !wkn || !/\d/.test(wkn)) return;
       rows.push({ line: i, isin: null, wkn, name: rowName(lines, i), quantity: num(q[3]), price: null, value: null, currency: null, acquisitionPrice: null });
@@ -595,6 +651,13 @@ export function mergeStatement(
       value: l.value ?? r?.value ?? null,
     };
     let source: MergedPosition["source"] = !r ? "llm" : l.quantity !== null ? "both" : "rules";
+    // A row printed with its value alone: whatever quantity the model gives
+    // was read off the value column ("12.345,00" as 12.345 shares). The row
+    // stays unread.
+    if (r?.noQuantityPrinted && l.quantity !== null) {
+      figures = { quantity: null, price: null, value: r.value };
+      source = "rules";
+    }
     if (r && positionAddsUp(figures) === false && positionAddsUp(r) === true) {
       figures = { quantity: r.quantity, price: r.price, value: r.value };
       source = "rules";
