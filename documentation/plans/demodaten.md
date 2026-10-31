@@ -232,6 +232,11 @@ Watchtower.
 - **Tag `latest`.** The demo shows what is on main, not every PR. The
   image workflow gets a step "Deploy demo" after the prod deploy, with a
   new secret `WATCHTOWER_URL_DEMO`. Migrations run on update as usual.
+  The step must never turn main red: it runs only when the secret is set
+  (mapped into `env`, since `secrets` cannot be read in `if:`) and carries
+  `continue-on-error: true`, so a demo stack that is not set up yet or is
+  down only shows a warning. Watchtower itself answers 200 when none of
+  its containers exist yet; it updates only what runs.
 - **First fill.** `DEMO_DATA=1` in the demo's `.env` makes the server load
   the demo at boot while the system is untouched (the same switch the E2E
   workflow will use).
