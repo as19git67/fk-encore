@@ -409,7 +409,7 @@ BETA GLOBAL FONDS   +0,00
 ALPHA INDUSTRIES AG   +0,00`);
     const statementRow = (documentId: number) => ({
       account_id: depot, as_of: "2026-02-01", isin: ISIN_B, name: "Beta Global Fonds", amount: "10", currency: "EUR",
-      source: "document", document_id: documentId,
+      source: "document" as const, document_id: documentId,
     });
     await db.insert(financeAccountHolding).values(statementRow(garbled));
     expect((await reconcileHoldings([depot])).gaps).toHaveLength(0);

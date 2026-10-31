@@ -273,6 +273,43 @@ Gesamtkurswert 11.000,00`;
     const row = inspectDepotStatement(PAGE)!.positions.find((p) => p.wkn === "FFF666")!;
     expect(row.acquisitionPrice).toBe(150);
   });
+
+  // Synthetic: the table broke over a page and the second page's header
+  // has no quantity or price columns. The row prints value, purchase value
+  // and gain alone.
+  const VALUE_ONLY = `Finanzreport per 01.12.2025 - Seite 6
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal Kurswert Kaufwert Gewinn / Verlust
+Bezeichnung Stückzinsen
+JJJ999 / Girosammelverwahrung 12.345,00 10.000,00 +2.345,00
+IOTA INC. +0,00
+Gesamtkurswert 12.345,00 10.000,00 +2.345,00`;
+
+  it("keeps a row printed without its quantity, with the value and no quantity", () => {
+    const r = inspectDepotStatement(VALUE_ONLY)!;
+    expect(r.tableWkns).toEqual(["JJJ999"]);
+    expect(r.positions).toEqual([
+      expect.objectContaining({ wkn: "JJJ999", name: "IOTA INC.", quantity: null, price: null, value: 12345, noQuantityPrinted: true }),
+    ]);
+  });
+
+  it("does not take a row's value for its quantity when the model does", () => {
+    const rules = inspectDepotStatement(VALUE_ONLY)!;
+    for (const quantity of [12345, 12.345]) {
+      const m = mergeStatement(rules, {
+        asOf: null,
+        depotNumber: null,
+        positions: [{ isin: null, wkn: "JJJ999", name: "IOTA INC.", quantity, price: null, value: 12345, currency: "EUR", acquisitionPrice: null }],
+      });
+      expect(m.positions).toHaveLength(1);
+      expect(m.positions[0]).toMatchObject({ wkn: "JJJ999", quantity: null, value: 12345, source: "rules" });
+    }
+  });
+
+  it("does not read three amounts as value, purchase value and gain unless they add up", () => {
+    const r = inspectDepotStatement(VALUE_ONLY.replace("+2.345,00\nIOTA", "+2.000,00\nIOTA"))!;
+    expect(r.positions).toEqual([]);
+  });
 });
 
 describe("reportTrades", () => {
