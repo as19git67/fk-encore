@@ -20,11 +20,15 @@ import { removeRun } from "./remove";
 import { DemoRefused, executeRun, fileRun, requestCancel } from "./run";
 import { contentCounts, currentRun, isEmpty, type ContentCounts, type DemoRunRow } from "./state";
 
+// Spelled out instead of derived from the Drizzle row: Encore's parser
+// cannot read Drizzle's table types, and these shapes are the API schema.
+export type DemoRunStatus = "running" | "cancelling" | "done" | "failed" | "cancelled" | "removing" | "removed";
+
 export interface DemoRunView {
   id: number;
-  status: DemoRunRow["status"];
+  status: DemoRunStatus;
   stage: string | null;
-  size: DemoRunRow["size"];
+  size: "full" | "small";
   progress: Record<string, { done: number; total: number }>;
   summary: Record<string, number> | null;
   error: string | null;
