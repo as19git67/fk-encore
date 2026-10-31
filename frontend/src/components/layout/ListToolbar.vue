@@ -22,12 +22,15 @@ import { hasOpenOverlay, overlayAbove } from '../../utils/overlayLayer'
  *   [chip] [chip] [alle entfernen]                 „123 von 4.567"
  *
  * The first group carries what the user operates, the second what the list
- * currently *is*. Where the width allows, the second group sits at the end
- * of the first row instead of on a row of its own:
+ * currently *is*. Nothing breaks onto a new row on purpose: search, buttons
+ * and the result line share one row as long as they fit side by side, and
+ * only what does not fit any more moves down — first the result line, then
+ * the buttons:
  *
  *   [ search ] [ filter (n) ] [ sort ]   [chip] [alle entfernen] „123 von 4.567"
  *
- * Below `sm` the buttons drop their labels and become icons.
+ * Below `sm` the buttons drop their labels and become icons, so on a phone
+ * the search, the icon buttons and a short count still fit one row.
  *
  * A view with a search bar of its own (the gallery's natural-language
  * search) fills the `search` slot instead of handing over `model.search`.
@@ -293,11 +296,12 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 </template>
 
 <style scoped>
-/* The controls and the result line share one wrapping row. The controls
-   claim a fixed basis — never their content, for the same reason as below —
-   and nearly all the space that is left; the result line joins them when its
-   own width still fits beside that basis, and otherwise wraps onto a line of
-   its own, where it is alone and keeps the count at the right edge. */
+/* Search, buttons and the result line are items of one wrapping row (the
+   `__main` wrapper steps aside with `display: contents`). Each item asks for
+   its natural width — the search for a modest basis it grows from — so the
+   browser breaks a line only where the next item really no longer fits. The
+   search grows into what is left; the result line, alone on its line, keeps
+   the count at the right edge. The compact toolbar lays itself out below. */
 .list-toolbar {
   display: flex;
   align-items: center;
@@ -306,7 +310,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   min-width: 0;
 }
 
-.list-toolbar__main {
+.list-toolbar:not(.list-toolbar--compact) .list-toolbar__main {
+  display: contents;
+}
+.list-toolbar--compact .list-toolbar__main {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -315,11 +322,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   min-width: 0;
 }
 
+/* The basis is what the search needs to stay usable, not what it would
+   like: it is the width the line break is decided on, and it grows into
+   whatever the row leaves afterwards. */
 .list-toolbar__search {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 1 1 14rem;
+  flex: 1 1 11rem;
   min-width: 0;
   max-width: 32rem;
 }
@@ -348,16 +358,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   color: var(--p-text-color);
 }
 
-/* The controls take the row that is left beside the search, and below `sm`
-   the whole next row. Their width comes from the layout, never from what
-   they contain: a content-sized row plus a toolbar that decides its contents
-   from the width it gets is a loop, and the page flickers. */
+/* The buttons ask for their own width and stay together; only when even a
+   line of their own is too narrow do they wrap among themselves. */
 .list-toolbar__controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-1);
-  flex: 1 1 18rem;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -395,7 +403,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 /* Compact (the gallery): from sm on, search and buttons share one row —
    the search at its natural width on the left, the buttons on the right,
    the view's actions taking what is left and spilling into their overflow
-   menu — and chips and count always go on the row below. */
+   menu — and chips and count always go on the row below. Here the controls
+   take their width from the layout, never from what they contain: the
+   actions are a toolbar that decides its contents from the width it gets,
+   and a content-sized row around it is a loop — the page flickers. */
+.list-toolbar--compact .list-toolbar__controls {
+  flex: 1 1 18rem;
+}
 @media (min-width: 640px) {
   .list-toolbar--compact .list-toolbar__main {
     flex-basis: 100%;
@@ -418,8 +432,12 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
    row still fits one line at 360px. */
 @media (max-width: 639px) {
   .list-toolbar__search {
-    flex-basis: 100%;
     max-width: none;
+  }
+  /* The gallery's natural-language bar carries chips and a button of its
+     own; on a phone it keeps the whole row. */
+  .list-toolbar--compact .list-toolbar__search {
+    flex-basis: 100%;
   }
   .list-toolbar__button :deep(.p-button-label),
   /* Only a label with an icon beside it: a view without icons (a range
