@@ -7,7 +7,7 @@
  * show, each row opens its object, and `route` opens the list page with the
  * same filters ("In der Liste öffnen").
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import type { ResultBlock } from '../../api/assistant'
 import { getThumbUrl } from '../../api/gallery'
 import { getPhotoDetailsBatch } from '../../api/photos'
@@ -23,11 +23,11 @@ const props = withDefaults(defineProps<{
   /** Rows shown before "… weitere"; photos show more since they are small. */
   limit?: number
   /**
-   * Folded to its header: an earlier search the answer narrowed down again
-   * (the message shows the last block of a kind open, the ones before it
-   * folded). The reader opens it with one click.
+   * Opened at first. A list starts folded to its header: the answer is the
+   * text above it, the rows are its evidence, and the reader opens them with
+   * one click.
    */
-  folded?: boolean
+  initiallyOpen?: boolean
   /**
    * Names this block among all blocks of the conversation (message and
    * position), so a row opened from here is the row the reader comes back
@@ -35,14 +35,17 @@ const props = withDefaults(defineProps<{
    */
   anchorScope?: string
   /**
-   * Photos the answer picked by id ("das beste Foto ist Bild 123"). A photo
-   * list shows these instead of the hits it searched through; "Alle Treffer"
-   * shows the rest behind them.
+   * The rows the answer names by link ("[die Stromrechnung](dokument:123)",
+   * "das beste Foto ist Bild 123"). The list shows these instead of the hits
+   * it searched through; "Alle Treffer" shows the rest behind them. A picked
+   * photo beyond the block's rows is loaded by id; for the other kinds the
+   * block holds every row the model saw, so a pick is one of them.
    */
   picked?: number[]
-}>(), { limit: 8, folded: false, anchorScope: undefined, picked: () => [] })
+}>(), { limit: 8, initiallyOpen: false, anchorScope: undefined, picked: () => [] })
 
-const open = ref(!props.folded)
+const open = ref(props.initiallyOpen)
+const bodyId = useId()
 
 /**
  * A photo opens in the gallery with the answer's photos as the grid, so
@@ -132,9 +135,9 @@ function sentimentClass(v: unknown): string {
  * (or that no longer exists) is left out.
  */
 const pickedRows = ref<Row[]>([])
-watch(() => (props.block.kind === 'photos' ? props.picked : []), async (ids) => {
+watch(() => props.picked, async (ids) => {
   const inBlock = new Map(props.block.rows.map((r) => [num(r.id), r]))
-  const missing = ids.filter((id) => !inBlock.has(id))
+  const missing = props.block.kind === 'photos' ? ids.filter((id) => !inBlock.has(id)) : []
   const loaded = new Map<number, Row>()
   if (missing.length) {
     try {
@@ -154,7 +157,7 @@ const allHits = ref(false)
 /** Only the picks are shown; "Alle Treffer" opens the rest. */
 const picksOnly = computed(() => pickedRows.value.length > 0 && !allHits.value)
 
-const title = computed(() => (picksOnly.value
+const title = computed(() => (picksOnly.value && props.block.kind === 'photos'
   ? pickedRows.value.length === 1 ? 'Ausgewähltes Foto' : 'Ausgewählte Fotos'
   : TITLES[props.block.kind] ?? 'Ergebnis'))
 const cap = computed(() => (props.block.kind === 'photos' ? Math.max(props.limit, 12) : props.limit))
@@ -244,27 +247,25 @@ const analysisGroups = computed(() =>
 <template>
   <section class="block" :aria-label="title">
     <header class="block-head">
-      <span class="block-heading">
-        <span class="block-title">{{ title }}</span>
-        <span v-if="block.subtitle" class="block-subtitle">{{ block.subtitle }}</span>
-      </span>
-      <span class="block-head-end">
-        <span v-if="picksOnly" class="block-count">aus {{ total }} Treffern</span>
+      <button
+        type="button"
+        class="block-toggle"
+        :aria-expanded="open"
+        :aria-controls="bodyId"
+        @click="open = !open"
+      >
+        <i :class="['pi', open ? 'pi-chevron-down' : 'pi-chevron-right', 'block-chevron']" aria-hidden="true" />
+        <span class="block-heading">
+          <span class="block-title">{{ title }}</span>
+          <span v-if="block.subtitle" class="block-subtitle">{{ block.subtitle }}</span>
+        </span>
+        <span v-if="picksOnly" class="block-count">{{ pickedRows.length }} aus {{ total }}</span>
         <span v-else-if="block.kind !== 'analysis'" class="block-count">{{ total }}</span>
-        <Button
-          v-if="folded"
-          :icon="open ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
-          text
-          rounded
-          size="small"
-          :aria-label="open ? 'Liste einklappen' : 'Liste ausklappen'"
-          :aria-expanded="open"
-          @click="open = !open"
-        />
-      </span>
+      </button>
     </header>
 
-    <template v-if="open">
+    <div v-if="open" :id="bodyId">
+
 
     <!-- Accounts: as on the Übersicht page, with the latest balance -->
     <ul v-if="block.kind === 'accounts'" class="rows">
@@ -548,12 +549,10 @@ const analysisGroups = computed(() =>
       </li>
     </ul>
 
-    </template>
-
-    <footer v-if="open && (more > 0 || block.route || pickedRows.length)" class="block-foot">
+    <footer v-if="more > 0 || block.route || pickedRows.length" class="block-foot">
       <Button
         v-if="pickedRows.length"
-        :label="allHits ? 'Nur die Auswahl' : `Alle ${total} Treffer`"
+        :label="allHits ? (block.kind === 'photos' ? 'Nur die Auswahl' : 'Nur die genannten') : `Alle ${total} Treffer`"
         text
         size="small"
         :aria-expanded="allHits"
@@ -565,6 +564,7 @@ const analysisGroups = computed(() =>
         In der Liste öffnen
       </RouterLink>
     </footer>
+    </div>
   </section>
 </template>
 
@@ -577,7 +577,7 @@ const analysisGroups = computed(() =>
   overflow: hidden;
 }
 
-.block-head,
+.block-toggle,
 .block-foot {
   display: flex;
   align-items: center;
@@ -586,8 +586,35 @@ const analysisGroups = computed(() =>
   padding: var(--space-2) var(--space-3);
 }
 
-.block-head {
+/* The whole header opens and closes the list. */
+.block-toggle {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Fills the rounded, clipping card edge to edge: the ring is drawn inside. */
+  outline-offset: var(--focus-ring-offset-inset);
+}
+
+.block-toggle:hover {
+  background: var(--p-content-hover-background);
+}
+
+.block-toggle:focus-visible {
+  outline: var(--focus-ring);
+}
+
+.block-toggle[aria-expanded='true'] {
   border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.block-chevron {
+  flex: none;
+  color: var(--p-text-muted-color);
+  font-size: var(--text-xs);
 }
 
 .block-foot {
@@ -597,6 +624,7 @@ const analysisGroups = computed(() =>
 .block-heading {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
 }
 
@@ -614,13 +642,8 @@ const analysisGroups = computed(() =>
   white-space: nowrap;
 }
 
-.block-head-end {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
 .block-count {
+  flex: none;
   color: var(--p-text-muted-color);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;

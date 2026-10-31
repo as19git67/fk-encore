@@ -76,8 +76,29 @@ const SENTENCE_END = /[.!?;](?:\s|$)|\n/u
 /** How far after the noun its id may stand ("Dokument „Stromrechnung 2025“ (ID 123)"). */
 const WINDOW = 120
 
-/** A Markdown link to a page of the app; `//host` and `http:` are not. */
-const MD_LINK_RE = /\[([^\]\n]+)\]\((\/(?!\/)[^\s)]*)\)/gu
+/** A Markdown link to a page of the app or to an item (`buchung:4711`); `//host` and `http:` are not. */
+const MD_LINK_RE = /\[([^\]\n]+)\]\((\/(?!\/)[^\s)]*|[\p{L}]+:\s*#?\d+)\)/gu
+
+/** The kind words of an item link, German as the prompt writes them, English as the model may slip. */
+const LINK_KINDS: Record<string, EntityKind> = {
+  dokument: 'document', document: 'document',
+  foto: 'photo', photo: 'photo', bild: 'photo',
+  buchung: 'transaction', umsatz: 'transaction', transaktion: 'transaction', transaction: 'transaction',
+  album: 'album',
+  person: 'person',
+  sammelmappe: 'collection', mappe: 'collection', collection: 'collection',
+  zaehler: 'meter', zähler: 'meter', meter: 'meter',
+  betrieb: 'business', business: 'business',
+  konto: 'account', account: 'account',
+}
+
+/** The page an item link names, or undefined for a kind the app does not know. */
+function linkTarget(target: string): string | undefined {
+  if (target.startsWith('/')) return target
+  const m = /^([\p{L}]+):\s*#?(\d+)$/u.exec(target)
+  const kind = m ? LINK_KINDS[m[1]!.toLowerCase()] : undefined
+  return kind ? entityPath(kind, m![2]!) : undefined
+}
 
 function kindOf(groups: Array<string | undefined>): EntityKind {
   const i = groups.findIndex((g) => g !== undefined)
@@ -93,7 +114,8 @@ export function linkEntities(text: string): LinkedText[] {
   for (const m of text.matchAll(MD_LINK_RE)) {
     const at = m.index ?? 0
     out.push(...mentions(text.slice(last, at)))
-    out.push({ text: m[1]!, to: m[2]! })
+    const to = linkTarget(m[2]!)
+    out.push(to ? { text: m[1]!, to } : { text: m[1]! })
     last = at + m[0].length
   }
   if (last === 0) return mentions(text)

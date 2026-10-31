@@ -74,6 +74,27 @@ describe('linkEntities', () => {
   })
 })
 
+describe('item links', () => {
+  it('links the words of a Markdown link to the item its kind and id name', () => {
+    expect(linkEntities('Das war [Beispielmarkt am 28.10.](buchung:4711) auf dem [Girokonto](konto: 7).')).toEqual([
+      { text: 'Das war ' },
+      { text: 'Beispielmarkt am 28.10.', to: '/finanzen/umsaetze/4711' },
+      { text: ' auf dem ' },
+      { text: 'Girokonto', to: '/finanzen/uebersicht/konto/7' },
+      { text: '.' },
+    ])
+  })
+
+  it('keeps the words of a link to a kind the app does not know, without the target', () => {
+    expect(linkEntities('Siehe [das](wohnung:3).')).toEqual([{ text: 'Siehe ' }, { text: 'das' }, { text: '.' }])
+  })
+
+  it('counts linked items as named', () => {
+    expect(mentionedIds('[Bild](foto:12) und [Zähler](zaehler:4)', 'photo')).toEqual([12])
+    expect(mentionedIds('[Bild](foto:12) und [Zähler](zaehler:4)', 'meter')).toEqual([4])
+  })
+})
+
 describe('mentionedIds', () => {
   it('collects the ids of one kind in the order the answer names them', () => {
     const text = 'Am besten ist **Foto 12**, danach [das hier](/fotos/galerie?photoId=7&ids=1) und Bilder mit den IDs 5 und 12; dazu Dokument 99.'
