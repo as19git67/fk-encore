@@ -51,7 +51,8 @@ export function wknFromIsin(isin: string | null): string | null {
  *      its check digit holds — even when the reading as printed passes
  *      too, which an O does by chance about one time in ten;
  *   2. otherwise the reading as printed, when its check digit holds;
- *   3. otherwise the one partial replacement whose check digit holds.
+ *   3. otherwise the one partial replacement whose check digit holds;
+ *   4. when none holds, the same with L→1 and S→5 as well (`repairLookalikes`).
  *
  * Several or none: no guess, the reading stays as it is.
  */
@@ -61,7 +62,7 @@ export function repairIsin(raw: string): string {
   const chars = isin.split("");
   const positions: number[] = [];
   for (let i = 2; i < 12; i++) if (DIGIT_FOR[chars[i]!] !== undefined) positions.push(i);
-  if (positions.length === 0) return isin;
+  if (positions.length === 0) return repairLookalikes(isin);
   const swapped = (mask: number) => {
     const v = [...chars];
     positions.forEach((p, k) => {
@@ -76,6 +77,40 @@ export function repairIsin(raw: string): string {
   for (let mask = 1; mask < (1 << positions.length) - 1; mask++) {
     const candidate = swapped(mask);
     if (/\d$/.test(candidate) && isinChecksumValid(candidate)) valid.add(candidate);
+  }
+  if (valid.size === 1) return [...valid][0]!;
+  return valid.size === 0 ? repairLookalikes(isin) : isin;
+}
+
+/**
+ * Letters OCR also reads for a digit, but that an ISIN uses often enough
+ * to stand for themselves ("LU…", "…LS…"): only tried as a last resort.
+ */
+const LOOKALIKE_FOR: Record<string, string> = { ...DIGIT_FOR, L: "1", S: "5" };
+
+/** More candidates than this and a single checksum hit is no longer telling. */
+const MAX_LOOKALIKES = 6;
+
+/**
+ * The last resort of `repairIsin`: a reading whose check digit fails with
+ * O, Q and I alone, tried with L→1 and S→5 as well ("DE000ALB5C16" for
+ * "DE000A1B5C16"). Taken only when exactly one combination holds its check
+ * digit; any other count leaves the reading as it is.
+ */
+function repairLookalikes(isin: string): string {
+  if (isinChecksumValid(isin)) return isin;
+  const chars = isin.split("");
+  const positions: number[] = [];
+  for (let i = 2; i < 12; i++) if (LOOKALIKE_FOR[chars[i]!] !== undefined) positions.push(i);
+  if (positions.length === 0 || positions.length > MAX_LOOKALIKES) return isin;
+  const valid = new Set<string>();
+  for (let mask = 1; mask < 1 << positions.length; mask++) {
+    const v = [...chars];
+    positions.forEach((p, k) => {
+      if (mask & (1 << k)) v[p] = LOOKALIKE_FOR[v[p]!]!;
+    });
+    const candidate = v.join("");
+    if (isinChecksumValid(candidate)) valid.add(candidate);
   }
   return valid.size === 1 ? [...valid][0]! : isin;
 }
