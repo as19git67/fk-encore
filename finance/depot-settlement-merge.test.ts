@@ -44,6 +44,15 @@ describe("repairIsin", () => {
     expect(repairIsin("DE000000AAA2")).toBe("DE000000AAA2");
   });
 
+  it("reads L and S as 1 and 5 as a last resort, when exactly one combination holds", () => {
+    expect(repairIsin("DE000ALB5C16")).toBe("DE000A1B5C16");
+    expect(repairIsin("DE000ASXLY50")).toBe("DE000A5X1Y50");
+    // A reading whose check digit holds as printed stays, L and S included.
+    expect(repairIsin("LU0000000017")).toBe("LU0000000017");
+    // No combination holds: no guess.
+    expect(repairIsin("DE000ALBSCL6")).toBe("DE000ALBSCL6");
+  });
+
   it("is used where the rules find an ISIN in text", () => {
     expect(extractIsin("Wertpapier ISIN DEOOOOOOAAA1 Stück 5")).toBe("DE000000AAA1");
   });

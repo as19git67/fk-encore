@@ -40,6 +40,20 @@ export function identityFromPairs(pairs: Iterable<{ isin: string | null; wkn: st
     (isinsByWkn.get(wkn) ?? isinsByWkn.set(wkn, new Set()).get(wkn)!).add(isin);
     (wknsByIsin.get(isin) ?? wknsByIsin.set(isin, new Set()).get(isin)!).add(wkn);
   }
+  // A WKN as OCR may have read it ("ALBSC1" for "A1B5C1"): the letters that
+  // stand for a digit folded, so a misread WKN finds the known one.
+  const fold = (wkn: string) => wkn.replace(/[OQ]/g, "0").replace(/[IL]/g, "1").replace(/S/g, "5");
+  const knownByFold = new Map<string, Set<string>>();
+  for (const wkn of isinsByWkn.keys()) {
+    (knownByFold.get(fold(wkn)) ?? knownByFold.set(fold(wkn), new Set()).get(fold(wkn))!).add(wkn);
+  }
+  /** The one known WKN a reading unknown as it stands is a misreading of. */
+  const knownWkn = (wkn: string): string | null => {
+    const w = wkn.trim().toUpperCase();
+    if (isinsByWkn.has(w)) return null;
+    const set = knownByFold.get(fold(w));
+    return set && set.size === 1 ? [...set][0]! : null;
+  };
   const isinOf = (wkn: string): string | null => {
     const set = isinsByWkn.get(wkn.trim().toUpperCase());
     return set && set.size === 1 ? [...set][0]! : null;
@@ -58,6 +72,12 @@ export function identityFromPairs(pairs: Iterable<{ isin: string | null; wkn: st
     if (row.isin && !isinChecksumValid(row.isin)) {
       const repaired = repairIsin(row.isin);
       if (repaired !== row.isin && isinChecksumValid(repaired)) row = { ...row, isin: repaired };
+    }
+    if (row.wkn) {
+      // Never against a valid ISIN that names another security.
+      const known = knownWkn(row.wkn);
+      const fits = known && (!row.isin || !isinChecksumValid(row.isin) || isinOf(known) === row.isin);
+      if (known && fits) row = { ...row, wkn: known };
     }
     if (row.isin && row.wkn) return row;
     if (!row.isin && row.wkn) {

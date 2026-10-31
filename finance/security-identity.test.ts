@@ -5,6 +5,7 @@ import { dedupeSnapshotRows, identityFromPairs } from "./security-identity";
 // Synthetic identifiers with valid check digits.
 const ISIN_A = "DE0000000017";
 const ISIN_LU = "LU0000000017";
+const ISIN_OCR = "DE000A1B5C16";
 
 describe("identityFromPairs", () => {
   it("completes a row that carries only the WKN or only the ISIN", () => {
@@ -25,6 +26,17 @@ describe("identityFromPairs", () => {
     expect(id.complete({ isin: null, wkn: "999001" })).toEqual({ isin: null, wkn: "999001" });
     expect(id.complete({ isin: null, wkn: "999002" })).toEqual({ isin: null, wkn: "999002" });
     expect(id.complete({ isin: ISIN_LU, wkn: null })).toEqual({ isin: ISIN_LU, wkn: null });
+  });
+
+  it("finds the known WKN behind one OCR read with L for 1 and S for 5", () => {
+    const id = identityFromPairs([{ isin: ISIN_OCR, wkn: "A1B5C1" }]);
+    expect(id.complete({ isin: null, wkn: "ALBSC1" })).toEqual({ isin: ISIN_OCR, wkn: "A1B5C1" });
+    // The ISIN misread the same way is repaired too, and then completes nothing wrong.
+    expect(id.complete({ isin: "DE000ALBSC16", wkn: null }).wkn).toBeDefined();
+    // A WKN known as it stands is never folded, and a valid ISIN of another security wins.
+    const two = identityFromPairs([{ isin: ISIN_OCR, wkn: "A1B5C1" }, { isin: ISIN_LU, wkn: "ALB5C1" }]);
+    expect(two.complete({ isin: null, wkn: "ALB5C1" })).toEqual({ isin: ISIN_LU, wkn: "ALB5C1" });
+    expect(id.complete({ isin: ISIN_LU, wkn: "ALBSC1" })).toEqual({ isin: ISIN_LU, wkn: "ALBSC1" });
   });
 });
 
