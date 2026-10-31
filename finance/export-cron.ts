@@ -2,23 +2,18 @@
  * Daily JSON snapshot of every finance_* user-data table into the
  * `${FINANCE_EXPORT_DIR}/` volume.
  *
- * Why: the import-pending cron in `import-pending.ts` reads the same
- * fk-encore import shape that `import-schema.ts` defines, so pairing
- * it with a periodic export gives a worst-case recovery path that's
- * literally a `cp` away:
- *
- *   cp finance-export-2026-04-20.json /data/finance-import/pending/
- *   # next 5-minute tick wipes + restores
+ * Why: a readable copy of the finance data next to the database backup
+ * (backup/pg-dump.ts), which is what a restore uses. The JSON import that
+ * once read this shape back (the Finanzkraft migration) is gone.
  *
  * What's exported:
- *   - currencies (stammdaten — re-seeded on import via Stage 0)
+ *   - currencies (stammdaten)
  *   - bankcontacts (NO credentials — write-only field, can't decrypt
- *     here without the key, and the import schema doesn't accept them
- *     anyway)
+ *     here without the key)
  *   - accounts (incl. fints_account_number for live-sync continuity)
  *   - transactions (every column, including SEPA fields from 0055)
  *   - tags (user-source only)
- *   - tag_links (composite-key flavour the importer expects)
+ *   - tag_links (by composite key)
  *
  * What's NOT exported:
  *   - account_balance — large, low-value: a fresh sync re-derives it.
@@ -114,8 +109,7 @@ export const runFinanceExport = api(
 );
 
 // -----------------------------------------------------------------------
-// Snapshot builder — shape matches finance/import-schema.ts so a
-// snapshot can be dropped into pending/ and re-imported as-is.
+// Snapshot builder
 // -----------------------------------------------------------------------
 
 interface Snapshot {

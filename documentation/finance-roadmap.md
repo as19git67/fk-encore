@@ -19,7 +19,7 @@ Status: feature plan, implementation starts with stage 1.
 | 4 | Accounts + ACL | `finance-data-model.md` §5 + `finance-frontend.md` §4.4/§4.7/§4.8 | ✓ |
 | 5 | Transactions + AI tagging | `finance-tagging-and-ai.md` §3 + `finance-frontend.md` §4.9–§4.12 | ✓ |
 | 6 | Sync cron + push | `finance-fints-integration.md` §5 + `finance-frontend.md` §4.3 | ✓ |
-| 7 | Data import | `finance-data-import.md` + `finance-frontend.md` §4.13 | ✓ |
+| 7 | Data import | removed 2026-10-31: the Finanzkraft migration is done | ✓ |
 | 8 | Overall frontend picture | `finance-frontend.md` §1–§5 | ✓ |
 | 9 | Analysis queries | `finance-tagging-and-ai.md` §4 + `finance-frontend.md` §4.2 | post-MVP |
 
@@ -157,6 +157,10 @@ live), `push.service` available (existing).
 **Goal**: Admin can upload the Finanzkraft export as JSON; the import
 runs idempotently, ACL is set manually afterwards.
 
+**Removed 2026-10-31**: the migration from Finanzkraft is done and the
+import with its dropbox watcher left the code. Restores use the
+database backup.
+
 **New files**:
 - `finance/data-import.ts` + `.test.ts`
 - `finance/import-schema.ts` (Zod schema)
@@ -227,7 +231,6 @@ With two parallel streams:
 | `finance-data-model.md` | Stages 1, 4, 5 (DB + ACL) |
 | `finance-fints-integration.md` | Stages 2, 3, 6, 10 |
 | `finance-tagging-and-ai.md` | Stages 5, 9 |
-| `finance-data-import.md` | Stage 7 |
 | `finance-frontend.md` | Stages 3–9 (UI work) |
 | `finance-service-layout.md` | every stage (target files) |
 | `finance-testing.md` | every stage (test focus) |

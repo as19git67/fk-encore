@@ -210,8 +210,7 @@ export const financeAccountBalance = pgTable(
 ```
 
 Deliberately no dedicated status table — status will be added later as a
-`pgEnum` column if needed. During the Finanzkraft import the historical
-status is not migrated (see `finance-data-import.md`).
+`pgEnum` column if needed.
 
 ### 2.6 Depot holdings
 

@@ -1,14 +1,13 @@
 /**
  * Per-endpoint rate-limiting integration tests.
  *
- * Covers the five limited finance endpoints listed in
+ * Covers the four limited finance endpoints listed in
  * documentation/finance-rate-limiting.md §2:
  *
  *   1. POST /finance/tan-sessions/complete   (5 / 10m, per tan_reference)
  *   2. POST /finance/bankcontacts/:id/creds  (10 / 15m, per user×bankcontact)
  *   3. POST /finance/statements              (20 / 15m, per user×bankcontact)
- *   4. POST /finance/admin/import            (3 / 60m, per user)
- *   5. POST /finance/tags/suggest            (5 / 60m, per user)
+ *   4. POST /finance/tags/suggest            (5 / 60m, per user)
  *
  * Each block runs: one "normal" call succeeds, then the max+1-th call
  * throws resource_exhausted. The tan-complete block additionally
@@ -42,9 +41,7 @@ import { __resetRateLimiterForTests } from "../user/rateLimiter";
 import { setBankcontactCredentials } from "./bankcontacts";
 import { completeTanSession } from "./tan-sessions";
 import { triggerSync } from "./statements";
-import { importFinanceData } from "./data-import";
 import { suggestTagsBatch } from "./tag-suggester";
-import type { FinanzkraftExport } from "./import-schema";
 
 import * as fintsClient from "./fints-client";
 
@@ -304,35 +301,7 @@ describe("rate-limiting — POST /finance/statements", () => {
 });
 
 // -----------------------------------------------------------------------
-// 4. POST /finance/admin/import — 3 / 60m per user
-// -----------------------------------------------------------------------
-
-describe("rate-limiting — POST /finance/admin/import", () => {
-  it("blocks the 4th import from the same user", async () => {
-    setAuth("1", ["finance.admin"]);
-    const emptyExport: FinanzkraftExport = {
-      version: "1",
-      bankcontacts: [],
-      accounts: [],
-      transactions: [],
-      tags: [],
-      tag_links: [],
-    };
-
-    for (let i = 0; i < 3; i++) {
-      await importFinanceData({ export: emptyExport });
-    }
-    try {
-      await importFinanceData({ export: emptyExport });
-      throw new Error("expected 429");
-    } catch (err) {
-      expect429(err);
-    }
-  });
-});
-
-// -----------------------------------------------------------------------
-// 5. POST /finance/tags/suggest — 5 / 60m per user
+// 4. POST /finance/tags/suggest — 5 / 60m per user
 // -----------------------------------------------------------------------
 
 describe("rate-limiting — POST /finance/tags/suggest", () => {

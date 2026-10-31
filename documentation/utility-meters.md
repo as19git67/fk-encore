@@ -704,8 +704,7 @@ entire file fail at the gateway instead of naming the faulty row. The import is 
 as the unique index (`kind`, `valid_from`, `unit`, `name`) — an already
 existing row is updated, not duplicated, so a corrected file
 may be imported again. Faulty rows do not stop the rest,
-but come back with their position in `errors` (pattern:
-`finance/data-import.ts`).
+but come back with their position in `errors`.
 
 #### 5.2.2.1 Petrol prices from the EU Oil Bulletin
 

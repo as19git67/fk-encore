@@ -43,8 +43,6 @@ finance/
 ├── statements-cron.test.ts
 ├── sync-schedule.ts           # sync time management
 ├── sync-schedule.test.ts
-├── data-import.ts             # POST /finance/admin/import
-├── data-import.test.ts
 ├── tag-suggester.ts           # embedding + classify, used on insert
 ├── tag-suggester.test.ts
 ├── tag-queue.ts               # tag suggestion queue (async)
@@ -54,8 +52,6 @@ finance/
 ├── sepa-parser.ts             # SEPA remittance information parser
 ├── sepa-parser.test.ts
 ├── rate-limiting.test.ts      # rate limiting tests
-├── import-schema.ts           # Zod schema for Finanzkraft JSON
-├── import-pending.ts          # pending import processing
 ├── iso-btc-codes.ts           # ISO BTC code mapping
 ├── export-cron.ts             # export/backup cron
 ├── anomaly-detector.ts        # anomaly detection in transactions
@@ -97,9 +93,7 @@ export default new Service("finance");
 | `transactions.ts` | List/detail, manual transaction, tag promotion | `GET /finance/transactions[/:id]`, `POST /finance/transactions`, `POST /finance/transactions/:id/tags/promote`, `POST /finance/transactions/batch-tag` | `finance.view` |
 | `tags.ts` | Tag list, suggest batch | `GET /finance/tags`, `POST /finance/tags/suggest` | `finance.view` |
 | `statements-cron.ts` | Cron: sync + TAN cleanup | `POST /internal/finance/sync-statements`, `POST /internal/finance/tan-sessions/cleanup` | (internal, `expose: false`) |
-| `data-import.ts` | Finanzkraft JSON import | `POST /finance/admin/import` | `finance.admin` |
 | `tag-suggester.ts` | On TX insert: embed + classify, persist suggestions | — | (internal) |
-| `import-schema.ts` | Zod schema of the Finanzkraft JSON | — | (internal) |
 | `types.ts` | Shared interfaces (`FinanceSyncSlot`, `DialogResult`, …) | — | — |
 | `statement-persist.ts` | `persistFetchResult(bankcontactId, result)`: writes transactions, balances and holdings from a FetchResult to the DB. Two-phase matching (exact kind → unclaimed fallback). | — | (internal) |
 | `holdings.ts` | Query securities account positions | `GET /finance/accounts/:id/holdings` | `finance.view` |
@@ -137,7 +131,6 @@ graph TD
     TS[tan-sessions.ts]
     TX[transactions.ts]
     TG[tags.ts]
-    DI[data-import.ts]
     CR[statements-cron.ts]
     HO[holdings.ts]
     OV[overview.ts]
@@ -147,7 +140,6 @@ graph TD
     EN[encryption.ts]
     LC[llm-client.ts]
     SU[tag-suggester.ts]
-    IS[import-schema.ts]
     TY[types.ts]
   end
 
@@ -165,7 +157,6 @@ graph TD
   TX --> SU
   SU --> LC
   TG --> SU
-  DI --> IS
   FC --> EN
   FC --> TY
   FC --> SE

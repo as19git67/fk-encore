@@ -529,7 +529,6 @@ nobody accidentally overwrites existing tags.
 | existing Photos/Documents views | API helper usage, store pattern |
 | `finance-fints-integration.md` §4 | `TanDialog` backend contract |
 | `finance-tagging-and-ai.md` §3–§4 | AI chips, `AnalysisView` backend |
-| `finance-data-import.md` | Import backend (dropbox) |
 | `finance-data-model.md` §5 | Permissions for router guards |
 
 ---
