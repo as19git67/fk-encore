@@ -74,6 +74,24 @@ e2e/
     └── finance.spec.ts    # DataTable-Auswahl, Batch-Tag-Dialog, Escape
 ```
 
+### Specs je Modul des Benutzerhandbuchs
+
+Neue Tests entstehen Modul für Modul aus `documentation/handbuch/`: ein
+Ordner je Modul (`specs/zaehler/`), Testnamen beginnen mit der Kennung der
+Aktion (`ZAE-LST-03 Zähler anlegen`). Jedes Modul ist ein Paar Projekte in
+`playwright.config.ts` (`zaehler` parallel, danach `zaehler-seriell` für
+`*.seriell.spec.ts`) und hat einen eigenen Workflow
+`.github/workflows/e2e-<modul>.yml`. Einzeln starten:
+
+```bash
+npm run e2e -- --project=zaehler --project=zaehler-seriell
+npm run e2e -- -g ZAE-DET
+```
+
+Seeding-Helfer je Modul liegen unter `fixtures/` (`meters.ts`), Formular-
+Helfer für PrimeVue in `fixtures/ui.ts`. Externe Dienste (OCR, Ortssuche,
+Benzinpreise, Gradtage) ersetzt `page.route` mit festen Antworten.
+
 ### Authentifizierung
 
 `globalSetup` führt einen REST-Login gegen `${E2E_API_URL}/auth/login` aus

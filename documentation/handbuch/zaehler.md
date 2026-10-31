@@ -72,7 +72,7 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
   die Liste wieder auf dieser Kachel (Anker, siehe `allgemein.md`).
 - **Fehler und Grenzfälle:** Klicks auf die Knöpfe in der Kachel
   („Ablegen“, Stift, Papierkorb) öffnen den Zähler nicht.
-- **Test:** –
+- **Test:** `zaehler/liste.spec.ts`
 
 ### ZAE-LST-02 Zu den Auswertungen wechseln
 
@@ -80,7 +80,7 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
 - **Recht:** `meters.view`
 - **Schritte:** 1. Knopf drücken
 - **Ergebnis:** Seite Auswertungen (`AUS`)
-- **Test:** –
+- **Test:** `zaehler/liste.spec.ts`
 
 ### ZAE-LST-03 Zähler anlegen
 
@@ -101,10 +101,10 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
   6. „Speichern“.
 - **Ergebnis:** Dialog schließt, neue Kachel erscheint in der Liste, der
   Zähler hat ein aktives Gerät mit dem angegebenen Startwert.
-- **Fehler und Grenzfälle:** Ein leerer Name wird vom Server abgewiesen; die
-  Meldung erscheint als rotes Banner über der Liste. „Abbrechen“ oder Escape
-  verwirft die Eingaben.
-- **Test:** –
+- **Fehler und Grenzfälle:** Ein leerer Name wird abgewiesen: rotes Banner
+  „Name darf nicht leer sein“ über der Liste, der Dialog bleibt mit den
+  Eingaben offen. „Abbrechen“ oder Escape verwirft die Eingaben.
+- **Test:** `zaehler/liste.spec.ts`
 
 ### ZAE-LST-04 Zähler bearbeiten
 
@@ -117,7 +117,7 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
 - **Ergebnis:** Kachel zeigt die neuen Werte.
 - **Fehler und Grenzfälle:** Wechsel der Sichtbarkeit von einer Gruppe auf
   „Privat“ macht den Zähler für alle anderen unsichtbar.
-- **Test:** –
+- **Test:** `zaehler/liste.spec.ts`
 
 ### ZAE-LST-05 Zähler löschen
 
@@ -126,11 +126,11 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
 - **Schritte:** 1. Papierkorb drücken. 2. Bestätigungsdialog „Zähler
   löschen“ mit dem Text „Zähler „…“ mit allen Geräten und Ablesungen
   löschen? Diese Aktion kann nicht rückgängig gemacht werden.“ mit
-  „Löschen“ bestätigen.
+  „Endgültig löschen“ bestätigen.
 - **Ergebnis:** Kachel verschwindet; Geräte und Ablesungen sind mit gelöscht.
 - **Fehler und Grenzfälle:** „Abbrechen“ lässt alles unverändert. Dies ist
   die einzige Aktion des Moduls ohne Rückweg.
-- **Test:** –
+- **Test:** `zaehler/liste.spec.ts`
 
 ### ZAE-LST-06 Zähler ablegen (Basket oder Sammelmappe)
 
@@ -141,7 +141,7 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
   2. Ziel anhaken oder „Neue Sammelmappe“.
 - **Ergebnis:** Zähler liegt im Basket oder in der Mappe; das Symbol ist
   grün, solange er im Basket liegt.
-- **Test:** –
+- **Test:** `zaehler/liste.spec.ts`
 
 ### ZAE-LST-07 Liste auf eine Sammelmappe einschränken
 
@@ -153,7 +153,7 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
   die Zähler der Mappe werden gezeigt. „×“ zeigt wieder alle.
 - **Fehler und Grenzfälle:** leere Mappe: „In dieser Sammelmappe liegen
   keine Zähler.“
-- **Test:** –
+- **Test:** `zaehler/liste.spec.ts`
 
 ### ZAE-LST-08 Haushalt festlegen
 
@@ -164,13 +164,15 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
 - **Schritte:** 1. Knopf drücken; Dialog „Haushalt“ erklärt die Wirkung.
   2. Gruppe wählen. 3. „Speichern“ (nur aktiv, wenn sich die Auswahl
   geändert hat).
-- **Ergebnis:** grüne Meldung über der Liste; neue Zähler werden ab jetzt mit
-  dieser Gruppe geteilt; Tarife und Wohnort der Person werden in den
-  Haushalt kopiert, falls er noch keine hat.
+- **Ergebnis:** Dialog schließt, die Liste lädt neu; besitzt die Person
+  private Zähler, erscheint das Banner aus ZAE-LST-09. Neue Zähler werden ab
+  jetzt mit dieser Gruppe geteilt (Sichtbarkeit vorbelegt mit
+  „… (Haushalt)“); Tarife und Wohnort der Person werden in den Haushalt
+  kopiert, falls er noch keine hat.
 - **Fehler und Grenzfälle:** ohne Gruppe steht im Feld „Keine Gruppe
   vorhanden“ und Speichern bleibt aus. Ein Fehler des Servers erscheint im
   Dialog.
-- **Test:** –
+- **Test:** `zaehler/haushalt.seriell.spec.ts`
 
 ### ZAE-LST-09 Alle privaten Zähler mit dem Haushalt teilen
 
@@ -183,14 +185,14 @@ Typ-Chip, Rollen-Chip (falls gesetzt), Standort, Sichtbarkeit
 - **Schritte:** 1. Knopf drücken.
 - **Ergebnis:** alle eigenen privaten Zähler zeigen die Sichtbarkeit des
   Haushalts; Banner verschwindet; grüne Meldung mit der Anzahl.
-- **Test:** –
+- **Test:** `zaehler/haushalt.seriell.spec.ts`
 
 ### ZAE-LST-10 Leere Liste
 
 - **Wo:** Liste ohne sichtbare Zähler
 - **Ergebnis:** Text „Noch keine Zähler angelegt.“; mit `meters.manage`
   bleibt „Neuer Zähler“ der Weg weiter.
-- **Test:** –
+- **Test:** `zaehler/liste.spec.ts` (Zählerliste als feste Antwort)
 
 ---
 
@@ -210,7 +212,7 @@ Besitzerrecht) API-Keys.
 - **Ergebnis:** zurück zur vorigen Seite, wenn sie im Modul Zähler lag oder
   eine modulübergreifende Seite war (Assistent, Sammelmappen), sonst zur
   Liste (`LST`).
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-02 Link teilen
 
@@ -218,26 +220,27 @@ Besitzerrecht) API-Keys.
 - **Recht:** `meters.view`
 - **Ergebnis:** Teilen-Menü des Geräts oder Link in der Zwischenablage; der
   Link führt auf diese Detailseite und setzt Anmeldung voraus.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-03 Zähler ablegen
 
 Wie ZAE-LST-06, Knopf in den Aktionen der Detailseite.
 
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-04 Zähler bearbeiten
 
 Wie ZAE-LST-04, Stift in den Aktionen; Änderungen erscheinen sofort in Titel
 und Kopfzeile.
 
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-05 Zähler löschen
 
-Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
+Wie ZAE-LST-05 (Papierkorb in den Aktionen); nach dem Löschen landet man
+auf der Liste.
 
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-06 Verbrauchsreport umschalten
 
@@ -255,7 +258,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   Zeitraums)“); ein rechnerisch verteilter Zeitraum (Ablesungen liegen im
   Mittel weiter auseinander als der Zeitraum lang ist) ein Regler-Symbol.
   Beide zählen nicht in den Durchschnitt.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-07 Gerät ersetzen
 
@@ -272,7 +275,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
 - **Fehler und Grenzfälle:** Ein Wechselzeitpunkt vor der letzten Ablesung
   oder ein Endstand unter der letzten Ablesung wird abgewiesen; die Meldung
   erscheint als Banner.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-08 Gerät bearbeiten
 
@@ -285,7 +288,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   gerechnet, wenn Start- oder Endwert geändert wurden.
 - **Fehler und Grenzfälle:** Ein „Ausgebaut am“ am aktiven Gerät macht es
   nicht zum ersetzten Gerät; dafür ist ZAE-DET-07 da.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-09 Neuestes Gerät löschen
 
@@ -298,7 +301,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   „Löschen“ bestätigen.
 - **Ergebnis:** Zeile verschwindet; war ein Vorgänger vorhanden, wird es
   wieder das aktive Gerät.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-10 Ablesung erfassen
 
@@ -316,7 +319,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   ein Zeitpunkt vor dem Einbau wird abgewiesen. Ein Wert, der kleiner ist als
   die vorige Ablesung, ergibt negativen Verbrauch und wird ebenfalls
   abgewiesen. Die Meldung erscheint als Banner.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-11 Zählerstand per Foto erkennen
 
@@ -334,7 +337,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   Zählerstand erkannt. Bitte manuell eingeben.“ Dienst nicht erreichbar:
   gelbe Meldung mit der Fehlermeldung oder „OCR-Dienst nicht erreichbar“.
   Das Foto wird nicht gespeichert.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts` (OCR feste Antwort)
 
 ### ZAE-DET-12 Ablesung bearbeiten
 
@@ -346,7 +349,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
 - **Ergebnis:** Zeile zeigt die neuen Werte; Kennzahlen und Report werden neu
   geladen.
 - **Fehler und Grenzfälle:** dieselben Plausibilitätsregeln wie ZAE-DET-10.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-13 Ablesung löschen
 
@@ -356,7 +359,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   „Ablesung wirklich löschen?“, mit „Löschen“ bestätigen.
 - **Ergebnis:** Zeile verschwindet; Kennzahlen und Report werden neu
   geladen.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-14 Ablesung ablegen
 
@@ -365,14 +368,14 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
 - **Ergebnis:** Die einzelne Ablesung liegt als Nachweis im Basket oder in
   einer Mappe (zum Beispiel die Ablesung beim Auszug), unabhängig vom
   Zähler.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-15 Durch die Ablesungen blättern
 
 - **Wo:** Seitensteuerung unter der Tabelle „Ablesungen“
 - **Vorbedingung:** mehr als 20 Ablesungen
 - **Ergebnis:** je 20 Ablesungen pro Seite, neueste zuerst.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-16 Zahlung mit einer Ablesung verknüpfen
 
@@ -391,7 +394,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   Buchung sichtbar.
 - **Fehler und Grenzfälle:** Ohne `finance.view` fehlt die Spalte ganz.
   Ohne `meters.read_entry` zeigt der Dialog nur „Verknüpft“ ohne Knöpfe.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts` (Demo-Buchung aus `E2E_SEED_DEMO`)
 
 ### ZAE-DET-17 Verknüpfung einer Zahlung lösen
 
@@ -400,7 +403,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
 - **Recht:** `meters.read_entry`
 - **Ergebnis:** Buchung verschwindet aus „Verknüpft“; die Buchung selbst
   bleibt in den Finanzen unverändert.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts` (Demo-Buchung aus `E2E_SEED_DEMO`)
 
 ### ZAE-DET-18 API-Schlüssel anlegen
 
@@ -417,7 +420,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   anzeigen; wer ihn verliert, legt einen neuen an. Ein Gerät sendet damit
   Ablesungen an den Ingest-Endpunkt (`documentation/utility-meters.md`,
   Abschnitt 3.2); diese erscheinen mit Quelle `api`.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-19 API-Schlüssel löschen
 
@@ -427,7 +430,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   „Löschen“ bestätigen.
 - **Ergebnis:** Zeile verschwindet; das Gerät bekommt ab sofort
   `unauthenticated`.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ### ZAE-DET-20 Unbekannter Zähler
 
@@ -435,7 +438,7 @@ Wie ZAE-LST-05; nach dem Löschen landet man auf der Liste.
   sehen darf
 - **Ergebnis:** Text „Zähler nicht gefunden.“; die Aktionen in der Kopfzeile
   fehlen.
-- **Test:** –
+- **Test:** `zaehler/detail.spec.ts`
 
 ---
 
@@ -452,7 +455,7 @@ Datum. Gedacht für den Rundgang am Monatsersten.
   „Konfiguriere zuerst mindestens einen Zähler.“
 - **Recht:** `meters.read_entry`
 - **Ergebnis:** Seite `SKO`
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ### ZAE-SCH-02 Datum für alle Werte setzen
 
@@ -461,7 +464,7 @@ Datum. Gedacht für den Rundgang am Monatsersten.
 - **Ergebnis:** Jede Ablesung, die danach auf dieser Seite gespeichert wird,
   trägt dieses Datum (ohne Uhrzeit). Schon gespeicherte Werte bleiben, wie
   sie sind.
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ### ZAE-SCH-03 Einen Wert erfassen
 
@@ -472,23 +475,24 @@ Datum. Gedacht für den Rundgang am Monatsersten.
 - **Vorbedingung:** mindestens ein konfigurierter Zähler
 - **Schritte:** 1. Wert eingeben. 2. „Speichern“ in derselben Zeile.
 - **Ergebnis:** Knopf wird grün mit „Gespeichert“, unter der Zeile steht
-  „Gespeichert“, „Vorher“ zeigt den neuen Wert. Eine weitere Änderung im
-  Feld setzt den Knopf wieder auf „Speichern“.
+  „Gespeichert“. „Vorher“ bleibt bis zum nächsten Laden der Seite beim alten
+  Wert. Eine weitere Änderung im Feld setzt den Knopf wieder auf
+  „Speichern“.
 - **Fehler und Grenzfälle:** Leeres Feld: gelbe Meldung „Bitte einen
   Zählerstand eingeben.“ Ein unplausibler Wert (unter der letzten Ablesung)
   wird vom Server abgewiesen; die Meldung steht gelb unter der Zeile, die
   anderen Zeilen bleiben unberührt.
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ### ZAE-SCH-04 Wert per Foto erkennen
 
 - **Wo:** Kamera-Knopf in der Zeile
 - **Ergebnis:** Feld ist mit dem erkannten Wert gefüllt, darunter steht
-  „OCR … %“. Gespeichert wird erst mit „Speichern“ (ZAE-SCH-03); die Notiz
-  der Ablesung bleibt leer.
+  „OCR …%“. Gespeichert wird erst mit „Speichern“ (ZAE-SCH-03); die Ablesung
+  bekommt dann die Quelle `ocr` und „OCR …%“ als Notiz.
 - **Fehler und Grenzfälle:** wie ZAE-DET-11, Meldungen stehen unter der
   Zeile.
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts` (OCR feste Antwort)
 
 ### ZAE-SCH-05 Alle eingegebenen Werte speichern
 
@@ -497,11 +501,10 @@ Datum. Gedacht für den Rundgang am Monatsersten.
   gespeichert ist; sonst ist der Knopf ausgegraut
 - **Schritte:** 1. Werte in mehreren Zeilen eingeben. 2. Knopf drücken.
 - **Ergebnis:** Jede ausgefüllte Zeile wird einzeln gespeichert und grün;
-  Zeilen ohne Wert werden übersprungen; oben erscheint eine grüne Meldung mit
-  der Anzahl.
+  Zeilen ohne Wert werden übersprungen. Eine Gesamtmeldung gibt es nicht.
 - **Fehler und Grenzfälle:** Schlägt eine Zeile fehl, steht die Meldung an
   dieser Zeile, die übrigen sind trotzdem gespeichert.
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ---
 
@@ -515,7 +518,7 @@ Zähler enthalten, auch geteilte.
 
 - **Wo:** Pfeil links vom Titel („Zurück zur Erfassung“)
 - **Ergebnis:** Seite `SCH`
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ### ZAE-SKO-02 Zähler hinzufügen
 
@@ -528,7 +531,7 @@ Zähler enthalten, auch geteilte.
 - **Ergebnis:** Zähler steht am Ende der nummerierten Liste; der Chip oben
   zählt hoch („3 Zähler“); grüne Meldung; die Konfiguration ist sofort
   gespeichert.
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ### ZAE-SKO-03 Reihenfolge ändern
 
@@ -537,7 +540,7 @@ Zähler enthalten, auch geteilte.
   ausgegraut
 - **Ergebnis:** Zeile wandert um eine Position; die Schnellerfassung zeigt
   dieselbe Reihenfolge.
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ### ZAE-SKO-04 Zähler aus der Liste nehmen
 
@@ -545,13 +548,13 @@ Zähler enthalten, auch geteilte.
 - **Ergebnis:** Zeile verschwindet ohne Rückfrage; der Zähler selbst und
   seine Ablesungen bleiben unverändert; er ist im Auswahlfeld wieder
   wählbar.
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ### ZAE-SKO-05 Leere Konfiguration
 
 - **Ergebnis:** Text „Noch keine Zähler ausgewählt. Füge oben die Zähler
   hinzu, die du regelmäßig abliest.“
-- **Test:** –
+- **Test:** `zaehler/schnellerfassung.spec.ts`
 
 ---
 
@@ -575,7 +578,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   „Zur Zählerverwaltung“ im Hinweis „Noch keine Zähler angelegt — ohne
   Ablesungen gibt es nichts auszuwerten.“
 - **Ergebnis:** Seite `LST`
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts` (leere Liste als feste Antwort)
 
 ### ZAE-AUS-02 Trend-Kachel öffnen
 
@@ -591,7 +594,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   zusammenfasst, reagiert nicht auf Klick. Ohne volles Vorjahr steht statt
   der Veränderung die Richtung aus der Regression mit der Zahl der
   Rollwerte.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-03 Energiebericht umschalten
 
@@ -608,14 +611,14 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   markiert und zählen nicht in die Durchschnitte.
 - **Fehler und Grenzfälle:** Tragen zwei Zähler dieselbe Rolle, warnt ein
   gelbes Banner und der Bericht nimmt nur den ersten.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-04 Hilfe zu den Energie-Kennzahlen
 
 - **Wo:** Knopf „Hilfe“ im Abschnitt „Energie“
 - **Ergebnis:** Dialog „Energie-Kennzahlen“ mit den Formeln und dem gerade
   betrachteten Zeitraum. Schließen mit „×“ oder Escape.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-05 Tarife und Annahmen öffnen
 
@@ -624,7 +627,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
 - **Ergebnis:** Dialog „Tarife & Annahmen verwalten“ mit Formular oben und
   den vorhandenen Einträgen nach Kategorie gruppiert darunter (Art, Betrag,
   „ab Datum“, Name, Steuerstatus, Leistungsgrenze).
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-06 Tarif oder Annahme anlegen
 
@@ -637,13 +640,13 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   dem Feld steht eine Erklärung der Art, die Einheit wird vorbelegt).
   2. „Gültig ab“, „Betrag“, Einheit; optional „Name / Tarif“, „Grenze kW“,
   „Steuerstatus“. 3. „Speichern“.
-- **Ergebnis:** Eintrag erscheint in seiner Kategorie; Formular ist leer;
-  grüne Meldung. Kosten und Vergleichsrechnungen rechnen ab dem
+- **Ergebnis:** Eintrag erscheint in seiner Kategorie; Formular ist leer
+  (ohne eigene Meldung). Kosten und Vergleichsrechnungen rechnen ab dem
   Gültigkeitsdatum mit dem neuen Wert, tagesanteilig innerhalb eines Monats.
 - **Fehler und Grenzfälle:** Fehler stehen rot im Dialog. Gehört die Person
   zu einem Haushalt, gilt der Eintrag für den ganzen Haushalt (Zeile oben im
   Dialog).
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-07 Tarif oder Annahme bearbeiten
 
@@ -652,7 +655,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   Bearbeitungsmodus mit dem Banner „Bearbeite Preisänderung #…“. 2. Ändern.
   3. „Änderung speichern“; „Abbrechen“ leert das Formular wieder.
 - **Ergebnis:** Eintrag zeigt die neuen Werte.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-08 Tarif oder Annahme löschen
 
@@ -661,7 +664,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   „Preisänderung „…“ ab … löschen?“, mit „Löschen“ bestätigen.
 - **Ergebnis:** Eintrag verschwindet; Kosten rechnen wieder mit dem
   vorigen gültigen Wert.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-09 Benzinpreise abrufen
 
@@ -675,7 +678,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   Annahme angelegt; vorhandene Werte bleiben; grüne Meldung mit der Anzahl.
 - **Fehler und Grenzfälle:** Keine Netzverbindung oder keine passenden
   Monate: rote beziehungsweise grüne Meldung mit „0“.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts` (Ölbulletin feste Antwort)
 
 ### ZAE-AUS-10 Preisreihen aus Datei importieren
 
@@ -686,7 +689,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   Abschnitt „File import of series“.
 - **Fehler und Grenzfälle:** Ungültige Datei: rote Meldung, nichts
   importiert.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-11 Wohnort für Gradtagzahlen setzen
 
@@ -699,7 +702,7 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
 - **Ergebnis:** Karte zeigt Bezeichnung und Koordinaten; ab jetzt holt ein
   täglicher Lauf die Gradtagzahlen für diesen Ort. Bei Haushalt gilt der Ort
   für alle Mitglieder.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts` (Ortssuche feste Antwort)
 
 ### ZAE-AUS-12 Gradtagzahlen sofort abrufen
 
@@ -712,20 +715,20 @@ Formeln stehen in `documentation/utility-meters.md`, Abschnitt 5.
   Gradtage, je Gradtag und Normaljahr beziehungsweise Normalmonat.
 - **Fehler und Grenzfälle:** Ohne Gradtage rechnet der Abschnitt mit dem
   typischen Monatsprofil (Spalten „Typisch“ und „Abweichung“).
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts` (Open-Meteo feste Antwort)
 
 ### ZAE-AUS-13 Wohnort entfernen
 
 - **Wo:** Knopf „Entfernen“ in derselben Karte
 - **Ergebnis:** Kein Wohnort mehr; bereits geholte Gradtage bleiben, neue
   kommen nicht dazu.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ### ZAE-AUS-14 Hilfe „Was sind Gradtage?“
 
 - **Wo:** Knopf im Abschnitt „Heizung witterungsbereinigt“
 - **Ergebnis:** Seite `HLF` mit Erklärung; der Pfeil dort führt zurück.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ---
 
@@ -747,14 +750,14 @@ Meldung, Abweichung in σ und, falls vorhanden, den Vorjahreswert.
   „Mit anderen Filtereinstellungen findet sich vielleicht etwas.“ und
   „Filter zurücksetzen“. Ohne Filter und ohne Fund: „Keine offenen
   Auffälligkeiten“ / „Die tägliche Prüfung hat nichts gefunden.“
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ### ZAE-AUF-02 Liste neu laden
 
 - **Wo:** Knopf „Aktualisieren“ oben rechts
 - **Ergebnis:** Liste wird neu geholt; während des Ladens ist der Knopf
   ausgegraut.
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ### ZAE-AUF-03 Prüfung sofort ausführen
 
@@ -763,13 +766,13 @@ Meldung, Abweichung in σ und, falls vorhanden, den Vorjahreswert.
 - **Recht:** `meters.manage`
 - **Ergebnis:** Die Prüfung läuft über alle sichtbaren Zähler; neue Funde
   erscheinen als offene Karten; bekannte werden nicht doppelt angelegt.
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ### ZAE-AUF-04 Zähler aus einer Karte öffnen
 
 - **Wo:** Zählername in der Karte
 - **Ergebnis:** Zählerdetails (`DET`).
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ### ZAE-AUF-05 Auffälligkeit bestätigen
 
@@ -778,14 +781,14 @@ Meldung, Abweichung in σ und, falls vorhanden, den Vorjahreswert.
 - **Ergebnis:** Karte verschwindet aus „Offen“ und steht unter „Alle“ mit
   Chip „bestätigt“. Eine Bestätigung hält fest, dass die Abweichung echt
   war (zum Beispiel ein Leck).
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ### ZAE-AUF-06 Auffälligkeit verwerfen
 
 - **Wo:** Knopf „Verwerfen“ an einer offenen Karte
 - **Recht:** `meters.read_entry`
 - **Ergebnis:** wie ZAE-AUF-05 mit Chip „verworfen“.
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ### ZAE-AUF-07 Alle offenen verwerfen
 
@@ -796,7 +799,7 @@ Meldung, Abweichung in σ und, falls vorhanden, den Vorjahreswert.
   die Seite zeigt „Keine offenen Auffälligkeiten“.
 - **Fehler und Grenzfälle:** Es werden nur die gerade gefilterten Karten
   verworfen, nicht die anderer Arten.
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ### ZAE-AUF-08 Wieder öffnen
 
@@ -804,7 +807,7 @@ Meldung, Abweichung in σ und, falls vorhanden, den Vorjahreswert.
   (Umfang „Alle“)
 - **Recht:** `meters.read_entry`
 - **Ergebnis:** Karte ist wieder offen.
-- **Test:** –
+- **Test:** `zaehler/auffaelligkeiten.spec.ts`
 
 ---
 
@@ -816,7 +819,7 @@ Meldung, Abweichung in σ und, falls vorhanden, den Vorjahreswert.
 - **Ergebnis:** Erklärung, was Gradtagzahlen sind und wie der
   witterungsbereinigte Heizverbrauch entsteht. Der Pfeil führt zur vorigen
   Seite im Modul, sonst zur Liste.
-- **Test:** –
+- **Test:** `zaehler/auswertungen.spec.ts`
 
 ---
 
@@ -824,66 +827,66 @@ Meldung, Abweichung in σ und, falls vorhanden, den Vorjahreswert.
 
 | Kennung | Aktion | Recht | Test |
 |---|---|---|---|
-| ZAE-LST-01 | Zähler öffnen | view | – |
-| ZAE-LST-02 | Zu den Auswertungen wechseln | view | – |
-| ZAE-LST-03 | Zähler anlegen | manage | – |
-| ZAE-LST-04 | Zähler bearbeiten | manage + Besitzer | – |
-| ZAE-LST-05 | Zähler löschen | manage + Besitzer | – |
-| ZAE-LST-06 | Zähler ablegen | view | – |
-| ZAE-LST-07 | Liste auf Sammelmappe einschränken | view | – |
-| ZAE-LST-08 | Haushalt festlegen | manage + Gruppenbesitzer | – |
-| ZAE-LST-09 | Alle privaten Zähler teilen | manage | – |
-| ZAE-LST-10 | Leere Liste | view | – |
-| ZAE-DET-01 | Zurück | view | – |
-| ZAE-DET-02 | Link teilen | view | – |
-| ZAE-DET-03 | Zähler ablegen | view | – |
-| ZAE-DET-04 | Zähler bearbeiten | manage + Besitzer | – |
-| ZAE-DET-05 | Zähler löschen | manage + Besitzer | – |
-| ZAE-DET-06 | Verbrauchsreport umschalten | view | – |
-| ZAE-DET-07 | Gerät ersetzen | manage + Besitzer | – |
-| ZAE-DET-08 | Gerät bearbeiten | manage + Besitzer | – |
-| ZAE-DET-09 | Neuestes Gerät löschen | manage + Besitzer | – |
-| ZAE-DET-10 | Ablesung erfassen | read_entry | – |
-| ZAE-DET-11 | Zählerstand per Foto erkennen | read_entry | – |
-| ZAE-DET-12 | Ablesung bearbeiten | read_entry (eigene) / manage | – |
-| ZAE-DET-13 | Ablesung löschen | read_entry (eigene) / manage | – |
-| ZAE-DET-14 | Ablesung ablegen | view | – |
-| ZAE-DET-15 | Durch Ablesungen blättern | view | – |
-| ZAE-DET-16 | Zahlung verknüpfen | finance.view + read_entry | – |
-| ZAE-DET-17 | Zahlungsverknüpfung lösen | read_entry | – |
-| ZAE-DET-18 | API-Schlüssel anlegen | manage + Besitzer | – |
-| ZAE-DET-19 | API-Schlüssel löschen | manage + Besitzer | – |
-| ZAE-DET-20 | Unbekannter Zähler | view | – |
-| ZAE-SCH-01 | Konfiguration öffnen | read_entry | – |
-| ZAE-SCH-02 | Datum setzen | read_entry | – |
-| ZAE-SCH-03 | Einen Wert erfassen | read_entry | – |
-| ZAE-SCH-04 | Wert per Foto erkennen | read_entry | – |
-| ZAE-SCH-05 | Alle Werte speichern | read_entry | – |
-| ZAE-SKO-01 | Zurück zur Erfassung | read_entry | – |
-| ZAE-SKO-02 | Zähler hinzufügen | read_entry | – |
-| ZAE-SKO-03 | Reihenfolge ändern | read_entry | – |
-| ZAE-SKO-04 | Zähler aus Liste nehmen | read_entry | – |
-| ZAE-SKO-05 | Leere Konfiguration | read_entry | – |
-| ZAE-AUS-01 | Zur Zählerliste wechseln | view | – |
-| ZAE-AUS-02 | Trend-Kachel öffnen | view | – |
-| ZAE-AUS-03 | Energiebericht umschalten | view | – |
-| ZAE-AUS-04 | Hilfe Energie-Kennzahlen | view | – |
-| ZAE-AUS-05 | Tarife und Annahmen öffnen | manage | – |
-| ZAE-AUS-06 | Tarif anlegen | manage | – |
-| ZAE-AUS-07 | Tarif bearbeiten | manage | – |
-| ZAE-AUS-08 | Tarif löschen | manage | – |
-| ZAE-AUS-09 | Benzinpreise abrufen | manage | – |
-| ZAE-AUS-10 | Preisreihen importieren | manage | – |
-| ZAE-AUS-11 | Wohnort setzen | manage | – |
-| ZAE-AUS-12 | Gradtagzahlen abrufen | manage | – |
-| ZAE-AUS-13 | Wohnort entfernen | manage | – |
-| ZAE-AUS-14 | Hilfe Gradtage öffnen | view | – |
-| ZAE-AUF-01 | Filtern | view | – |
-| ZAE-AUF-02 | Liste neu laden | view | – |
-| ZAE-AUF-03 | Prüfung sofort ausführen | manage | – |
-| ZAE-AUF-04 | Zähler aus Karte öffnen | view | – |
-| ZAE-AUF-05 | Bestätigen | read_entry | – |
-| ZAE-AUF-06 | Verwerfen | read_entry | – |
-| ZAE-AUF-07 | Alle offenen verwerfen | read_entry | – |
-| ZAE-AUF-08 | Wieder öffnen | read_entry | – |
-| ZAE-HLF-01 | Hilfe lesen | view | – |
+| ZAE-LST-01 | Zähler öffnen | view | `zaehler/liste.spec.ts` |
+| ZAE-LST-02 | Zu den Auswertungen wechseln | view | `zaehler/liste.spec.ts` |
+| ZAE-LST-03 | Zähler anlegen | manage | `zaehler/liste.spec.ts` |
+| ZAE-LST-04 | Zähler bearbeiten | manage + Besitzer | `zaehler/liste.spec.ts` |
+| ZAE-LST-05 | Zähler löschen | manage + Besitzer | `zaehler/liste.spec.ts` |
+| ZAE-LST-06 | Zähler ablegen | view | `zaehler/liste.spec.ts` |
+| ZAE-LST-07 | Liste auf Sammelmappe einschränken | view | `zaehler/liste.spec.ts` |
+| ZAE-LST-08 | Haushalt festlegen | manage + Gruppenbesitzer | `zaehler/haushalt.seriell.spec.ts` |
+| ZAE-LST-09 | Alle privaten Zähler teilen | manage | `zaehler/haushalt.seriell.spec.ts` |
+| ZAE-LST-10 | Leere Liste | view | `zaehler/liste.spec.ts` (Zählerliste als feste Antwort) |
+| ZAE-DET-01 | Zurück | view | `zaehler/detail.spec.ts` |
+| ZAE-DET-02 | Link teilen | view | `zaehler/detail.spec.ts` |
+| ZAE-DET-03 | Zähler ablegen | view | `zaehler/detail.spec.ts` |
+| ZAE-DET-04 | Zähler bearbeiten | manage + Besitzer | `zaehler/detail.spec.ts` |
+| ZAE-DET-05 | Zähler löschen | manage + Besitzer | `zaehler/detail.spec.ts` |
+| ZAE-DET-06 | Verbrauchsreport umschalten | view | `zaehler/detail.spec.ts` |
+| ZAE-DET-07 | Gerät ersetzen | manage + Besitzer | `zaehler/detail.spec.ts` |
+| ZAE-DET-08 | Gerät bearbeiten | manage + Besitzer | `zaehler/detail.spec.ts` |
+| ZAE-DET-09 | Neuestes Gerät löschen | manage + Besitzer | `zaehler/detail.spec.ts` |
+| ZAE-DET-10 | Ablesung erfassen | read_entry | `zaehler/detail.spec.ts` |
+| ZAE-DET-11 | Zählerstand per Foto erkennen | read_entry | `zaehler/detail.spec.ts` (OCR feste Antwort) |
+| ZAE-DET-12 | Ablesung bearbeiten | read_entry (eigene) / manage | `zaehler/detail.spec.ts` |
+| ZAE-DET-13 | Ablesung löschen | read_entry (eigene) / manage | `zaehler/detail.spec.ts` |
+| ZAE-DET-14 | Ablesung ablegen | view | `zaehler/detail.spec.ts` |
+| ZAE-DET-15 | Durch Ablesungen blättern | view | `zaehler/detail.spec.ts` |
+| ZAE-DET-16 | Zahlung verknüpfen | finance.view + read_entry | `zaehler/detail.spec.ts` (Demo-Buchung aus `E2E_SEED_DEMO`) |
+| ZAE-DET-17 | Zahlungsverknüpfung lösen | read_entry | `zaehler/detail.spec.ts` (Demo-Buchung aus `E2E_SEED_DEMO`) |
+| ZAE-DET-18 | API-Schlüssel anlegen | manage + Besitzer | `zaehler/detail.spec.ts` |
+| ZAE-DET-19 | API-Schlüssel löschen | manage + Besitzer | `zaehler/detail.spec.ts` |
+| ZAE-DET-20 | Unbekannter Zähler | view | `zaehler/detail.spec.ts` |
+| ZAE-SCH-01 | Konfiguration öffnen | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SCH-02 | Datum setzen | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SCH-03 | Einen Wert erfassen | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SCH-04 | Wert per Foto erkennen | read_entry | `zaehler/schnellerfassung.spec.ts` (OCR feste Antwort) |
+| ZAE-SCH-05 | Alle Werte speichern | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SKO-01 | Zurück zur Erfassung | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SKO-02 | Zähler hinzufügen | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SKO-03 | Reihenfolge ändern | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SKO-04 | Zähler aus Liste nehmen | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-SKO-05 | Leere Konfiguration | read_entry | `zaehler/schnellerfassung.spec.ts` |
+| ZAE-AUS-01 | Zur Zählerliste wechseln | view | `zaehler/auswertungen.spec.ts` (leere Liste als feste Antwort) |
+| ZAE-AUS-02 | Trend-Kachel öffnen | view | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-03 | Energiebericht umschalten | view | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-04 | Hilfe Energie-Kennzahlen | view | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-05 | Tarife und Annahmen öffnen | manage | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-06 | Tarif anlegen | manage | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-07 | Tarif bearbeiten | manage | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-08 | Tarif löschen | manage | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-09 | Benzinpreise abrufen | manage | `zaehler/auswertungen.spec.ts` (Ölbulletin feste Antwort) |
+| ZAE-AUS-10 | Preisreihen importieren | manage | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-11 | Wohnort setzen | manage | `zaehler/auswertungen.spec.ts` (Ortssuche feste Antwort) |
+| ZAE-AUS-12 | Gradtagzahlen abrufen | manage | `zaehler/auswertungen.spec.ts` (Open-Meteo feste Antwort) |
+| ZAE-AUS-13 | Wohnort entfernen | manage | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUS-14 | Hilfe Gradtage öffnen | view | `zaehler/auswertungen.spec.ts` |
+| ZAE-AUF-01 | Filtern | view | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-AUF-02 | Liste neu laden | view | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-AUF-03 | Prüfung sofort ausführen | manage | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-AUF-04 | Zähler aus Karte öffnen | view | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-AUF-05 | Bestätigen | read_entry | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-AUF-06 | Verwerfen | read_entry | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-AUF-07 | Alle offenen verwerfen | read_entry | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-AUF-08 | Wieder öffnen | read_entry | `zaehler/auffaelligkeiten.spec.ts` |
+| ZAE-HLF-01 | Hilfe lesen | view | `zaehler/auswertungen.spec.ts` |
