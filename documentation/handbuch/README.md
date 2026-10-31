@@ -15,16 +15,16 @@ Eine Datei je Modul, in der Reihenfolge des Hauptmenüs
 
 | Datei | Modul | Stand |
 |---|---|---|
-| `allgemein.md` | Anmelden, Registrieren, Passwort vergessen, Profil, Navigation, Hauptmenü | offen |
+| `allgemein.md` | Anmelden, Registrieren, Passwort vergessen, Profil, Navigation, Hauptmenü | **geschrieben** |
 | `fotos-galerie.md`, `fotos-alben.md`, `fotos-personen.md`, `fotos-einstellungen.md` | Fotos (Feed, Galerie, Vollbild, Editor, Alben, Personen, Gruppen-Review, Rückblicke, Fotobücher, Einstellungen) | **geschrieben** |
 | `dokumente.md` | Dokumente | **geschrieben** |
 | `finanzen.md` | Finanzen | **geschrieben** |
 | `zaehler.md` | Zähler | **geschrieben** |
-| `assistent.md` | Assistent | offen |
-| `label.md` | Label | offen |
-| `sammelmappen.md` | Sammelmappen, Basket, Exporte, geteilte Links | offen |
-| `admin.md` | Benutzer, Rollen, Jobs, Systemstatus | offen |
-| `ios.md` | iOS-App | offen |
+| `assistent.md` | Assistent | **geschrieben** |
+| `label.md` | Label | **geschrieben** |
+| `sammelmappen.md` | Sammelmappen, Basket, Exporte, geteilte Links | **geschrieben** |
+| `admin.md` | Benutzer, Rollen, Jobs, Systemstatus | **geschrieben** |
+| `ios.md` | iOS-App (Bildschirm-Ebene; Reiseplaner braucht einen eigenen Durchgang) | **geschrieben** |
 
 Bedienmuster, die in jedem Modul gleich sind (Listen-Toolbar, Auswahlmodus,
 „Ablegen“, Basket, Detailseiten mit Zurück-Pfeil, Dialoge, Tastatur), werden
