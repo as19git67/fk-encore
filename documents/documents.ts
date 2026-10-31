@@ -44,7 +44,6 @@ import {
   ensureDir,
   getInitialUploadDiskPath,
   guessExtension,
-  pruneEmptyDirs,
   slugifyName,
   slugifyUserLogin,
 } from "./documents.service";
@@ -79,7 +78,8 @@ import {
   type CostBearer,
   type RelationKind,
 } from "./subject-persons";
-import { dropTaxLinks, relocateDocument } from "./relocate";
+import { relocateDocument } from "./relocate";
+import { purgeDocument } from "./purge";
 import { withDocumentLock } from "./document-lock";
 import { singleJpegPagePdf } from "./receipt-pdf";
 import {
@@ -2744,27 +2744,8 @@ export const deleteDocument = api(
     requirePermission(authData, "documents.delete");
     const userId = getUserId();
 
-    const row = await loadAdministrableDocument(userId, id, isDataAdmin(authData));
-    // Drop tax hardlinks first so we don't leave dangling entries under
-    // `_steuer/` after the canonical inode is freed. The DB delete then
-    // cascades through tag/tax rows via FK ON DELETE.
-    try {
-      await dropTaxLinks(id);
-    } catch (err) {
-      console.warn(
-        `[documents] delete: dropTaxLinks(${id}) failed: ${(err as Error).message}`,
-      );
-    }
-    await db.delete(documents).where(eq(documents.id, id));
-    try {
-      assertPathUnderDocumentsRoot(row.disk_path);
-      await fs.promises.unlink(row.disk_path).catch(() => {});
-      await pruneEmptyDirs(path.dirname(row.disk_path));
-    } catch (err) {
-      console.warn(`[documents] delete: failed to unlink ${row.disk_path}: ${(err as Error).message}`);
-    }
-    await removeThumbnail(id);
-    await removeOcrPdf(id);
+    await loadAdministrableDocument(userId, id, isDataAdmin(authData));
+    await purgeDocument(id);
     return { success: true };
   },
 );

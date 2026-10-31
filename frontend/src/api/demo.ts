@@ -18,6 +18,7 @@ export interface DemoRun {
   status: DemoRunStatus
   stage: string | null
   size: 'full' | 'small'
+  text_source: 'llm' | 'template'
   progress: Record<string, { done: number; total: number }>
   summary: Record<string, number> | null
   error: string | null
@@ -35,8 +36,8 @@ export function getDemoStatus() {
   return apiFetch<DemoStatus>('/admin/demo/status', { timeoutMs: 15000 })
 }
 
-export function startDemo() {
-  return apiFetch<DemoStatus>('/admin/demo/start', { method: 'POST', body: JSON.stringify({}) })
+export function startDemo(text: 'llm' | 'template' = 'llm') {
+  return apiFetch<DemoStatus>('/admin/demo/start', { method: 'POST', body: JSON.stringify({ text }) })
 }
 
 export function cancelDemo() {
@@ -45,4 +46,19 @@ export function cancelDemo() {
 
 export function removeDemo() {
   return apiFetch<DemoStatus>('/admin/demo/remove', { method: 'POST' })
+}
+
+export type DemoTruthField = 'category' | 'document_type' | 'sender' | 'date' | 'tax_role'
+
+/** How well the pipeline read the demo documents (demo/truth.ts). */
+export interface DemoTruthReport {
+  documents: number
+  pending: number
+  failed: number
+  fields: Array<{ field: DemoTruthField; compared: number; hits: number }>
+  kinds: Array<{ kind: string; documents: number; category_hits: number; finished: number }>
+}
+
+export function getDemoTruth() {
+  return apiFetch<DemoTruthReport>('/admin/demo/truth', { timeoutMs: 15000 })
 }

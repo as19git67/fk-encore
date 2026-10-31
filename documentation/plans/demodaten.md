@@ -79,7 +79,7 @@ The code builds one synthetic household over three years before today:
 The 500 bookings and the 500 PDFs come from this calendar. Not every
 booking has a document (card payments at the supermarket do not) and not
 every document has a booking (contracts, notices, the depot statement),
-so the overlap is about 250. That overlap is what document matching and
+so the overlap is about 180. That overlap is what document matching and
 the depot derivation show.
 
 ### Text (llm-service)
@@ -202,9 +202,35 @@ show something.
    `db/seed-demo.ts` by `size: "small"` and `DEMO_DATA=1` in the
    Playwright workflow — the E2E specs need the photos and documents of
    the seed, which the generator does not make yet.
-2. **Documents.** Skeleton for all document kinds, PDF layouts, import
-   through the pipeline, `template` texts first, then `llm` texts through
-   the `llm` queue; ground-truth report on the page.
+2. **Documents.** *Done.* The plan of 500 documents (30 for `small`) in
+   `demo/documents.ts`: one per booking that has paper (payslip, phone
+   bill, utility bill, insurance premium, craftsman's invoice, doctor's
+   bill, car repair, donation receipt, tax assessment, online invoice,
+   receipts), the yearly ones (wage tax certificate, the bank's tax
+   certificate, advance plan, service charges, pension information, car
+   insurance), monthly statements of the giro accounts and quarterly ones
+   of the savings account, filled up with letters (school, club, health
+   insurer, bank, utility, insurer). The household got the bookings these
+   need (craftsman, doctor, garage, donation, tax refund). Layouts and
+   rendering in `demo/pdf-render.ts`: three letter layouts, a statement
+   table over several pages, a receipt slip; about one in ten is drawn as
+   SVG, rasterised by sharp, turned and roughened, and stored as an
+   image-only PDF. Wording by the model in `demo/doc-text-llm.ts`
+   (`/json-prompt` with a schema through the `llm` queue at background
+   priority); an answer that names a common surname, an unknown company,
+   a title, a long number or an amount the document does not have is
+   dropped and the template stays. The start offers the model or the
+   templates; a model that does not answer at the start means templates
+   for the whole run (`text_source` says which). Import and truth in
+   `demo/doc-writer.ts`, nothing prefilled, file names that say nothing
+   (`Dokument_<date>_<n>.pdf`, `Scan_…`), source folder `Demodaten`; the
+   comparison in `demo/truth.ts` (`GET /admin/demo/truth`: category or a
+   child of it, document type, sender, date, tax role where the generator
+   has one; documents still in the queue count as pending), shown on the
+   card. Removal deletes each document with its file through
+   `documents/purge.ts`, the same code as `DELETE /documents/:id`.
+   Booking purposes stay with the templates: the model words documents
+   only.
 3. **Depot.** Removal of the Finanzkraft import beforehand (own PR).
    Depot with settlements, dividends and statements, real index funds with
    prices from the provider's history, the bookings that go with them.

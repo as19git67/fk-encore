@@ -6,6 +6,7 @@
  *   POST /admin/demo/start    lays a demo household down in the background
  *   POST /admin/demo/cancel   stops a running run at its next batch
  *   POST /admin/demo/remove   takes everything the run wrote back
+ *   GET  /admin/demo/truth    how well the pipeline read the demo documents
  *
  * Gate: `data.manage` and the Admin role — the demo creates a user and
  * writes into every module, which is an administrator's call.
@@ -17,6 +18,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { isAdminUser } from "../user/admin-guard";
 import { removeRun } from "./remove";
+import { truthReport, type TruthReport } from "./truth";
 import { DemoRefused, executeRun, fileRun, requestCancel } from "./run";
 import { contentCounts, currentRun, isEmpty, type ContentCounts, type DemoRunRow } from "./state";
 
@@ -29,6 +31,8 @@ export interface DemoRunView {
   status: DemoRunStatus;
   stage: string | null;
   size: "full" | "small";
+  /** Who wrote the documents' wording: the local model or the templates. */
+  text_source: "llm" | "template";
   progress: Record<string, { done: number; total: number }>;
   summary: Record<string, number> | null;
   error: string | null;
@@ -60,6 +64,7 @@ function view(run: DemoRunRow | null): DemoRunView | null {
     status: run.status,
     stage: run.stage,
     size: run.size,
+    text_source: run.text_source === "llm" ? "llm" : "template",
     progress: run.progress ?? {},
     summary: Object.keys(run.summary ?? {}).length ? run.summary : null,
     error: run.error,
@@ -84,6 +89,8 @@ export const getDemoStatus = api(
 interface StartParams {
   /** `small` is the quick household of the end-to-end tests. */
   size?: "full" | "small";
+  /** `template` words the documents from templates in minutes instead of by the model in hours. */
+  text?: "llm" | "template";
 }
 
 export const startDemo = api(
@@ -92,7 +99,7 @@ export const startDemo = api(
     const userId = await requireAdmin();
     let runId: number;
     try {
-      runId = await fileRun(userId, { size: p.size });
+      runId = await fileRun(userId, { size: p.size, text: p.text });
     } catch (err) {
       if (err instanceof DemoRefused) throw APIError.failedPrecondition(err.message);
       throw err;
@@ -126,5 +133,15 @@ export const removeDemo = api(
     if (run.status === "removing") throw APIError.failedPrecondition("the demo is being removed already");
     await removeRun(run.id);
     return status();
+  },
+);
+
+export const getDemoTruth = api(
+  { expose: true, method: "GET", path: "/admin/demo/truth", auth: true },
+  async (): Promise<TruthReport> => {
+    await requireAdmin();
+    const run = await currentRun();
+    if (!run) throw APIError.notFound("there is no demo");
+    return truthReport(run.id);
   },
 );

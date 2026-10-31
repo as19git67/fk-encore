@@ -58,7 +58,12 @@ export type BookingKind =
   | "groceries"
   | "pharmacy"
   | "fuel"
-  | "online";
+  | "online"
+  | "craftsman"
+  | "doctor"
+  | "car_repair"
+  | "donation"
+  | "tax_refund";
 
 export interface HouseholdPlan {
   accounts: PlannedAccount[];
@@ -161,6 +166,23 @@ export function planHousehold(seed: number, size: DemoSize, today: string): Hous
     }
     if (m === 0) {
       add({ account: "joint", date: iso(y, m, 12), cents: -rnd.int(380, 460) * 100, counterparty: CP.insurer, purpose: `Beitrag Hausrat- und Haftpflichtversicherung ${y}`, entryText: "Lastschrift", kind: "insurance" });
+    }
+    if (m === 4) {
+      // Household services in the flat (§ 35a): the invoice comes as a document.
+      add({ account: "joint", date: iso(y, m, 22), cents: -rnd.int(380, 1_450) * 100, counterparty: CP.craftsman, purpose: `Rechnung RE-${y}-${rnd.int(100, 999)} Malerarbeiten`, entryText: "Überweisung", kind: "craftsman" });
+    }
+    if (m === 2 || m === 9) {
+      add({ account: "giro_spouse", date: iso(y, m, 14), cents: -rnd.cents(45, 260), counterparty: CP.doctor, purpose: `Privatrechnung ${rnd.int(10_000, 99_999)}`, entryText: "Überweisung", kind: "doctor" });
+    }
+    if (m === 6) {
+      add({ account: "giro_self", date: iso(y, m, 9), cents: -rnd.cents(180, 950), counterparty: CP.garage, purpose: `Werkstattrechnung ${rnd.int(10_000, 99_999)}`, entryText: "Überweisung", kind: "car_repair" });
+    }
+    if (m === 11) {
+      add({ account: "giro_self", date: iso(y, m, 6), cents: -rnd.int(5, 30) * 1_000, counterparty: CP.charity, purpose: "Spende Weihnachten", entryText: "Überweisung", kind: "donation" });
+    }
+    if (m === 7) {
+      // The refund of last year's income tax, announced by the assessment notice.
+      add({ account: "giro_self", date: iso(y, m, 19), cents: rnd.cents(150, 1_400), counterparty: CP.taxOffice, purpose: `Einkommensteuer ${y - 1} Erstattung StNr 000/000/00000`, entryText: "Gutschrift", kind: "tax_refund" });
     }
     if (m === 2) {
       // The annual utility bill: a refund or an additional payment.
