@@ -188,21 +188,31 @@ show something.
 
 ## Stages
 
-1. **State and removal.** Service `demo/`, `isUntouched()`, tables
-   `demo_run`, `demo_item`, `demo_file`, `demo_truth`, endpoints
-   start/status/cancel/remove, the card on Admin › Systemstatus. Generator
-   skeleton with `template` texts for bookings only. `db/seed-demo.ts` is
-   replaced by `size: "small"`; the Playwright workflow sets `DEMO_DATA=1`
-   instead of `E2E_SEED_DEMO`.
+1. **State and removal.** *Done.* Service `demo/` (endpoints in
+   `demo/demo.ts`), `isUntouched()` and the counts in `demo/state.ts`,
+   tables `demo_run`, `demo_item`, `demo_file`, `demo_truth` (migration
+   0284), register in `demo/registry.ts`, removal in `demo/remove.ts`, the
+   card `DemoDataCard.vue` on Admin › Systemstatus. The household skeleton
+   (`demo/household.ts`, seeded) with `template` texts: the spouse as second
+   user, subject persons and joint assessment, four accounts including the
+   joint one, 500 bookings (40 for `small`), written by `demo/writer.ts`.
+   The run is an in-process background job that writes its progress into
+   `demo_run` (polled by the card), not a queue job; a run a restart
+   interrupted is marked failed at boot. Moved to stage 4: replacing
+   `db/seed-demo.ts` by `size: "small"` and `DEMO_DATA=1` in the
+   Playwright workflow — the E2E specs need the photos and documents of
+   the seed, which the generator does not make yet.
 2. **Documents.** Skeleton for all document kinds, PDF layouts, import
    through the pipeline, `template` texts first, then `llm` texts through
    the `llm` queue; ground-truth report on the page.
-3. **Bookings and depot.** Removal of the Finanzkraft import beforehand
-   (own PR). Accounts, 500 bookings, depot with settlements, dividends and
-   statements, real index funds with prices from the provider's history,
-   the spouse as second demo user with the joint account.
+3. **Depot.** Removal of the Finanzkraft import beforehand (own PR).
+   Depot with settlements, dividends and statements, real index funds with
+   prices from the provider's history, the bookings that go with them.
+   (Accounts, the household bookings and the spouse came with stage 1.)
 4. **Photos.** Openverse download with licence list, face filter, EXIF
-   rewrite, demo library, albums.
+   rewrite, demo library, albums. Then `db/seed-demo.ts` becomes
+   `size: "small"` and the Playwright workflow sets `DEMO_DATA=1` instead
+   of `E2E_SEED_DEMO`.
 5. **Meters and businesses.** Meter readings, PV business with its assets,
    so the EÜR shows a year.
 6. **Benchmark hand-off.** The generator as a function the assistant
