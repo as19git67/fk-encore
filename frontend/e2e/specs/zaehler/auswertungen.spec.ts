@@ -101,7 +101,7 @@ test.describe('Zähler › Auswertungen', () => {
     await expect(dialog.locator('label', { hasText: 'Art' })).toBeVisible()
     const group = dialog.locator('.tariff-group').filter({ hasText: name })
     await expect(group.locator('.tariff-group-title')).toHaveText('Strom')
-    await expect(tariffCard(dialog, name)).toContainText('ab 01.01.2024')
+    await expect(tariffCard(dialog, name)).toContainText('ab 1.1.2024')
   })
 
   test('ZAE-AUS-06 Tarif oder Annahme anlegen', async ({ page }) => {
