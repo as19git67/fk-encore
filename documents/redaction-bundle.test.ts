@@ -84,13 +84,14 @@ async function writePdf(name: string, pages: string[][]): Promise<string> {
 
 async function pdfText(bytes: Buffer): Promise<string[]> {
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const doc = await getDocument({ data: new Uint8Array(bytes), verbosity: 0 }).promise;
+  const task = getDocument({ data: new Uint8Array(bytes), verbosity: 0 });
+  const doc = await task.promise;
   const pages: string[] = [];
   for (let n = 1; n <= doc.numPages; n++) {
     const content = await (await doc.getPage(n)).getTextContent();
     pages.push(content.items.map((i) => ("str" in i ? i.str : "")).join(" "));
   }
-  await doc.destroy();
+  await task.destroy();
   return pages;
 }
 

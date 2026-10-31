@@ -55,3 +55,17 @@ export const Telefon: Story = {
   name: 'Telefonbreite',
   parameters: { testViewport: { width: 360, height: 740 } },
 }
+
+export const DepotbestandTelefon: Story = {
+  name: 'Depotbestand auf dem Telefon',
+  args: { documentId: 307 },
+  parameters: {
+    testViewport: { width: 360, height: 740 },
+    msw: {
+      handlers: [
+        http.get('/api/finance/portfolio/documents/:id/inspection', () => HttpResponse.json(MOCK_STATEMENT_INSPECTION)),
+        ...defaultHandlers,
+      ],
+    },
+  },
+}

@@ -450,6 +450,12 @@ export interface StatementPositionView {
   source: MergedPosition["source"];
   /** A holdings row for this security was stored from this paper. */
   stored: boolean;
+  /**
+   * What the depot's master says about the security: "ignored" for one the
+   * user took out of the depot, null when the depot is unknown or the master
+   * has no entry. Tells the dialog why a position is not stored.
+   */
+  security_status: SecurityStatus | null;
 }
 
 /** What a depot statement says and what was taken from it into the holdings. */
@@ -493,8 +499,10 @@ export async function inspectStatement(documentId: number, text: string | null, 
   const same = (a: { isin: string | null; wkn: string | null }, b: { isin: string | null; wkn: string | null }) =>
     (a.isin !== null && a.isin === b.isin) || (a.wkn !== null && b.wkn !== null && repairWkn(a.wkn) === repairWkn(b.wkn));
   const result = await readDepotStatement(documentId, accountIds, { dryRun: true, llm: "cache-only", includeIgnored: true });
-  const views = positions.map((p): StatementPositionView => {
+  const accountId = result.account_id;
+  const views = await Promise.all(positions.map(async (p): Promise<StatementPositionView> => {
     const c = identity.complete(p);
+    const master = accountId === null ? null : await findSecurity(accountId, c);
     return {
       isin: c.isin,
       wkn: c.wkn,
@@ -506,8 +514,9 @@ export async function inspectStatement(documentId: number, text: string | null, 
       checked: p.checked,
       source: p.source,
       stored: stored.some((s) => same(s, c)),
+      security_status: (master?.status as SecurityStatus | undefined) ?? null,
     };
-  });
+  }));
   return {
     as_of: merged.asOf,
     depot_number: merged.depotNumber,

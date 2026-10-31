@@ -49,7 +49,7 @@ import {
 } from "../db/schema";
 import { enrichPendingStatements, inspectStatement, pruneStatementHoldings, readDepotStatement } from "./depot-statement-enrichment";
 import { reconcileHoldings } from "./depot-holding-reconciliation";
-import { admitSecurity, listSecurities } from "./depot-securities";
+import { admitSecurity, listSecurities, removeSecurity } from "./depot-securities";
 import {
   awaitDocumentEnrichRun,
   decideDepotSecurity,
@@ -254,6 +254,19 @@ describe("finance/depot-statement-enrichment", () => {
     const again = (await inspectStatement(docId, STATEMENT_WITH_NUMBER, [depot]))!;
     expect(again.positions.find((p) => p.isin === ISIN_A)!.stored).toBe(true);
     expect(again.stored_only).toEqual([]);
+  });
+
+  it("names a position whose security the user took out of the depot", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(STATEMENT_WITH_NUMBER);
+    await readDepotStatement(docId);
+    await removeSecurity(depot, { isin: ISIN_B, wkn: null, name: null }, 1);
+
+    const view = (await inspectStatement(docId, STATEMENT_WITH_NUMBER, [depot]))!;
+    expect(view.positions.map((p) => [p.isin, p.stored, p.security_status])).toEqual([
+      [ISIN_A, true, "confirmed"],
+      [ISIN_B, false, "ignored"],
+    ]);
   });
 
   it("has nothing to show for a paper that is no statement", async () => {

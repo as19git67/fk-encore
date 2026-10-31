@@ -962,6 +962,8 @@ export interface StatementInspectionPosition {
   source: 'llm' | 'rules' | 'both'
   /** A holdings row for this security was stored from this paper. */
   stored: boolean
+  /** The depot's word on the security; "ignored" when the user took it out of the depot. */
+  security_status: 'confirmed' | 'proposed' | 'ignored' | null
 }
 
 export interface StatementInspection {
