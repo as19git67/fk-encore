@@ -11,6 +11,7 @@ import {
   inspectSettlementDocument,
   type SettlementInspection,
   type SettlementInspectionFields,
+  type StatementInspectionPosition,
 } from '../../api/finance'
 import {
   depotKindLabel,
@@ -241,8 +242,18 @@ const MATCHED_BY_TEXT: Record<string, string> = {
 }
 
 /** Positions the statement lists that went into no holdings row of its day. */
+// Not stored for two different reasons: a row whose quantity was read but
+// that has no holdings row (the security is not confirmed for the depot, so
+// the reconciliation sees 0 pieces), and a row whose quantity could not be
+// read at all — that one is never stored and never counts as a sale. A
+// security the user took out of the depot is neither: it is meant to be
+// missing.
+const removedFromDepot = (p: StatementInspectionPosition) => p.security_status === 'ignored'
 const missingFromHoldings = computed(() =>
-  (inspection.value?.statement?.positions ?? []).filter((p) => !p.stored),
+  (inspection.value?.statement?.positions ?? []).filter((p) => !p.stored && !removedFromDepot(p) && p.quantity !== null),
+)
+const unreadPositions = computed(() =>
+  (inspection.value?.statement?.positions ?? []).filter((p) => !p.stored && !removedFromDepot(p) && p.quantity === null),
 )
 
 const statementOutcomeLine = computed(() => {
@@ -356,9 +367,16 @@ function openInDocuments() {
             <p v-if="missingFromHoldings.length > 0" class="sd-status sd-warn">
               {{ missingFromHoldings.length === 1 ? 'Eine Position steht' : `${missingFromHoldings.length} Positionen stehen` }}
               auf dem Beleg, aber nicht im Bestand dieses Tages — der Bestandsabgleich sieht sie dort als 0 Stück.
+              Meist wartet das Wertpapier im Portfolio noch unter „Zu prüfen“.
+            </p>
+            <p v-if="unreadPositions.length > 0" class="sd-status sd-warn">
+              {{ unreadPositions.length === 1
+                ? 'Bei einer Position ließ sich die Stückzahl nicht lesen — sie kommt nicht in den Bestand'
+                : `Bei ${unreadPositions.length} Positionen ließ sich die Stückzahl nicht lesen — sie kommen nicht in den Bestand` }},
+              und der Abgleich zählt das nicht als Verkauf.
             </p>
 
-            <table class="sd-fields">
+            <table class="sd-fields sd-positions">
               <thead>
                 <tr>
                   <th>Wertpapier</th>
@@ -372,22 +390,32 @@ function openInDocuments() {
                 <tr
                   v-for="p in inspection.statement.positions"
                   :key="`${p.isin ?? ''}|${p.wkn ?? ''}`"
-                  :class="{ 'sd-disagree': !p.stored }"
+                  :class="{ 'sd-disagree': !p.stored && !removedFromDepot(p), 'sd-removed': removedFromDepot(p) }"
                 >
                   <td class="sd-field">
                     {{ p.name ?? '–' }}
                     <span class="sd-label-after">{{ [p.wkn, p.isin].filter(Boolean).join(' · ') }}</span>
+                    <span v-if="removedFromDepot(p)" class="sd-label-after">aus dem Depot entfernt</span>
                   </td>
-                  <td class="sd-value">{{ p.quantity === null ? 'nicht gefunden' : formatQuantity(p.quantity) }}</td>
-                  <td class="sd-value">
+                  <td class="sd-value sd-qty">
+                    <template v-if="p.quantity === null">Stück nicht gelesen</template>
+                    <template v-else>{{ formatQuantity(p.quantity) }}<span class="sd-unit"> Stück</span></template>
+                  </td>
+                  <td class="sd-value sd-amount">
                     {{ p.value === null ? '–' : formatCurrency(p.value, p.currency ?? 'EUR') }}
                     <span v-if="p.checked === false" class="sd-label-after">Stück × Kurs ergibt nicht den Kurswert</span>
                   </td>
                   <td class="sd-src">
                     <span class="sd-source" :class="`sd-source-${p.source}`">{{ SOURCE_TEXT[p.source] }}</span>
                   </td>
-                  <td class="sd-value">
+                  <td class="sd-value sd-instock">
                     <i
+                      v-if="removedFromDepot(p) && !p.stored"
+                      class="pi pi-minus-circle sd-removed-icon"
+                      aria-label="Aus dem Depot entfernt"
+                    />
+                    <i
+                      v-else
                       :class="p.stored ? 'pi pi-check-circle sd-stored' : 'pi pi-times-circle sd-not-stored'"
                       :aria-label="p.stored ? 'Im Bestand gespeichert' : 'Nicht im Bestand gespeichert'"
                     />
@@ -658,6 +686,14 @@ function openInDocuments() {
 .sd-stored {
   color: var(--p-green-600);
 }
+.sd-removed td,
+.sd-removed-icon {
+  color: var(--p-text-muted-color);
+}
+/* The header names the column on a wide screen; a phone has no header. */
+.sd-unit {
+  display: none;
+}
 .sd-not-stored {
   color: var(--p-red-600);
 }
@@ -757,6 +793,29 @@ function openInDocuments() {
   }
   .sd-fields tr.sd-disagree {
     background: rgba(234, 179, 8, 0.12);
+  }
+  /* A position has three figures, not one: each gets its own cell in the
+     second line instead of all three sharing 'value' and printing over
+     each other. */
+  .sd-positions tr {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'field field src'
+      'qty amount instock';
+    align-items: baseline;
+  }
+  .sd-positions .sd-qty {
+    grid-area: qty;
+  }
+  .sd-positions .sd-amount {
+    grid-area: amount;
+    text-align: right;
+  }
+  .sd-positions .sd-instock {
+    grid-area: instock;
+  }
+  .sd-positions .sd-unit {
+    display: inline;
   }
   .sd-fields tr.sd-disagree td {
     background: none;
