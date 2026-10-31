@@ -247,8 +247,7 @@ Watchtower.
   removing the run is not enough: a nightly job empties the demo's
   database and file directories and loads the demo again. It only runs
   where `DEMO_DATA=1` is set, never on prod or test.
-  It runs at 18:00 in Cupertino (end of the working day there,
-  `America/Los_Angeles`), computed in that time zone so daylight saving
+  It runs at 18:00 `America/Los_Angeles`, computed in that time zone so daylight saving
   on either side does not move it; in Germany that is 03:00, for a few
   weeks in spring and autumn 02:00.
 
