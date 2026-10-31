@@ -150,6 +150,15 @@ body {
   overflow-x: clip;
 }
 
+/* No rubber band at the ends of the page: pulling the page past its top or
+   bottom and watching it snap back made the sticky stack and every bar
+   pinned under it (the document viewer's head) wobble against each other on
+   iOS. The app has no pull-to-refresh to lose. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 /* The document is the page's one scroller (issue #1674). Whatever the
    browser scrolls into view by itself on the page — the next element on Tab,
    a hash anchor — lands below the sticky stack, not under it.
