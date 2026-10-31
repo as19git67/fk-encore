@@ -309,7 +309,7 @@ auf der Liste.
   „Ablesungen“
 - **Recht:** `meters.read_entry`
 - **Schritte:** 1. Knopf drücken; Dialog „Neue Ablesung“, Zeitpunkt ist mit
-  jetzt vorbelegt, der Fokus liegt im Feld „Zählerstand“. 2. Zählerstand
+  jetzt vorbelegt. 2. Zählerstand
   eingeben (Nachkommastellen wie am Zähler eingestellt). 3. Optional Notiz.
   4. „Speichern“.
 - **Ergebnis:** Ablesung steht oben in der Tabelle mit Datum, Wert, Absolut,

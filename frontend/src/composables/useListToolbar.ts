@@ -222,12 +222,21 @@ export function useListView(options: UseListViewOptions): ListToolbarView {
   const initial = known(fromQuery) ? fromQuery : (stored() ?? options.defaultValue)
   const value = ref(initial)
 
+  // Writes of this key still on their way into the URL. While one is
+  // pending, the URL lags behind `value`: another list's write landing first
+  // (two dropdowns reset in one go) must not read the stale key back into
+  // `value`, or the two writes take turns undoing each other for ever.
+  let pendingWrites = 0
+
   if (!known(fromQuery) && initial !== options.defaultValue) void syncUrl(initial)
 
   function syncUrl(next: string) {
+    pendingWrites++
     return updateRouteQuery(router, (current) =>
       replaceQuerySlice(current, [key], next === options.defaultValue ? {} : { [key]: next }),
-    )
+    ).finally(() => {
+      pendingWrites--
+    })
   }
 
   watch(value, (next) => {
@@ -243,7 +252,7 @@ export function useListView(options: UseListViewOptions): ListToolbarView {
   watch(
     () => [route.path, route.query[key]] as const,
     ([path, q]) => {
-      if (path !== ownPath) return
+      if (path !== ownPath || pendingWrites > 0) return
       const next = known(q) ? q : options.defaultValue
       if (next !== value.value) value.value = next
     },

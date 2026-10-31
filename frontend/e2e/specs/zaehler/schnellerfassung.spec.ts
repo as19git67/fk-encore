@@ -137,8 +137,9 @@ test.describe('Zähler › Schnellerfassung', () => {
 
     const chosen = daysAgo(3)
     await date.fill(ddmmyyyy(chosen))
-    await date.blur()
-    await page.keyboard.press('Escape')
+    // Escape in the field closes the calendar; it would cover the rows.
+    await date.press('Escape')
+    await expect(page.locator('.p-datepicker-panel')).toHaveCount(0)
 
     await typeNumber(entryRow(page, meter.name).locator('input'), 20)
     await entryRow(page, meter.name).getByRole('button', { name: 'Speichern' }).click()

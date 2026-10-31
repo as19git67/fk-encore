@@ -99,7 +99,7 @@ test.describe('Zähler › Auswertungen', () => {
     const dialog = await openTariffs(page)
 
     await expect(dialog.locator('label', { hasText: 'Art' })).toBeVisible()
-    const group = dialog.locator('.tariff-group').filter({ has: tariffCard(dialog, name) })
+    const group = dialog.locator('.tariff-group').filter({ hasText: name })
     await expect(group.locator('.tariff-group-title')).toHaveText('Strom')
     await expect(tariffCard(dialog, name)).toContainText('ab 01.01.2024')
   })

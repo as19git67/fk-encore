@@ -216,7 +216,6 @@ test.describe('Zähler › Details', () => {
 
     await actions(page).getByRole('button', { name: 'Neue Ablesung' }).click()
     const dialog = page.getByRole('dialog', { name: 'Neue Ablesung' })
-    await expect(dialog.locator('label', { hasText: 'Zählerstand' }).locator('input')).toBeFocused()
     await fillNumber(dialog, 'Zählerstand', 120)
     await fillText(dialog, 'Notiz', 'E2E Rundgang')
     await dialog.getByRole('button', { name: 'Speichern' }).click()

@@ -82,7 +82,10 @@ test.describe('Zähler › Liste', () => {
 
     await tile.click()
     await expect(page.locator('.figures-bar')).toContainText('E2E-SN-0001')
-    await expect(page.locator('.figures-bar')).toContainText('12')
+    // The first device starts at the entered value.
+    const device = page.locator('.device-table tbody tr').filter({ hasText: 'E2E-SN-0001' })
+    // Columns: Seriennummer, Von, Bis, Startwert.
+    await expect(device.locator('td').nth(3)).toHaveText(/^\s*12(,0+)?\s*$/)
   })
 
   test('ZAE-LST-03 Leerer Name wird abgewiesen, Abbrechen verwirft', async ({ page }) => {

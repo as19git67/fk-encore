@@ -80,6 +80,21 @@ describe("POST /meters/:id/readings", () => {
     expect(parseFloat(rows[0].value)).toBe(123);
   });
 
+  it("keeps the note through create, list and update", async () => {
+    const { id } = await endpoints.addReading({
+      id: meterId,
+      value: 10,
+      takenAt: "2024-02-01T08:00:00Z",
+      notes: " Rundgang ",
+    });
+    let page = await endpoints.listReadings({ id: meterId });
+    expect(page.readings.find((r) => r.id === id)?.notes).toBe("Rundgang");
+
+    await endpoints.updateReading({ readingId: id, value: 12, takenAt: "2024-02-01T08:00:00Z", notes: "korrigiert" });
+    page = await endpoints.listReadings({ id: meterId });
+    expect(page.readings.find((r) => r.id === id)?.notes).toBe("korrigiert");
+  });
+
   it("defaults takenAt to now when omitted", async () => {
     const { id } = await endpoints.addReading({ id: meterId, value: 5 });
     const rows = await db.select().from(meterReadings).where(eq(meterReadings.id, id));
