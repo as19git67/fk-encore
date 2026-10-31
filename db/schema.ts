@@ -3373,6 +3373,7 @@ export const meterReadings = pgTable(
     source: text("source").$type<MeterReadingSource>().notNull().default("manual"),
     photo_path: text("photo_path"),
     ocr_confidence: real("ocr_confidence"),
+    notes: text("notes"),
     entered_by: integer("entered_by").references(() => users.id, { onDelete: "set null" }),
     api_key_id: integer("api_key_id").references(() => meterApiKeys.id, { onDelete: "set null" }),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),

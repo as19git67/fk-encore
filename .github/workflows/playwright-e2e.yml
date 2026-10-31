@@ -220,9 +220,11 @@ jobs:
 
       # Vite dev server is started automatically by Playwright's `webServer`
       # (see frontend/playwright.config.ts). E2E_NO_WEBSERVER stays unset.
+      # Only the specs from before the module folders; every module of the
+      # handbook has its own workflow (e2e-<module>.yml via e2e-module.yml).
       - name: Run Playwright tests
         working-directory: frontend
-        run: npm run e2e
+        run: npm run e2e -- --project=chromium
 
       - name: Stop Encore backend
         if: always()

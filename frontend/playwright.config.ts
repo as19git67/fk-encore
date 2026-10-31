@@ -11,6 +11,39 @@ import { defineConfig, devices } from '@playwright/test'
 //   E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD  credentials for the seeded admin
 const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:5173/app/'
 
+// One spec folder per module of the user handbook (documentation/handbuch/).
+// Each module is its own pair of projects, run by its own CI workflow
+// (.github/workflows/e2e-<module>.yml) when the module's paths change:
+//   - `<module>`          the parallel specs under e2e/specs/<module>/
+//   - `<module>-seriell`  `*.seriell.spec.ts` in the same folder: state every
+//                         other spec of the module shares (a household, say),
+//                         run after `<module>` has finished.
+// Test names start with the action's handbook ID (e.g. `ZAE-LST-03`).
+export const MODULES = ['zaehler'] as const
+
+const moduleUse = {
+  ...devices['Desktop Chrome'],
+  // The app formats and parses numbers for de-DE; so do the specs.
+  locale: 'de-DE',
+}
+
+const moduleProjects = MODULES.flatMap((module) => [
+  {
+    name: module,
+    testDir: `./e2e/specs/${module}`,
+    testIgnore: /\.seriell\.spec\.ts$/,
+    use: moduleUse,
+  },
+  {
+    name: `${module}-seriell`,
+    testDir: `./e2e/specs/${module}`,
+    testMatch: /\.seriell\.spec\.ts$/,
+    dependencies: [module],
+    fullyParallel: false,
+    use: moduleUse,
+  },
+])
+
 export default defineConfig({
   testDir: './e2e',
   outputDir: './e2e/.results',
@@ -40,9 +73,13 @@ export default defineConfig({
 
   projects: [
     {
+      // The specs from before the module folders (login, navigation, …).
       name: 'chromium',
+      testDir: './e2e/specs',
+      testIgnore: MODULES.map((module) => `**/specs/${module}/**`),
       use: { ...devices['Desktop Chrome'] },
     },
+    ...moduleProjects,
     // Track M targets desktop input first; uncomment to broaden:
     // { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     // { name: 'webkit',  use: { ...devices['Desktop Safari']  } },

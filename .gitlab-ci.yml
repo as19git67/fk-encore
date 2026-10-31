@@ -948,7 +948,9 @@ e2e:playwright:
         ps aux >&2 || true
         exit 1
       fi
-    - cd frontend && npm run e2e
+    # Same scope as playwright-e2e.yml: the module specs run in their own
+    # GitHub workflows (.github/workflows/e2e-<module>.yml).
+    - cd frontend && npm run e2e -- --project=chromium
   after_script:
     - |
       pid=$(cat e2e-logs/encore.pid 2>/dev/null || true)

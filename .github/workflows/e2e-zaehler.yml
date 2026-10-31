@@ -1,0 +1,60 @@
+name: E2E Zähler
+
+# Playwright specs for the Zähler module (frontend/e2e/specs/zaehler/,
+# documentation/handbuch/zaehler.md). Runs only when the module or the shared
+# E2E setup changes; the weekly run catches breakage from shared code
+# (layout, stores, database) that the path filter does not see.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'meter/**'
+      - 'frontend/src/views/Meter*.vue'
+      - 'frontend/src/components/Meter*.vue'
+      - 'frontend/src/api/meters.ts'
+      # The frontend frame every module sits in, and the schema.
+      - 'frontend/src/components/layout/**'
+      - 'frontend/src/router/**'
+      - 'frontend/src/config/modules.ts'
+      - 'frontend/src/App.vue'
+      - 'db/migrations/**'
+      - 'frontend/e2e/specs/zaehler/**'
+      - 'frontend/e2e/fixtures/**'
+      - 'frontend/e2e/global-setup.ts'
+      - 'frontend/playwright.config.ts'
+      - '.github/workflows/e2e-module.yml'
+      - '.github/workflows/e2e-zaehler.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'meter/**'
+      - 'frontend/src/views/Meter*.vue'
+      - 'frontend/src/components/Meter*.vue'
+      - 'frontend/src/api/meters.ts'
+      # The frontend frame every module sits in, and the schema.
+      - 'frontend/src/components/layout/**'
+      - 'frontend/src/router/**'
+      - 'frontend/src/config/modules.ts'
+      - 'frontend/src/App.vue'
+      - 'db/migrations/**'
+      - 'frontend/e2e/specs/zaehler/**'
+      - 'frontend/e2e/fixtures/**'
+      - 'frontend/e2e/global-setup.ts'
+      - 'frontend/playwright.config.ts'
+      - '.github/workflows/e2e-module.yml'
+      - '.github/workflows/e2e-zaehler.yml'
+  schedule:
+    # Sundays 03:00 UTC.
+    - cron: '0 3 * * 0'
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e-zaehler-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    uses: ./.github/workflows/e2e-module.yml
+    with:
+      module: zaehler

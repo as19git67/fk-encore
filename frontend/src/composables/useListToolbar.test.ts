@@ -208,6 +208,28 @@ describe('useListView', () => {
     expect(view.value.value).toBe('list')
   })
 
+  it('lets two choices reset in one go without undoing each other', async () => {
+    const router = makeRouter()
+    await router.push('/dokumente?scope=all&type=grid')
+    const { exposed } = mountComposable(router, () => ({
+      scope: useListView({ options, defaultValue: 'list', key: 'scope' }),
+      type: useListView({ options, defaultValue: 'list', key: 'type' }),
+    }))
+    expect(exposed.scope.value.value).toBe('list')
+    expect(exposed.type.value.value).toBe('grid')
+
+    exposed.scope.value.value = 'grid'
+    await settle(router)
+    // Both back to the default in the same tick, like "Filter zurücksetzen".
+    exposed.scope.value.value = 'list'
+    exposed.type.value.value = 'list'
+    for (let i = 0; i < 5; i++) await settle(router)
+
+    expect(exposed.scope.value.value).toBe('list')
+    expect(exposed.type.value.value).toBe('list')
+    expect(router.currentRoute.value.query).toEqual({})
+  })
+
   it('ignores a view the list does not have', async () => {
     const router = makeRouter()
     await router.push('/dokumente?view=hologram')
