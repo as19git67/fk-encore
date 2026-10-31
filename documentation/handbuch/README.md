@@ -16,7 +16,7 @@ Eine Datei je Modul, in der Reihenfolge des Hauptmenüs
 | Datei | Modul | Stand |
 |---|---|---|
 | `allgemein.md` | Anmelden, Registrieren, Passwort vergessen, Profil, Navigation, Hauptmenü | offen |
-| `fotos-*.md` | Fotos (Galerie, Alben, Personen, Fotobücher, Rückblicke, Feed/Stream, Review, Einstellungen) | offen |
+| `fotos-galerie.md`, `fotos-alben.md`, `fotos-personen.md`, `fotos-einstellungen.md` | Fotos (Feed, Galerie, Vollbild, Editor, Alben, Personen, Gruppen-Review, Rückblicke, Fotobücher, Einstellungen) | **geschrieben** |
 | `dokumente.md` | Dokumente | **geschrieben** |
 | `finanzen.md` | Finanzen | **geschrieben** |
 | `zaehler.md` | Zähler | **geschrieben** |
