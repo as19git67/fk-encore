@@ -470,6 +470,7 @@ these parameters as given.
 | 2026-10-28 (afternoon) | same | 1–5 with the schema rule, the yes nudge and the letter note | 75 | 100 % (75) | 96 % | 3 | 4,402 | 23 |
 | 2026-10-29 (evening) | same, on the CPU twin (GPU lent, `gpu_layers` 0) | 1–5 unchanged, canned results | 75 | 95 % (71); two cases lost to the request limit, two to borderline decisions | 95 % | 3 | 4,402 | 25 |
 | 2026-10-30 | same (CUDA) | stage 6 part 2: synthetic data, real tools | 10 | 100 % (10) | 90 % | 3 | 4,463 | 2 |
+| 2026-10-30 (night) | Qwen3.6-35B-A3B UD-Q5_K_M (CUDA, server backend, 18.5k ctx) | 1–5 unchanged, canned results | 75 | 92 % (69); two cases did not fit the context window | 97 % | 3 | 4,608 | 29 |
 
 The run of 2026-10-26 is the first with the path metrics; there is no
 measured run from before the router. Router stages of that run: 62 cases by
@@ -821,6 +822,41 @@ whole text with `get_document_text` — a candidate for a rule in the
 documents area once it shows up in daily use; and the checker flagged
 `syn-tax-2025` once wrongly (the case passed). The remaining open stage is
 the router's embedding step.
+
+### What a second model showed (Qwen3.6-35B-A3B, 2026-10-30)
+
+The same 75 canned cases on Qwen3.6-35B-A3B UD-Q5_K_M, the only other
+MoE model that fits the 16 GB card — with 18,500 tokens of context instead
+of 30,000, because the Q5 weights take the room. 69 of 75 (92 %) in 21 min
+against Gemma 4's 75 of 75.
+
+- Two cases did not fit the window: `thanks-no-tool` and
+  `tag-bookings-after-yes` carry a 19,760-token history, and llama-server
+  refused them (`exceeds the available context size (18688)`). On the 73
+  cases it could read, Qwen answered 69 (95 %).
+- `empty-then-loosen-period`: September was read as September 2025, the
+  benchmark's today being 2026-10-15; after the empty result the model
+  dropped the period instead of the search term. Gemma gets the year right.
+- `dividends-this-year` asked up to today instead of 2026-12-31 — arguable,
+  the expectation wants the whole year.
+- `followup-photos-album`: the follow-up was answered with a fresh
+  `list_photos` carrying every filter instead of `from_previous_result` —
+  the follow-up idiom Gemma has learned; `follow_up_pass_rate` 78 %
+  against 100 %.
+- `letter-paid-invoices`: the `[[…]]` gap went into the recipient instead
+  of the body, as on Gemma's CPU run, and the letter asked for a payment
+  confirmation where the unknown payment date should have stayed open.
+
+The checker (stage 5, run by the same model) flagged 15 claims against 2,
+and five answers went out with the "could not be shown in the data read"
+note (Gemma none); the cases passed anyway, so either Qwen phrases more
+freely than the results hold or it is the stricter checker. Nine cases
+needed more than five rounds (Gemma four), 29 nudges against 23. Speed:
+median 2.0 s per round against 1.3 s, p90 10.7 s against 3.9 s, the
+checker 3.0 s against 1.1 s. The first tool is level (97 % against 96 %):
+the areas and rules carry over to another model; what does not carry over
+is the date arithmetic, the follow-up idiom and the room for a long
+history. Gemma 4 stays the model for the assistant.
 
 ## Risks and what is left out on purpose
 
