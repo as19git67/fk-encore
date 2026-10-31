@@ -37,7 +37,10 @@ concurrency:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # Pinned: `ubuntu-latest` moved to 26.04, for which Playwright 1.58 has no
+    # Chromium build (`playwright install --with-deps` fails before any test).
+    # Back to `ubuntu-latest` once the Playwright in frontend/ supports it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     # NOT running inside the pre-baked ghcr.io/as19git67/fk-encore/playwright-e2e
