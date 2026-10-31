@@ -52,6 +52,8 @@ const SUMMARY_LABELS: Record<string, string> = {
   documents: 'Dokumente',
   worded: 'davon von der KI formuliert',
   scans: 'davon als Scan',
+  depot: 'Depot',
+  depot_papers: 'Depotpapiere',
 }
 
 const FIELD_LABELS: Record<DemoTruthField, string> = {
@@ -65,6 +67,7 @@ const FIELD_LABELS: Record<DemoTruthField, string> = {
 const STAGE_LABELS: Record<string, string> = {
   household: 'Haushalt',
   bookings: 'Buchungen',
+  quotes: 'Kurse',
   documents: 'Dokumente',
   remove: 'Entfernen',
 }
@@ -95,6 +98,7 @@ const summaryLine = computed(() => {
   const s = run.value?.summary
   if (!s) return ''
   return Object.entries(s)
+    .filter(([, n]) => n > 0)
     .map(([k, n]) => `${n} ${SUMMARY_LABELS[k] ?? k}`)
     .join(', ')
 })
@@ -183,7 +187,8 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
     </div>
     <p class="demo-card__desc">
       Ein Beispielhaushalt zum Ausprobieren: eine zweite Benutzerin, ein gemeinsames Konto, drei Jahre
-      Buchungen und 500 Dokumente, die durch die normale Erkennung laufen. Nur in einem System, in das
+      Buchungen, ein Depot mit Indexfonds zu echten Kursen und 500 Dokumente, die durch die normale
+      Erkennung laufen. Nur in einem System, in das
       noch niemand etwas eingetragen hat.
     </p>
 
@@ -229,6 +234,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
     <template v-else-if="run">
       <p class="demo-card__line" aria-live="polite">{{ outcomeLine }}</p>
       <p v-if="summaryLine" class="demo-card__line">{{ summaryLine }}</p>
+      <p v-if="run.status === 'done' && run.error" class="demo-card__hint">{{ run.error }}</p>
       <div v-if="truth && truth.documents" class="demo-truth">
         <div class="demo-truth__head">
           <span class="demo-truth__title">Erkennung der Dokumente</span>

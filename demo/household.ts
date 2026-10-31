@@ -63,7 +63,8 @@ export type BookingKind =
   | "doctor"
   | "car_repair"
   | "donation"
-  | "tax_refund";
+  | "tax_refund"
+  | "securities";
 
 export interface HouseholdPlan {
   accounts: PlannedAccount[];

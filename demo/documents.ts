@@ -46,7 +46,11 @@ export type DocKind =
   | "health_insurer_letter"
   | "price_change"
   | "bank_letter"
-  | "insurer_letter";
+  | "insurer_letter"
+  | "securities_buy"
+  | "securities_sell"
+  | "distribution"
+  | "depot_statement";
 
 export type TaxRole = "beleg" | "bezug" | "keine";
 
@@ -85,6 +89,10 @@ export const DOC_TRUTH: Record<DocKind, DocTruth> = {
   price_change: { category: "vertraege-strom", documentType: "mitteilung", taxRole: "keine" },
   bank_letter: { category: "finanzen-bankvertraege", documentType: "mitteilung", taxRole: "keine" },
   insurer_letter: { category: "versicherungen-sach", documentType: "mitteilung", taxRole: "keine" },
+  securities_buy: { category: "finanzen-wertpapiere", documentType: "abrechnung", taxRole: "keine" },
+  securities_sell: { category: "finanzen-wertpapiere", documentType: "abrechnung", taxRole: null },
+  distribution: { category: "finanzen-wertpapiere", documentType: "gutschrift", taxRole: null },
+  depot_statement: { category: "finanzen-wertpapiere", documentType: "standmitteilung", taxRole: "keine" },
 };
 
 export type Recipient = "self" | "spouse" | "both";
@@ -100,6 +108,16 @@ export interface StatementRow {
   date: string;
   text: string;
   cents: number;
+}
+
+/** One position of a depot statement. */
+export interface DepotPosition {
+  name: string;
+  isin: string;
+  quantity: number;
+  price: number;
+  /** In cents. */
+  valueCents: number;
 }
 
 export interface PlannedDocument {
@@ -120,6 +138,10 @@ export interface PlannedDocument {
   /** The amount the document is about (invoice total, net pay, refund), in cents. */
   totalCents: number | null;
   statement: { opening: number; closing: number; rows: StatementRow[]; account: string; iban: string } | null;
+  /** Label and value lines of a settlement ("Kurswert 2.960,00 EUR"). */
+  facts: Array<{ label: string; value: string }>;
+  /** The holdings table of a depot statement. */
+  positions: DepotPosition[] | null;
   /** Index into `plan.bookings` of the booking this document belongs to. */
   booking: number | null;
   /** One of the letter layouts, so the documents do not all look alike. */
@@ -199,14 +221,32 @@ interface Builder {
   counter: Map<DocKind, number>;
 }
 
-function push(b: Builder, d: Omit<PlannedDocument, "key" | "layout" | "scan" | "truth" | "senderAddress" | "statement"> & { statement?: PlannedDocument["statement"]; senderAddress?: string }): void {
+/**
+ * A document before the plan gives it its key, layout and scan. Another
+ * planner (the depot) hands drafts in; `bookingRef` is its booking, found
+ * by identity in the merged booking list.
+ */
+export type DocumentDraft = Omit<PlannedDocument, "key" | "layout" | "scan" | "truth" | "senderAddress" | "statement" | "facts" | "positions"> & {
+  statement?: PlannedDocument["statement"];
+  senderAddress?: string;
+  facts?: PlannedDocument["facts"];
+  positions?: PlannedDocument["positions"];
+  bookingRef?: PlannedBooking;
+};
+
+function push(b: Builder, d: DocumentDraft): void {
   const n = (b.counter.get(d.kind) ?? 0) + 1;
   b.counter.set(d.kind, n);
+  const { bookingRef, ...rest } = d;
+  const bookingIndex = bookingRef ? b.plan.bookings.indexOf(bookingRef) : -1;
   b.out.push({
-    ...d,
+    ...rest,
     key: `${d.kind}-${n}`,
     senderAddress: d.senderAddress ?? addressOf(d.sender),
     statement: d.statement ?? null,
+    facts: d.facts ?? [],
+    positions: d.positions ?? null,
+    booking: bookingIndex >= 0 ? bookingIndex : d.booking,
     layout: b.rnd.int(0, 2) as 0 | 1 | 2,
     // Statements run over several pages and receipts are slips: both stay digital.
     scan: d.kind !== "bank_statement" && d.kind !== "receipt" && b.rnd.chance(0.1),
@@ -693,11 +733,15 @@ const LETTER_KINDS: LetterKind[] = [
 
 /**
  * Plans the documents for a household plan, filled with letters to the
- * size's target. The order is by date.
+ * size's target. `extra` are documents another planner made (the depot's
+ * settlements and statements); they count toward the target. The order is
+ * by date.
  */
-export function planDocuments(seed: number, size: DemoSize, plan: HouseholdPlan): DocumentPlan {
+export function planDocuments(seed: number, size: DemoSize, plan: HouseholdPlan, extra: DocumentDraft[] = []): DocumentPlan {
   const rnd = createRandom(seed ^ 0x5eed);
   const b: Builder = { rnd, plan, out: [], counter: new Map() };
+
+  for (const d of extra) push(b, d);
 
   plan.bookings.forEach((booking, i) => fromBooking(b, i, booking));
 
@@ -738,7 +782,7 @@ export function planDocuments(seed: number, size: DemoSize, plan: HouseholdPlan)
   let docs = b.out;
   if (docs.length > target) {
     // Small size: keep the ones that go with a booking first, then the rest by date.
-    docs = [...docs].sort((x, y) => Number(y.booking !== null) - Number(x.booking !== null) || x.date.localeCompare(y.date)).slice(0, target);
+    docs = [...docs].sort((x, y) => Number(y.booking !== null) - Number(x.booking !== null) || x.date.localeCompare(y.date) || x.key.localeCompare(y.key)).slice(0, target);
   } else {
     const firstDay = Date.parse(`${plan.from}T12:00:00Z`);
     const days = Math.max(0, Math.floor((Date.parse(`${plan.to}T12:00:00Z`) - firstDay) / 86_400_000));

@@ -169,6 +169,45 @@ function lineTable(L: Layout, doc: PlannedDocument, texts: DocTexts): void {
   }
 }
 
+/** Label and value per line, the way a settlement prints them. */
+function facts(L: Layout, doc: PlannedDocument): void {
+  if (!doc.facts.length) return;
+  L.y += 4;
+  for (const f of doc.facts) {
+    L.ensure(14);
+    L.text(LEFT, L.y, f.label, 9.5);
+    L.text(LEFT + 170, L.y, f.value, 9.5, f.label === "Ausmachender Betrag" || f.label === "Betrag zu Ihren Gunsten");
+    L.y += 14;
+  }
+  L.y += 6;
+}
+
+/**
+ * The holdings of a depot statement, one block per security: name,
+ * identifier, then quantity, price and value each with its label, the
+ * way many banks print a statement in list form.
+ */
+function positions(L: Layout, doc: PlannedDocument): void {
+  if (!doc.positions?.length) return;
+  const right = A4.width - MARGIN;
+  L.y += 4;
+  L.text(LEFT, L.y, "Depotbestand", 10, true);
+  L.y += 14;
+  L.line(LEFT, L.y, right, L.y);
+  L.y += 6;
+  for (const p of doc.positions) {
+    L.ensure(46);
+    L.text(LEFT, L.y, p.name, 9.5, true);
+    L.y += 13;
+    L.text(LEFT, L.y, `ISIN ${p.isin}`, 9);
+    L.y += 12;
+    L.text(LEFT, L.y, `Stück ${p.quantity.toLocaleString("de-DE", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`, 9);
+    L.text(LEFT + 130, L.y, `Kurs ${p.price.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} EUR`, 9);
+    L.text(LEFT + 280, L.y, `Kurswert ${euro(p.valueCents).replace(" €", " EUR")}`, 9);
+    L.y += 18;
+  }
+}
+
 function letter(m: Measure, doc: PlannedDocument, texts: DocTexts): Page[] {
   const L = new Layout(m, A4.width, A4.height);
   const width = A4.width - MARGIN - LEFT;
@@ -188,6 +227,8 @@ function letter(m: Measure, doc: PlannedDocument, texts: DocTexts): Page[] {
     L.y += 6;
   }
   lineTable(L, doc, texts);
+  facts(L, doc);
+  positions(L, doc);
   if (formal) {
     L.y += 10;
     L.paragraph("Mit freundlichen Grüßen", 10, LEFT, width);

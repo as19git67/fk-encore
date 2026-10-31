@@ -18,6 +18,8 @@ import {
   documents,
   financeAccount,
   financeAccountAccess,
+  financeAccountType,
+  financeDepotSecurity,
   financeTransaction,
   roles,
   userRoles,
@@ -30,6 +32,8 @@ import { registered } from "./registry";
 import { removeRun } from "./remove";
 import { executeRun, fileRun, DemoRefused, markInterruptedRuns } from "./run";
 import { truthReport } from "./truth";
+import { setQuoteProvider, type QuoteProvider } from "../finance/quote-provider";
+import { DEMO_DEPOT_NUMBER } from "./securities";
 import fs from "node:fs";
 import { contentCounts, currentRun } from "./state";
 
@@ -112,6 +116,7 @@ describe("a demo run", () => {
     expect(report.fields.every((f) => f.compared === 0)).toBe(true);
 
     const accounts = await registered(runId, "finance_account");
+    // Four household accounts; the depot is left out without a quote provider.
     expect(accounts).toHaveLength(4);
     const bookings = await db.select({ id: financeTransaction.id }).from(financeTransaction).where(inArray(financeTransaction.account_id, accounts));
     expect(bookings).toHaveLength(40);
@@ -128,6 +133,61 @@ describe("a demo run", () => {
     expect(persons.map((p) => p.relation_kind).sort()).toEqual(["child", "self", "spouse"]);
 
     expect(await contentCounts()).toEqual(before);
+  });
+
+  it("builds the depot at the provider's closes when it has them, and takes it back", async () => {
+    // A provider from memory: weekday closes for every fund, no network.
+    const provider: QuoteProvider = {
+      name: "demo-test",
+      resolve: async ({ isin }) => ({ symbol: `T-${isin}`, name: null, exchange: null, currency: "EUR", securityType: "etf" }),
+      history: async (symbol, range) => {
+        const points: Array<{ at: string; price: number }> = [];
+        if (range === "backfill") {
+          for (let t = Date.parse("2026-06-01T16:00:00Z"); t <= Date.parse("2026-10-26T16:00:00Z"); t += 86_400_000) {
+            const d = new Date(t).getUTCDay();
+            if (d !== 0 && d !== 6) points.push({ at: new Date(t).toISOString(), price: 50 + (symbol.length % 7) });
+          }
+        }
+        return { symbol, currency: "EUR", points };
+      },
+    };
+    setQuoteProvider(provider);
+    try {
+      const runId = await fileDirect();
+      await executeRun(runId, { today: "2026-10-26" });
+      const [run] = await db.select().from(demoRun).where(eq(demoRun.id, runId));
+      expect(run.status).toBe("done");
+      expect(run.error).toBeNull();
+      expect(run.summary).toMatchObject({ depot: 1 });
+
+      const accounts = await registered(runId, "finance_account");
+      const [depot] = await db
+        .select({ id: financeAccount.id, number: financeAccount.account_number })
+        .from(financeAccount)
+        .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+        .where(and(inArray(financeAccount.id, accounts), eq(financeAccountType.kind, "depot")));
+      expect(depot.number).toBe(DEMO_DEPOT_NUMBER);
+      const securities = await db.select().from(financeDepotSecurity).where(eq(financeDepotSecurity.account_id, depot.id));
+      expect(securities.length).toBeGreaterThan(0);
+      expect(securities.every((s) => s.status === "confirmed")).toBe(true);
+      const kinds = (await db.select({ kind: demoTruth.kind }).from(demoTruth).where(eq(demoTruth.run_id, runId))).map((t) => t.kind);
+      expect(kinds).toContain("securities_buy");
+
+      await removeRun(runId);
+      expect(await db.select().from(financeAccount).where(eq(financeAccount.id, depot.id))).toHaveLength(0);
+      expect(await db.select().from(financeDepotSecurity).where(eq(financeDepotSecurity.account_id, depot.id))).toHaveLength(0);
+    } finally {
+      setQuoteProvider(null);
+    }
+  });
+
+  it("leaves the depot out and says why when no provider answers", async () => {
+    const runId = await fileDirect();
+    await executeRun(runId, { today: "2026-10-26" });
+    const [run] = await db.select().from(demoRun).where(eq(demoRun.id, runId));
+    expect(run.status).toBe("done");
+    expect(run.summary).toMatchObject({ depot: 0 });
+    expect(run.error).toMatch(/^Depot ausgelassen/);
   });
 
   it("takes back exactly what it wrote", async () => {

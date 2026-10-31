@@ -135,8 +135,8 @@ The four securities are real, widely held broad index funds (world
 equities, emerging markets, Europe, a bond index), listed in
 `demo/securities.ts`, so the demo gets real and current quotes from the
 configured provider like any depot. That needs the provider to be
-reachable when the demo is loaded; without it the run stops before the
-depot stage and says why.
+reachable when the demo is loaded; without it the run leaves the depot
+out and says why.
 
 The prices in the settlements come from the provider's real history: the
 generator first loads the quote history of the three years, then sets each
@@ -231,10 +231,27 @@ show something.
    `documents/purge.ts`, the same code as `DELETE /documents/:id`.
    Booking purposes stay with the templates: the model words documents
    only.
-3. **Depot.** Removal of the Finanzkraft import beforehand (own PR).
-   Depot with settlements, dividends and statements, real index funds with
-   prices from the provider's history, the bookings that go with them.
-   (Accounts, the household bookings and the spouse came with stage 1.)
+3. **Depot.** *Done.* The Finanzkraft import was removed beforehand
+   (#1784). Four broad index funds by ISIN in `demo/securities.ts`; their
+   history comes from the configured provider through `refreshQuotes`
+   (moved to `finance/quote-refresh.ts`, so the demo service loads quotes
+   without importing the finance endpoints), and the plan in
+   `demo/depot.ts` trades at each day's close: one-off buys of three
+   funds, a monthly savings plan in the world fund, quarterly and
+   half-yearly distributions of the two distributing funds at a synthetic
+   yield, one sale two years in, a depot statement at each quarter's end.
+   Every trade and payout is a booking on the admin's giro account
+   ("Wertpapierkauf ISIN … Depot …") and a settlement PDF in label/value
+   form; the statements list each position with its labelled quantity,
+   price and value. `demo/depot-writer.ts` creates the depot account
+   (depot number on every paper) with the traded funds confirmed in its
+   securities master; the depot transactions and holdings are not
+   written — the pipeline reads them from the papers (the tests check
+   that `parseSettlement` and `inspectDepotStatement` read the rendered
+   PDFs back to the planned figures). Without a provider or without a
+   fund's history the run leaves the depot out and says why on the card
+   (not a failure). The loaded quotes stay when the demo is removed: they
+   are shared by every depot holding the fund.
 4. **Photos.** Openverse download with licence list, face filter, EXIF
    rewrite, demo library, albums. Then `db/seed-demo.ts` becomes
    `size: "small"` and the Playwright workflow sets `DEMO_DATA=1` instead
