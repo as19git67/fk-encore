@@ -17,8 +17,8 @@ Eine Datei je Modul, in der Reihenfolge des Hauptmenüs
 |---|---|---|
 | `allgemein.md` | Anmelden, Registrieren, Passwort vergessen, Profil, Navigation, Hauptmenü | offen |
 | `fotos-*.md` | Fotos (Galerie, Alben, Personen, Fotobücher, Rückblicke, Feed/Stream, Review, Einstellungen) | offen |
-| `dokumente.md` | Dokumente | offen |
-| `finanzen.md` | Finanzen | offen |
+| `dokumente.md` | Dokumente | **geschrieben** |
+| `finanzen.md` | Finanzen | **geschrieben** |
 | `zaehler.md` | Zähler | **geschrieben** |
 | `assistent.md` | Assistent | offen |
 | `label.md` | Label | offen |
