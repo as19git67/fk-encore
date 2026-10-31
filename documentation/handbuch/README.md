@@ -83,7 +83,9 @@ Teststatus. So sieht man je Modul auf einen Blick, was schon abgedeckt ist.
 
 ## Tests je Modul
 
-Die End-to-End-Tests sind nach Modulen geschnitten, so wie das Handbuch:
+Die End-to-End-Tests sind nach Modulen geschnitten, so wie das Handbuch.
+Sie gelten für die Web-App; die iOS-App (`ios.md`) bleibt vorerst außen
+vor und bekommt keine E2E-Tests (Entscheidung vom 2026-10-31).
 
 - Eine Spec-Datei je Modul unter `frontend/e2e/specs/`, zum Beispiel
   `zaehler.spec.ts`; große Module dürfen einen Ordner mit einer Datei je
