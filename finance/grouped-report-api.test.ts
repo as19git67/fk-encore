@@ -162,12 +162,13 @@ describe("grouped reports", () => {
     pdf.end();
     await done;
     const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const doc = await getDocument({ data: new Uint8Array(Buffer.concat(chunks)), verbosity: 0 }).promise;
+    const task = getDocument({ data: new Uint8Array(Buffer.concat(chunks)), verbosity: 0 });
+    const doc = await task.promise;
     let text = "";
     for (let n = 1; n <= doc.numPages; n++) {
       text += (await (await doc.getPage(n)).getTextContent()).items.map((i) => ("str" in i ? i.str : "")).join(" ");
     }
-    await doc.destroy();
+    await task.destroy();
     text = text.replace(/ /g, " ");
     for (const s of ["Wohnung Musterstadt", "Zwischensumme Kauf", "Zwischensumme Mieteinnahmen", "Sonstige", "Summe (5 Buchungen)", "Rendite p. a.", "365 Tage vom 10.01.2025 bis 10.01.2026"]) {
       expect(text, s).toContain(s);

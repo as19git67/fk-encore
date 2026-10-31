@@ -89,10 +89,18 @@ type PdfJsPage = Parameters<typeof renderPageWithSpacing>[0] & { cleanup?: () =>
 interface PdfJsDocument {
   numPages: number;
   getPage(n: number): Promise<PdfJsPage>;
+}
+/**
+ * The loading task owns the worker and the document: pdf.js 6 dropped
+ * `PDFDocumentProxy.destroy()`, and `loadingTask.destroy()` is the one way to
+ * release both that works in every version.
+ */
+interface PdfJsLoadingTask {
+  promise: Promise<PdfJsDocument>;
   destroy(): Promise<void>;
 }
 type PdfJsModule = {
-  getDocument(params: Record<string, unknown>): { promise: Promise<PdfJsDocument> };
+  getDocument(params: Record<string, unknown>): PdfJsLoadingTask;
 };
 
 let pdfjs: Promise<PdfJsModule> | null = null;
@@ -167,14 +175,15 @@ async function pdfParseQuiet(
   };
   try {
     const { getDocument } = await loadPdfJs();
-    const doc = await getDocument({
+    const task = getDocument({
       data: ownedBytes(buffer),
       verbosity: 0,
       isEvalSupported: false,
       disableFontFace: true,
       useSystemFonts: false,
-    }).promise;
+    });
     try {
+      const doc = await task.promise;
       // The same rendering, also handing each page's items to `sink` when
       // the caller keeps word positions (#1531).
       const render = sink ? renderPageCollecting(sink) : renderPageWithSpacing;
@@ -188,7 +197,7 @@ async function pdfParseQuiet(
       }
       return { text, numpages: doc.numPages };
     } finally {
-      await doc.destroy();
+      await task.destroy();
     }
   } finally {
     console.log = originalLog;
