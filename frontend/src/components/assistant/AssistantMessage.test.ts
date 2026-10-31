@@ -35,6 +35,12 @@ function mount(blocks: ResultBlock[], messageId?: number, content = 'Antwort'): 
   return el
 }
 
+/** Opens every list under the answer; they start folded to their header. */
+async function openAll(el: HTMLElement): Promise<void> {
+  for (const b of el.querySelectorAll<HTMLButtonElement>('button.block-toggle[aria-expanded="false"]')) b.click()
+  await nextTick()
+}
+
 beforeEach(() => {
   getPhotoDetailsBatch.mockReset()
   giveFeedback.mockClear()
@@ -65,27 +71,63 @@ describe('AssistantMessage', () => {
     expect(el.textContent).toContain('<img src=x onerror=alert(1)>')
   })
 
-  it('folds the earlier lists of a kind and keeps the last one open', async () => {
-    const el = mount([docs('tax_documents', [1, 2, 3], 'Steuer 2025'), docs('search_documents', [2, 4]), docs('get_document_summary', [2])], 5)
+  it('starts every list folded to its header, and the header opens and closes it', async () => {
+    const el = mount([docs('tax_documents', [1, 2, 3], 'Steuer 2025'), docs('search_documents', [2, 4])], 5)
     const sections = [...el.querySelectorAll('section.block')]
-    expect(sections).toHaveLength(3)
-    // Folded: header only, with a button to open it.
-    expect(sections[0]!.querySelectorAll('a.row')).toHaveLength(0)
-    expect(sections[1]!.querySelectorAll('a.row')).toHaveLength(0)
-    expect(sections[2]!.querySelectorAll('a.row')).toHaveLength(1)
-    expect(sections[2]!.querySelector('button[aria-label="Liste ausklappen"]')).toBeNull()
+    expect(sections).toHaveLength(2)
+    expect(el.querySelectorAll('a.row')).toHaveLength(0)
+    expect(sections[0]!.querySelector('.block-count')?.textContent).toBe('3')
 
-    const toggle = sections[0]!.querySelector<HTMLButtonElement>('button[aria-label="Liste ausklappen"]')
-    expect(toggle).not.toBeNull()
-    toggle!.click()
+    const toggle = sections[0]!.querySelector<HTMLButtonElement>('button.block-toggle')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    toggle.click()
     await nextTick()
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(sections[0]!.querySelectorAll('a.row')).toHaveLength(3)
-    expect(sections[0]!.querySelector('button[aria-label="Liste einklappen"]')).not.toBeNull()
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).not.toBeNull()
+    expect(sections[1]!.querySelectorAll('a.row')).toHaveLength(0)
+    toggle.click()
+    await nextTick()
+    expect(sections[0]!.querySelectorAll('a.row')).toHaveLength(0)
   })
 
-  it('marks each row with an anchor of its own block and remembers the one opened', () => {
+  it('links an item the answer names as a Markdown link to its kind and id', () => {
+    const el = mount([], undefined, 'Zuletzt [Beispielmarkt am 28.10. über 45,90 €](buchung:4711) vom [Kreditkartenkonto](konto:7), nicht [das](wohnung:3).')
+    const links = [...el.querySelectorAll<HTMLAnchorElement>('.text--rich a.entity-link')]
+    expect(links.map((a) => [a.textContent, a.dataset.to])).toEqual([
+      ['Beispielmarkt am 28.10. über 45,90 €', '/finanzen/umsaetze/4711'],
+      ['Kreditkartenkonto', '/finanzen/uebersicht/konto/7'],
+    ])
+    expect(el.textContent).toContain('nicht das.')
+  })
+
+  it('shows only the rows the answer names and leaves out the lists it only searched', async () => {
+    const accounts = { kind: 'accounts', tool: 'list_accounts', rows: [1, 2, 3].map((id) => ({ id, label: `Konto ${id}`, route: `/finanzen/uebersicht/konto/${id}`, balance: '1.00' })) } as ResultBlock
+    const transactions = { kind: 'transactions', tool: 'list_transactions', rows: [10, 11, 12].map((id) => ({ id, booking_date: '2026-10-28', counterparty: `Beispiel ${id}`, amount: '-1.00' })) } as ResultBlock
+    const el = mount([accounts, transactions], 5, 'Die letzte Buchung war [Beispiel 11 am 28.10.](buchung:11).')
+    await nextTick()
+    const sections = [...el.querySelectorAll('section.block')]
+    expect(sections.map((s) => s.querySelector('.block-title')?.textContent)).toEqual(['Buchungen'])
+    expect(sections[0]!.querySelector('.block-count')?.textContent).toBe('1 aus 3')
+    await openAll(el)
+    expect([...el.querySelectorAll('a.row .row-title')].map((t) => t.textContent)).toEqual(['Beispiel 11'])
+
+    const all = [...el.querySelectorAll<HTMLButtonElement>('.block-foot button')].find((b) => b.textContent?.includes('Alle 3 Treffer'))!
+    all.click()
+    await nextTick()
+    expect([...el.querySelectorAll('a.row .row-title')].map((t) => t.textContent)).toEqual(['Beispiel 11', 'Beispiel 10', 'Beispiel 12'])
+  })
+
+  it('keeps every list when the answer links nothing', () => {
+    const accounts = { kind: 'accounts', tool: 'list_accounts', rows: [{ id: 1, label: 'Konto 1', balance: '1.00' }] } as ResultBlock
+    const el = mount([accounts, docs('search_documents', [2])], 5, 'Hier ist alles.')
+    expect(el.querySelectorAll('section.block')).toHaveLength(2)
+  })
+
+  it('marks each row with an anchor of its own block and remembers the one opened', async () => {
     const transactions = { kind: 'transactions', tool: 'list_transactions', rows: [{ id: 2, booking_date: '2026-01-02', counterparty: 'Beispiel GmbH', amount: '-10.00' }] } as ResultBlock
     const el = mount([transactions, docs('get_document_summary', [2])], 5)
+    await openAll(el)
     const rows = [...el.querySelectorAll<HTMLElement>('a.row')]
     // The same id in two blocks of different kinds: two different anchors.
     expect(rows.map((r) => r.dataset.anchor)).toEqual(['transactions@m5-0:2', 'documents@m5-1:2'])
@@ -93,8 +135,9 @@ describe('AssistantMessage', () => {
     expect(JSON.parse(sessionStorage.getItem('list_anchor:assistent') ?? 'null')).toEqual({ kind: 'documents@m5-1', id: 2 })
   })
 
-  it('gives the rows of an answer that is not stored yet no anchor', () => {
+  it('gives the rows of an answer that is not stored yet no anchor', async () => {
     const el = mount([docs('search_documents', [2])])
+    await openAll(el)
     const row = el.querySelector<HTMLElement>('a.row')!
     expect(row.dataset.anchor).toBeUndefined()
     row.click()
@@ -103,9 +146,10 @@ describe('AssistantMessage', () => {
 })
 
 describe('AssistantMessage photos', () => {
-  it('opens a photo in the gallery with the answer\'s photos as the grid', () => {
+  it('opens a photo in the gallery with the answer\'s photos as the grid', async () => {
     const photos = { kind: 'photos', tool: 'search_photos', rows: [{ id: 3, filename: 'a.jpg' }, { id: 9, filename: 'b.jpg' }, { id: 27, filename: 'c.jpg' }] } as ResultBlock
     const el = mount([photos], 5)
+    await openAll(el)
     const links = [...el.querySelectorAll<HTMLElement>('a.photo')]
     expect(links).toHaveLength(3)
     expect(JSON.parse(links[1]!.dataset.to!)).toEqual({ name: 'fotos-gallery', query: { photoId: '9', ids: '3,9,27' } })
@@ -120,8 +164,9 @@ describe('AssistantMessage picked photos', () => {
   it('shows the photo the answer picked instead of the hits, the hits one click away', async () => {
     const el = mount([hits], 5, 'Das beste Foto ist das Bild mit der ID 9.')
     await nextTick()
+    await openAll(el)
     expect(el.querySelector('.block-title')?.textContent).toBe('Ausgewähltes Foto')
-    expect(el.querySelector('.block-count')?.textContent).toBe('aus 500 Treffern')
+    expect(el.querySelector('.block-count')?.textContent).toBe('1 aus 500')
     expect(thumbs(el)).toEqual(['/thumb/b.jpg'])
     expect(getPhotoDetailsBatch).not.toHaveBeenCalled()
 
@@ -136,6 +181,7 @@ describe('AssistantMessage picked photos', () => {
   it('loads a picked photo that is not among the first hits', async () => {
     getPhotoDetailsBatch.mockResolvedValueOnce({ photos: [{ id: 42, filename: 'z.jpg', taken_at: '2020-01-01T10:00:00Z' }] })
     const el = mount([hits], 5, 'Am schönsten sind Foto 42 und Foto 3.')
+    await openAll(el)
     await vi.waitFor(() => expect(thumbs(el)).toEqual(['/thumb/z.jpg', '/thumb/a.jpg']))
     expect(getPhotoDetailsBatch).toHaveBeenCalledWith([42])
     expect(el.querySelector('.block-title')?.textContent).toBe('Ausgewählte Fotos')
@@ -146,6 +192,7 @@ describe('AssistantMessage picked photos', () => {
   it('keeps the hits when the answer names no photo', async () => {
     const el = mount([hits], 5, 'Hier sind die Treffer.')
     await nextTick()
+    await openAll(el)
     expect(thumbs(el)).toEqual(['/thumb/a.jpg', '/thumb/b.jpg', '/thumb/c.jpg'])
     expect(el.querySelector('.block-title')?.textContent).toBe('Fotos')
   })

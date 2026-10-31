@@ -35,6 +35,15 @@ const meta: Meta<typeof AssistantMessage> = {
 export default meta
 type Story = StoryObj<typeof AssistantMessage>
 
+/**
+ * The lists start folded to their header; the stories open them so the
+ * screenshots show the rows.
+ */
+async function openLists({ canvasElement }: { canvasElement: HTMLElement }): Promise<void> {
+  for (const b of canvasElement.querySelectorAll<HTMLButtonElement>('button.block-toggle[aria-expanded="false"]')) b.click()
+  await new Promise((r) => requestAnimationFrame(r))
+}
+
 export const Frage: Story = {
   name: 'Frage',
   args: { role: 'user', content: 'Wie viel haben wir im September für Lebensmittel ausgegeben?' },
@@ -43,31 +52,46 @@ export const Frage: Story = {
 export const Buchungen: Story = {
   name: 'Antwort mit Buchungen',
   args: { role: 'assistant', content: 'Ich habe 14 Buchungen an die Stadtwerke gefunden.', blocks: [TRANSACTIONS_BLOCK] },
+  play: openLists,
+}
+
+export const GenannteBuchung: Story = {
+  name: 'Antwort nennt eine Buchung: Link im Text, Liste zugeklappt',
+  args: {
+    role: 'assistant',
+    content: 'Der letzte Abschlag war [Stadtwerke Musterstadt am 20.09. über 84,00 €](buchung:501).',
+    blocks: [TRANSACTIONS_BLOCK],
+  },
 }
 
 export const Lastschriften: Story = {
   name: 'Antwort mit Lastschriften',
   args: { role: 'assistant', content: 'Bis Monatsende kommen noch zwei Lastschriften.', blocks: [DEBITS_BLOCK] },
+  play: openLists,
 }
 
 export const Dokumente: Story = {
   name: 'Antwort mit Dokumenten',
   args: { role: 'assistant', content: 'Zwei Protokolle passen.', blocks: [DOCUMENTS_BLOCK] },
+  play: openLists,
 }
 
 export const Fotos: Story = {
   name: 'Antwort mit Fotos',
   args: { role: 'assistant', content: '143 favorisierte Fotos aus 2025.', blocks: [PHOTOS_BLOCK] },
+  play: openLists,
 }
 
 export const Rueckblicke: Story = {
   name: 'Antwort mit Rückblicken und Zählern',
   args: { role: 'assistant', content: 'Zwei Reisen letztes Jahr.', blocks: [RECAPS_BLOCK, METERS_BLOCK] },
+  play: openLists,
 }
 
 export const Auswertung: Story = {
   name: 'Antwort mit Auswertung und Tabelle',
   args: { role: 'assistant', content: 'Im September waren es 412,37 €.', blocks: [ANALYSIS_BLOCK, TABLE_BLOCK] },
+  play: openLists,
 }
 
 export const Laeuft: Story = {

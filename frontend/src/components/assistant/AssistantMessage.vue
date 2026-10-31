@@ -9,7 +9,7 @@ import InputText from 'primevue/inputtext'
 import { giveFeedback, type FeedbackVerdict, type Proposal, type ResultBlock } from '../../api/assistant'
 import type { TurnStep } from '../../utils/assistantTurn'
 import { parseBlocks } from '../../utils/assistantMarkdown'
-import { mentionedIds } from '../../utils/assistantLinks'
+import { mentionedIds, type EntityKind } from '../../utils/assistantLinks'
 import ScrollX from '../layout/ScrollX.vue'
 import AssistantBlock from './AssistantBlock.vue'
 import AssistantInlines from './AssistantInlines.vue'
@@ -36,6 +36,12 @@ const emit = defineEmits<{ keep: [content: string] }>()
 // shown as typed.
 const rendered = computed(() => (props.role === 'assistant' ? parseBlocks(props.content) : []))
 
+// An answer's link to an item ("[die Stromrechnung](dokument:123)") is its
+// words outside the app: a copy or a saved text keeps those, not the target.
+const plainContent = computed(() => (props.role === 'assistant'
+  ? props.content.replace(/\[([^\]\n]+)\]\([\p{L}]+:\s*#?\d+\)/gu, '$1')
+  : props.content))
+
 // Copy the message as it stands: the text as written (an answer's Markdown
 // reads fine as plain text) and, for an answer, the rendered HTML beside it,
 // so a table pasted into a spreadsheet or a letter arrives as a table.
@@ -50,11 +56,11 @@ async function copyMessage() {
   try {
     if (html && typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
       await navigator.clipboard.write([new ClipboardItem({
-        'text/plain': new Blob([props.content], { type: 'text/plain' }),
+        'text/plain': new Blob([plainContent.value], { type: 'text/plain' }),
         'text/html': new Blob([html], { type: 'text/html' }),
       })])
     } else {
-      await navigator.clipboard.writeText(props.content)
+      await navigator.clipboard.writeText(plainContent.value)
     }
     copied.value = true
     if (copiedTimer) clearTimeout(copiedTimer)
@@ -97,40 +103,67 @@ function thumbsDown() {
 }
 
 
+// The kind of item a list holds, for the lists whose rows the answer can
+// link ("[die Stromrechnung](dokument:123)").
+const LINKED_KIND: Partial<Record<ResultBlock['kind'], EntityKind>> = {
+  accounts: 'account',
+  transactions: 'transaction',
+  documents: 'document',
+  document: 'document',
+  photos: 'photo',
+  albums: 'album',
+  meters: 'meter',
+  businesses: 'business',
+}
+
+// The items the answer links, per kind, in the order it names them. While the
+// answer is still arriving the text is unfinished, so nothing is narrowed.
+const named = computed(() => {
+  const out = new Map<EntityKind, number[]>()
+  if (props.role !== 'assistant' || props.pending) return out
+  for (const kind of new Set(Object.values(LINKED_KIND))) {
+    const ids = mentionedIds(props.content, kind)
+    if (ids.length) out.set(kind, ids)
+  }
+  return out
+})
+
+/** The last photo list of the answer: the search the picked photos came from. */
+const lastPhotos = computed(() => props.blocks.filter((b) => b.rows.length > 0).map((b) => b.kind).lastIndexOf('photos'))
+
+/** The rows of a list the answer names; empty when it names none of them. */
+function picksOf(b: ResultBlock): number[] {
+  const kind = LINKED_KIND[b.kind]
+  const ids = kind ? named.value.get(kind) ?? [] : []
+  // A named photo may lie beyond the first hits the last photo list holds;
+  // that list loads it by id.
+  if (b.kind === 'photos' && props.blocks.filter((x) => x.rows.length > 0).indexOf(b) === lastPhotos.value) return ids
+  const inBlock = new Set(b.rows.map((r) => Number(r.id)))
+  return ids.filter((id) => inBlock.has(id))
+}
+
 // A lookup that found nothing has its "· 0" in the steps above; an empty
 // grid under the answer said the same thing again, with nothing in it.
 // While the answer is still arriving, only proposal cards show: the lists of
 // the rounds in between are the model's search, and most of them are gone
 // from the final answer (a repeated search replaces the earlier one, an answer
 // may stand without rows). The steps line says what was looked up meanwhile.
-const shownBlocks = computed(() => props.blocks.filter((b) =>
-  (b.kind === 'analysis' || b.rows.length > 0) && (!props.pending || b.kind === 'proposal')))
+//
+// Once the answer links the items it is about, a list of a kind the answer
+// can link shows only if it holds one of them: the 22 accounts searched to
+// find the one card are the road, not the answer, and the steps line still
+// says they were looked up. An answer that links nothing keeps every list.
+const shownBlocks = computed(() => {
+  const narrowing = named.value.size > 0
+  const blocks = props.blocks.filter((b) =>
+    (b.kind === 'analysis' || b.rows.length > 0) && (!props.pending || b.kind === 'proposal'))
+  if (!narrowing) return blocks
+  return blocks.filter((b) => !LINKED_KIND[b.kind] || picksOf(b).length > 0)
+})
 
 // Between two rounds nothing runs and nothing is written yet, but the model
 // is still at work: say so, or the answer looks finished.
 const thinking = computed(() => props.pending && !props.content && props.steps.every((s) => s.done))
-
-// One answer often holds several lists of the same kind: the model searched
-// the tax documents, then all documents, then summarised three. Only the
-// last list of a kind is what the answer is about; the ones before it fold
-// to their header so the thread stays readable (a click opens them).
-function family(kind: string): string {
-  return kind === 'document' ? 'documents' : kind
-}
-const lastOfFamily = computed(() => {
-  const last = new Map<string, number>()
-  shownBlocks.value.forEach((b, i) => last.set(family(b.kind), i))
-  return last
-})
-// The photos the answer names ("das beste Foto ist Bild 123") are what the
-// reader asked for; the last photo list shows them instead of the first
-// hits of the search, which need not contain them at all.
-const pickedPhotoIds = computed(() => (props.role === 'assistant' && !props.pending ? mentionedIds(props.content, 'photo') : []))
-
-function isFolded(i: number): boolean {
-  const b = shownBlocks.value[i]
-  return b !== undefined && b.kind !== 'analysis' && lastOfFamily.value.get(family(b.kind)) !== i
-}
 </script>
 
 <template>
@@ -212,7 +245,7 @@ function isFolded(i: number): boolean {
         class="copy-button"
         aria-label="Als Textdokument speichern"
         v-tooltip.bottom="'Als Textdokument speichern'"
-        @click="emit('keep', content)"
+        @click="emit('keep', plainContent)"
       />
       <template v-if="messageId !== undefined && role === 'assistant'">
         <Button
@@ -269,8 +302,7 @@ function isFolded(i: number): boolean {
         <AssistantBlock
           v-if="b.kind !== 'proposal'"
           :block="b"
-          :folded="isFolded(i)"
-          :picked="b.kind === 'photos' && !isFolded(i) ? pickedPhotoIds : undefined"
+          :picked="picksOf(b)"
           :anchor-scope="messageId !== undefined ? `m${messageId}-${i}` : undefined"
         />
       </template>
