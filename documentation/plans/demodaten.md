@@ -188,27 +188,68 @@ show something.
 
 ## Stages
 
-1. **State and removal.** Service `demo/`, `isUntouched()`, tables
-   `demo_run`, `demo_item`, `demo_file`, `demo_truth`, endpoints
-   start/status/cancel/remove, the card on Admin › Systemstatus. Generator
-   skeleton with `template` texts for bookings only. `db/seed-demo.ts` is
-   replaced by `size: "small"`; the Playwright workflow sets `DEMO_DATA=1`
-   instead of `E2E_SEED_DEMO`.
+1. **State and removal.** *Done.* Service `demo/` (endpoints in
+   `demo/demo.ts`), `isUntouched()` and the counts in `demo/state.ts`,
+   tables `demo_run`, `demo_item`, `demo_file`, `demo_truth` (migration
+   0284), register in `demo/registry.ts`, removal in `demo/remove.ts`, the
+   card `DemoDataCard.vue` on Admin › Systemstatus. The household skeleton
+   (`demo/household.ts`, seeded) with `template` texts: the spouse as second
+   user, subject persons and joint assessment, four accounts including the
+   joint one, 500 bookings (40 for `small`), written by `demo/writer.ts`.
+   The run is an in-process background job that writes its progress into
+   `demo_run` (polled by the card), not a queue job; a run a restart
+   interrupted is marked failed at boot. Moved to stage 4: replacing
+   `db/seed-demo.ts` by `size: "small"` and `DEMO_DATA=1` in the
+   Playwright workflow — the E2E specs need the photos and documents of
+   the seed, which the generator does not make yet.
 2. **Documents.** Skeleton for all document kinds, PDF layouts, import
    through the pipeline, `template` texts first, then `llm` texts through
    the `llm` queue; ground-truth report on the page.
-3. **Bookings and depot.** Removal of the Finanzkraft import beforehand
-   (own PR). Accounts, 500 bookings, depot with settlements, dividends and
-   statements, real index funds with prices from the provider's history,
-   the spouse as second demo user with the joint account.
+3. **Depot.** Removal of the Finanzkraft import beforehand (own PR).
+   Depot with settlements, dividends and statements, real index funds with
+   prices from the provider's history, the bookings that go with them.
+   (Accounts, the household bookings and the spouse came with stage 1.)
 4. **Photos.** Openverse download with licence list, face filter, EXIF
-   rewrite, demo library, albums.
+   rewrite, demo library, albums. Then `db/seed-demo.ts` becomes
+   `size: "small"` and the Playwright workflow sets `DEMO_DATA=1` instead
+   of `E2E_SEED_DEMO`.
 5. **Meters and businesses.** Meter readings, PV business with its assets,
    so the EÜR shows a year.
 6. **Benchmark hand-off.** The generator as a function the assistant
    benchmark can call against the test database with `text: "template"`
    and a fixed seed. Agreed with the work on `assistent-wegfindung.md`
    before anything in `assistant/` changes.
+
+## Demo deployment
+
+Decided 2026-10-31: the demo runs as a third deployment from the same
+`docker-compose.yml`, next to prod and test, and is kept current by
+Watchtower.
+
+- **Own stack.** Its own `.env` with `DEPLOY_NAME_SUFFIX=-demo`,
+  `DEPLOY_WATCHTOWER_SCOPE=fkdemo`, its own ports, data root and
+  Watchtower token.
+- **Tag `latest`.** The demo shows what is on main, not every PR. The
+  image workflow gets a step "Deploy demo" after the prod deploy, with a
+  new secret `WATCHTOWER_URL_DEMO`. Migrations run on update as usual.
+  The step must never turn main red: it runs only when the secret is set
+  (mapped into `env`, since `secrets` cannot be read in `if:`) and carries
+  `continue-on-error: true`, so a demo stack that is not set up yet or is
+  down only shows a warning. Watchtower itself answers 200 when none of
+  its containers exist yet; it updates only what runs.
+- **First fill.** `DEMO_DATA=1` in the demo's `.env` makes the server load
+  the demo at boot while the system is untouched (the same switch the E2E
+  workflow will use).
+- **Shared GPU.** A second Gemma 4 does not fit next to the first in
+  16 GB; the demo app points `LLM_SERVICE_URL` at the prod llm-service
+  instead of starting its own.
+- **Nightly reset.** Visitors create rows the register does not know, so
+  removing the run is not enough: a nightly job empties the demo's
+  database and file directories and loads the demo again. It only runs
+  where `DEMO_DATA=1` is set, never on prod or test.
+  It runs at 18:00 `America/Los_Angeles`, computed in that time zone so daylight saving
+  on either side does not move it; in Germany that is 03:00, for a few
+  weeks in spring and autumn 02:00.
 
 ## Open questions
 

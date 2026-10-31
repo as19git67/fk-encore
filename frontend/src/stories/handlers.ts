@@ -414,6 +414,11 @@ export const defaultHandlers = [
   http.get('/api/build-info', () => HttpResponse.json({ build: 'storybook-dev' })),
   // Development builds put the proxy prefix in front of the endpoint's own /api.
   http.get('/api/api/build-info', () => HttpResponse.json({ build: 'storybook-dev' })),
+  http.get('/api/admin/demo/status', () => HttpResponse.json({
+    untouched: true,
+    counts: { users: 0, photos: 0, documents: 0, transactions: 0, depot_transactions: 0, meter_readings: 0, trip_plans: 0 },
+    run: null,
+  })),
   http.get('/api/trip-planner/routing/status', () => HttpResponse.json({
     reachable: true, reason: null, version: '3.5.1', hasTiles: true,
     tilesBuiltAt: '2026-09-20T04:00:00.000Z', newestRegionAt: '2026-09-18T12:00:00.000Z',

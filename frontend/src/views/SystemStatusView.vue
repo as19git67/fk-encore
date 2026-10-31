@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import AdminPage from '../components/admin/AdminPage.vue'
 import BuildInfo from '../components/admin/BuildInfo.vue'
+import DemoDataCard from '../components/admin/DemoDataCard.vue'
 import { visibleQueues, type QueueOverviewEntry } from '../config/queueOverview'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
@@ -258,6 +259,8 @@ function open(entry: QueueOverviewEntry) {
         </div>
       </div>
     </section>
+
+    <DemoDataCard v-if="auth.hasPermission('data.manage')" />
 
     <BuildInfo />
   </AdminPage>

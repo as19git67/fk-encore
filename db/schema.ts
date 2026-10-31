@@ -5219,3 +5219,58 @@ export const photoBookCaption = pgTable(
   },
   (table) => [primaryKey({ columns: [table.book_id, table.photo_id] }), index("photo_book_caption_by_photo").on(table.photo_id)],
 );
+
+// ========== Demo data (migration 0284, documentation/plans/demodaten.md) ==========
+
+/** One demo run: who started it, with which seed and size, how far it got. */
+export const demoRun = pgTable("demo_run", {
+  id: serial("id").primaryKey(),
+  owner_user_id: integer("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+  seed: integer("seed").notNull(),
+  size: text("size").$type<"full" | "small">().notNull(),
+  text_source: text("text_source").$type<"template" | "llm">().notNull(),
+  status: text("status")
+    .$type<"running" | "cancelling" | "done" | "failed" | "cancelled" | "removing" | "removed">()
+    .notNull(),
+  stage: text("stage"),
+  progress: jsonb("progress").$type<Record<string, { done: number; total: number }>>().notNull().default({}),
+  summary: jsonb("summary").$type<Record<string, number>>().notNull().default({}),
+  error: text("error"),
+  started_at: timestamp("started_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
+  removed_at: timestamp("removed_at", { mode: "string", withTimezone: true }),
+});
+
+/** Every row a run wrote, so removing the demo takes back exactly that. */
+export const demoItem = pgTable(
+  "demo_item",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    run_id: integer("run_id").notNull().references(() => demoRun.id, { onDelete: "cascade" }),
+    table_name: text("table_name").notNull(),
+    row_id: bigint("row_id", { mode: "number" }).notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("demo_item_run_table_idx").on(table.run_id, table.table_name),
+    index("demo_item_table_row_idx").on(table.table_name, table.row_id),
+  ],
+);
+
+/** Every file a run wrote. */
+export const demoFile = pgTable("demo_file", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  run_id: integer("run_id").notNull().references(() => demoRun.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+/** What the generator knows about a document it made, to measure the classification against. */
+export const demoTruth = pgTable("demo_truth", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  run_id: integer("run_id").notNull().references(() => demoRun.id, { onDelete: "cascade" }),
+  document_id: integer("document_id"),
+  kind: text("kind").notNull(),
+  truth: jsonb("truth").$type<Record<string, unknown>>().notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
