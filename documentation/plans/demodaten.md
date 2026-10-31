@@ -220,6 +220,29 @@ show something.
    and a fixed seed. Agreed with the work on `assistent-wegfindung.md`
    before anything in `assistant/` changes.
 
+## Demo deployment
+
+Decided 2026-10-31: the demo runs as a third deployment from the same
+`docker-compose.yml`, next to prod and test, and is kept current by
+Watchtower.
+
+- **Own stack.** Its own `.env` with `DEPLOY_NAME_SUFFIX=-demo`,
+  `DEPLOY_WATCHTOWER_SCOPE=fkdemo`, its own ports, data root and
+  Watchtower token.
+- **Tag `latest`.** The demo shows what is on main, not every PR. The
+  image workflow gets a step "Deploy demo" after the prod deploy, with a
+  new secret `WATCHTOWER_URL_DEMO`. Migrations run on update as usual.
+- **First fill.** `DEMO_DATA=1` in the demo's `.env` makes the server load
+  the demo at boot while the system is untouched (the same switch the E2E
+  workflow will use).
+- **Shared GPU.** A second Gemma 4 does not fit next to the first in
+  16 GB; the demo app points `LLM_SERVICE_URL` at the prod llm-service
+  instead of starting its own.
+- **Nightly reset.** Visitors create rows the register does not know, so
+  removing the run is not enough: a nightly job empties the demo's
+  database and file directories and loads the demo again. It only runs
+  where `DEMO_DATA=1` is set, never on prod or test.
+
 ## Open questions
 
 None at the moment. Decided (2026-10-26): no persons in the demo, real
