@@ -1045,6 +1045,7 @@ onBeforeUnmount(() => {
 <template>
   <PageLayout
     :title="doc ? (doc.title || doc.original_filename) : 'Dokument'"
+    class="document-page"
     width="full"
     :ready="!loading"
     sticky-header
@@ -2042,6 +2043,24 @@ onBeforeUnmount(() => {
     /* The document scrolls, so the viewer's head pins itself right under
        the app's sticky stack. */
     --pdf-head-top: var(--app-stack-height, 0px);
+  }
+}
+
+/* ── Phone: the document edge to edge ──────────────────────────────────────
+   Below `md` every pixel of width is a pixel of page. The panel gives up the
+   page gutter, its side borders and its rounding, and starts right under the
+   app's stack instead of a gutter below it: the viewer's head then sits
+   where it will stay pinned anyway, and the PDF page takes the full width of
+   the screen. The attributes below keep the gutter. */
+@media (max-width: 767px) {
+  .page.document-page {
+    padding-top: 0;
+  }
+  .pdf-panel {
+    margin-inline: calc(-1 * var(--page-gutter));
+    border-inline: none;
+    border-top: none;
+    border-radius: 0;
   }
 }
 
