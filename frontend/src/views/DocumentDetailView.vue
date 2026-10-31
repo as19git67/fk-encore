@@ -2041,8 +2041,12 @@ onBeforeUnmount(() => {
     overflow-x: clip;
     overflow-y: visible;
     /* The document scrolls, so the viewer's head pins itself right under
-       the app's sticky stack. */
-    --pdf-head-top: var(--app-stack-height, 0px);
+       the app's sticky stack — tucked 1px beneath it. The stack's height is
+       published rounded to whole pixels while the stack itself ends on a
+       fraction (a 3x phone), so an exact `top` can leave a sub-pixel seam
+       through which the pages flicker past while scrolling. The stack sits
+       above the head, so the overlap is never seen. */
+    --pdf-head-top: calc(var(--app-stack-height, 0px) - 1px);
   }
 }
 
