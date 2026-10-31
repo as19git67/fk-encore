@@ -169,11 +169,15 @@ async function loadDocument(bytes: Uint8Array) {
 
 function computeScale(page: PDFPageProxy): number {
   if (zoom.value === FIT_WIDTH) {
-    const containerWidth = containerRef.value?.clientWidth ?? 0
-    if (containerWidth > 0) {
+    const container = containerRef.value
+    const containerWidth = container?.clientWidth ?? 0
+    if (container && containerWidth > 0) {
       const baseViewport = page.getViewport({ scale: 1 })
-      // Leave a little padding so the page doesn't touch the scrollbar.
-      return Math.max(0.1, (containerWidth - 16) / baseViewport.width)
+      // The wrapper's own padding (narrower on a phone) keeps the page off
+      // its edges; the page takes the rest.
+      const style = getComputedStyle(container)
+      const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0)
+      return Math.max(0.1, (containerWidth - padding) / baseViewport.width)
     }
     return 1
   }
@@ -1136,6 +1140,18 @@ onBeforeUnmount(() => {
      from squeezing the (fixed-size) pages. */
   margin: auto;
   flex-shrink: 0;
+}
+
+/* The grey frame around the page is just that, a frame: on a phone it
+   shrinks to a sliver so the page gets the width back. After the rules it
+   overrides, which share its specificity. */
+@media (max-width: 499px) {
+  .canvas-wrapper {
+    padding: var(--space-1);
+  }
+  .page-list {
+    gap: var(--space-2);
+  }
 }
 
 .page-item {

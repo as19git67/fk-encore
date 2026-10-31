@@ -209,6 +209,20 @@ export const Telefonbreite: Story = {
       )
     }
 
+    // On a phone the preview runs edge to edge and the page fills it: no
+    // gutter, no card frame, only a sliver of grey around the page.
+    const panelBox = panel.getBoundingClientRect()
+    if (Math.round(panelBox.left) !== 0 || Math.round(panelBox.right) !== window.innerWidth) {
+      throw new Error(
+        `the preview spans ${Math.round(panelBox.left)}–${Math.round(panelBox.right)}px, not the full ${window.innerWidth}px`,
+      )
+    }
+    const firstPage = stack[0]?.querySelector<HTMLElement>('.page-layer')
+    const pageWidth = firstPage?.getBoundingClientRect().width ?? 0
+    if (window.innerWidth - pageWidth > 12) {
+      throw new Error(`the page is ${Math.round(pageWidth)}px wide on a ${window.innerWidth}px screen`)
+    }
+
     // The attributes follow the pages rather than sitting beside them.
     const meta = await waitFor(() => document.querySelector<HTMLElement>('.meta-panel'))
     if (meta.getBoundingClientRect().top < panel.getBoundingClientRect().bottom) {
