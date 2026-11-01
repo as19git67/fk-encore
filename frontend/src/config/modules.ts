@@ -11,6 +11,13 @@ export interface ModuleMenuItem {
   children?: ModuleMenuItem[]
   /** The module's settings group: shown as the gear, not in the strip. */
   settings?: boolean
+  /**
+   * Opens something in place instead of a route (a dialog the module mounts
+   * through App.vue), raised via `useModuleMenuActionsStore`.
+   */
+  action?: string
+  /** Drawn filled in the primary colour: the module's main action. */
+  primary?: boolean
 }
 
 export interface ModuleConfig {
@@ -21,6 +28,12 @@ export interface ModuleConfig {
   permission?: string
   routes: RouteRecordRaw[]
   menuItems: ModuleMenuItem[]
+  /**
+   * Actions that hold on every page of the module (upload, help). They stand
+   * at the right end of the sub-menu row, outside its scroller, so they cost
+   * no line of a page and stay in the sticky stack.
+   */
+  actionItems?: ModuleMenuItem[]
 }
 
 export const modules: ModuleConfig[] = [
@@ -327,9 +340,21 @@ export const modules: ModuleConfig[] = [
           { label: 'Taxonomie-Tools', icon: 'pi pi-wrench', routeName: 'dokumente-taxonomie-tools', permission: 'data.manage' },
           { label: 'KI-Modell', icon: 'pi pi-microchip-ai', routeName: 'dokumente-ki-modell', permission: 'data.manage' },
           { label: 'KI-Benchmark', icon: 'pi pi-stopwatch', routeName: 'dokumente-ki-benchmark', permission: 'data.manage' },
-          { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
+          { label: 'Standard für neue Dokumente', icon: 'pi pi-sliders-h', action: 'documents.upload-defaults', permission: 'documents.upload' },
         ],
       },
+    ],
+    actionItems: [
+      {
+        label: 'Neu',
+        icon: 'pi pi-plus',
+        primary: true,
+        children: [
+          { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
+          { label: 'Schreiben', icon: 'pi pi-pen-to-square', routeName: 'dokumente-text-neu', permission: 'documents.upload' },
+        ],
+      },
+      { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
     ],
   },
   {

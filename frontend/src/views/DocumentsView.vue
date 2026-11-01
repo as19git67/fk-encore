@@ -8,7 +8,6 @@ import Menu from 'primevue/menu'
 import type { MenuItem } from 'primevue/menuitem'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
-import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
@@ -33,7 +32,6 @@ import {
   listDocumentCategories,
   listDocumentTypesCatalog,
   listCorrespondents,
-  getUploadDefaults,
   listGroups,
   listSubjectPersons,
   searchDocuments,
@@ -207,7 +205,6 @@ const selection = useListSelection({
   total: () => items.value.length,
 })
 const { selectMode, selectedIds } = selection
-const defaultsDialogVisible = ref(false)
 
 function isSelected(id: number) {
   return selectedIds.value.has(id)
@@ -755,57 +752,6 @@ useRealtimeEvent('documents', 'status.changed', (ev) => {
   }
 })
 
-// A saved default group the user is no longer a member of sends new
-// documents to private without a word; the cog button warns about it.
-const uploadDefaultsStale = ref(false)
-
-const mayUpload = computed(() => auth.hasPermission('documents.upload'))
-
-function openHelp() {
-  void router.push({ name: 'dokumente-hilfe' })
-}
-function openWrite() {
-  void router.push({ name: 'dokumente-text-neu' })
-}
-function openUpload() {
-  void router.push({ name: 'dokumente-upload' })
-}
-
-/**
- * On a phone in portrait the title row is hidden; what sat beside the title
- * and is rarely needed goes behind one "more" button on the search line.
- * "Hochladen" stays a button of its own there.
- */
-const moreMenu = ref<InstanceType<typeof Menu> | null>(null)
-const moreItems = computed<MenuItem[]>(() => [
-  ...(mayUpload.value
-    ? [
-        {
-          label: 'Schreiben',
-          icon: 'pi pi-pen-to-square',
-          command: openWrite,
-        },
-        {
-          label: uploadDefaultsStale.value
-            ? 'Standard für neue Dokumente (Gruppe gilt nicht mehr)'
-            : 'Standard für neue Dokumente',
-          icon: uploadDefaultsStale.value ? 'pi pi-exclamation-triangle' : 'pi pi-cog',
-          command: () => { defaultsDialogVisible.value = true },
-        },
-      ]
-    : []),
-  { label: 'Hilfe', icon: 'pi pi-question-circle', command: openHelp },
-])
-
-async function loadUploadDefaults() {
-  if (!auth.hasPermission('documents.upload')) return
-  try {
-    uploadDefaultsStale.value = (await getUploadDefaults()).stale
-  } catch (err: any) {
-    console.warn('[documents] failed to load upload defaults:', err)
-  }
-}
-
 async function loadGroups() {
   try {
     const res = await listGroups()
@@ -822,7 +768,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadUploadDefaults(), loadSubjectPeople(), loadCorrespondents(), load()])
+  await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadSubjectPeople(), loadCorrespondents(), load()])
 })
 </script>
 
@@ -836,97 +782,28 @@ onMounted(async () => {
     legacy-anchor-key="documents"
     :resolve-anchor="resolveListAnchor"
   >
-    <!-- Beside the title on a wide screen. On a phone in portrait the title
-         row is hidden and these move into the toolbar's search line (below),
-         so they cost no line of their own. -->
-    <template v-if="!compactHeader" #actions>
-        <Button
-          icon="pi pi-question-circle"
-          text
-          rounded
-          aria-label="Hilfe zum Dokumente-Modul"
-          v-tooltip.bottom="'Hilfe: Dokument-Flow und Aktionen'"
-          @click="openHelp"
-        />
-        <Button
-          v-if="mayUpload"
-          icon="pi pi-cog"
-          text
-          rounded
-          :severity="uploadDefaultsStale ? 'warn' : undefined"
-          :aria-label="uploadDefaultsStale
-            ? 'Standardeinstellungen für neue Dokumente – Standard-Gruppe gilt nicht mehr'
-            : 'Standardeinstellungen für neue Dokumente'"
-          v-tooltip.bottom="uploadDefaultsStale
-            ? 'Standard-Gruppe gilt nicht mehr: neue Dokumente bleiben privat'
-            : 'Standard-Gruppe für neue Dokumente'"
-          @click="defaultsDialogVisible = true"
-        />
-        <Button
-          v-if="mayUpload"
-          label="Schreiben"
-          icon="pi pi-pen-to-square"
-          severity="secondary"
-          outlined
-          v-tooltip.bottom="'Eigenes Textdokument mit Markdown schreiben'"
-          @click="openWrite"
-        />
-        <Button
-          v-if="mayUpload"
-          label="Hochladen"
-          icon="pi pi-upload"
-          @click="openUpload"
-        />
-    </template>
-
     <!-- Sticky part (lifted into the app stack by PageLayout): toolbar,
          active filter chips, the selection bar and the notices. -->
     <template #toolbar>
       <ListToolbar :model="toolbar">
-        <template v-if="isSearchActive || compactHeader" #search-end>
+        <template v-if="isSearchActive" #search-end>
           <!-- The search mode belongs to the search, so it sits on its line —
-               one button naming the mode, the three choices in its menu. -->
-          <template v-if="isSearchActive">
-            <Button
-              :label="searchModeLabel"
-              icon="pi pi-angle-down"
-              icon-pos="right"
-              size="small"
-              outlined
-              severity="secondary"
-              class="search-mode-btn"
-              aria-haspopup="true"
-              :aria-label="`Suchmodus: ${searchModeLabel}`"
-              v-tooltip.bottom="'Suchmodus'"
-              data-testid="documents-search-mode"
-              @click="searchModeMenu?.toggle($event)"
-            />
-            <Menu ref="searchModeMenu" :model="searchModeItems" :popup="true" />
-          </template>
-          <template v-if="compactHeader">
-            <Button
-              icon="pi pi-ellipsis-v"
-              text
-              rounded
-              size="small"
-              :severity="uploadDefaultsStale ? 'warn' : 'secondary'"
-              aria-label="Weitere Aktionen"
-              aria-haspopup="true"
-              v-tooltip.bottom="'Weitere Aktionen'"
-              data-testid="documents-more"
-              @click="moreMenu?.toggle($event)"
-            />
-            <Menu ref="moreMenu" :model="moreItems" :popup="true" />
-            <Button
-              v-if="mayUpload"
-              icon="pi pi-upload"
-              size="small"
-              aria-label="Dokumente hochladen"
-              v-tooltip.bottom="'Dokumente hochladen'"
-              data-testid="documents-upload"
-              @click="openUpload"
-            />
-          </template>
+             one button naming the mode, the three choices in its menu. -->
+          <Button
+            :label="searchModeLabel"
+            icon="pi pi-angle-down"
+            icon-pos="right"
+            size="small"
+            outlined
+            severity="secondary"
+            class="search-mode-btn"
+            aria-haspopup="true"
+            :aria-label="`Suchmodus: ${searchModeLabel}`"
+            v-tooltip.bottom="'Suchmodus'"
+            data-testid="documents-search-mode"
+            @click="searchModeMenu?.toggle($event)"
+          />
+          <Menu ref="searchModeMenu" :model="searchModeItems" :popup="true" />
         </template>
       </ListToolbar>
     </template>
@@ -1181,11 +1058,6 @@ onMounted(async () => {
       @added="onFiled"
     />
 
-    <DocumentUploadDefaultsDialog
-      v-model:visible="defaultsDialogVisible"
-      :groups="groups"
-      @saved="info = 'Standard für neue Dokumente gespeichert.'; uploadDefaultsStale = false"
-    />
 
     <DocumentFilterMenu
       v-model:visible="filterMenuVisible"

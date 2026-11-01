@@ -76,11 +76,10 @@ steht nur, was das Modul daraus macht.
 
 ## LST: Alle Dokumente (`/dokumente`)
 
-Volle Breite. Oben rechts: Hilfe (Fragezeichen), Zahnrad „Standard für neue
-Dokumente“, „Schreiben“ und „Hochladen“ (die drei letzten nur mit
-`documents.upload`). Auf dem Handy im Hochformat entfällt die Titelzeile:
-„Hochladen“ steht als Symbol am Ende der Suchzeile, „Schreiben“, „Standard
-für neue Dokumente“ und „Hilfe“ liegen dort im Menü „Weitere Aktionen“ (⋮).
+Volle Breite. „Neu“ (Hochladen, Schreiben; nur mit `documents.upload`) und
+„Hilfe“ stehen rechts in der Modulleiste und sind damit auf jeder Seite des
+Moduls erreichbar; „Standard für neue Dokumente“ liegt im Zahnrad oben (ein
+Warnzeichen am Zahnrad, wenn die gespeicherte Gruppe nicht mehr gilt).
 Darunter die Listen-Toolbar, ein Warteschlangen-Streifen,
 der nur bei Aktivität erscheint, ein Streifen mit Sammelmappen-Kacheln und
 die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
@@ -208,11 +207,12 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 
 ### DOK-LST-12 Standardgruppe für neue Dokumente setzen
 
-- **Wo:** Zahnrad oben rechts, Dialog „Standard für neue Dokumente“
+- **Wo:** Zahnrad in der Kopfzeile › „Standard für neue Dokumente“ (auf
+  jeder Seite des Moduls)
 - **Recht:** `documents.upload`
 - **Schritte:** 1. „Privat (Standard)“ oder „Standardmäßig in Gruppe“ mit
   Gruppe wählen. 2. „Speichern“.
-- **Ergebnis:** Grüne Meldung „Standard für neue Dokumente gespeichert.“;
+- **Ergebnis:** Der Dialog schließt, das Warnzeichen am Zahnrad verschwindet;
   alles, was ab jetzt hochgeladen oder geschrieben wird, bekommt diese
   Sichtbarkeit.
 - **Fehler und Grenzfälle:** Ist die Person nicht mehr Mitglied der
@@ -235,8 +235,8 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 
 ### DOK-LST-14 Zur Hilfe, zum Hochladen, zum Schreiben
 
-- **Wo:** Fragezeichen, „Hochladen“, „Schreiben“ oben rechts; auf dem Handy
-  im Hochformat „Hochladen“ am Ende der Suchzeile, der Rest im Menü ⋮
+- **Wo:** „Hilfe“ und „Neu“ › „Hochladen“ / „Schreiben“ rechts in der
+  Modulleiste
 - **Ergebnis:** `HLF`, `UPL`, `TXT`.
 - **Test:** –
 

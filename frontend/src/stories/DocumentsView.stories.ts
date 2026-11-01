@@ -144,8 +144,8 @@ export const KeineTreffer: Story = {
 }
 
 /**
- * A phone in portrait: the title row is hidden, so search mode, the "more"
- * menu (Schreiben, Standard, Hilfe) and "Hochladen" sit on the search line,
+ * A phone in portrait: the title row is hidden (the page actions live in the
+ * module's sub-menu row and gear), the search mode sits on the search line,
  * and the buttons share their line with the result count.
  */
 export const HandyHochformatSuche: Story = {
