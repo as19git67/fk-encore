@@ -841,7 +841,7 @@ e2e:playwright:
     ADMIN_EMAIL: admin@example.com
     ADMIN_PASSWORD: admin
     ADMIN_NAME: Admin
-    E2E_SEED_DEMO: "1"
+    DEMO_DATA: small
     RP_ORIGIN: http://localhost:5173
     RP_NAME: FK Encore E2E
     RP_ID: localhost
