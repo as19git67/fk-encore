@@ -43,7 +43,7 @@ import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { draftTitleOf, TEXT_DRAFT_STATE_KEY, type TextDraft } from '../utils/markdown'
 import { useAtLeast } from '../composables/useBreakpoint'
-import { applyEvent, emptyTurn, suggestedQuestions, type LiveTurn } from '../utils/assistantTurn'
+import { applyEvent, emptyTurn, suggestedQuestions, type LiveTurn, type TurnDraft } from '../utils/assistantTurn'
 import { latestUsage } from '../utils/contextUsage'
 
 /** How long the server usually needs to name a new conversation. */
@@ -63,7 +63,12 @@ const confirm = useConfirm()
 const wide = useAtLeast('lg')
 
 const conversations = ref<ConversationSummary[]>([])
-const messages = ref<ConversationMessage[]>([])
+/**
+ * The drafts of an answer given in this visit stay with it (folded): what the
+ * user read while it was written does not vanish when it is done. The server
+ * keeps only the answer, so a reload shows that alone.
+ */
+const messages = ref<(ConversationMessage & { drafts?: TurnDraft[] })[]>([])
 /** The working set of the open conversation. */
 const context = ref<ContextItem[]>([])
 const live = ref<LiveTurn | null>(null)
@@ -249,6 +254,7 @@ async function send(question: string) {
           content: res.answer,
           blocks: res.blocks,
           context_usage: res.context_usage ?? null,
+          drafts: live.value?.drafts,
           created_at: new Date().toISOString(),
         }]
       }
@@ -359,6 +365,7 @@ function remove(conversation: ConversationSummary) {
             :role="m.role"
             :content="m.content"
             :blocks="m.blocks"
+            :drafts="m.drafts"
             :message-id="m.id > 0 ? m.id : undefined"
             :keepable="mayKeep"
             @keep="keepAsDocument"
@@ -367,6 +374,7 @@ function remove(conversation: ConversationSummary) {
             v-if="live && liveFor === activeId"
             role="assistant"
             :content="live.text"
+            :drafts="live.drafts"
             :steps="live.steps"
             :blocks="live.blocks"
             :error="live.error"
