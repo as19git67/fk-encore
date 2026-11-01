@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useAccountsStore } from '../stores/finance/accounts'
 import { modules, detectModule, landingPath, refusedRouteFallback, MODULE_ROUTE_KEY_PREFIX } from '../config/modules'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
@@ -144,6 +145,16 @@ router.beforeEach(async (to) => {
     await auth.refreshUser()
     if (!auth.hasPermission(requiredPermission)) {
       return refusedRouteFallback(to.fullPath, (p) => auth.hasPermission(p))
+    }
+  }
+
+  // Kurse and Portfolio need a depot among the accounts the user may read;
+  // without one a direct link lands on the finance overview instead.
+  if (to.meta.requiresDepot) {
+    const accounts = useAccountsStore()
+    await accounts.ensureLoaded()
+    if (accounts.loaded && !accounts.hasDepot) {
+      return { name: 'finance-overview' }
     }
   }
 })
