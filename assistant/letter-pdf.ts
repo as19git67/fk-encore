@@ -9,7 +9,8 @@
  * the punch mark at 148.5 mm sit on the left edge. Two blank lines stand
  * between subject and salutation, one between paragraphs, three between the
  * closing formula and the name for the signature; a following page carries
- * its number.
+ * its number. Enclosed photos follow the letter, one per page under their
+ * title; they are enclosures, so the letter's page count leaves them out.
  */
 
 import PDFDocument from "pdfkit";
@@ -49,6 +50,14 @@ export interface LetterContent {
   date: string;
   /** Titles of the enclosures, listed under "Anlagen". */
   attachments: string[];
+  /** Photos printed after the letter, one per page (their titles belong in `attachments` too). */
+  photos?: LetterPhoto[];
+}
+
+export interface LetterPhoto {
+  title: string;
+  /** Upright and scaled already. */
+  jpeg: Buffer;
 }
 
 /** A gap the model left for the user: `[[Rechnungsdatum]]`. */
@@ -178,6 +187,17 @@ export function renderLetterPdf(letter: LetterContent): Promise<Buffer> {
           width: textWidth, align: "right", lineBreak: false,
         });
     }
+  }
+
+  for (const photo of letter.photos ?? []) {
+    pdf.addPage({ margins: { top: 20 * MM, bottom: 20 * MM, left: g.left * MM, right: g.right * MM } });
+    pdf.font("Helvetica-Bold").fontSize(11).fillColor("#000")
+      .text(text(`Anlage: ${photo.title}`), g.left * MM, 20 * MM, { width: textWidth });
+    const top = pdf.y + 4 * MM;
+    pdf.image(photo.jpeg, g.left * MM, top, {
+      fit: [textWidth, (g.pageHeight - 20) * MM - top],
+      align: "center",
+    });
   }
 
   pdf.end();

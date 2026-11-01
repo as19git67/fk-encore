@@ -31,6 +31,7 @@ function formOf(p: Proposal): LetterForm | null {
     body: l.body,
     destinations: [...l.destinations],
     attachmentIds: l.attachments.map((a) => a.id),
+    photoIds: (l.photos ?? []).map((p) => p.id),
   }
 }
 
@@ -52,6 +53,7 @@ function letterEdits(): ProposalEdits | undefined {
     body: f.body,
     destinations: f.destinations,
     attachment_ids: f.attachmentIds,
+    ...(current.value.letter?.photos?.length ? { photo_ids: f.photoIds } : {}),
   }
 }
 

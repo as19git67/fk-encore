@@ -832,7 +832,16 @@ behind it.
        The related-documents panel shows the link from both sides as its
        first group, "Antwort und Bezug". There is no `source = assistant`
        column; the link and the letter row say where it came from.
-     - Photos are context only; enclosing them as pages is left for later.
+     - Photos go along as pages after the letter (`assistant/letter-photos.ts`):
+       `render_letter` takes `attachment_photo_ids`, by default the working
+       set's photos, at most 12; each is read upright and scaled to a 2000 px
+       edge, printed under "Anlage: <title>" and listed under "Anlagen". Only
+       users with `module.photos` and `photos.view` enclose any, and only
+       photos the gallery would show them (`accessiblePhotoCondition`); the
+       download re-reads them as the user asking. The card lists the photos
+       to tick off, but adds none. The letter's page count leaves them out.
+       They are stored in `assistant_letter.attachments` with `kind: "photo"`,
+       and stay in the PDF, not as members of the Sammelmappe.
 
 8. **iOS** (later, own plan). The service API is the contract; the
    stream endpoint is a WebSocket the iOS client can consume like
@@ -883,9 +892,11 @@ from the model.
 ## Open questions
 
 - How many tool rounds a question may take before the wait is too long:
-  stage 1's timing answers it. If the CPU fallback cannot carry a tool
-  turn, the assistant is offered only when the active config runs on the
-  `server` backend, and the page says so.
+  answered by stage 1's timing — Gemma on the GPU needs a median of three
+  rounds at under a second each. The CPU fallback cannot carry a tool turn
+  (11 of 26 cases, answers from imagination). Still open: offering the
+  assistant only when the active config runs on the `server` backend, with
+  the page saying so.
 - "Immobilie" has no entity. The second question works through
   categories and the search text today; a property entity (address,
   documents, meters, bookings) is its own feature and not a prerequisite.
@@ -893,11 +904,10 @@ from the model.
   relevant to the purchase" is a search today and would be a lookup with
   an entity. It is also the natural home of the yield, which the saved
   analysis of stage 6 only approximates.
-- Which rows `document_page_words` keeps: the resolver-corrected rows
-  (what the letterhead read and the classifier see) rather than
-  Tesseract's raw words. The corrected ones are what the stored text was
-  rendered from, so a search over the text and a search over the boxes
-  find the same thing. The uncorrected reading is not kept.
+- Which rows `document_page_words` keeps: decided in stage 6 — the
+  resolver-corrected rows (what the letterhead read and the classifier
+  see), not Tesseract's raw words, so a search over the text and a search
+  over the boxes find the same thing. The uncorrected reading is not kept.
 - What the yield means has to be printed, not assumed: gross rent over
   purchase price is one number, net of repairs and annualised another.
   The tool prints its formula and the period on the report, and the

@@ -200,4 +200,25 @@ describe('ProposalCard', () => {
     await flushPromises()
     expect(vi.mocked(executeProposal).mock.calls[0]![1]!.attachment_ids).toEqual([205])
   })
+
+  it('lists the proposed photos and sends the ones left ticked', async () => {
+    vi.mocked(executeProposal).mockResolvedValue({ ...letter, status: 'executed', result_summary: 'Brief erstellt' })
+    const withPhotos: Proposal = {
+      ...letter,
+      letter: {
+        ...letter.letter!,
+        body: 'Sehr geehrte Damen und Herren,\n\nanbei die Fotos.',
+        gaps: [],
+        photos: [{ id: 31, title: 'Foto vom 12.08.2026' }, { id: 32, title: 'Foto vom 13.08.2026' }],
+      },
+    }
+    const el = mountCard(withPhotos)
+    expect(el.textContent).toContain('Fotos (je eine Seite hinter dem Brief)')
+    el.querySelector<HTMLInputElement>('#letter-9-photo-32')!.click()
+    await flushPromises()
+
+    button(el, 'Ausführen').click()
+    await flushPromises()
+    expect(vi.mocked(executeProposal).mock.calls[0]![1]!.photo_ids).toEqual([31])
+  })
 })

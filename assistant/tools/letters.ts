@@ -2,7 +2,8 @@
  * Letters from selected context (documentation/plans/ki-assistent.md,
  * stage 8, #1534). The model writes the text; the server adds what it knows
  * for certain — the sender from the user's profile, today's date, the
- * enclosures by their titles — and renders a DIN 5008 page. Gaps the model
+ * enclosures by their titles, photos as pages after the letter — and renders
+ * a DIN 5008 page. Gaps the model
  * could not fill stay as `[[…]]`; the card shows the letter for editing and
  * refuses to send it off while one is left.
  */
@@ -14,6 +15,7 @@ import { assistantLetter, users } from "../../db/schema";
 import { documentTitle } from "../briefs";
 import { str } from "../format";
 import { gapsIn, lines, renderLetterPdf } from "../letter-pdf";
+import { letterPhotoPages, letterPhotoTitles, mayEnclosePhotos, MAX_LETTER_PHOTOS } from "../letter-photos";
 import type {
   LetterAttachment,
   LetterDestination,
@@ -92,6 +94,16 @@ function attachmentsOf(v: unknown): LetterAttachment[] {
     : [];
 }
 
+function photosOf(v: unknown): LetterAttachment[] {
+  return Array.isArray(v)
+    ? v.flatMap((a) => {
+        const o = (a && typeof a === "object" ? a : {}) as Record<string, unknown>;
+        const id = Number(o.id);
+        return Number.isInteger(id) && id > 0 ? [{ id, title: String(o.title ?? `Foto ${id}`) }] : [];
+      })
+    : [];
+}
+
 function destinationsOf(v: unknown): LetterDestination[] {
   return Array.isArray(v) ? DESTINATIONS.filter((d) => v.includes(d)) : [];
 }
@@ -106,6 +118,7 @@ function draftOf(args: Record<string, unknown>): LetterDraft {
   return {
     ...letter,
     attachments: attachmentsOf(args.attachments),
+    photos: photosOf(args.photos),
     destinations: destinationsOf(args.destinations),
     gaps: gapsIn(letter.sender, letter.recipient, letter.subject, letter.body),
   };
@@ -125,6 +138,11 @@ function editOf(args: Record<string, unknown>, edits: ProposalEdits): Record<str
     const known = new Map(attachmentsOf(args.attachments).map((a) => [a.id, a]));
     const ids = [...new Set(edits.attachment_ids.filter((n) => Number.isInteger(n) && n > 0))].slice(0, MAX_ATTACHMENTS);
     next.attachments = ids.map((id) => known.get(id) ?? { id, title: `Dokument ${id}` });
+  }
+  if (edits.photo_ids) {
+    // The card only takes photos off; it cannot add one the assistant did not propose.
+    const keep = new Set(edits.photo_ids);
+    next.photos = photosOf(args.photos).filter((p) => keep.has(p.id));
   }
   return next;
 }
@@ -166,7 +184,7 @@ async function rememberAddress(userId: number, sender: string): Promise<void> {
 
 export const renderLetter: WriteToolDefinition = {
   name: "render_letter",
-  summary: "Propose a letter as a DIN 5008 PDF: you write salutation, text and the closing formula; the server adds the user's sender block, today's date, the signature with the user's name and the enclosures. Everything the user wants mentioned goes into body. For any fact you do not have, write a gap naming it in double brackets, e.g. [[Mitgliedsnummer]]. Enclosures default to the documents of the working set.",
+  summary: "Propose a letter as a DIN 5008 PDF: you write salutation, text and the closing formula; the server adds the user's sender block, today's date, the signature with the user's name and the enclosures. Everything the user wants mentioned goes into body. For any fact you do not have, write a gap naming it in double brackets, e.g. [[Mitgliedsnummer]]. Enclosures default to the documents of the working set; photos go along as pages after the letter.",
   permissions: ["module.assistant"],
   parameters: {
     type: "object",
@@ -178,6 +196,11 @@ export const renderLetter: WriteToolDefinition = {
         type: "array",
         items: { type: "integer" },
         description: "documents enclosed with the letter (ids from the working set or an earlier tool result in this conversation, e.g. the contract a termination refers to); default: the documents of the working set",
+      },
+      attachment_photo_ids: {
+        type: "array",
+        items: { type: "integer" },
+        description: `photos printed after the letter, one per page (e.g. the damage a claim describes; ids from the working set or an earlier photo result), at most ${MAX_LETTER_PHOTOS}; default: the photos of the working set. Pass [] for none`,
       },
     },
     required: ["body"],
@@ -196,10 +219,12 @@ export const renderLetter: WriteToolDefinition = {
       : (ctx.context ?? []).filter((r) => r.type === "document").map((r) => r.id);
     const ids = [...new Set(askedFor)].slice(0, MAX_ATTACHMENTS);
     const attachments = await titlesOf(ids, ctx);
+    const photos = await photoTitlesOf(photoIdsAskedFor(args, ctx), ctx);
 
-    const draft = draftOf({ sender, recipient, subject, body, attachments, destinations: ["document"] });
+    const draft = draftOf({ sender, recipient, subject, body, attachments, photos, destinations: ["document"] });
     const parts = [`Brief „${subject}“ an ${firstLine(recipient) || "?"}`];
     if (attachments.length) parts.push(`${plural(attachments.length, "Anlage", "Anlagen")}`);
+    if (photos.length) parts.push(`${plural(photos.length, "Foto", "Fotos")} als Anlage`);
     if (draft.gaps.length) parts.push(`${plural(draft.gaps.length, "Lücke", "Lücken")} zum Ausfüllen`);
     const leftOut = factsLeftOut(textsReadThisTurn(ctx), `${subject}\n${written}`);
     const notes = [
@@ -211,15 +236,19 @@ export const renderLetter: WriteToolDefinition = {
     if (left) notes.push(left);
     return {
       summary: parts.join(", "),
-      arguments: { sender, recipient, subject, body, attachments, destinations: ["document"] },
-      count: attachments.length || undefined,
+      arguments: { sender, recipient, subject, body, attachments, photos, destinations: ["document"] },
+      count: attachments.length + photos.length || undefined,
       note: notes.join(" "),
     };
   },
   async execute(args, ctx) {
     const drafted = draftOf(args);
     // Enclosures may have been added on the card: only what the user can see goes along.
-    const letter = { ...drafted, attachments: await titlesOf(drafted.attachments.map((a) => a.id), ctx) };
+    const letter = {
+      ...drafted,
+      attachments: await titlesOf(drafted.attachments.map((a) => a.id), ctx),
+      photos: await photoTitlesOf(drafted.photos.map((p) => p.id), ctx),
+    };
     if (letter.gaps.length) {
       throw new Error(`Der Brief hat noch Lücken: ${letter.gaps.join(", ")}. Bitte im Text ausfüllen.`);
     }
@@ -235,7 +264,7 @@ export const renderLetter: WriteToolDefinition = {
         subject: letter.subject,
         body: letter.body,
         letter_date: ctx.today,
-        attachments: letter.attachments,
+        attachments: [...letter.attachments, ...letter.photos.map((p) => ({ ...p, kind: "photo" as const }))],
       })
       .returning({ id: assistantLetter.id });
     await rememberAddress(userId, letter.sender);
@@ -246,7 +275,12 @@ export const renderLetter: WriteToolDefinition = {
     let documentId: number | null = null;
     let collectionId: number | null = null;
     if (wanted.has("document") || wanted.has("collection")) {
-      const pdf = await renderLetterPdf({ ...letter, date: ctx.today, attachments: letter.attachments.map((a) => a.title) });
+      const pdf = await renderLetterPdf({
+        ...letter,
+        date: ctx.today,
+        attachments: [...letter.attachments, ...letter.photos].map((a) => a.title),
+        photos: (await letterPhotoPages(userId, letter.photos)).pages,
+      });
       const stored = (await documents.storeGeneratedDocument({
         filename: fileName(letter.subject, ctx.today),
         title: letter.subject,
@@ -284,6 +318,20 @@ export const renderLetter: WriteToolDefinition = {
   draft: draftOf,
   edit: editOf,
 };
+
+/** The photos the model named, else the working set's; at most MAX_LETTER_PHOTOS. */
+function photoIdsAskedFor(args: Record<string, unknown>, ctx: ToolContext): number[] {
+  const asked = Array.isArray(args.attachment_photo_ids)
+    ? args.attachment_photo_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : (ctx.context ?? []).filter((r) => r.type === "photo").map((r) => r.id);
+  return [...new Set(asked)].slice(0, MAX_LETTER_PHOTOS);
+}
+
+/** The enclosed photos' titles; none without the photo permissions, none the user cannot see. */
+async function photoTitlesOf(ids: number[], ctx: ToolContext): Promise<LetterAttachment[]> {
+  if (!ids.length || !mayEnclosePhotos(ctx.user.permissions)) return [];
+  return letterPhotoTitles(Number(ctx.user.userID), ids);
+}
 
 /** The enclosures' titles; a document the user cannot see is left out. */
 async function titlesOf(ids: number[], ctx: ToolContext): Promise<LetterAttachment[]> {

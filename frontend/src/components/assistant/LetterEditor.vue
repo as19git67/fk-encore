@@ -6,7 +6,8 @@
  * named above the fields, each a jump to where it stands, and the fields
  * holding one are marked; the card does not send the letter while one is left.
  * Further documents can be searched and enclosed; the server checks on
- * "Ausführen" that the user may see them.
+ * "Ausführen" that the user may see them. Photos the assistant proposed go
+ * along as pages after the letter and can be ticked off.
  */
 import { computed, nextTick, ref } from 'vue'
 import AutoComplete, { type AutoCompleteOptionSelectEvent } from 'primevue/autocomplete'
@@ -24,6 +25,7 @@ export interface LetterForm {
   body: string
   destinations: LetterDestination[]
   attachmentIds: number[]
+  photoIds: number[]
 }
 
 const props = defineProps<{ letter: LetterDraft; disabled?: boolean; idPrefix: string }>()
@@ -36,6 +38,7 @@ type Enclosure = { id: number; title: string }
 /** Documents the user enclosed on the card, beside the ones the assistant proposed. */
 const added = ref<Enclosure[]>([])
 const enclosures = computed<Enclosure[]>(() => [...props.letter.attachments, ...added.value])
+const photos = computed<Enclosure[]>(() => props.letter.photos ?? [])
 const enclosed = computed(() => form.value.attachmentIds.length > 0)
 
 const DESTINATIONS = computed<{ value: LetterDestination; label: string }[]>(() => [
@@ -163,6 +166,14 @@ defineExpose({ focusGap })
         @complete="searchEnclosures"
         @option-select="enclose"
       />
+    </fieldset>
+
+    <fieldset v-if="photos.length" class="letter-choices">
+      <legend>Fotos (je eine Seite hinter dem Brief)</legend>
+      <div v-for="p in photos" :key="p.id" class="letter-choice">
+        <Checkbox v-model="form.photoIds" :input-id="id(`photo-${p.id}`)" :value="p.id" :disabled="disabled" />
+        <label :for="id(`photo-${p.id}`)">{{ p.title }}</label>
+      </div>
     </fieldset>
 
     <fieldset class="letter-choices">

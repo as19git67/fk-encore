@@ -179,6 +179,8 @@ export interface LetterDraft {
   subject: string
   body: string
   attachments: { id: number; title: string }[]
+  /** Photos printed after the letter, one per page; absent on drafts from before they could go along. */
+  photos?: { id: number; title: string }[]
   destinations: LetterDestination[]
   /** What the model left as `[[…]]` for the user to fill in. */
   gaps: string[]
@@ -192,6 +194,7 @@ export interface ProposalEdits {
   body?: string
   destinations?: LetterDestination[]
   attachment_ids?: number[]
+  photo_ids?: number[]
   collage?: CollageEdits
 }
 
