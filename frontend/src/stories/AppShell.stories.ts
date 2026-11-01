@@ -116,6 +116,13 @@ export const Dokumente: Story = {
   render: shellAt('/dokumente'),
 }
 
+/** "Neu" and "Hilfe" stand at the right of the sub-menu row, as icons on a phone. */
+export const DokumenteTelefon: Story = {
+  name: 'Modul Dokumente auf Telefonbreite (Neu und Hilfe rechts)',
+  parameters: { testViewport: { width: 390, height: 844 } },
+  render: shellAt('/dokumente'),
+}
+
 export const Finanzen: Story = {
   name: 'Modul Finanzen',
   render: shellAt('/finanzen'),

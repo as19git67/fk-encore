@@ -13,7 +13,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import db from "../db/database";
 import { assistantProposal } from "../db/schema";
-import type { JsonSchema, ResultBlock, ToolContext, ToolOutcome, ToolSpec } from "./types";
+import { AFTER_EXECUTE, type JsonSchema, type ResultBlock, type ToolContext, type ToolOutcome, type ToolSpec } from "./types";
 import type { CollageTextPosition, CollageTextSize } from "../photo/collage";
 
 /** What a write tool would do, ready to store. */
@@ -153,6 +153,12 @@ export interface ProposalRow {
   text_document: TextDocumentPreview | null;
   /** Set for a collage: what will be rendered, and afterwards the photo it became. */
   collage: CollagePreview | null;
+  /**
+   * What the assistant goes on with once the card ran — the rest of the
+   * question that needs its result. The app asks it to continue right after
+   * "Ausführen"; null when nothing waits on the card.
+   */
+  continuation: string | null;
 }
 
 /** Per tool, how its stored arguments become the card's editable letter. */
@@ -179,6 +185,25 @@ function collageOf(tool: string, args: Record<string, unknown>, result: Record<s
   return collage ? collage(args, result) : null;
 }
 
+const MAX_CONTINUATION_CHARS = 300;
+
+
+/** The continuation as stored: trimmed, null for nothing or a placeholder ("nichts", "none"). */
+export function cleanContinuation(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length < 4 || /^(?:nichts|keine[rs]?|none|nothing|n\/a|-+)\.?$/i.test(text)) return null;
+  return text.length > MAX_CONTINUATION_CHARS ? `${text.slice(0, MAX_CONTINUATION_CHARS - 1).trimEnd()}…` : text;
+}
+
+/** Sets what the assistant goes on with once the card ran, for a proposal of this turn that has none yet. */
+export async function setContinuation(id: number, continuation: string): Promise<void> {
+  await db
+    .update(assistantProposal)
+    .set({ continuation })
+    .where(and(eq(assistantProposal.id, id), sql`${assistantProposal.continuation} IS NULL`));
+}
+
 function proposalBlock(row: ProposalRow): ResultBlock {
   return { kind: "proposal", tool: row.tool, rows: [{ ...row }] };
 }
@@ -196,9 +221,13 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
     kind: "write",
     summary: def.summary,
     permissions: def.permissions,
+    // `after_execute` is not in the schema: the loop lets it through for every
+    // write tool and the system prompt names it once.
     parameters: def.parameters,
     source: "hand",
-    async run(args, ctx): Promise<ToolOutcome> {
+    async run(rawArgs, ctx): Promise<ToolOutcome> {
+      const { [AFTER_EXECUTE]: after, ...args } = rawArgs;
+      const continuation = cleanContinuation(after);
       const prepared = await def.prepare(args, ctx);
       const [stored] = await db
         .insert(assistantProposal)
@@ -208,6 +237,7 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
           tool: def.name,
           arguments: prepared.arguments,
           summary: prepared.summary,
+          continuation,
         })
         .returning({ id: assistantProposal.id });
       const row: ProposalRow = {
@@ -223,12 +253,16 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
         letter: letterOf(def.name, prepared.arguments),
         text_document: textDocumentOf(def.name, prepared.arguments),
         collage: collageOf(def.name, prepared.arguments),
+        continuation,
       };
       return {
         text: [
           `Proposal #${stored.id} created, NOT executed: ${prepared.summary}.`,
           ...(prepared.note ? [prepared.note] : []),
           "The user sees a card with \"Ausführen\" and \"Verwerfen\" and decides. Tell them what you proposed; never say it is done.",
+          continuation
+            ? `Once the user pressed "Ausführen", the app asks you to go on with: ${continuation}. Do not try that step now; say you continue with it as soon as the card is executed.`
+            : `A step of the request that needs this card's result waits until it is executed — that is no failure: do not try it now and never say you could not do it; say you go on with it once the card ran.`,
         ].join("\n"),
         digest: `[earlier proposal #${stored.id}: ${prepared.summary}]`,
         rowCount: prepared.count ?? 1,
@@ -342,7 +376,74 @@ export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {
     letter: letterOf(row.tool, row.arguments),
     text_document: textDocumentOf(row.tool, row.arguments),
     collage: collageOf(row.tool, row.arguments, row.status === "executed" ? (row.result as Record<string, unknown> | null) : null),
+    continuation: row.status === "discarded" ? null : row.continuation ?? null,
   };
+}
+
+// ── the state of earlier cards, for later turns ───────────────────────────
+
+const CREATED_RE = /^Proposal #(\d+) created, NOT executed/;
+const DIGEST_RE = /^\[earlier proposal #(\d+):/;
+
+/** A proposal as later turns need to know it: what became of it. */
+export interface ProposalState {
+  status: ProposalStatus;
+  summary: string;
+  result_summary: string | null;
+  route: string | null;
+  details: Record<string, unknown> | null;
+}
+
+/** The proposals of a conversation, by id, as they stand now. */
+export async function proposalStates(conversationId: number): Promise<Map<number, ProposalState>> {
+  const rows = await db
+    .select({ id: assistantProposal.id, status: assistantProposal.status, summary: assistantProposal.summary, result: assistantProposal.result })
+    .from(assistantProposal)
+    .where(eq(assistantProposal.conversation_id, conversationId));
+  return new Map(rows.map((r) => {
+    const result = (r.result ?? {}) as { summary?: unknown; route?: unknown; details?: unknown };
+    const executed = r.status === "executed";
+    return [r.id, {
+      status: r.status,
+      summary: r.summary,
+      result_summary: executed && typeof result.summary === "string" ? result.summary : null,
+      route: executed && typeof result.route === "string" ? result.route : null,
+      details: executed && result.details && typeof result.details === "object" ? result.details as Record<string, unknown> : null,
+    }];
+  }));
+}
+
+/** One line on what became of a card, as the model reads it in a later turn. */
+export function proposalStateText(id: number, state: ProposalState): string {
+  switch (state.status) {
+    case "executed": {
+      const details = state.details && Object.keys(state.details).length ? ` (${JSON.stringify(state.details)})` : "";
+      return `Proposal #${id} (${state.summary}) was EXECUTED by the user: ${state.result_summary ?? "done"}${details}. It is done — never say it still waits for confirmation or is not confirmed.`;
+    }
+    case "discarded":
+      return `Proposal #${id} (${state.summary}) was DISCARDED by the user; nothing was changed.`;
+    case "executing":
+      return `Proposal #${id} (${state.summary}) is being executed right now.`;
+    default:
+      return "";
+  }
+}
+
+/**
+ * A proposal's tool result (or its digest) from an earlier turn, rewritten to
+ * what became of the card since: the stored text says "NOT executed" for
+ * good, and a later turn that read it kept telling the user the card still
+ * waited although it had run. A pending card and any other text stay as they
+ * are.
+ */
+export function currentProposalText(content: string, states: Map<number, ProposalState>): string {
+  const match = CREATED_RE.exec(content) ?? DIGEST_RE.exec(content);
+  if (!match) return content;
+  const id = Number(match[1]);
+  const state = states.get(id);
+  if (!state || state.status === "pending") return content;
+  const text = proposalStateText(id, state);
+  return DIGEST_RE.test(content) ? `[${text}]` : text;
 }
 
 /**

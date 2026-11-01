@@ -138,6 +138,16 @@ onMounted(() => {
 })
 
 const stackTarget = `#${STACK_TARGET_ID}`
+/**
+ * A hidden title with nothing beside it: the header keeps the heading for
+ * screen readers but takes no line and no gap (a phone in portrait, where
+ * the documents list carries its actions in the toolbar).
+ */
+// A function, not a computed: slots are not reactive, and the view decides
+// per render (portrait or not) whether it fills `#actions`.
+function isBareHeader(): boolean {
+  return !!props.titleHidden && !props.hint && !slots.actions && !slots.back && !slots.menu
+}
 const hasStackContent = computed(() => props.stickyHeader || !!(slots.toolbar || slots.notice || slots.selection))
 
 watch(
@@ -287,7 +297,7 @@ defineExpose({ contentEl })
     <!-- With a sticky header the hint stays on the page: it explains the
          page once, it does not need to follow the reader down. -->
     <p v-if="stickyHeader && hint" class="page-hint page-hint--lead">{{ hint }}</p>
-    <header v-if="!stickyHeader" class="page-header" :class="{ 'page-header--back': !!slots.back, 'page-header--menu': !!slots.menu }">
+    <header v-if="!stickyHeader" class="page-header" :class="{ 'page-header--back': !!slots.back, 'page-header--menu': !!slots.menu, 'page-header--bare': isBareHeader() }">
       <div class="page-heading">
         <div class="page-title-line">
           <div v-if="slots.back" class="page-back" data-testid="page-back">
@@ -434,6 +444,9 @@ defineExpose({ contentEl })
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;
+}
+.page-header--bare {
+  position: absolute;
 }
 .page-title--hidden {
   position: absolute;

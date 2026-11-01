@@ -1996,6 +1996,13 @@
       "when": 1790330000000,
       "tag": "0285_demo_photo",
       "breakpoints": true
+    },
+    {
+      "idx": 286,
+      "version": "7",
+      "when": 1790340000000,
+      "tag": "0286_assistant_proposal_continuation",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,9 @@ import {
   executeProposal,
   ProposalError,
   refreshProposalBlocks,
+  currentProposalText,
+  proposalStates,
+  setContinuation,
   type ProposalEdits,
   type ProposalRow,
 } from "./proposals";
@@ -264,6 +267,9 @@ export async function history(conversationId: number): Promise<{ messages: ChatM
     .where(eq(assistantMessage.conversation_id, conversationId))
     .orderBy(desc(assistantMessage.id))
     .limit(HISTORY_TURNS * 12)).reverse();
+  // A card decided since its turn: the stored result still says "NOT executed".
+  const states = await proposalStates(conversationId);
+  const current = (text: string | null) => (text === null ? null : currentProposalText(text, states));
 
   interface Turn {
     messages: ChatMessage[];
@@ -292,9 +298,10 @@ export async function history(conversationId: number): Promise<{ messages: ChatM
       if (!m.tool_call_id || !open.has(m.tool_call_id)) continue;
       const name = open.get(m.tool_call_id)!;
       open.delete(m.tool_call_id);
-      turn.messages.push({ role: "tool", tool_call_id: m.tool_call_id, content: m.content ?? m.digest ?? "[no result kept]" });
-      if (m.digest) digests[m.tool_call_id] = m.digest;
-      turn.tools.push({ tool: name, digest: m.digest ?? null });
+      const digest = current(m.digest);
+      turn.messages.push({ role: "tool", tool_call_id: m.tool_call_id, content: current(m.content) ?? digest ?? "[no result kept]" });
+      if (digest) digests[m.tool_call_id] = digest;
+      turn.tools.push({ tool: name, digest });
     } else if (m.tool_calls) {
       closeCalls();
       turn.messages.push({
@@ -478,6 +485,8 @@ async function answerQuestion({ auth, question, conversation, emit, signal }: Pr
       }),
     }));
 
+    // The plan's steps that wait for this turn's card go with the card.
+    if (result.continuation) await setContinuation(result.continuation.proposalId, result.continuation.text);
     const contextUsage: ContextUsage = { ...result.context, earlierTurns, summarizedTurns: earlier.summarized };
     const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults, contextUsage);
     summarizeLater(conversation.id, messageId, result.transcript);

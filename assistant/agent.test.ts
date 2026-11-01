@@ -7,6 +7,7 @@ import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
 import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isBareYes, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, loosenGuard, openQuestion, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
+import { checkArguments } from "./arguments";
 import { MalformedReplyError, type ChatRequest, type ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
 import { CHECK_ANSWER_NAME, isCheckRequest, ungroundedNudge, unverifiedNote } from "./verify";
@@ -1346,5 +1347,47 @@ describe("what the GPU runs of 2026-10-27 showed: replies llama-server could not
     const clean = scripted([answer("Gern geschehen!")]);
     const res = await runTurn({ user: USER, history: [], question: "Danke!", tools: catalogFor(USER), chat: clean.fn, now: NOW });
     expect(res.malformedReplies).toBeUndefined();
+  });
+});
+
+describe("a plan whose next step waits for a card", () => {
+  it("does not push for the open steps once a card was made, and hands them to the card", async () => {
+    // The card is a row of its own user's.
+    const { default: db } = await import("../db/database");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`INSERT INTO users (id, email, name, password_hash) VALUES (7, 'u7@test.local', 'User7', 'x') ON CONFLICT (id) DO NOTHING`);
+    const albumUser = { userID: "7", permissions: [...EVERYTHING, "albums.manage"] };
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 5 }, { id: 6 }] });
+    clients.photo.listAlbums.mockResolvedValue({ albums: [] });
+    const { fn, requests } = scripted([
+      planReply([["create_album", "das Album anlegen"], ["add_photos_to_album", "die Fotos vom Juli dazu"]]),
+      calls(["create_album", { name: "Sommer", photos: { favorite: true } }]),
+      answer("Ich habe das Album vorgeschlagen; nach dem Ausführen mache ich die Collage."),
+    ]);
+    const res = await runTurn({
+      user: albumUser, history: [], question: "Leg ein Album mit meinen Favoriten an und dann füg die Fotos vom Juli dazu.",
+      tools: catalogFor(albumUser), chat: fn, now: NOW,
+    });
+    // The status after the card says the rest waits, not "call step 2 now".
+    const afterCard = String(requests[2]!.messages.at(-1)!.content);
+    expect(afterCard).toContain("A proposal card was made. The steps still open (add_photos_to_album — die Fotos vom Juli dazu) wait until the user pressed \"Ausführen\"");
+    expect(afterCard).not.toContain("Call it now");
+    // No plan nudge: three requests, the answer stands.
+    expect(requests).toHaveLength(3);
+    expect(res.answer).toBe("Ich habe das Album vorgeschlagen; nach dem Ausführen mache ich die Collage.");
+    expect(res.continuation).toMatchObject({ text: "die Fotos vom Juli dazu" });
+    const row = res.blocks.find((b) => b.kind === "proposal")!.rows[0]!;
+    expect(row.continuation).toBe("die Fotos vom Juli dazu");
+  });
+
+  it("every write tool takes after_execute, without it in each schema", () => {
+    const writes = HAND_TOOLS.filter((x) => x.kind === "write");
+    expect(writes.length).toBeGreaterThan(5);
+    for (const t of writes) {
+      expect(t.parameters.properties ?? {}).not.toHaveProperty("after_execute");
+      expect(checkArguments(t, { after_execute: "das PDF erzeugen" }).join(" ")).not.toContain("unknown argument");
+    }
+    const read = HAND_TOOLS.find((x) => x.name === "list_photos")!;
+    expect(checkArguments(read, { after_execute: "x" }).join(" ")).toContain("unknown argument after_execute");
   });
 });
