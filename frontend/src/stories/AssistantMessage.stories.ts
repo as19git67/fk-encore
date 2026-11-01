@@ -107,6 +107,41 @@ export const Laeuft: Story = {
   },
 }
 
+/**
+ * What was written before stays on screen: the sentence before a tool call,
+ * and an answer the server withdrew to check once more, marked as such.
+ */
+export const LaeuftMitEntwurf: Story = {
+  name: 'Antwort entsteht: verworfener Entwurf bleibt sichtbar',
+  args: {
+    role: 'assistant',
+    content: '',
+    pending: true,
+    drafts: [
+      { text: 'Ich sehe in den Buchungen nach.', withdrawn: false },
+      { text: 'Im September gingen 412,30 € an Lebensmittel.', withdrawn: true },
+    ],
+    steps: [
+      { tool: 'list_transactions', label: 'Buchungen durchsuchen', done: true, rowCount: 18 },
+      { tool: 'transaction_totals', label: 'Summen berechnen', done: false },
+    ],
+  },
+}
+
+/** Once the answer is there, the drafts fold away under one line. */
+export const FertigMitEntwurf: Story = {
+  name: 'Fertige Antwort mit zugeklappten Zwischenständen',
+  args: {
+    role: 'assistant',
+    content: 'Im September gingen 398,10 € an Lebensmittel.',
+    drafts: [
+      { text: 'Ich sehe in den Buchungen nach.', withdrawn: false },
+      { text: 'Im September gingen 412,30 € an Lebensmittel.', withdrawn: true },
+    ],
+    steps: [{ tool: 'transaction_totals', label: 'Summen berechnen', done: true, rowCount: 1 }],
+  },
+}
+
 export const Fehler: Story = {
   name: 'Werkzeug fehlgeschlagen',
   args: {

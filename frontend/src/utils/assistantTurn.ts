@@ -4,7 +4,10 @@
  *
  * Text belongs to the round it arrives in: the model may write a sentence
  * before it calls tools, so a `tool_start` begins the answer afresh, and
- * `done` carries the final answer either way.
+ * `done` carries the final answer either way. What was on screen before
+ * stays there as a draft: a sentence before a tool call, or an answer the
+ * server withdrew to check it once more. Text the user has read never
+ * vanishes without a word (it did, and that was confusing).
  */
 
 import type { ResultBlock, StreamEvent } from '../api/assistant'
@@ -17,8 +20,17 @@ export interface TurnStep {
   error?: string
 }
 
+/** Text of an earlier round that is no longer the answer. */
+export interface TurnDraft {
+  text: string
+  /** The server withdrew it (a claim without data behind it, an open plan step). */
+  withdrawn: boolean
+}
+
 export interface LiveTurn {
   text: string
+  /** What was written before the current round, oldest first. */
+  drafts: TurnDraft[]
   steps: TurnStep[]
   blocks: ResultBlock[]
   finished: boolean
@@ -26,7 +38,7 @@ export interface LiveTurn {
 }
 
 export function emptyTurn(): LiveTurn {
-  return { text: '', steps: [], blocks: [], finished: false }
+  return { text: '', drafts: [], steps: [], blocks: [], finished: false }
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -64,6 +76,11 @@ export function toolLabel(tool: string): string {
   return TOOL_LABELS[tool] ?? tool.replace(/_/g, ' ')
 }
 
+/** The current text kept as a draft before the next round begins. */
+function keepDraft(turn: LiveTurn, withdrawn: boolean): TurnDraft[] {
+  return turn.text.trim() ? [...turn.drafts, { text: turn.text.trim(), withdrawn }] : turn.drafts
+}
+
 export function applyEvent(turn: LiveTurn, event: StreamEvent): LiveTurn {
   if (turn.finished) return turn
   switch (event.type) {
@@ -71,10 +88,10 @@ export function applyEvent(turn: LiveTurn, event: StreamEvent): LiveTurn {
       return { ...turn, text: turn.text + (event.text ?? '') }
     // The server withdrew an answer that stated data without a tool behind it.
     case 'retract':
-      return { ...turn, text: '' }
+      return { ...turn, text: '', drafts: keepDraft(turn, true) }
     case 'tool_start': {
       const tool = event.tool ?? 'tool'
-      return { ...turn, text: '', steps: [...turn.steps, { tool, label: toolLabel(tool), done: false }] }
+      return { ...turn, text: '', drafts: keepDraft(turn, false), steps: [...turn.steps, { tool, label: toolLabel(tool), done: false }] }
     }
     case 'tool_result': {
       let closed = false

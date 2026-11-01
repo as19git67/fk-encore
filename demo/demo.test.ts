@@ -24,7 +24,15 @@ import {
   financeAccount,
   financeAccountAccess,
   financeAccountType,
+  financeBusiness,
+  financeBusinessAsset,
   financeDepotSecurity,
+  financeTag,
+  financeTagTransaction,
+  meterElectricityTariffs,
+  meterReadings,
+  meterDevices,
+  meters,
   financeTransaction,
   roles,
   userRoles,
@@ -44,6 +52,7 @@ import path from "node:path";
 import { UPLOAD_DIR } from "../photo/photo.service";
 import { planHousehold } from "./household";
 import { planPhotos } from "./photos";
+import { planEnergy, PV_BOOKING_TAG } from "./energy";
 import { contentCounts, currentRun } from "./state";
 
 vi.mock("~encore/auth", () => ({ getAuthData: vi.fn() }));
@@ -106,8 +115,13 @@ describe("a demo run", () => {
 
     const [run] = await db.select().from(demoRun).where(eq(demoRun.id, runId));
     expect(run.status).toBe("done");
-    expect(run.summary).toMatchObject({ users: 1, accounts: 4, bookings: 40, documents: 30, worded: 0 });
-    expect(run.progress.bookings).toEqual({ done: 40, total: 40 });
+    // The household's 40 bookings plus the PV system's feed-in payments of the span.
+    const household = planHousehold(run.seed, "small", "2026-10-26");
+    const energy = planEnergy(run.seed, "small", household);
+    const total = 40 + energy.bookings.length;
+    expect(energy.bookings.length).toBeGreaterThan(0);
+    expect(run.summary).toMatchObject({ users: 1, accounts: 4, bookings: total, documents: 30, worded: 0 });
+    expect(run.progress.bookings).toEqual({ done: total, total });
     expect(run.progress.documents).toEqual({ done: 30, total: 30 });
     // The llm-service is not there in tests: the run falls back to the templates and says so.
     expect(run.text_source).toBe("template");
@@ -136,7 +150,29 @@ describe("a demo run", () => {
     // Four household accounts; the depot is left out without a quote provider.
     expect(accounts).toHaveLength(4);
     const bookings = await db.select({ id: financeTransaction.id }).from(financeTransaction).where(inArray(financeTransaction.account_id, accounts));
-    expect(bookings).toHaveLength(40);
+    expect(bookings).toHaveLength(total);
+
+    // Five meters with their monthly readings, through the meter service, owned by the admin.
+    const meterIds = await registered(runId, "meters");
+    expect(meterIds).toHaveLength(5);
+    const meterRows = await db.select().from(meters).where(inArray(meters.id, meterIds));
+    expect(meterRows.every((m) => m.owner_user_id === adminId)).toBe(true);
+    expect(meterRows.map((m) => m.role).filter(Boolean).sort()).toEqual(["grid_export", "grid_import", "pv_production", "water_main"]);
+    const readings = await db.select({ id: meterReadings.id }).from(meterReadings)
+      .innerJoin(meterDevices, eq(meterDevices.id, meterReadings.device_id)).where(inArray(meterDevices.meter_id, meterIds));
+    expect(readings).toHaveLength(energy.meters.reduce((n, m) => n + m.readings.length, 0));
+    expect(run.summary).toMatchObject({ meters: 5, meter_readings: readings.length, businesses: 1 });
+    expect(await registered(runId, "meter_electricity_tariffs")).toHaveLength(3);
+
+    // The PV business with its system as an asset, and its bookings carry its tag.
+    const [businessId] = await registered(runId, "finance_business");
+    const [business] = await db.select().from(financeBusiness).where(eq(financeBusiness.id, businessId));
+    expect(business).toMatchObject({ owner_user_id: adminId, kind: "photovoltaik", booking_tag: PV_BOOKING_TAG, pv_capacity_kwp: "9.800" });
+    expect(await db.select().from(financeBusinessAsset).where(eq(financeBusinessAsset.business_id, businessId))).toHaveLength(1);
+    const tagged = await db.select({ id: financeTagTransaction.transaction_id }).from(financeTagTransaction)
+      .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+      .where(and(eq(financeTag.name, PV_BOOKING_TAG), inArray(financeTagTransaction.transaction_id, bookings.map((b) => b.id))));
+    expect(tagged).toHaveLength(energy.bookings.length);
 
     const [spouse] = await db.select({ id: users.id }).from(users).where(eq(users.email, DEMO_SPOUSE.email));
     expect(await registered(runId, "users")).toEqual([spouse.id]);
@@ -241,8 +277,18 @@ describe("a demo run", () => {
     const photoFiles = (await db.select({ filename: photos.filename }).from(photos).where(inArray(photos.id, photoIds))).map((p) => path.join(UPLOAD_DIR, p.filename));
     expect(photoFiles).toHaveLength(12);
 
+    const meterIds = await registered(runId, "meters");
+    const tariffIds = await registered(runId, "meter_electricity_tariffs");
+    const businessIds = await registered(runId, "finance_business");
+    const tagIds = await registered(runId, "finance_tag");
+    expect(meterIds).toHaveLength(5);
+
     await removeRun(runId);
 
+    expect(await db.select().from(meters).where(inArray(meters.id, meterIds))).toHaveLength(0);
+    expect(await db.select().from(meterElectricityTariffs).where(inArray(meterElectricityTariffs.id, tariffIds))).toHaveLength(0);
+    expect(await db.select().from(financeBusiness).where(inArray(financeBusiness.id, businessIds))).toHaveLength(0);
+    if (tagIds.length) expect(await db.select().from(financeTag).where(inArray(financeTag.id, tagIds))).toHaveLength(0);
     expect(await db.select().from(photos).where(inArray(photos.id, photoIds))).toHaveLength(0);
     expect(photoFiles.some((f) => fs.existsSync(f))).toBe(false);
     if (albumIds.length) expect(await db.select().from(albums).where(inArray(albums.id, albumIds))).toHaveLength(0);

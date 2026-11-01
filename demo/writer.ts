@@ -12,13 +12,15 @@
  */
 
 import crypto from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import db from "../db/database";
 import {
   financeAccount,
   financeAccountAccess,
   financeAccountBalance,
   financeAccountType,
+  financeTag,
+  financeTagTransaction,
   financeTransaction,
   roles,
   userAssessmentSettings,
@@ -183,6 +185,8 @@ export async function writeHousehold(runId: number, ownerId: number, plan: House
     await hooks.progress?.(Math.min(i + BATCH, plan.bookings.length), plan.bookings.length);
   }
 
+  await tagBookings(runId, plan.bookings, bookingIds);
+
   // Today's balance per account: the opening balance plus every booking.
   const asOf = `${plan.to}T18:00:00Z`;
   for (const a of plan.accounts) {
@@ -191,6 +195,28 @@ export async function writeHousehold(runId: number, ownerId: number, plan: House
   }
 
   return { spouseId, accounts, bookings: plan.bookings.length, bookingIds };
+}
+
+/**
+ * Links each booking to its tags. Tags are shared by name across the
+ * system: an existing one is reused, a new one is registered with the run so
+ * removal takes it back.
+ */
+async function tagBookings(runId: number, bookings: PlannedBooking[], bookingIds: number[]): Promise<void> {
+  const names = [...new Set(bookings.flatMap((b) => b.tags ?? []))];
+  if (!names.length) return;
+  const existing = await db.select({ id: financeTag.id, name: financeTag.name }).from(financeTag)
+    .where(and(inArray(financeTag.name, names), eq(financeTag.source, "user")));
+  const idOf = new Map(existing.map((t) => [t.name, t.id]));
+  const missing = names.filter((n) => !idOf.has(n));
+  if (missing.length) {
+    const created = await db.insert(financeTag).values(missing.map((name) => ({ name, source: "user" as const })))
+      .returning({ id: financeTag.id, name: financeTag.name });
+    await register(runId, "finance_tag", created.map((t) => t.id));
+    for (const t of created) idOf.set(t.name, t.id);
+  }
+  const links = bookings.flatMap((b, i) => (b.tags ?? []).map((name) => ({ tag_id: idOf.get(name)!, transaction_id: bookingIds[i] })));
+  for (let i = 0; i < links.length; i += 500) await db.insert(financeTagTransaction).values(links.slice(i, i + 500));
 }
 
 /** The bookings of the given accounts, for the remover: they do not cascade from their account. */

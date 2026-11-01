@@ -97,7 +97,7 @@ export const DemodatenGeladen: Story = {
         run: {
           id: 1, status: 'done', stage: null, size: 'full', text_source: 'llm',
           progress: { bookings: { done: 500, total: 500 }, documents: { done: 500, total: 500 } },
-          summary: { users: 1, accounts: 5, bookings: 556, documents: 500, worded: 312, scans: 36, depot: 1, depot_papers: 61, photos: 500, photos_openverse: 500, photos_drawn: 0, albums: 5 }, error: null,
+          summary: { users: 1, accounts: 5, bookings: 556, documents: 500, worded: 312, scans: 36, depot: 1, depot_papers: 61, photos: 500, photos_openverse: 500, photos_drawn: 0, albums: 5, meters: 5, meter_readings: 185, businesses: 1 }, error: null,
           started_at: '2026-10-31T09:00:00.000Z', finished_at: '2026-10-31T12:40:00.000Z',
         },
       }).concat([

@@ -67,6 +67,9 @@ export const DEMO_COUNTERPARTIES = {
   school: "Grundschule Musterstadt",
   club: "TSV Musterstadt e.V.",
   carInsurer: "Muster Kfz-Versicherung AG",
+  gridOperator: "Beispielnetz GmbH",
+  meterOperator: "Muster Messstellenbetrieb GmbH",
+  solarInstaller: "Solartechnik Beispiel GmbH",
 } as const;
 
 /** Every company or office the demo writes, for the check of the model's texts. */
