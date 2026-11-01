@@ -317,6 +317,11 @@ Decided 2026-10-31: the demo runs as a third deployment from the same
 `docker-compose.yml`, next to prod and test, and is kept current by
 Watchtower.
 
+*Done:* `docker-compose.demo.yml` and `docker-compose.env.demo.example`,
+a "Deploy to TrueNAS (demo)" step in every image workflow except the
+llm-service's, and `scripts/host/demo-reset.sh` for the nightly reset.
+How to set it up is in `DEPLOYMENT.md`, "Demo stack".
+
 - **Own stack.** Its own `.env` with `DEPLOY_NAME_SUFFIX=-demo`,
   `DEPLOY_WATCHTOWER_SCOPE=fkdemo`, its own ports, data root and
   Watchtower token.

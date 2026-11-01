@@ -1,0 +1,43 @@
+# fk-encore — the demo stack (documentation/plans/demodaten.md, "Demo deployment").
+#
+# Layered on top of docker-compose.yml and docker-compose.volumes.yml by
+# COMPOSE_FILE in `.env.demo` (template: docker-compose.env.demo.example):
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml:docker-compose.demo.yml
+#
+# Two things differ from prod and test:
+#
+#   1. No llm-service of its own. A second Gemma 4 does not fit next to the
+#      first on a 16 GB card, so the demo app joins prod's network and talks
+#      to prod's llm-service (DEPLOY_LLM_SERVICE_URL). The service stays in
+#      the file under a profile nobody activates, so it never starts.
+#   2. DEMO_DATA=1: the app loads the full demo at its first boot.
+#
+# `!override` needs Docker Compose 2.24 or later.
+
+services:
+  app:
+    depends_on: !override
+      chown-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      insightface:
+        condition: service_healthy
+      embedding_service:
+        condition: service_healthy
+    environment:
+      DEMO_DATA: ${DEMO_DATA:-1}
+      LLM_SERVICE_URL: ${DEPLOY_LLM_SERVICE_URL:-http://fk-encore-llm:8000}
+    networks:
+      - default
+      - prod
+
+  llm_service:
+    profiles: ["own-llm"]
+
+networks:
+  prod:
+    external: true
+    # The default network of the prod stack: <COMPOSE_PROJECT_NAME>_default.
+    name: ${DEMO_PROD_NETWORK:-fk-encore_default}
