@@ -1130,7 +1130,9 @@ Jede View unter `frontend/src/views/` baut ihre Seite mit
 einziger `<h1>` und `document.title` im Format `Seite · Modul · F4mil`),
 optional `hint`, `scroll="page|fill"`, `width="normal|wide|full"`,
 `sticky-header` und `ready`, und füllt die Slots `actions`, `toolbar`,
-`notice`, `selection` und den Inhalt. `toolbar`, `notice` und `selection`
+`notice`, `selection` und den Inhalt. Selten gebrauchte Aktionen (neu
+einlesen, ableiten) gehören in ein Mehr-Menü (⋮) im Slot `menu`, das am Ende
+der Titelzeile steht und keine eigene Zeile kostet. `toolbar`, `notice` und `selection`
 hebt `PageLayout` in den einen Sticky-Stack der App (`#module-subheaders` in
 `App.vue`), mit `sticky-header` auch die Titelzeile samt `#actions`.
 

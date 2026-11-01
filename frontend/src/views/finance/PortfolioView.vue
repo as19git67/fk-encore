@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
+import Menu from 'primevue/menu'
 import MultiSelect from 'primevue/multiselect'
 import Select from 'primevue/select'
 import PageLayout from '../../components/layout/PageLayout.vue'
@@ -614,6 +615,37 @@ async function deriveFromAccountBookings() {
   }
 }
 
+// ── "More" menu beside the title ─────────────────────────────────────
+const moreMenu = ref<InstanceType<typeof Menu> | null>(null)
+
+const moreItems = computed(() => [
+  {
+    label: enriching.value && enrichProgress.value > 0
+      ? `Belege einlesen … ${enrichProgress.value} geprüft`
+      : 'Belege einlesen',
+    icon: enriching.value ? 'pi pi-spin pi-spinner' : 'pi pi-receipt',
+    disabled: noDepots.value || enriching.value,
+    command: () => { void enrichFromDocuments() },
+  },
+  {
+    label: 'Aus Giro ableiten',
+    icon: deriving.value ? 'pi pi-spin pi-spinner' : 'pi pi-sync',
+    disabled: noDepots.value || deriving.value,
+    command: () => { void deriveFromAccountBookings() },
+  },
+  { separator: true },
+  {
+    label: 'Löschen + neu einlesen',
+    icon: 'pi pi-history',
+    disabled: noDepots.value || enriching.value,
+    command: askReadAgain,
+  },
+])
+
+function toggleMoreMenu(event: Event) {
+  moreMenu.value?.toggle(event)
+}
+
 onMounted(() => void pollRun())
 onBeforeUnmount(() => {
   if (pollTimer) clearTimeout(pollTimer)
@@ -622,44 +654,21 @@ onBeforeUnmount(() => {
 
 <template>
   <PageLayout title="Portfolio" :hint="hint" width="wide" :ready="!loading">
-    <template #actions>
+    <template #menu>
+      <!-- Rarely needed: reading documents, deriving from the giro account
+           and starting over sit behind one "more" button beside the title. -->
       <Button
-        icon="pi pi-refresh"
-        label="Aktualisieren"
-        severity="secondary"
+        :icon="enriching || deriving ? 'pi pi-spin pi-spinner' : 'pi pi-ellipsis-v'"
         text
-        :disabled="loading || txLoading"
-        @click="loadPortfolio(); loadTransactions()"
-      />
-      <Button
-        v-tooltip.bottom="'Wertpapier- und Dividendenabrechnungen aus den Dokumenten lesen und den Transaktionen zuordnen'"
-        icon="pi pi-receipt"
-        :label="enriching && enrichProgress > 0 ? `Belege einlesen … ${enrichProgress} geprüft` : 'Belege einlesen'"
+        rounded
         severity="secondary"
-        text
-        :loading="enriching"
-        :disabled="noDepots"
-        @click="enrichFromDocuments"
+        aria-label="Weitere Aktionen"
+        aria-haspopup="true"
+        v-tooltip.bottom="'Weitere Aktionen'"
+        data-testid="portfolio-more"
+        @click="toggleMoreMenu"
       />
-      <Button
-        v-tooltip.bottom="'Wertpapier- und Dividendenbuchungen der Konten den Transaktionen zuordnen oder daraus ableiten'"
-        icon="pi pi-sync"
-        label="Aus Giro ableiten"
-        severity="secondary"
-        text
-        :loading="deriving"
-        :disabled="noDepots"
-        @click="deriveFromAccountBookings"
-      />
-      <Button
-        v-tooltip.bottom="'Alles, was Belege gebucht haben, zurücknehmen und alle Belege neu lesen'"
-        icon="pi pi-history"
-        aria-label="Belege neu einlesen"
-        severity="secondary"
-        text
-        :disabled="noDepots || enriching"
-        @click="askReadAgain"
-      />
+      <Menu ref="moreMenu" :model="moreItems" :popup="true" />
     </template>
 
     <template #toolbar>

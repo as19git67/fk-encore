@@ -27,6 +27,7 @@ import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory
  *
  *   <PageLayout title="Dokumente" width="full">
  *     <template #back>     … the back button, left of the title   </template>
+ *     <template #menu>     … a "more" button at the end of the title line </template>
  *     <template #actions>  … buttons beside the title             </template>
  *     <template #toolbar>  … search / filter / sort (sticky)       </template>
  *     <template #notice>   … Message banners (sticky, under toolbar)</template>
@@ -58,6 +59,11 @@ import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory
  * starting at the same edge, and the title is cut with "…". A page with
  * many actions hands them to `ResponsiveToolbar`, which folds what does not
  * fit into a "more" menu instead of wrapping into a third line.
+ *
+ * `#menu`: actions a page rarely needs (re-read, re-derive) go into one
+ * "more" button that stands at the end of the title's own line, right of
+ * the title and above the hint — it costs no line of its own, however long
+ * the hint is.
  */
 
 export type PageScroll = 'page' | 'fill'
@@ -248,7 +254,7 @@ defineExpose({ contentEl })
         <header
           v-if="stickyHeader"
           class="page-header page-header--sticky"
-          :class="{ 'page-header--back': !!slots.back }"
+          :class="{ 'page-header--back': !!slots.back, 'page-header--menu': !!slots.menu }"
           data-testid="page-header"
         >
           <div class="page-heading">
@@ -257,6 +263,9 @@ defineExpose({ contentEl })
                 <slot name="back" />
               </div>
               <h1 class="page-title" :class="{ 'page-title--hidden': titleHidden }" :title="slots.back ? title : undefined">{{ title }}</h1>
+              <div v-if="slots.menu" class="page-menu" data-testid="page-menu">
+                <slot name="menu" />
+              </div>
             </div>
           </div>
           <div v-if="slots.actions" class="page-actions">
@@ -278,13 +287,16 @@ defineExpose({ contentEl })
     <!-- With a sticky header the hint stays on the page: it explains the
          page once, it does not need to follow the reader down. -->
     <p v-if="stickyHeader && hint" class="page-hint page-hint--lead">{{ hint }}</p>
-    <header v-if="!stickyHeader" class="page-header" :class="{ 'page-header--back': !!slots.back }">
+    <header v-if="!stickyHeader" class="page-header" :class="{ 'page-header--back': !!slots.back, 'page-header--menu': !!slots.menu }">
       <div class="page-heading">
         <div class="page-title-line">
           <div v-if="slots.back" class="page-back" data-testid="page-back">
             <slot name="back" />
           </div>
           <h1 class="page-title" :class="{ 'page-title--hidden': titleHidden }" :title="slots.back ? title : undefined">{{ title }}</h1>
+          <div v-if="slots.menu" class="page-menu" data-testid="page-menu">
+            <slot name="menu" />
+          </div>
         </div>
         <p v-if="hint" class="page-hint">{{ hint }}</p>
       </div>
@@ -352,6 +364,21 @@ defineExpose({ contentEl })
   display: flex;
   align-items: center;
   flex-shrink: 0;
+}
+/* With a "more" button the heading takes the whole line it stands on, so the
+   button sits at the right edge of the page, not at the end of the title;
+   the title wraps before it pushes the button off. */
+.page-header--menu .page-heading {
+  flex: 1 1 auto;
+}
+.page-header--menu .page-title {
+  min-width: 0;
+}
+.page-menu {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 /* A page with a way out: back + title, then the actions — on the same line
    while both fit at their natural width, otherwise the actions move to one
