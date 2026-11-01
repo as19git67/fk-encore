@@ -76,9 +76,11 @@ steht nur, was das Modul daraus macht.
 
 ## LST: Alle Dokumente (`/dokumente`)
 
-Volle Breite. Oben rechts: Hilfe (Fragezeichen), Zahnrad „Standard für neue
-Dokumente“, „Schreiben“ und „Hochladen“ (die drei letzten nur mit
-`documents.upload`). Darunter die Listen-Toolbar, ein Warteschlangen-Streifen,
+Volle Breite. „Neu“ (Hochladen, Schreiben; nur mit `documents.upload`) und
+„Hilfe“ stehen rechts in der Modulleiste und sind damit auf jeder Seite des
+Moduls erreichbar; „Standard für neue Dokumente“ liegt im Zahnrad oben (ein
+Warnzeichen am Zahnrad, wenn die gespeicherte Gruppe nicht mehr gilt).
+Darunter die Listen-Toolbar, ein Warteschlangen-Streifen,
 der nur bei Aktivität erscheint, ein Streifen mit Sammelmappen-Kacheln und
 die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 (ab 1300 px) steht rechts die Vorschau des aktuellen Dokuments.
@@ -100,8 +102,8 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 - **Wo:** Suchfeld der Toolbar, Fokus mit `/`
 - **Schritte:** 1. Begriff eingeben; die Liste lädt nach kurzer Pause.
   2. Optional Suchmodus „Hybrid“ (Standard), „Text“ (exakte Wörter) oder
-  „Bedeutung“ (semantisch) im Schalter neben dem Feld; der Schalter
-  erscheint nur bei aktiver Suche, die Wahl bleibt gespeichert.
+  „Bedeutung“ (semantisch) über den Knopf mit dem aktuellen Modus neben
+  dem Feld (Menü); der Knopf erscheint nur bei aktiver Suche, die Wahl bleibt gespeichert.
 - **Ergebnis:** Treffer samt gesetzten Filtern; `q` steht in der URL. Die
   Suche findet auch Dokumente in Sammelmappen und Mappen selbst (Titel,
   Notiz, Zusammenfassung). Kein „Mehr laden“ bei aktiver Suche.
@@ -205,11 +207,12 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 
 ### DOK-LST-12 Standardgruppe für neue Dokumente setzen
 
-- **Wo:** Zahnrad oben rechts, Dialog „Standard für neue Dokumente“
+- **Wo:** Zahnrad in der Kopfzeile › „Standard für neue Dokumente“ (auf
+  jeder Seite des Moduls)
 - **Recht:** `documents.upload`
 - **Schritte:** 1. „Privat (Standard)“ oder „Standardmäßig in Gruppe“ mit
   Gruppe wählen. 2. „Speichern“.
-- **Ergebnis:** Grüne Meldung „Standard für neue Dokumente gespeichert.“;
+- **Ergebnis:** Der Dialog schließt, das Warnzeichen am Zahnrad verschwindet;
   alles, was ab jetzt hochgeladen oder geschrieben wird, bekommt diese
   Sichtbarkeit.
 - **Fehler und Grenzfälle:** Ist die Person nicht mehr Mitglied der
@@ -232,7 +235,8 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 
 ### DOK-LST-14 Zur Hilfe, zum Hochladen, zum Schreiben
 
-- **Wo:** Fragezeichen, „Hochladen“, „Schreiben“ oben rechts
+- **Wo:** „Hilfe“ und „Neu“ › „Hochladen“ / „Schreiben“ rechts in der
+  Modulleiste
 - **Ergebnis:** `HLF`, `UPL`, `TXT`.
 - **Test:** –
 

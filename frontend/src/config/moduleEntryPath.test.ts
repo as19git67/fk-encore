@@ -68,7 +68,8 @@ describe('moduleEntryPath', () => {
 
   it('exposes document navigation as the active-module submenu', () => {
     // The strip keeps the working views; rarely used entries
-    // (Kategorie-Vorschläge, Hilfe, …) live behind the Einstellungen gear.
+    // (Kategorie-Vorschläge, …) live behind the Einstellungen gear, and what
+    // holds on every page (Neu, Hilfe) stands at the right of the row.
     expect(dokumente.menuItems.map((item) => item.label)).toEqual([
       'Alle Dokumente',
       'Arbeitskorb',
@@ -89,7 +90,15 @@ describe('moduleEntryPath', () => {
       'Taxonomie-Tools',
       'KI-Modell',
       'KI-Benchmark',
-      'Hilfe',
+      'Standard für neue Dokumente',
+    ])
+    const upload = dokumente.menuItems.at(-1)?.children?.at(-1)
+    expect(upload?.action).toBe('documents.upload-defaults')
+    expect(upload?.permission).toBe('documents.upload')
+    expect(dokumente.actionItems?.map((item) => item.label)).toEqual(['Neu', 'Hilfe'])
+    expect(dokumente.actionItems?.[0].children?.map((item) => [item.routeName, item.permission])).toEqual([
+      ['dokumente-upload', 'documents.upload'],
+      ['dokumente-text-neu', 'documents.upload'],
     ])
   })
 

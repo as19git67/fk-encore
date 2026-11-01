@@ -7,13 +7,15 @@ import ConfirmDialog from 'primevue/confirmdialog'
 import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
 import DocBasketIndicator from './components/documents/DocBasketIndicator.vue'
 import SharedBasketIndicator from './components/collections/SharedBasketIndicator.vue'
+import DocumentUploadDefaultsHost from './components/documents/DocumentUploadDefaultsHost.vue'
+import { useModuleMenuActionsStore } from './stores/moduleMenuActions'
 import { useBasketStore } from './stores/basket'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
 import { useMeterAnomalyStore } from './stores/meterAnomalies'
 import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
-import type { ModuleConfig } from './config/modules'
+import type { ModuleConfig, ModuleMenuItem } from './config/modules'
 import { useReferenceData } from './composables/useReferenceData'
 import { usePhotoNavStore } from './stores/photoNav'
 import { albumMenuTarget, albumsViewQueryFromStorage, readRememberedAlbumId } from './utils/albumsViewState'
@@ -101,19 +103,21 @@ function toggleHamburgerMenu(event: Event) {
 // Items may be plain links or a group (e.g. the Dokumente "Einstellungen"
 // gear) that opens a popup with `children`. Groups whose children are all
 // permission-filtered away are dropped entirely.
-const subMenuItems = computed(() => {
-  if (!activeModule.value) return []
-  return activeModule.value.menuItems
+const menuActions = useModuleMenuActionsStore()
+
+function visibleItems(items: ModuleMenuItem[]) {
+  return items
     .filter((item) => !item.permission || auth.hasPermission(item.permission))
     .map((item) => {
       const children = item.children
         ?.filter((c) => !c.permission || auth.hasPermission(c.permission))
-        .map((c) => ({ label: c.label, icon: c.icon, routeName: c.routeName }))
+        .map((c) => ({ label: c.label, icon: c.icon, routeName: c.routeName, action: c.action }))
       return {
         label: item.label,
         icon: item.icon,
         routeName: item.routeName,
         settings: item.settings,
+        primary: item.primary,
         children: children && children.length ? children : undefined,
         badge:
           item.routeName === 'finance-anomalies' && anomalyStore.count > 0
@@ -126,7 +130,15 @@ const subMenuItems = computed(() => {
       }
     })
     .filter((item) => item.routeName || item.children)
-})
+}
+
+const subMenuItems = computed(() => (activeModule.value ? visibleItems(activeModule.value.menuItems) : []))
+
+// What holds on every page of the module (upload, help): at the right end of
+// the sub-menu row, outside its scroller.
+const actionItems = computed(() =>
+  activeModule.value?.actionItems ? visibleItems(activeModule.value.actionItems) : [],
+)
 
 // A module's settings group is lifted out of the submenu strip and rendered
 // as a gear among the meta icons in navbar-end. The group marked `settings`
@@ -147,6 +159,8 @@ interface MenuEntry {
   label: string
   icon: string
   routeName?: string
+  /** Opens something in place (see `ModuleMenuItem.action`). */
+  action?: string
   separator?: boolean
 }
 const settingsMenuItems = computed<MenuEntry[]>(() => [
@@ -155,6 +169,10 @@ const settingsMenuItems = computed<MenuEntry[]>(() => [
   { label: 'Mein Profil', icon: 'pi pi-user', routeName: 'profile' },
 ])
 const settingsActive = computed(() => isGroupActive(settingsMenuItems.value))
+/** An entry of the gear that needs attention (a default that no longer holds). */
+const settingsWarn = computed(() =>
+  settingsMenuItems.value.some((c) => c.action && menuActions.warn[c.action]),
+)
 
 // Mirrors the server's rule (collections/members.ts): collections are open to
 // whoever can use at least one type that goes into them.
@@ -179,10 +197,11 @@ function openGroupMenu(
     c.separator
       ? { separator: true }
       : {
-          label: c.label,
-          icon: c.icon,
+          label: c.action && menuActions.warn[c.action] ? `${c.label} (prüfen)` : c.label,
+          icon: c.action && menuActions.warn[c.action] ? 'pi pi-exclamation-triangle' : c.icon,
           command: () => {
-            if (c.routeName) router.push({ name: c.routeName })
+            if (c.action) menuActions.request(c.action)
+            else if (c.routeName) router.push({ name: c.routeName })
           },
         },
   )
@@ -326,8 +345,10 @@ onBeforeUnmount(() => stackObserver?.disconnect())
             :icon="settingsGroup?.icon ?? 'pi pi-cog'"
             text
             rounded
-            :severity="settingsActive ? 'primary' : 'secondary'"
-            aria-label="Einstellungen"
+            :severity="settingsWarn ? 'warn' : settingsActive ? 'primary' : 'secondary'"
+            :badge="settingsWarn ? '!' : undefined"
+            badge-severity="warn"
+            :aria-label="settingsWarn ? 'Einstellungen – eine Einstellung braucht Aufmerksamkeit' : 'Einstellungen'"
             aria-haspopup="true"
             v-tooltip.bottom="'Einstellungen'"
             data-testid="navbar-settings"
@@ -348,7 +369,7 @@ onBeforeUnmount(() => stackObserver?.disconnect())
       <!-- Row 2: the active module's sub-menu. Always one row of fixed height;
            it scrolls sideways inside itself on a narrow screen, never the page. -->
       <nav
-        v-if="activeModule && stripItems.length"
+        v-if="activeModule && (stripItems.length || actionItems.length)"
         class="app-submenu"
         data-testid="app-submenu"
         :aria-label="`Untermenü ${activeModule.label}`"
@@ -389,7 +410,26 @@ onBeforeUnmount(() => stackObserver?.disconnect())
             />
           </template>
         </div>
+        <div v-if="actionItems.length" class="submenu-actions" data-testid="app-submenu-actions">
+          <Button
+            v-for="item in actionItems"
+            :key="item.routeName || item.label"
+            :label="item.label"
+            :icon="item.icon"
+            size="small"
+            :text="!item.primary"
+            :severity="item.primary ? 'primary' : route.name === item.routeName ? 'primary' : 'secondary'"
+            class="submenu-action"
+            :class="{ 'submenu-action--primary': item.primary }"
+            :aria-label="item.label"
+            :aria-haspopup="item.children ? 'true' : undefined"
+            :aria-current="route.name === item.routeName ? 'page' : undefined"
+            v-tooltip.bottom="item.children ? undefined : item.label"
+            @click="item.children ? openGroupMenu($event, item.children) : navigateSubMenu(item.routeName)"
+          />
+        </div>
       </nav>
+      <DocumentUploadDefaultsHost v-if="activeModule?.id === 'dokumente' && auth.hasPermission('documents.upload')" />
       <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
 
       <!-- Row 3: what the active view lifts up here through PageLayout
@@ -531,6 +571,14 @@ body {
   display: none;
 }
 
+.submenu-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  padding-left: var(--space-2);
+}
+
 .submenu-item {
   position: relative;
   flex-shrink: 0;
@@ -586,10 +634,12 @@ body {
    reader or to a long press. The module name in the navbar above stays
    written out: it is the one label that says where you are. */
 @media (max-width: 639px) {
-  .submenu-item .p-button-label {
+  .submenu-item .p-button-label,
+  .submenu-action .p-button-label {
     display: none;
   }
-  .submenu-item .p-button-icon {
+  .submenu-item .p-button-icon,
+  .submenu-action .p-button-icon {
     margin: 0;
   }
   .submenu-strip .p-button {

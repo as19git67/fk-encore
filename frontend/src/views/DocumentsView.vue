@@ -4,10 +4,10 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
-import SelectButton from 'primevue/selectbutton'
+import Menu from 'primevue/menu'
+import type { MenuItem } from 'primevue/menuitem'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
-import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
@@ -32,7 +32,6 @@ import {
   listDocumentCategories,
   listDocumentTypesCatalog,
   listCorrespondents,
-  getUploadDefaults,
   listGroups,
   listSubjectPersons,
   searchDocuments,
@@ -127,6 +126,22 @@ const searchModeOptions = [
   { label: 'Bedeutung', value: 'semantic' },
 ]
 
+const searchModeLabel = computed(
+  () => searchModeOptions.find((o) => o.value === searchMode.value)?.label ?? 'Hybrid',
+)
+const searchModeMenu = ref<InstanceType<typeof Menu> | null>(null)
+const searchModeItems = computed<MenuItem[]>(() =>
+  searchModeOptions.map((o) => ({
+    label: o.label,
+    icon: o.value === searchMode.value ? 'pi pi-check' : 'pi pi-fw',
+    command: () => {
+      if (searchMode.value === o.value) return
+      searchMode.value = o.value as SearchMode
+      void load()
+    },
+  })),
+)
+
 // The term settles 300 ms after the last keystroke (and on back/forward);
 // that is the moment to ask the backend again.
 watch(q, () => load())
@@ -190,7 +205,6 @@ const selection = useListSelection({
   total: () => items.value.length,
 })
 const { selectMode, selectedIds } = selection
-const defaultsDialogVisible = ref(false)
 
 function isSelected(id: number) {
   return selectedIds.value.has(id)
@@ -738,19 +752,6 @@ useRealtimeEvent('documents', 'status.changed', (ev) => {
   }
 })
 
-// A saved default group the user is no longer a member of sends new
-// documents to private without a word; the cog button warns about it.
-const uploadDefaultsStale = ref(false)
-
-async function loadUploadDefaults() {
-  if (!auth.hasPermission('documents.upload')) return
-  try {
-    uploadDefaultsStale.value = (await getUploadDefaults()).stale
-  } catch (err: any) {
-    console.warn('[documents] failed to load upload defaults:', err)
-  }
-}
-
 async function loadGroups() {
   try {
     const res = await listGroups()
@@ -767,7 +768,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadUploadDefaults(), loadSubjectPeople(), loadCorrespondents(), load()])
+  await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadSubjectPeople(), loadCorrespondents(), load()])
 })
 </script>
 
@@ -781,66 +782,28 @@ onMounted(async () => {
     legacy-anchor-key="documents"
     :resolve-anchor="resolveListAnchor"
   >
-    <template #actions>
-        <Button
-          icon="pi pi-question-circle"
-          text
-          rounded
-          aria-label="Hilfe zum Dokumente-Modul"
-          v-tooltip.bottom="'Hilfe: Dokument-Flow und Aktionen'"
-          @click="router.push({ name: 'dokumente-hilfe' })"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.upload')"
-          icon="pi pi-cog"
-          text
-          rounded
-          :severity="uploadDefaultsStale ? 'warn' : undefined"
-          :aria-label="uploadDefaultsStale
-            ? 'Standardeinstellungen für neue Dokumente – Standard-Gruppe gilt nicht mehr'
-            : 'Standardeinstellungen für neue Dokumente'"
-          v-tooltip.bottom="uploadDefaultsStale
-            ? 'Standard-Gruppe gilt nicht mehr: neue Dokumente bleiben privat'
-            : 'Standard-Gruppe für neue Dokumente'"
-          @click="defaultsDialogVisible = true"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.upload')"
-          :label="compactHeader ? undefined : 'Schreiben'"
-          aria-label="Schreiben"
-          icon="pi pi-pen-to-square"
-          severity="secondary"
-          outlined
-          v-tooltip.bottom="'Eigenes Textdokument mit Markdown schreiben'"
-          @click="router.push({ name: 'dokumente-text-neu' })"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.upload')"
-          :label="compactHeader ? undefined : 'Hochladen'"
-          aria-label="Hochladen"
-          icon="pi pi-upload"
-          v-tooltip.bottom="compactHeader ? 'Dokumente hochladen' : undefined"
-          @click="router.push({ name: 'dokumente-upload' })"
-        />
-    </template>
-
     <!-- Sticky part (lifted into the app stack by PageLayout): toolbar,
          active filter chips, the selection bar and the notices. -->
     <template #toolbar>
       <ListToolbar :model="toolbar">
-        <template #actions>
-          <SelectButton
-            v-if="isSearchActive"
-            v-model="searchMode"
-            :options="searchModeOptions"
-            optionLabel="label"
-            optionValue="value"
-            :allowEmpty="false"
+        <template v-if="isSearchActive" #search-end>
+          <!-- The search mode belongs to the search, so it sits on its line —
+             one button naming the mode, the three choices in its menu. -->
+          <Button
+            :label="searchModeLabel"
+            icon="pi pi-angle-down"
+            icon-pos="right"
             size="small"
+            outlined
+            severity="secondary"
             class="search-mode-btn"
+            aria-haspopup="true"
+            :aria-label="`Suchmodus: ${searchModeLabel}`"
             v-tooltip.bottom="'Suchmodus'"
-            @update:model-value="load"
+            data-testid="documents-search-mode"
+            @click="searchModeMenu?.toggle($event)"
           />
+          <Menu ref="searchModeMenu" :model="searchModeItems" :popup="true" />
         </template>
       </ListToolbar>
     </template>
@@ -1095,11 +1058,6 @@ onMounted(async () => {
       @added="onFiled"
     />
 
-    <DocumentUploadDefaultsDialog
-      v-model:visible="defaultsDialogVisible"
-      :groups="groups"
-      @saved="info = 'Standard für neue Dokumente gespeichert.'; uploadDefaultsStale = false"
-    />
 
     <DocumentFilterMenu
       v-model:visible="filterMenuVisible"
@@ -1216,7 +1174,7 @@ onMounted(async () => {
 /* Page frame, title, sticky subheader: all PageLayout now (issue #1272).
    Only the list region below keeps its own scrolling columns. */
 
-.search-mode-btn { flex-shrink: 0; }
+.search-mode-btn { flex-shrink: 0; white-space: nowrap; }
 
 /* ── Pagination ────────────────────────────────────────────────── */
 .load-more-row {
