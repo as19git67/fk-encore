@@ -112,6 +112,44 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
 | `DEPLOY_LLM_START_PERIOD` | `600s` | Healthcheck grace for llm_service — covers Llama GGUF + embedder load (and download on a cold volume). |
 
+### Demo stack
+
+A third stack shows the app filled with synthetic demo data
+(`documentation/plans/demodaten.md`, "Demo deployment"). It follows
+`latest` like prod, fills itself at its first boot and is reset every
+night.
+
+```bash
+cp docker-compose.env.demo.example .env.demo
+# set ADMIN_PASSWORD, the secrets and DEPLOY_DATA_ROOT; INTERNAL_SERVICE_SECRET
+# and WATCHTOWER_TOKEN must be the same values as prod's
+docker compose --env-file .env.demo up -d
+```
+
+- **No llm-service of its own.** `docker-compose.demo.yml` (the third file
+  in the demo's `COMPOSE_FILE`) parks the demo's llm-service under a
+  profile, joins the app to prod's network (`DEMO_PROD_NETWORK`, default
+  `fk-encore_default`) and points it at prod's llm-service
+  (`DEPLOY_LLM_SERVICE_URL`, default `http://fk-encore-llm:8000`). Prod has
+  to be up first. Needs Docker Compose 2.24 or later (`!override`).
+- **First fill.** `DEMO_DATA=1` makes the app load the full demo at boot
+  while the system is untouched; the admin from `ADMIN_EMAIL` owns it.
+  Progress is on Admin › Systemstatus. The full demo needs
+  `api.openverse.org` (otherwise the photos are drawn) and a quote
+  provider (otherwise the depot is left out).
+- **Updates.** The image workflows call the demo's Watchtower after the
+  prod deploy when the repository secret `WATCHTOWER_URL_DEMO`
+  (`http://<host>:9002`) is set. A demo that is down only leaves a warning
+  in the run.
+- **Nightly reset.** `scripts/host/demo-reset.sh /path/to/.env.demo`
+  stops the stack, empties its database and file directories (not the
+  model caches or the OSM data) and starts it again, so the app loads the
+  demo afresh. Run it every hour from cron or a TrueNAS periodic task; it
+  acts only in the hour 18 of `America/Los_Angeles` and once per day.
+  It refuses an env file without `DEMO_DATA`, with an empty
+  `DEPLOY_NAME_SUFFIX` or with a `DEPLOY_DATA_ROOT` that does not contain
+  "demo". `--dry-run` shows what it would empty, `--now` resets right away.
+
 ### NVIDIA document-AI profile
 
 The normal deployment remains CPU-only. To accelerate document classification

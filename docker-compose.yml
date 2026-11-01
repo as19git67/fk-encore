@@ -202,6 +202,9 @@ services:
       # local model copies example documents' title/sender/category into the
       # output. Opt in only after validating example safety on the model.
       DOCUMENTS_FEWSHOT_ENABLED: ${DOCUMENTS_FEWSHOT_ENABLED:-false}
+      # Loads the demo data once at boot on an untouched system (demo/boot.ts):
+      # 1 = the full demo, small = the household of the E2E tests. Empty = never.
+      DEMO_DATA: ${DEMO_DATA:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_NAME: ${ADMIN_NAME:-Admin}
       # No default on purpose: the seed creates the initial admin only when
@@ -215,7 +218,9 @@ services:
       FACE_DISTANCE_THRESHOLD: "0.42"
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
-      LLM_SERVICE_URL: http://llm_service:8000
+      # The demo stack borrows prod's llm-service (docker-compose.demo.yml);
+      # every other stack talks to its own.
+      LLM_SERVICE_URL: ${DEPLOY_LLM_SERVICE_URL:-http://llm_service:8000}
       AESTHETIC_SERVICE_URL: http://aesthetic_service:8000
       # Per-request deadline for /classify & friends (documents/llm-client.ts).
       # The 120 s default fits a dense model held entirely in VRAM; a MoE model

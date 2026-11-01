@@ -85,3 +85,25 @@ jobs:
             --retry-all-errors \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
             ${{ secrets.WATCHTOWER_URL_PROD }}/v1/update
+
+      # The demo stack follows latest too (documentation/plans/demodaten.md,
+      # "Demo deployment"). It must never turn main red: without the secret
+      # the step does nothing, and a demo that is down only leaves a warning.
+      - name: Deploy to TrueNAS (demo)
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          WATCHTOWER_URL_DEMO: ${{ secrets.WATCHTOWER_URL_DEMO }}
+          WATCHTOWER_TOKEN: ${{ secrets.WATCHTOWER_TOKEN }}
+        run: |
+          if [ -z "$WATCHTOWER_URL_DEMO" ]; then
+            echo "WATCHTOWER_URL_DEMO is not set, no demo to update"
+            exit 0
+          fi
+          curl -f -X POST \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
+            "$WATCHTOWER_URL_DEMO/v1/update" \
+            || echo "::warning::The demo stack did not take the update"
