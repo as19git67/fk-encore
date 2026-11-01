@@ -78,7 +78,10 @@ steht nur, was das Modul daraus macht.
 
 Volle Breite. Oben rechts: Hilfe (Fragezeichen), Zahnrad „Standard für neue
 Dokumente“, „Schreiben“ und „Hochladen“ (die drei letzten nur mit
-`documents.upload`). Darunter die Listen-Toolbar, ein Warteschlangen-Streifen,
+`documents.upload`). Auf dem Handy im Hochformat entfällt die Titelzeile:
+„Hochladen“ steht als Symbol am Ende der Suchzeile, „Schreiben“, „Standard
+für neue Dokumente“ und „Hilfe“ liegen dort im Menü „Weitere Aktionen“ (⋮).
+Darunter die Listen-Toolbar, ein Warteschlangen-Streifen,
 der nur bei Aktivität erscheint, ein Streifen mit Sammelmappen-Kacheln und
 die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 (ab 1300 px) steht rechts die Vorschau des aktuellen Dokuments.
@@ -100,8 +103,8 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 - **Wo:** Suchfeld der Toolbar, Fokus mit `/`
 - **Schritte:** 1. Begriff eingeben; die Liste lädt nach kurzer Pause.
   2. Optional Suchmodus „Hybrid“ (Standard), „Text“ (exakte Wörter) oder
-  „Bedeutung“ (semantisch) im Schalter neben dem Feld; der Schalter
-  erscheint nur bei aktiver Suche, die Wahl bleibt gespeichert.
+  „Bedeutung“ (semantisch) über den Knopf mit dem aktuellen Modus neben
+  dem Feld (Menü); der Knopf erscheint nur bei aktiver Suche, die Wahl bleibt gespeichert.
 - **Ergebnis:** Treffer samt gesetzten Filtern; `q` steht in der URL. Die
   Suche findet auch Dokumente in Sammelmappen und Mappen selbst (Titel,
   Notiz, Zusammenfassung). Kein „Mehr laden“ bei aktiver Suche.
@@ -232,7 +235,8 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 
 ### DOK-LST-14 Zur Hilfe, zum Hochladen, zum Schreiben
 
-- **Wo:** Fragezeichen, „Hochladen“, „Schreiben“ oben rechts
+- **Wo:** Fragezeichen, „Hochladen“, „Schreiben“ oben rechts; auf dem Handy
+  im Hochformat „Hochladen“ am Ende der Suchzeile, der Rest im Menü ⋮
 - **Ergebnis:** `HLF`, `UPL`, `TXT`.
 - **Test:** –
 

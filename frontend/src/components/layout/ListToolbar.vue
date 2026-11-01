@@ -34,6 +34,11 @@ import { hasOpenOverlay, overlayAbove } from '../../utils/overlayLayer'
  *
  * A view with a search bar of its own (the gallery's natural-language
  * search) fills the `search` slot instead of handing over `model.search`.
+ *
+ * `#search-end` sits on the search's line, right of the field, and moves
+ * with it: what belongs to the search (the documents' search mode) or what a
+ * phone would otherwise give a line of its own (the page's actions while the
+ * title row is hidden). The field gives up width for it, never the line.
  */
 
 const props = defineProps<{
@@ -202,6 +207,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
             />
           </IconField>
         </slot>
+        <div v-if="slots['search-end']" class="list-toolbar__search-end">
+          <slot name="search-end" />
+        </div>
       </div>
 
       <div class="list-toolbar__controls">
@@ -344,6 +352,22 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 .list-toolbar__field {
   width: 100%;
   min-width: 0;
+}
+/* Beside its addons the field takes what they leave, but stays wide enough
+   to read what was typed. */
+.list-toolbar__search:has(.list-toolbar__search-end) {
+  gap: var(--space-1);
+}
+.list-toolbar__search:has(.list-toolbar__search-end) .list-toolbar__field {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 6rem;
+}
+.list-toolbar__search-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
 }
 .list-toolbar__field :deep(input) {
   width: 100%;

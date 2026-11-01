@@ -142,3 +142,17 @@ export const KeineTreffer: Story = {
     await new Promise((resolve) => setTimeout(resolve, 500))
   },
 }
+
+/**
+ * A phone in portrait: the title row is hidden, so search mode, the "more"
+ * menu (Schreiben, Standard, Hilfe) and "Hochladen" sit on the search line,
+ * and the buttons share their line with the result count.
+ */
+export const HandyHochformatSuche: Story = {
+  name: 'Handy hochkant mit Suche',
+  parameters: {
+    ...Suchergebnis.parameters,
+    testViewport: { width: 390, height: 844 },
+  },
+  play: Suchergebnis.play,
+}

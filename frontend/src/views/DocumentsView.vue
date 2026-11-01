@@ -4,7 +4,8 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
-import SelectButton from 'primevue/selectbutton'
+import Menu from 'primevue/menu'
+import type { MenuItem } from 'primevue/menuitem'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
@@ -126,6 +127,22 @@ const searchModeOptions = [
   { label: 'Text', value: 'fts' },
   { label: 'Bedeutung', value: 'semantic' },
 ]
+
+const searchModeLabel = computed(
+  () => searchModeOptions.find((o) => o.value === searchMode.value)?.label ?? 'Hybrid',
+)
+const searchModeMenu = ref<InstanceType<typeof Menu> | null>(null)
+const searchModeItems = computed<MenuItem[]>(() =>
+  searchModeOptions.map((o) => ({
+    label: o.label,
+    icon: o.value === searchMode.value ? 'pi pi-check' : 'pi pi-fw',
+    command: () => {
+      if (searchMode.value === o.value) return
+      searchMode.value = o.value as SearchMode
+      void load()
+    },
+  })),
+)
 
 // The term settles 300 ms after the last keystroke (and on back/forward);
 // that is the moment to ask the backend again.
@@ -742,6 +759,44 @@ useRealtimeEvent('documents', 'status.changed', (ev) => {
 // documents to private without a word; the cog button warns about it.
 const uploadDefaultsStale = ref(false)
 
+const mayUpload = computed(() => auth.hasPermission('documents.upload'))
+
+function openHelp() {
+  void router.push({ name: 'dokumente-hilfe' })
+}
+function openWrite() {
+  void router.push({ name: 'dokumente-text-neu' })
+}
+function openUpload() {
+  void router.push({ name: 'dokumente-upload' })
+}
+
+/**
+ * On a phone in portrait the title row is hidden; what sat beside the title
+ * and is rarely needed goes behind one "more" button on the search line.
+ * "Hochladen" stays a button of its own there.
+ */
+const moreMenu = ref<InstanceType<typeof Menu> | null>(null)
+const moreItems = computed<MenuItem[]>(() => [
+  ...(mayUpload.value
+    ? [
+        {
+          label: 'Schreiben',
+          icon: 'pi pi-pen-to-square',
+          command: openWrite,
+        },
+        {
+          label: uploadDefaultsStale.value
+            ? 'Standard für neue Dokumente (Gruppe gilt nicht mehr)'
+            : 'Standard für neue Dokumente',
+          icon: uploadDefaultsStale.value ? 'pi pi-exclamation-triangle' : 'pi pi-cog',
+          command: () => { defaultsDialogVisible.value = true },
+        },
+      ]
+    : []),
+  { label: 'Hilfe', icon: 'pi pi-question-circle', command: openHelp },
+])
+
 async function loadUploadDefaults() {
   if (!auth.hasPermission('documents.upload')) return
   try {
@@ -781,17 +836,20 @@ onMounted(async () => {
     legacy-anchor-key="documents"
     :resolve-anchor="resolveListAnchor"
   >
-    <template #actions>
+    <!-- Beside the title on a wide screen. On a phone in portrait the title
+         row is hidden and these move into the toolbar's search line (below),
+         so they cost no line of their own. -->
+    <template v-if="!compactHeader" #actions>
         <Button
           icon="pi pi-question-circle"
           text
           rounded
           aria-label="Hilfe zum Dokumente-Modul"
           v-tooltip.bottom="'Hilfe: Dokument-Flow und Aktionen'"
-          @click="router.push({ name: 'dokumente-hilfe' })"
+          @click="openHelp"
         />
         <Button
-          v-if="auth.hasPermission('documents.upload')"
+          v-if="mayUpload"
           icon="pi pi-cog"
           text
           rounded
@@ -805,22 +863,19 @@ onMounted(async () => {
           @click="defaultsDialogVisible = true"
         />
         <Button
-          v-if="auth.hasPermission('documents.upload')"
-          :label="compactHeader ? undefined : 'Schreiben'"
-          aria-label="Schreiben"
+          v-if="mayUpload"
+          label="Schreiben"
           icon="pi pi-pen-to-square"
           severity="secondary"
           outlined
           v-tooltip.bottom="'Eigenes Textdokument mit Markdown schreiben'"
-          @click="router.push({ name: 'dokumente-text-neu' })"
+          @click="openWrite"
         />
         <Button
-          v-if="auth.hasPermission('documents.upload')"
-          :label="compactHeader ? undefined : 'Hochladen'"
-          aria-label="Hochladen"
+          v-if="mayUpload"
+          label="Hochladen"
           icon="pi pi-upload"
-          v-tooltip.bottom="compactHeader ? 'Dokumente hochladen' : undefined"
-          @click="router.push({ name: 'dokumente-upload' })"
+          @click="openUpload"
         />
     </template>
 
@@ -828,19 +883,50 @@ onMounted(async () => {
          active filter chips, the selection bar and the notices. -->
     <template #toolbar>
       <ListToolbar :model="toolbar">
-        <template #actions>
-          <SelectButton
-            v-if="isSearchActive"
-            v-model="searchMode"
-            :options="searchModeOptions"
-            optionLabel="label"
-            optionValue="value"
-            :allowEmpty="false"
-            size="small"
-            class="search-mode-btn"
-            v-tooltip.bottom="'Suchmodus'"
-            @update:model-value="load"
-          />
+        <template v-if="isSearchActive || compactHeader" #search-end>
+          <!-- The search mode belongs to the search, so it sits on its line —
+               one button naming the mode, the three choices in its menu. -->
+          <template v-if="isSearchActive">
+            <Button
+              :label="searchModeLabel"
+              icon="pi pi-angle-down"
+              icon-pos="right"
+              size="small"
+              outlined
+              severity="secondary"
+              class="search-mode-btn"
+              aria-haspopup="true"
+              :aria-label="`Suchmodus: ${searchModeLabel}`"
+              v-tooltip.bottom="'Suchmodus'"
+              data-testid="documents-search-mode"
+              @click="searchModeMenu?.toggle($event)"
+            />
+            <Menu ref="searchModeMenu" :model="searchModeItems" :popup="true" />
+          </template>
+          <template v-if="compactHeader">
+            <Button
+              icon="pi pi-ellipsis-v"
+              text
+              rounded
+              size="small"
+              :severity="uploadDefaultsStale ? 'warn' : 'secondary'"
+              aria-label="Weitere Aktionen"
+              aria-haspopup="true"
+              v-tooltip.bottom="'Weitere Aktionen'"
+              data-testid="documents-more"
+              @click="moreMenu?.toggle($event)"
+            />
+            <Menu ref="moreMenu" :model="moreItems" :popup="true" />
+            <Button
+              v-if="mayUpload"
+              icon="pi pi-upload"
+              size="small"
+              aria-label="Dokumente hochladen"
+              v-tooltip.bottom="'Dokumente hochladen'"
+              data-testid="documents-upload"
+              @click="openUpload"
+            />
+          </template>
         </template>
       </ListToolbar>
     </template>
@@ -1216,7 +1302,7 @@ onMounted(async () => {
 /* Page frame, title, sticky subheader: all PageLayout now (issue #1272).
    Only the list region below keeps its own scrolling columns. */
 
-.search-mode-btn { flex-shrink: 0; }
+.search-mode-btn { flex-shrink: 0; white-space: nowrap; }
 
 /* ── Pagination ────────────────────────────────────────────────── */
 .load-more-row {
