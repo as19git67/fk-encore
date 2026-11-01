@@ -11,7 +11,7 @@
  * use); a tool's own validation still runs behind them.
  */
 
-import type { JsonSchema, ToolSpec } from "./types";
+import { AFTER_EXECUTE, type JsonSchema, type ToolSpec } from "./types";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const YEAR_RE = /^\d{4}$/;
@@ -136,13 +136,16 @@ function checkDate(name: string, value: string): string | null {
  * most likely meant), missing required ones, wrong types, values outside an
  * enum, dates that are not days. Empty when the call may run.
  */
-export function checkArguments(tool: Pick<ToolSpec, "parameters">, args: Record<string, unknown>): string[] {
+export function checkArguments(tool: Pick<ToolSpec, "parameters"> & Partial<Pick<ToolSpec, "kind">>, args: Record<string, unknown>): string[] {
   const schema: JsonSchema = tool.parameters;
   const properties = schema.properties ?? {};
   const known = Object.keys(properties);
   const problems: string[] = [];
   for (const name of Object.keys(args)) {
     if (name in properties) continue;
+    // Every write tool takes it; the system prompt says so instead of the
+    // schema of each one (the schemas of all tools sit at the deferral budget).
+    if (name === AFTER_EXECUTE && tool.kind === "write") continue;
     const meant = nearestName(name, known);
     problems.push(`unknown argument ${name}${meant ? `; did you mean ${meant}?` : known.length ? `; the arguments are ${known.join(", ")}` : "; it takes no arguments"}`);
   }

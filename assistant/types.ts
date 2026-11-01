@@ -185,3 +185,6 @@ export type TurnEvent =
   | { type: "error"; message: string }
   /** The user stopped the turn; nothing of it is kept. */
   | { type: "cancelled" };
+
+/** The argument every write tool takes besides its own: the step that waits for the card (`proposals.ts`). */
+export const AFTER_EXECUTE = "after_execute";

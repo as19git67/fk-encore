@@ -87,7 +87,12 @@ export function parseSummary(reply: Pick<ChatReply, "tool_calls">): string | nul
 function digestSuffix(digest: string | null): string {
   const rows = digest?.match(/(\d+) rows?\b/);
   if (rows) return ` (${rows[1]} row${rows[1] === "1" ? "" : "s"})`;
-  if (digest && /\bproposal #\d+/.test(digest)) return " (proposal)";
+  if (digest && /\bproposal #\d+/i.test(digest)) {
+    // The state the card has now (`currentProposalText`), not the one the summary was written in.
+    if (/was EXECUTED/.test(digest)) return " (proposal, since executed by the user: done)";
+    if (/was DISCARDED/.test(digest)) return " (proposal, since discarded by the user)";
+    return " (proposal)";
+  }
   return "";
 }
 

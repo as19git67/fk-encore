@@ -12,7 +12,7 @@
  * starts a new conversation with that working set, `?prompt=` fills the
  * question field.
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
@@ -45,6 +45,7 @@ import { draftTitleOf, TEXT_DRAFT_STATE_KEY, type TextDraft } from '../utils/mar
 import { useAtLeast } from '../composables/useBreakpoint'
 import { applyEvent, emptyTurn, suggestedQuestions, type LiveTurn } from '../utils/assistantTurn'
 import { latestUsage } from '../utils/contextUsage'
+import { CONTINUE_AFTER_PROPOSAL } from '../utils/proposalEffects'
 
 /** How long the server usually needs to name a new conversation. */
 const TITLE_RELOAD_MS = 8000
@@ -276,6 +277,17 @@ async function send(question: string) {
     void nextTick(() => composer.value?.focus())
   }
 }
+
+// A card the assistant said it would go on after (create the folder, then
+// its PDF): once it ran, the page asks the rest of the question. While an
+// answer is still coming, the question waits in the field instead.
+provide(CONTINUE_AFTER_PROPOSAL, (message: string) => {
+  if (busy.value) {
+    if (!draft.value) draft.value = message
+    return
+  }
+  void send(message)
+})
 
 function remove(conversation: ConversationSummary) {
   confirm.require({
