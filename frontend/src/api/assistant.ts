@@ -3,11 +3,13 @@
  *
  * A question is a POST with the full bearer token; the answer arrives over a
  * WebSocket that only watches the turn. The client picks the turn id, opens
- * the stream first, then posts, so the stream sees every event — and if the
- * socket fails, the POST still returns the whole answer.
+ * the stream first, then starts the turn, so the stream sees every event.
+ * The POST returns at once: a request held open for a long answer is cut
+ * off by the proxy in front of the app (Cloudflare's 524 after 100 s). Only
+ * when the socket cannot open does the client fall back to the waiting `ask`.
  */
 
-import { API_BASE_URL, apiFetch, ensureFreshToken } from './client'
+import { API_BASE_URL, ApiError, apiFetch, ensureFreshToken } from './client'
 
 export type BlockKind =
   | 'accounts' | 'transactions' | 'analysis' | 'debits' | 'categories'
@@ -89,7 +91,8 @@ export interface AskResponse {
 
 /** One event of a running turn, as the stream sends it. */
 export interface StreamEvent {
-  type: 'token' | 'retract' | 'tool_start' | 'tool_result' | 'done' | 'error' | 'cancelled'
+  /** `ping` carries nothing; it keeps a quiet socket open. */
+  type: 'token' | 'retract' | 'tool_start' | 'tool_result' | 'done' | 'error' | 'cancelled' | 'ping'
   text?: string
   tool?: string
   arguments?: Record<string, unknown>
@@ -99,6 +102,12 @@ export interface StreamEvent {
   answer?: string
   blocks?: ResultBlock[]
   message?: string
+  /** `done`: the stored answer. */
+  message_id?: number
+  rounds?: number
+  context_usage?: ContextUsage
+  /** `error`: the server's error code, e.g. `unavailable`. */
+  code?: string
 }
 
 export function listConversations(): Promise<{ conversations: ConversationSummary[] }> {
@@ -243,6 +252,14 @@ export function ask(conversationId: number, message: string, turnId?: string): P
   })
 }
 
+/** Starts a turn; the answer comes over the stream of `turnId`. */
+export function startTurn(conversationId: number, message: string, turnId: string): Promise<{ turnId: string }> {
+  return apiFetch(`/assistant/conversations/${conversationId}/turns`, {
+    method: 'POST',
+    body: JSON.stringify({ message, turnId }),
+  })
+}
+
 /**
  * Lets the assistant write text for the document editor: `instruction` says
  * what, `text` (optional) is the document so far. Nothing is stored; the
@@ -289,12 +306,19 @@ export interface TurnStream {
   close: () => void
 }
 
+export interface FollowOptions {
+  /** Reconnecting to a turn already started: the server refuses an unknown one at once. */
+  resume?: boolean
+  /** The socket closed after it had opened, by either side. */
+  onClose?: () => void
+}
+
 /**
  * Follows one turn. Each WebSocket frame is one JSON event; the server
  * closes the socket after `done` or `error`. Failure to connect is not an
- * error for the caller — the POST still delivers the answer.
+ * error for the caller — `ready` resolves false.
  */
-export function followTurn(turnId: string, onEvent: (event: StreamEvent) => void): TurnStream {
+export function followTurn(turnId: string, onEvent: (event: StreamEvent) => void, options: FollowOptions = {}): TurnStream {
   let socket: WebSocket | null = null
   let closed = false
   const ready = (async () => {
@@ -306,7 +330,8 @@ export function followTurn(turnId: string, onEvent: (event: StreamEvent) => void
     if (closed || typeof WebSocket === 'undefined') return false
     const token = localStorage.getItem('auth_token') ?? ''
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${proto}//${location.host}${API_BASE_URL}/assistant/turns/${encodeURIComponent(turnId)}/stream?token=${encodeURIComponent(token)}`
+    const resume = options.resume ? '&resume=true' : ''
+    const url = `${proto}//${location.host}${API_BASE_URL}/assistant/turns/${encodeURIComponent(turnId)}/stream?token=${encodeURIComponent(token)}${resume}`
     return await new Promise<boolean>((resolve) => {
       try {
         socket = new WebSocket(url)
@@ -315,7 +340,11 @@ export function followTurn(turnId: string, onEvent: (event: StreamEvent) => void
         return
       }
       const timer = setTimeout(() => resolve(false), 3000)
-      socket.addEventListener('open', () => { clearTimeout(timer); resolve(true) })
+      socket.addEventListener('open', () => {
+        clearTimeout(timer)
+        resolve(true)
+        socket?.addEventListener('close', () => { if (!closed) options.onClose?.() })
+      })
       socket.addEventListener('error', () => { clearTimeout(timer); resolve(false) })
       socket.addEventListener('message', (msg) => {
         if (typeof msg.data !== 'string') return
@@ -334,6 +363,105 @@ export function followTurn(turnId: string, onEvent: (event: StreamEvent) => void
       try { socket?.close() } catch { /* already closed */ }
     },
   }
+}
+
+/** How often a dropped socket is opened again before the turn counts as lost. */
+const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000]
+
+/** The socket to a running turn could not be opened again; its answer may still be stored. */
+export const TURN_LOST = 'turn_lost'
+
+/**
+ * Asks a question and waits for the answer on the stream. The POST that
+ * starts the turn returns at once, so no request stays open while the model
+ * and the tools work; a socket that drops is opened again and replays the
+ * turn, whose events already seen are skipped. Fails with the server's code
+ * (`canceled` when stopped), or `turn_lost` when the turn cannot be reached
+ * again — the answer then shows once the conversation is loaded again.
+ */
+export async function askStreaming(
+  conversationId: number,
+  message: string,
+  turnId: string,
+  onEvent: (event: StreamEvent) => void,
+): Promise<AskResponse> {
+  let settle: { resolve: (r: AskResponse) => void; reject: (e: unknown) => void } | null = null
+  const result = new Promise<AskResponse>((resolve, reject) => { settle = { resolve, reject } })
+  let finished = false
+  let seen = 0
+  let attempt = 0
+  let current: TurnStream | null = null
+  let started = false
+  let lostBeforeStart = false
+
+  const finish = (fn: () => void) => {
+    if (finished) return
+    finished = true
+    current?.close()
+    fn()
+  }
+
+  const handle = (replayed: { skip: number }) => (event: StreamEvent) => {
+    if (finished || event.type === 'ping') return
+    // A reconnected socket replays the whole turn; what was shown already stays.
+    if (replayed.skip > 0) {
+      replayed.skip--
+      return
+    }
+    seen++
+    attempt = 0
+    onEvent(event)
+    if (event.type === 'done') {
+      finish(() => settle!.resolve({
+        answer: event.answer ?? '',
+        blocks: event.blocks ?? [],
+        message_id: event.message_id ?? 0,
+        rounds: event.rounds ?? 0,
+        context_usage: event.context_usage,
+      }))
+    } else if (event.type === 'error') {
+      const code = event.code === 'not_found' && event.message === 'turn unknown' ? TURN_LOST : event.code
+      finish(() => settle!.reject(new ApiError(event.message ?? 'Die Frage konnte nicht beantwortet werden.', code)))
+    } else if (event.type === 'cancelled') {
+      finish(() => settle!.reject(new ApiError('the answer was cancelled', 'canceled')))
+    }
+  }
+
+  const reconnect = () => {
+    if (finished) return
+    if (!started) {
+      lostBeforeStart = true
+      return
+    }
+    const delay = RECONNECT_DELAYS_MS[attempt]
+    if (delay === undefined) {
+      finish(() => settle!.reject(new ApiError('Die Verbindung zur laufenden Antwort ist abgerissen.', TURN_LOST)))
+      return
+    }
+    attempt++
+    setTimeout(async () => {
+      if (finished) return
+      const stream = followTurn(turnId, handle({ skip: seen }), { resume: true, onClose: reconnect })
+      current = stream
+      if (!(await stream.ready)) reconnect()
+    }, delay)
+  }
+
+  current = followTurn(turnId, handle({ skip: 0 }), { onClose: reconnect })
+  if (!(await current.ready)) {
+    // No socket at all: ask and wait, as before streaming.
+    current.close()
+    return ask(conversationId, message, turnId)
+  }
+  try {
+    await startTurn(conversationId, message, turnId)
+  } catch (e) {
+    finish(() => settle!.reject(e))
+    return result
+  }
+  started = true
+  if (lostBeforeStart) reconnect()
+  return result
 }
 
 // ── Ausfüllhilfe (tax worksheet), straight from the Steuer page ──────────

@@ -181,8 +181,13 @@ export type TurnEvent =
   | { type: "retract" }
   | { type: "tool_start"; tool: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; tool: string; rowCount: number; block?: ResultBlock; error?: string }
-  | { type: "done"; answer: string; blocks: ResultBlock[] }
-  | { type: "error"; message: string }
+  /**
+   * The answer. The agent loop sends it without the rest; the endpoint sends
+   * it again once the answer is stored, with the stored message's id.
+   */
+  | { type: "done"; answer: string; blocks: ResultBlock[]; messageId?: number; rounds?: number; contextUsage?: ContextUsage }
+  /** `code` is the APIError code the turn failed with, e.g. `unavailable`. */
+  | { type: "error"; message: string; code?: string }
   /** The user stopped the turn; nothing of it is kept. */
   | { type: "cancelled" };
 

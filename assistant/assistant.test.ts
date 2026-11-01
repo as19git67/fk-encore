@@ -23,12 +23,14 @@ import { isSummaryRequest, SUMMARIZE_TURN_NAME } from "./summary";
 import { CHECK_ANSWER_NAME, isCheckRequest } from "./verify";
 import {
   __settleSummariesForTests,
+  __settleTurnsForTests,
   ask,
   cancelAssistantTurn,
   createConversation,
   deleteConversation,
   getConversation,
   listConversations,
+  startAssistantTurn,
   watchTurn,
   WHOLE_TURNS,
   type StreamEvent,
@@ -261,7 +263,7 @@ describe("watching a turn", () => {
     const sent: StreamEvent[] = [];
     return { sent, stream: { send: (e: StreamEvent) => { sent.push(e); }, close: vi.fn(async () => {}) } };
   }
-  const watch = watchTurn as unknown as (h: { turnId: string }, s: ReturnType<typeof fakeStream>["stream"]) => Promise<void>;
+  const watch = watchTurn as unknown as (h: { turnId: string; resume?: boolean }, s: ReturnType<typeof fakeStream>["stream"]) => Promise<void>;
 
   it("the stream opened first sees every event of the posted turn", async () => {
     clients.meter.listMeters.mockResolvedValue({ meters: [] });
@@ -342,6 +344,66 @@ describe("watching a turn", () => {
 
     expect(chat).not.toHaveBeenCalled();
     expect(sent.map((e) => e.type)).toEqual(["cancelled"]);
+  });
+
+  it("a started turn returns at once and its answer arrives on the stream, stored", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(chat).mockImplementation(async (req) => {
+      if (isRouterRequest(req) || isSummaryRequest(req)) return text("");
+      await held;
+      return text("Fertig.");
+    });
+    const conv = await createConversation({});
+    const { sent, stream } = fakeStream();
+
+    const watching = watch({ turnId: "turn-0006" }, stream);
+    // Returns while the model is still working: no request waits for the answer.
+    expect(await startAssistantTurn({ id: conv.id, message: "Lange Frage", turnId: "turn-0006" })).toEqual({ turnId: "turn-0006" });
+    expect(sent.some((e) => e.type === "done")).toBe(false);
+
+    release();
+    await watching;
+    await __settleTurnsForTests();
+    const done = sent.at(-1)!;
+    expect(done).toMatchObject({ type: "done", answer: "Fertig.", rounds: 1 });
+    const [stored] = await db.select().from(assistantMessage).where(eq(assistantMessage.role, "assistant"));
+    expect(done.message_id).toBe(stored.id);
+    expect(done.context_usage).toBeDefined();
+    // Only one done: the loop's own goes out after the answer is stored.
+    expect(sent.filter((e) => e.type === "done")).toHaveLength(1);
+  });
+
+  it("a started turn's failure goes to the stream with its code", async () => {
+    vi.mocked(chat).mockRejectedValue(new LlmServiceUnavailableError("down"));
+    const conv = await createConversation({});
+    const { sent, stream } = fakeStream();
+    const watching = watch({ turnId: "turn-0007" }, stream);
+    await startAssistantTurn({ id: conv.id, message: "Hallo", turnId: "turn-0007" });
+    await watching;
+    await __settleTurnsForTests();
+    expect(sent.at(-1)).toMatchObject({ type: "error", code: "unavailable" });
+  });
+
+  it("a started turn is refused like a question, and needs a turn id", async () => {
+    const conv = await createConversation({});
+    await expect(startAssistantTurn({ id: conv.id, message: "  ", turnId: "turn-0008" })).rejects.toThrow("message is empty");
+    await expect(startAssistantTurn({ id: conv.id, message: "Hallo", turnId: "" })).rejects.toThrow("turnId is required");
+    setAuth("702");
+    await expect(startAssistantTurn({ id: conv.id, message: "Hallo", turnId: "turn-0009" })).rejects.toThrow("conversation not found");
+  });
+
+  it("a reconnect to an unknown turn fails at once, to a known one replays it", async () => {
+    const lost = fakeStream();
+    await watch({ turnId: "turn-0010", resume: true }, lost.stream);
+    expect(lost.sent).toEqual([{ type: "error", message: "turn unknown", code: "not_found" }]);
+
+    vi.mocked(chat).mockResolvedValue(text("Hallo."));
+    const conv = await createConversation({});
+    await ask({ id: conv.id, message: "Hallo", turnId: "turn-0011" });
+    const again = fakeStream();
+    await watch({ turnId: "turn-0011", resume: true }, again.stream);
+    expect(again.sent.map((e) => e.type)).toEqual(["done"]);
   });
 
   it("a turn id cannot be posted twice", async () => {
