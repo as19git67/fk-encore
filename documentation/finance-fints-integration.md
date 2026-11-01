@@ -432,8 +432,7 @@ initial retrieval, at 89 days, lies deliberately *within* the
 PSD2 read-only window (some banks already treat a date exactly on the 90-day boundary
 as "older than 90 days" and then demand a fresh TAN on
 every sync) and therefore triggers no additional SCA — anyone who needs more history
-must either use the Finanzkraft import
-(`finance-data-import.md`) or temporarily raise the default value in `statements.ts`
+must temporarily raise the default value in `statements.ts`
 and accept the one-time TAN prompt.
 
 We leave `to` empty; the bank then delivers up to the current day.

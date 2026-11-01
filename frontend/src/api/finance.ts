@@ -1891,46 +1891,6 @@ export async function suggestTagsBatch(
 }
 
 // ----------------------------------------------------------------------
-// Admin: data import
-// ----------------------------------------------------------------------
-
-export interface ImportResponse {
-  counts: {
-    currencies: number
-    bankcontacts: number
-    accounts: number
-    transactions: number
-    tags: number
-    tag_links: number
-  }
-  skipped: {
-    currencies: number
-    bankcontacts: number
-    accounts: number
-    transactions: number
-    tags: number
-    tag_links: number
-  }
-  errors: Array<{ entity: string; row: number; message: string }>
-}
-
-export async function importFinanceData(
-  exportJson: unknown,
-  options: { wipeFirst?: boolean } = {},
-): Promise<ImportResponse> {
-  return apiFetch('/finance/admin/import', {
-    method: 'POST',
-    body: JSON.stringify({
-      export: exportJson,
-      wipe_first: options.wipeFirst === true,
-    }),
-    // Large imports can take a while — allow up to 5 minutes before
-    // the client aborts.
-    timeoutMs: 5 * 60_000,
-  })
-}
-
-// ----------------------------------------------------------------------
 // Totals: subtotals by tag or period and a grand total
 // ----------------------------------------------------------------------
 

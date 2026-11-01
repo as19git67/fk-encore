@@ -77,12 +77,6 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/documents-source
-  finance_import:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/finance-import
   finance_export:
     driver: local
     driver_opts:

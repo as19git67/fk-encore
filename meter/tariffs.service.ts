@@ -375,8 +375,7 @@ async function findExistingImportEntry(userId: number, entry: TariffNaturalKey) 
  *
  * Idempotent by the same natural key the unique index uses: a row that is
  * already there is updated, not duplicated, so re-importing a corrected file
- * is safe. A bad row is reported with its position and does not stop the rest,
- * following the finance importer (`finance/data-import.ts`).
+ * is safe. A bad row is reported with its position and does not stop the rest.
  */
 export async function importTariffEntries(
   userId: number,

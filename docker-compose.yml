@@ -64,14 +64,13 @@ services:
     # runs as 568:568, but a host that wants its own group to reach the
     # data as well sets DEPLOY_DATA_GID to that group — the files stay
     # writable for uid 568 either way, because it owns them.
-    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/routing /mnt/taxonomy-out /mnt/recap-music"]
+    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-export /mnt/backup /mnt/geo /mnt/routing /mnt/taxonomy-out /mnt/recap-music"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
       - llm_models:/mnt/models
       - embedding_models:/mnt/embedding-models
       - receipt_ocr_models:/mnt/receipt-ocr-models
-      - finance_import:/mnt/finance-import
       - finance_export:/mnt/finance-export
       - backup:/mnt/backup
       - geo_data:/mnt/geo
@@ -282,7 +281,6 @@ services:
       FINANCE_CREDENTIALS_KEY: ${FINANCE_CREDENTIALS_KEY:-}
       FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-dev-placeholder}
       FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-0.1.0}
-      FINANCE_IMPORT_DIR: /mnt/data/finance-import
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
       # Quotes and news of the held securities (documentation/plans/kurse.md).
@@ -304,7 +302,6 @@ services:
       - documents_inbox:/mnt/data/documents-inbox
       # Read-only: the backfill under Dokumente › Verarbeitung only reads it.
       - documents_source:/mnt/data/documents-source:ro
-      - finance_import:/mnt/data/finance-import
       - finance_export:/mnt/data/finance-export
       - backup:/mnt/backup
 

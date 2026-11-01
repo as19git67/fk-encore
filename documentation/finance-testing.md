@@ -171,17 +171,6 @@ no HTTP 409.
 - Date range filter: pin down and test `from`/`to` exclusive vs.
   inclusive.
 
-### 2.8 `data-import.test.ts`
-
-- Happy path: small JSON fixture (2 bank contacts, 3 accounts,
-  20 transactions, 5 tags) → exact counts in the response.
-- Re-import of the same JSON: all `skipped` counts match the
-  original `counts`, no duplicates in the DB.
-- Validation error: transaction references an unknown account →
-  entry in `validationErrors`, but bank contacts and accounts are
-  persisted nonetheless (stage isolation).
-- Permission: `finance.view` user → 403 without side effect.
-
 ### 2.9 `account-access.test.ts`
 
 - Diff saving: existing ACL `[A:read, B:write]`, new list

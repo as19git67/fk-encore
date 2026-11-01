@@ -44,7 +44,6 @@ and the ACL).
 | `/finance/tan-sessions/complete` | POST | 5 / 10 min | `tan-complete:<tan_reference>` | The FinTS server limits itself (usually 3 TAN attempts), but we want to prevent an attacker from brute-forcing third parties' TAN references as long as they have not expired. The key is **per reference**, not per IP — three users behind NAT must not lock each other out. |
 | `/finance/bankcontacts/:id/credentials` | POST | 10 / 15 min | `bank-creds:<userId>:<bankcontactId>` | Curb the credential-set rate — prevents a compromised user account from trying an arbitrary number of credential changes (noise in the log + CPU for crypto). |
 | `/finance/statements` | POST | 20 / 15 min | `sync-trigger:<userId>:<bankcontactId>` | Manual sync trigger: limited per user×bank contact so that nobody accidentally (or maliciously) floods the bank with HBCI dialogs. The cron runs on its own anyway. |
-| `/finance/admin/import` | POST | 3 / 60 min | `finance-import:<userId>` | The import is expensive (minutes, large DB transactions). Three attempts per hour are more than the admin actually needs. |
 | `/finance/tags/suggest` | POST | 5 / 60 min | `tag-suggest-batch:<userId>` | The batch endpoint runs over many transactions → many LLM calls. Limit strictly. |
 
 Not limited (but documenting why):

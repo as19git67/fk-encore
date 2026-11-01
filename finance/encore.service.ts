@@ -26,11 +26,7 @@ console.log("[boot] finance/encore.service.ts: begin");
 //   - statements-cron:    finance-sync-statements (5m), finance-tan-cleanup (1h)
 //   - export-cron:        finance-export-snapshot (daily 03:00 UTC)
 //   - tag-cleanup-cron:   finance-ai-tag-cleanup (daily 05:00 UTC)
-//   - import-pending:     no scheduled job (chokidar watcher handles it),
-//                         but the module also exposes the internal scan
-//                         endpoint, so we still need it loaded.
 import "./statements-cron";
-import "./import-pending";
 import "./export-cron";
 // Side-effect: starts the AI tag suggestion worker loop.
 import "./tag-worker";
@@ -48,7 +44,6 @@ import { createYahooNewsProvider } from "./quote-provider-yahoo-news";
 import { onvistaQuoteProvider } from "./quote-provider-onvista";
 import { eodhdFromEnvironment } from "./quote-provider-eodhd-config";
 
-import { startFinanceImportWatcher } from "./import-pending";
 
 // Prices come from Onvista. Yahoo answers a server's requests with 429
 // whatever the rate (it wants a browser's TLS fingerprint), so it stays
@@ -71,13 +66,6 @@ import { startFinanceImportWatcher } from "./import-pending";
 // Arm all timers registered above. Synchronous, fire-and-forget jobs
 // run on their own timers from here on.
 startLocalCron();
-
-// Fire-and-forget: the dropbox watcher must not block service boot.
-// Failures are logged inside the watcher. Mirrors the documents
-// inbox-watcher startup in documents/encore.service.ts.
-startFinanceImportWatcher().catch((err) =>
-  console.error("[finance] failed to start import watcher:", err),
-);
 
 console.log("[boot] finance/encore.service.ts: registering Service");
 export default new Service("finance");

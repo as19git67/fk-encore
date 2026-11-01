@@ -85,18 +85,6 @@ Errors do not block the insert — the suggestion is simply missing.
 `LlmServiceUnavailableError` (from the existing pattern) is
 caught and logged as a warning.
 
-### 2.5 Data import (`data-import.ts`)
-
-Stage by stage, so that progress is visible in the log:
-
-```
-[finance.import] job=<uuid> start: user=1 file=finanzkraft-2026-04.json size=2.4MB
-[finance.import] job=<uuid> stage=bankcontacts: inserted=5 skipped=0 errors=0
-[finance.import] job=<uuid> stage=accounts: inserted=12 skipped=0 errors=0
-[finance.import] job=<uuid> stage=transactions: inserted=48710 skipped=2 errors=0
-[finance.import] job=<uuid> done: duration=187s validationErrors=2
-```
-
 ### 2.6 Analysis (`analysis.ts`)
 
 Only the **question hash + AST shape**, never the raw question (it may contain
