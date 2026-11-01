@@ -450,7 +450,9 @@ async function loadAccessibleAccounts(
   // Step 3 — pending counts: transactions in the last 30 days that
   // don't yet carry any user-source tag. Single grouped raw SQL query
   // with NOT EXISTS so transactions with multiple AI-tag rows aren't
-  // counted multiple times.
+  // counted multiple times. A split booking keeps its tags on the
+  // splits (`finance_transaction_split.tags`), not on the transaction:
+  // it counts as done once every split carries at least one tag.
   const cutoff = new Date(Date.now() - PENDING_WINDOW_DAYS * 86_400_000)
     .toISOString();
   const pendingByAccount = new Map<number, number>();
@@ -466,6 +468,17 @@ async function loadAccessibleAccounts(
           FROM finance_tag_transaction tt
           INNER JOIN finance_tag tag ON tag.id = tt.tag_id
           WHERE tt.transaction_id = t.id AND tag.source = 'user'
+        )
+        AND NOT (
+          EXISTS (
+            SELECT 1 FROM finance_transaction_split s
+            WHERE s.transaction_id = t.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM finance_transaction_split s
+            WHERE s.transaction_id = t.id
+              AND jsonb_array_length(COALESCE(s.tags, '[]'::jsonb)) = 0
+          )
         )
       GROUP BY t.account_id
     `)
