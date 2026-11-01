@@ -8,15 +8,21 @@
 import fs from "node:fs/promises";
 import { eq, inArray } from "drizzle-orm";
 import db from "../db/database";
-import { demoFile, demoItem, demoRun, financeAccount, userAssessmentSettings, users, userSubjectPersons } from "../db/schema";
+import { albums, demoFile, demoItem, demoRun, financeAccount, userAssessmentSettings, users, userSubjectPersons } from "../db/schema";
 import { purgeDocument } from "../documents/purge";
+import { removePhotos } from "./photo-writer";
 import { registered } from "./registry";
 import { deleteBookingsOf } from "./writer";
 
 export async function removeRun(runId: number): Promise<void> {
   await db.update(demoRun).set({ status: "removing", stage: "remove" }).where(eq(demoRun.id, runId));
 
-  // Documents first: a receipt can point at a booking, and each has a file on disk.
+  // Albums and photos first: nothing else points at them, and each photo has a file and thumbnails.
+  const demoAlbums = await registered(runId, "albums");
+  if (demoAlbums.length) await db.delete(albums).where(inArray(albums.id, demoAlbums));
+  await removePhotos(await registered(runId, "photos"));
+
+  // Documents next: a receipt can point at a booking, and each has a file on disk.
   for (const id of await registered(runId, "documents")) await purgeDocument(id);
 
   const accounts = await registered(runId, "finance_account");

@@ -16,6 +16,9 @@ import { planDocuments } from "./documents";
 import { planDepot } from "./depot";
 import { createDemoDepot, loadDemoCloses } from "./depot-writer";
 import { planHousehold, type DemoSize } from "./household";
+import { defaultPhotoDeps, faceDetectorReachable, openverseReachable, type PhotoDeps } from "./photo-sources";
+import { writePhotos, type PhotoSource } from "./photo-writer";
+import { planPhotos } from "./photos";
 import { currentRun, isUntouched } from "./state";
 import { DemoCancelled, writeHousehold } from "./writer";
 
@@ -33,6 +36,8 @@ export interface StartOptions {
    * to the model.
    */
   text?: TextSource;
+  /** Where the photos come from; the tests hand in a fake Openverse and face detector. */
+  photoDeps?: PhotoDeps;
 }
 
 /** Thrown when the system is not untouched or a demo is there already. */
@@ -129,6 +134,30 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
       cancelled: () => cancelRequested(runId),
     });
 
+    // The full demo takes CC0 photos from Openverse, checked by the face
+    // detector; the small one, and a full one either does not answer for,
+    // draws its pictures.
+    const photoDeps = opts.photoDeps ?? defaultPhotoDeps();
+    let photoSource: PhotoSource = "drawn";
+    let photoNote: string | null = null;
+    if (run.size === "full") {
+      if (!(await openverseReachable(photoDeps))) photoNote = "Openverse nicht erreichbar";
+      else if (!(await faceDetectorReachable(photoDeps))) photoNote = "Gesichtserkennung nicht erreichbar";
+      else photoSource = "openverse";
+    }
+    const photoPlan = planPhotos(run.seed, run.size, plan);
+    await setProgress(runId, "photos", 0, photoPlan.shots.length);
+    const pics = await writePhotos(runId, run.owner_user_id, run.seed, photoPlan, photoSource, {
+      progress: (done, total) => setProgress(runId, "photos", done, total),
+      cancelled: () => cancelRequested(runId),
+    }, photoDeps);
+    photoNote ??= pics.fallback;
+
+    const notes = [
+      "skipped" in loaded ? `Depot ausgelassen: ${loaded.skipped}` : null,
+      photoNote && run.size === "full" ? `Fotos ${pics.drawn === pics.photos ? "" : "teils "}gezeichnet statt von Openverse: ${photoNote}` : null,
+    ].filter((n): n is string => n !== null);
+
     await db
       .update(demoRun)
       .set({
@@ -144,9 +173,13 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
           scans: docs.scans,
           depot: depotId === null ? 0 : 1,
           depot_papers: depot?.documents.length ?? 0,
+          photos: pics.photos,
+          photos_openverse: pics.openverse,
+          photos_drawn: pics.drawn,
+          albums: pics.albums,
         },
-        // Not a failure: the run is done, the depot was left out for this reason.
-        error: "skipped" in loaded ? `Depot ausgelassen: ${loaded.skipped}` : null,
+        // Not a failure: the run is done, these parts were left out or replaced for the reasons given.
+        error: notes.length ? notes.join(" · ") : null,
       })
       .where(eq(demoRun.id, runId));
   } catch (err) {

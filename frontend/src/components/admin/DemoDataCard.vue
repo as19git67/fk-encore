@@ -54,6 +54,10 @@ const SUMMARY_LABELS: Record<string, string> = {
   scans: 'davon als Scan',
   depot: 'Depot',
   depot_papers: 'Depotpapiere',
+  photos: 'Fotos',
+  photos_openverse: 'davon von Openverse (CC0)',
+  photos_drawn: 'davon gezeichnet',
+  albums: 'Alben',
 }
 
 const FIELD_LABELS: Record<DemoTruthField, string> = {
@@ -69,6 +73,7 @@ const STAGE_LABELS: Record<string, string> = {
   bookings: 'Buchungen',
   quotes: 'Kurse',
   documents: 'Dokumente',
+  photos: 'Fotos',
   remove: 'Entfernen',
 }
 
@@ -187,9 +192,9 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
     </div>
     <p class="demo-card__desc">
       Ein Beispielhaushalt zum Ausprobieren: eine zweite Benutzerin, ein gemeinsames Konto, drei Jahre
-      Buchungen, ein Depot mit Indexfonds zu echten Kursen und 500 Dokumente, die durch die normale
-      Erkennung laufen. Nur in einem System, in das
-      noch niemand etwas eingetragen hat.
+      Buchungen, ein Depot mit Indexfonds zu echten Kursen, 500 Dokumente, die durch die normale
+      Erkennung laufen, und 500 gemeinfreie Fotos (CC0) von Openverse ohne erkennbare Personen. Nur in
+      einem System, in das noch niemand etwas eingetragen hat.
     </p>
 
     <p v-if="!status && !error" class="demo-card__line">Wird geladen …</p>

@@ -252,10 +252,34 @@ show something.
    fund's history the run leaves the depot out and says why on the card
    (not a failure). The loaded quotes stay when the demo is removed: they
    are shared by every depot holding the fund.
-4. **Photos.** Openverse download with licence list, face filter, EXIF
-   rewrite, demo library, albums. Then `db/seed-demo.ts` becomes
-   `size: "small"` and the Playwright workflow sets `DEMO_DATA=1` instead
-   of `E2E_SEED_DEMO`.
+4. **Photos.** *Done.* The plan in `demo/photos.ts`: 500 shots (12 for
+   `small`) over the household's span — a winter holiday in the
+   mountains, a city trip in spring, a summer holiday at the sea, the
+   garden from April to September, two birthdays, Christmas, New Year's
+   Eve and everyday pictures — each with a topic, a local time, a camera
+   (phones at home, a system camera on holidays) and a position only on
+   the trips, at public squares and viewpoints; five albums (the latest
+   holiday of each kind, "Garten", "Weihnachten"). The sources in
+   `demo/photo-sources.ts`: the full demo searches Openverse for CC0 and
+   PDM photos per topic (anonymous, a pause between searches, waits out a
+   429), passes over candidates whose title or tags name people, downloads
+   the rest without their metadata (long edge 2048 px) and drops every
+   photo in which the app's face detector finds a recognisable face (the
+   photo book's 5 % × 5 % rule); other topics fill in where one runs out.
+   The small demo, the tests, and a full demo that Openverse or the
+   detector does not answer for draw their pictures from a few shapes; the
+   card says why. `demo/photo-writer.ts` writes each shot's EXIF (date,
+   camera, position) with exiftool, imports the folder through a
+   temporary photo library in "move" mode (so the files land in the photo
+   storage and thumbnails, embeddings, aesthetics and groups come from the
+   real pipeline), deletes the library again and makes the albums. The
+   chosen photos with Openverse id, title, creator, licence and source
+   URL are kept in `demo_photo` (migration 0285) after the run is removed;
+   the next run loads that set again before it searches. Removal deletes
+   the photos with files and thumbnails and the albums.
+   Still open from this stage: `db/seed-demo.ts` becomes `size: "small"`
+   and the Playwright workflow sets `DEMO_DATA=1` instead of
+   `E2E_SEED_DEMO` (with the boot switch `DEMO_DATA=1` itself).
 5. **Meters and businesses.** Meter readings, PV business with its assets,
    so the EÜR shows a year.
 6. **Benchmark hand-off.** The generator as a function the assistant

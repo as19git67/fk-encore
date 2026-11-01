@@ -5265,6 +5265,29 @@ export const demoFile = pgTable("demo_file", {
   created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
 
+/** A photo a run chose, with its source and licence (migration 0285); stays when the run is removed. */
+export const demoPhoto = pgTable(
+  "demo_photo",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    run_id: integer("run_id").notNull().references(() => demoRun.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    topic: text("topic").notNull(),
+    source: text("source").$type<"openverse" | "drawn">().notNull(),
+    openverse_id: text("openverse_id"),
+    title: text("title"),
+    creator: text("creator"),
+    license: text("license"),
+    license_version: text("license_version"),
+    image_url: text("image_url"),
+    landing_url: text("landing_url"),
+    file_name: text("file_name").notNull(),
+    photo_id: integer("photo_id"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("demo_photo_run_idx").on(table.run_id, table.position)],
+);
+
 /** What the generator knows about a document it made, to measure the classification against. */
 export const demoTruth = pgTable("demo_truth", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

@@ -12,7 +12,12 @@ import { getAuthData } from "~encore/auth";
 import { and, eq, inArray } from "drizzle-orm";
 import db from "../db/database";
 import {
+  albumPhotos,
+  albums,
   demoItem,
+  demoPhoto,
+  photoLibraries,
+  photos,
   demoRun,
   demoTruth,
   documents,
@@ -35,9 +40,21 @@ import { truthReport } from "./truth";
 import { setQuoteProvider, type QuoteProvider } from "../finance/quote-provider";
 import { DEMO_DEPOT_NUMBER } from "./securities";
 import fs from "node:fs";
+import path from "node:path";
+import { UPLOAD_DIR } from "../photo/photo.service";
+import { planHousehold } from "./household";
+import { planPhotos } from "./photos";
 import { contentCounts, currentRun } from "./state";
 
 vi.mock("~encore/auth", () => ({ getAuthData: vi.fn() }));
+// The photo pipeline's workers (faces, embeddings, geocoding) would reach
+// for services the tests do not have; the import itself is what is tested.
+vi.mock("../photo/scan-worker", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../photo/scan-worker")>()),
+  triggerWorkers: () => {},
+}));
+// A small run now also draws and imports its photos.
+vi.setConfig({ testTimeout: 60_000 });
 
 let adminId: number;
 let memberId: number;
@@ -132,6 +149,28 @@ describe("a demo run", () => {
     const persons = await db.select().from(userSubjectPersons).where(eq(userSubjectPersons.user_id, spouse.id));
     expect(persons.map((p) => p.relation_kind).sort()).toEqual(["child", "self", "spouse"]);
 
+    // The small demo draws its 12 photos and imports them through a library like any archive.
+    expect(run.summary).toMatchObject({ photos: 12, photos_drawn: 12, photos_openverse: 0 });
+    const photoIds = await registered(runId, "photos");
+    expect(photoIds).toHaveLength(12);
+    const rows = await db.select().from(photos).where(inArray(photos.id, photoIds));
+    const shots = planPhotos(run.seed, "small", planHousehold(run.seed, "small", "2026-10-26")).shots;
+    // The EXIF the generator wrote is what the import read.
+    expect(rows.map((p) => p.taken_at?.slice(0, 19).replace("T", " ")).sort()).toEqual(shots.map((s) => s.takenAt).sort());
+    expect(rows.every((p) => p.user_id === adminId && p.external_path === null)).toBe(true);
+    expect(rows.every((p) => fs.existsSync(path.join(UPLOAD_DIR, p.filename)))).toBe(true);
+    // The staging library is gone again.
+    expect(await db.select().from(photoLibraries).where(eq(photoLibraries.name, `Demodaten ${runId}`))).toHaveLength(0);
+    const chosen = await db.select().from(demoPhoto).where(eq(demoPhoto.run_id, runId));
+    expect(chosen).toHaveLength(12);
+    expect(chosen.every((c) => c.source === "drawn" && c.photo_id !== null && photoIds.includes(c.photo_id))).toBe(true);
+    const albumIds = await registered(runId, "albums");
+    expect(albumIds).toHaveLength(run.summary.albums);
+    if (albumIds.length) {
+      const members = await db.select().from(albumPhotos).where(inArray(albumPhotos.album_id, albumIds));
+      expect(members.every((m) => photoIds.includes(m.photo_id))).toBe(true);
+    }
+
     expect(await contentCounts()).toEqual(before);
   });
 
@@ -197,8 +236,18 @@ describe("a demo run", () => {
     const docIds = await registered(runId, "documents");
     const files = (await db.select({ path: documents.disk_path }).from(documents).where(inArray(documents.id, docIds))).map((d) => d.path);
     expect(files.length).toBe(30);
+    const photoIds = await registered(runId, "photos");
+    const albumIds = await registered(runId, "albums");
+    const photoFiles = (await db.select({ filename: photos.filename }).from(photos).where(inArray(photos.id, photoIds))).map((p) => path.join(UPLOAD_DIR, p.filename));
+    expect(photoFiles).toHaveLength(12);
 
     await removeRun(runId);
+
+    expect(await db.select().from(photos).where(inArray(photos.id, photoIds))).toHaveLength(0);
+    expect(photoFiles.some((f) => fs.existsSync(f))).toBe(false);
+    if (albumIds.length) expect(await db.select().from(albums).where(inArray(albums.id, albumIds))).toHaveLength(0);
+    // The list of chosen photos stays, so the next run can load the same set.
+    expect(await db.select().from(demoPhoto).where(eq(demoPhoto.run_id, runId))).toHaveLength(12);
 
     expect(await db.select().from(documents).where(inArray(documents.id, docIds))).toHaveLength(0);
     expect(files.some((f) => fs.existsSync(f))).toBe(false);
