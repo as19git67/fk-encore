@@ -883,9 +883,11 @@ from the model.
 ## Open questions
 
 - How many tool rounds a question may take before the wait is too long:
-  stage 1's timing answers it. If the CPU fallback cannot carry a tool
-  turn, the assistant is offered only when the active config runs on the
-  `server` backend, and the page says so.
+  answered by stage 1's timing — Gemma on the GPU needs a median of three
+  rounds at under a second each. The CPU fallback cannot carry a tool turn
+  (11 of 26 cases, answers from imagination). Still open: offering the
+  assistant only when the active config runs on the `server` backend, with
+  the page saying so.
 - "Immobilie" has no entity. The second question works through
   categories and the search text today; a property entity (address,
   documents, meters, bookings) is its own feature and not a prerequisite.
@@ -893,11 +895,10 @@ from the model.
   relevant to the purchase" is a search today and would be a lookup with
   an entity. It is also the natural home of the yield, which the saved
   analysis of stage 6 only approximates.
-- Which rows `document_page_words` keeps: the resolver-corrected rows
-  (what the letterhead read and the classifier see) rather than
-  Tesseract's raw words. The corrected ones are what the stored text was
-  rendered from, so a search over the text and a search over the boxes
-  find the same thing. The uncorrected reading is not kept.
+- Which rows `document_page_words` keeps: decided in stage 6 — the
+  resolver-corrected rows (what the letterhead read and the classifier
+  see), not Tesseract's raw words, so a search over the text and a search
+  over the boxes find the same thing. The uncorrected reading is not kept.
 - What the yield means has to be printed, not assumed: gross rent over
   purchase price is one number, net of repairs and annualised another.
   The tool prints its formula and the period on the report, and the
