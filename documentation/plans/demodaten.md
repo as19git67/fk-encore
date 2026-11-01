@@ -29,10 +29,11 @@ result.
 - `db/seed.ts` creates roles, permissions, the taxonomy, the admin from
   `ADMIN_EMAIL`/`ADMIN_PASSWORD` and the AI system user. There is no setup
   flow beyond that.
-- `db/seed-demo.ts` (Issue #401) lays down three colour-swatch photos, one
+- `db/seed-demo.ts` (Issue #401) laid down three colour-swatch photos, one
   PDF and a manual account with two bookings for the admin, only when
-  `E2E_SEED_DEMO=1` is set, for the Playwright specs. It writes rows
-  directly and bypasses every pipeline.
+  `E2E_SEED_DEMO=1` was set, for the Playwright specs. It wrote rows
+  directly and bypassed every pipeline. Replaced in stage 4 by
+  `DEMO_DATA=small`.
 - `finance/data-import.ts` (Finanzkraft JSON import) is not a path for demo
   bookings: it is no longer needed and is removed from the code in its own
   PR before stage 3.
@@ -43,7 +44,7 @@ result.
 | Question | Decision |
 |---|---|
 | When is a system "new" | When it holds no user content and no users besides the admin and the AI system user. "User content" is counted, not guessed from boot time: photos, documents, finance transactions, depot transactions, meter readings, trip plans. All zero → untouched. The check lives in one function (`demo/state.ts`, `isUntouched()`) and the endpoint repeats it before it starts, so a second admin tab or a document that arrived meanwhile cannot slip through. |
-| Who triggers it | An admin, explicitly, on Admin › Systemstatus ("Demodaten einspielen", with the volumes and the estimated duration). Nothing loads by itself on a production boot. For test installations `DEMO_DATA=1` starts the same job once at boot, still only on an untouched system. |
+| Who triggers it | An admin, explicitly, on Admin › Systemstatus ("Demodaten einspielen", with the volumes and the estimated duration). Nothing loads by itself on a production boot. For test installations `DEMO_DATA=1` starts the same job once at boot (`DEMO_DATA=small` the small household of the E2E tests), still only on an untouched system. |
 | Who owns the data | The admin who starts it, so the demo appears in the account that is looking at it. A second demo user, the spouse "Erika Mustermann" (`erika@beispiel.test`), is created with it: no password (the admin can set one or send an invite from the user list, so the shared view can be tried), the roles of a household member, and a subject person with `relation_kind` spouse so the joint assessment works. Each of the two has an own giro account; the joint giro account belongs to the admin and is shared with the spouse with write access through the account access list, and the depot is the admin's. The demo users count as demo rows: `isUntouched()` ignores them, and removal deletes the spouse with everything else. |
 | Removal | Every row the generator writes is recorded in `demo_item` (`run_id`, `table`, `row_id`), every file it writes in `demo_file`. "Demodaten entfernen" deletes in reverse dependency order and removes the files. Rows the pipelines derive (thumbnails, embeddings, faces, text, classification, depot transactions derived from documents) hang off a recorded row by foreign key and go with it; where a derived row has no cascade, the remover deletes it by its parent id. A run that is removed leaves the system untouched again. |
 | Where it lives | A new service `demo/` (endpoints under `/admin/demo`, admin only (`user/admin-guard.ts`)), the job in the existing queue so it shows up under Admin › Jobs. The E2E seed becomes the size `small` of the same generator; `db/seed-demo.ts` goes away. |
@@ -277,9 +278,13 @@ show something.
    URL are kept in `demo_photo` (migration 0285) after the run is removed;
    the next run loads that set again before it searches. Removal deletes
    the photos with files and thumbnails and the albums.
-   Still open from this stage: `db/seed-demo.ts` becomes `size: "small"`
-   and the Playwright workflow sets `DEMO_DATA=1` instead of
-   `E2E_SEED_DEMO` (with the boot switch `DEMO_DATA=1` itself).
+   The boot switch in `demo/boot.ts`: `DEMO_DATA=1` (or `full`) loads the
+   full demo worded by the model, `DEMO_DATA=small` the small household
+   from the templates; the admin from `ADMIN_EMAIL` owns it, and a system
+   that holds a demo or anything else is left alone, so a restart loads
+   nothing twice. The Playwright workflows set `DEMO_DATA=small` and the
+   E2E `globalSetup` waits until the run is done; `db/seed-demo.ts` and
+   `E2E_SEED_DEMO` are gone.
 5. **Meters and businesses.** Meter readings, PV business with its assets,
    so the EÜR shows a year.
 6. **Benchmark hand-off.** The generator as a function the assistant
@@ -305,8 +310,8 @@ Watchtower.
   down only shows a warning. Watchtower itself answers 200 when none of
   its containers exist yet; it updates only what runs.
 - **First fill.** `DEMO_DATA=1` in the demo's `.env` makes the server load
-  the demo at boot while the system is untouched (the same switch the E2E
-  workflow will use).
+  the full demo at boot while the system is untouched (`demo/boot.ts`;
+  the E2E workflows set `DEMO_DATA=small`).
 - **Shared GPU.** A second Gemma 4 does not fit next to the first in
   16 GB; the demo app points `LLM_SERVICE_URL` at the prod llm-service
   instead of starting its own.

@@ -11,6 +11,9 @@ import {
 } from '../../fixtures/meters'
 import { confirm, fillNumber, fillText, fmtValue, pageTitle } from '../../fixtures/ui'
 
+// The phone company of the demo household (demo/names.ts), paid every month.
+const DEMO_PAYEE = 'Beispielfunk GmbH'
+
 // Zähler › Zählerdetails (`/zaehler/:id`), documentation/handbuch/zaehler.md,
 // section DET.
 
@@ -359,17 +362,17 @@ test.describe('Zähler › Details', () => {
     const dialog = page.getByRole('dialog', { name: 'Zahlungen zur Ablesung' })
     await expect(dialog).toContainText('Noch keine Zahlung verknüpft.')
 
-    // The demo seed (E2E_SEED_DEMO=1) lays down this booking.
-    await dialog.getByPlaceholder(/Empfänger, Verwendungszweck oder Betrag/).fill('E2E Demo Supermarkt')
+    // The demo household (DEMO_DATA=small) pays its phone bill every month.
+    await dialog.getByPlaceholder(/Empfänger, Verwendungszweck oder Betrag/).fill(DEMO_PAYEE)
     const searched = page.waitForResponse((r) => r.url().includes('/finance/transactions?'))
     await dialog.getByRole('button', { name: 'Suchen' }).click()
     await searched
     await expect(dialog.getByText('Suche…')).toHaveCount(0)
-    const hit = dialog.locator('.tx-list').last().locator('.tx-row').filter({ hasText: 'E2E Demo Supermarkt' }).first()
-    test.skip((await hit.count()) === 0, 'Keine Demo-Buchung vorhanden (E2E_SEED_DEMO nicht gesetzt)')
+    const hit = dialog.locator('.tx-list').last().locator('.tx-row').filter({ hasText: DEMO_PAYEE }).first()
+    test.skip((await hit.count()) === 0, 'Keine Demo-Buchung vorhanden (DEMO_DATA nicht gesetzt)')
     await iconButton(hit, 'pi-link').click()
 
-    await expect(dialog.locator('.tx-list').first()).toContainText('E2E Demo Supermarkt')
+    await expect(dialog.locator('.tx-list').first()).toContainText(DEMO_PAYEE)
     await dialog.getByRole('button', { name: 'Schließen' }).click()
     await expect(iconButton(readingRows(page).first(), 'pi-euro')).toContainText('1')
   })
@@ -378,16 +381,16 @@ test.describe('Zähler › Details', () => {
     const meter = await createMeter({ name: uniqueName('E2E Detail Zahlung lösen') })
     const readingId = await addReading(meter.id, 12, daysAgo(2))
     const { ctx } = await adminApi()
-    const found = await ctx.get('/finance/transactions', { params: { q: 'E2E Demo Supermarkt', limit: 1 } })
+    const found = await ctx.get('/finance/transactions', { params: { q: DEMO_PAYEE, limit: 1 } })
     const items = found.ok() ? ((await found.json()) as { items: Array<{ id: number }> }).items : []
-    test.skip(items.length === 0, 'Keine Demo-Buchung vorhanden (E2E_SEED_DEMO nicht gesetzt)')
+    test.skip(items.length === 0, 'Keine Demo-Buchung vorhanden (DEMO_DATA nicht gesetzt)')
     const link = await ctx.post(`/meters/readings/${readingId}/transactions`, { data: { transactionId: items[0].id } })
     expect(link.ok()).toBeTruthy()
     await openDetail(page, meter)
 
     await iconButton(readingRows(page).first(), 'pi-euro').click()
     const dialog = page.getByRole('dialog', { name: 'Zahlungen zur Ablesung' })
-    const linked = dialog.locator('.tx-list').first().locator('.tx-row').filter({ hasText: 'E2E Demo Supermarkt' })
+    const linked = dialog.locator('.tx-list').first().locator('.tx-row').filter({ hasText: DEMO_PAYEE })
     await iconButton(linked, 'pi-times').click()
 
     await expect(dialog).toContainText('Noch keine Zahlung verknüpft.')

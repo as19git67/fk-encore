@@ -94,11 +94,12 @@ jobs:
       ADMIN_EMAIL: admin@example.com
       ADMIN_PASSWORD: admin
       ADMIN_NAME: Admin
-      # Demo-data seed switch (Issue #401). Tells db/seed-demo.ts to
-      # lay down 3 photos, 1 document and 1 finance account+transactions
-      # before Playwright starts, so specs that previously skipped on
-      # empty stacks now exercise the real UI paths.
-      E2E_SEED_DEMO: '1'
+      # Demo data (documentation/plans/demodaten.md): the server loads the
+      # small demo household at boot (demo/boot.ts) — 40 bookings, 30
+      # documents, 12 photos — and Playwright's globalSetup waits for the
+      # run to finish, so specs that skip on empty stacks exercise the real
+      # UI paths.
+      DEMO_DATA: small
       # WebAuthn / Passkey relying-party config. user/startupValidation.ts
       # throws at module-load if either is missing, so they MUST be present
       # even though no E2E test exercises the passkey flow yet. HTTP is fine

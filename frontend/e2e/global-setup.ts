@@ -52,9 +52,50 @@ export default async function globalSetup(config: FullConfig) {
     ],
   }
 
+  if (process.env.DEMO_DATA) await waitForDemo(apiURL, token)
+
   const outFile = path.resolve(process.cwd(), 'e2e/.auth/admin.json')
   await fs.mkdir(path.dirname(outFile), { recursive: true })
   await fs.writeFile(outFile, JSON.stringify(storageState, null, 2))
 
   await ctx.dispose()
+}
+
+interface DemoStatus {
+  run: { id: number; status: string; stage: string | null; error: string | null } | null
+}
+
+// With DEMO_DATA set the server loads the demo household at boot, in the
+// background (demo/boot.ts). The specs need its bookings, documents and
+// photos, so wait until the run is through. A run that never appears (the
+// database held data already) is not an error: the specs skip what they
+// cannot find, as before.
+async function waitForDemo(apiURL: string, token: string): Promise<void> {
+  const timeoutMs = Number(process.env.E2E_DEMO_TIMEOUT_MS ?? 10 * 60_000)
+  const noRunMs = 60_000
+  const started = Date.now()
+  const ctx = await request.newContext({ baseURL: apiURL, extraHTTPHeaders: { Authorization: `Bearer ${token}` } })
+  try {
+    for (;;) {
+      const res = await ctx.get('/admin/demo/status')
+      if (!res.ok()) throw new Error(`[e2e] demo status failed (${res.status()}): ${await res.text().catch(() => '')}`)
+      const { run } = (await res.json()) as DemoStatus
+      const waited = Date.now() - started
+      if (run && run.status === 'done') {
+        console.log(`[e2e] demo data loaded (run ${run.id}) after ${Math.round(waited / 1000)} s`)
+        return
+      }
+      if (run && run.status !== 'running' && run.status !== 'cancelling') {
+        throw new Error(`[e2e] demo run ${run.id} ended ${run.status}: ${run.error ?? ''}`)
+      }
+      if (!run && waited > noRunMs) {
+        console.warn('[e2e] DEMO_DATA is set but no demo run started — continuing without demo data')
+        return
+      }
+      if (waited > timeoutMs) throw new Error(`[e2e] demo run still ${run?.status} (${run?.stage}) after ${timeoutMs / 1000} s`)
+      await new Promise((r) => setTimeout(r, 2_000))
+    }
+  } finally {
+    await ctx.dispose()
+  }
 }
