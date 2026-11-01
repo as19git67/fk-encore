@@ -8,7 +8,7 @@
  * sees through the assistant exactly what they see in the app.
  */
 
-import { api, APIError } from "encore.dev/api";
+import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import log from "encore.dev/log";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
@@ -23,7 +23,7 @@ import { renderLetterPdf } from "./letter-pdf";
 import { letterPhotoPages, mayEnclosePhotos } from "./letter-photos";
 import { catalogFor } from "./catalog";
 import { chat, ContextTooLargeError, knownContextWindow, LlmServiceUnavailableError } from "./llm-client";
-import { cancelTurn, followTurn, openTurn, TURN_ID_RE, turnSignal } from "./live";
+import { cancelTurn, followTurn, isKnownTurn, openTurn, TURN_ID_RE, turnSignal } from "./live";
 import {
   discardProposal,
   executeProposal,
@@ -384,110 +384,184 @@ async function persist(
   return finalId;
 }
 
+/** A question checked and owned, with the turn it reports through. */
+interface PreparedQuestion {
+  auth: ReturnType<typeof assistantUser>;
+  question: string;
+  conversation: typeof assistantConversation.$inferSelect;
+  emit: (event: TurnEvent) => void;
+  signal?: AbortSignal;
+}
+
+/** Everything that can refuse a question, before any model is asked. */
+async function prepareQuestion(req: AskRequest): Promise<PreparedQuestion> {
+  const auth = assistantUser();
+  const userId = Number(auth.userID);
+  const question = req.message?.trim() ?? "";
+  if (!question) throw APIError.invalidArgument("message is empty");
+  if (question.length > MAX_QUESTION_LENGTH) {
+    throw APIError.invalidArgument(`message is longer than ${MAX_QUESTION_LENGTH} characters`);
+  }
+  if (req.turnId !== undefined && !TURN_ID_RE.test(req.turnId)) {
+    throw APIError.invalidArgument("turnId must be 8 to 64 letters, digits, '-' or '_'");
+  }
+  const conversation = await ownConversation(req.id, userId);
+  checkRateLimit(`assistant:${auth.userID}`, { ...RATE_LIMIT, message: "Too many questions to the assistant." });
+
+  let emit: (event: TurnEvent) => void = () => {};
+  let signal: AbortSignal | undefined;
+  if (req.turnId) {
+    try {
+      signal = turnSignal(req.turnId, auth.userID);
+      emit = openTurn(req.turnId, auth.userID);
+    } catch (err) {
+      throw APIError.alreadyExists((err as Error).message);
+    }
+  }
+  return { auth, question, conversation, emit, signal };
+}
+
+/** What a failed turn tells its caller; logged here when it is not the caller's doing. */
+function turnError(err: unknown, conversationId: number): APIError {
+  if (err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError) {
+    return APIError.unavailable("the assistant's model is busy or reloading — try again in a moment");
+  }
+  if (err instanceof ContextTooLargeError) {
+    return APIError.failedPrecondition("this conversation no longer fits the model's context — start a new one");
+  }
+  log.error(err, "assistant turn failed", { conversation_id: conversationId });
+  if (err instanceof APIError) return err;
+  return APIError.internal("the assistant could not answer");
+}
+
+/**
+ * Runs the turn and stores it. The turn's `done` goes out only after the
+ * answer is stored, with its message id, so a client that only watches the
+ * stream (a turn started with `startAssistantTurn`) has all `ask` returns.
+ */
+async function answerQuestion({ auth, question, conversation, emit, signal }: PreparedQuestion): Promise<AskResponse> {
+  const user = { userID: auth.userID, permissions: auth.permissions };
+  const turnEmit = (event: TurnEvent) => {
+    if (event.type !== "done") emit(event);
+  };
+  try {
+    const earlierTurns = await questionCount(conversation.id);
+    const earlier = await history(conversation.id);
+    const refs = cleanContext(conversation.context);
+    const entries = refs.length ? await describeContext(refs, user) : [];
+    const result = await withAiPriority(SLOT_PRIORITY, async () => runTurn({
+      user,
+      history: earlier.messages,
+      historyDigests: earlier.digests,
+      contextWindow: knownContextWindow() ?? undefined,
+      question,
+      conversationId: conversation.id,
+      previousRefs: await previousRefs(conversation.id),
+      context: entries.length
+        ? { refs: entries.filter((e) => e.visible).map(({ type, id }) => ({ type, id })), briefs: entries.map((e) => e.brief) }
+        : undefined,
+      tools: catalogFor(user),
+      chat,
+      emit: turnEmit,
+      signal,
+      routeModel: true,
+      verify: verifyByDefault(),
+      withSlot: (fn) => withAiSlot("llm", SLOT_PRIORITY, "assistant", fn, undefined, signal),
+      log: (entry) => log.info("assistant tool call", {
+        conversation_id: conversation.id,
+        tool: entry.tool,
+        argument_keys: Object.keys(entry.arguments).join(","),
+        arguments: JSON.stringify(entry.arguments).slice(0, 300),
+        rows: entry.rows,
+        ms: entry.ms,
+        error: entry.error,
+      }),
+    }));
+
+    const contextUsage: ContextUsage = { ...result.context, earlierTurns, summarizedTurns: earlier.summarized };
+    const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults, contextUsage);
+    summarizeLater(conversation.id, messageId, result.transcript);
+    const fallback = fallbackTitle(question);
+    await db
+      .update(assistantConversation)
+      .set({ updated_at: sql`now()`, title: conversation.title ?? fallback })
+      .where(eq(assistantConversation.id, conversation.id));
+    if (conversation.title === null) nameConversation(conversation.id, question, fallback);
+    log.info("assistant answered", {
+      conversation_id: conversation.id,
+      rounds: result.rounds,
+      blocks: result.blocks.length,
+      context_used: contextUsage.used,
+      context_window: contextUsage.window,
+      context_estimated: contextUsage.estimated,
+      kept_turns: contextUsage.keptTurns,
+      earlier_turns: earlierTurns,
+    });
+    emit({ type: "done", answer: result.answer, blocks: result.blocks, messageId, rounds: result.rounds, contextUsage });
+    return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds, context_usage: contextUsage };
+  } catch (err) {
+    if (signal?.aborted) {
+      // Nothing of a stopped turn is kept, like a failed one: the next
+      // question starts from the last answer.
+      emit({ type: "cancelled" });
+      log.info("assistant turn cancelled", { conversation_id: conversation.id });
+      throw APIError.canceled("the answer was cancelled");
+    }
+    const failure = turnError(err, conversation.id);
+    emit({ type: "error", message: failure.message, code: failure.code });
+    throw failure;
+  }
+}
+
+/**
+ * Asks and waits for the answer. Fine for a short question; a long one
+ * outlives a proxy's patience (Cloudflare answers 524 after 100 s without a
+ * response), so the web client starts the turn with `startAssistantTurn`
+ * and reads the answer from the stream.
+ */
 export const ask = api(
   { expose: true, method: "POST", path: "/assistant/conversations/:id/ask", auth: true },
-  async (req: AskRequest): Promise<AskResponse> => {
-    const auth = assistantUser();
-    const userId = Number(auth.userID);
-    const question = req.message?.trim() ?? "";
-    if (!question) throw APIError.invalidArgument("message is empty");
-    if (question.length > MAX_QUESTION_LENGTH) {
-      throw APIError.invalidArgument(`message is longer than ${MAX_QUESTION_LENGTH} characters`);
-    }
-    if (req.turnId !== undefined && !TURN_ID_RE.test(req.turnId)) {
-      throw APIError.invalidArgument("turnId must be 8 to 64 letters, digits, '-' or '_'");
-    }
-    const conversation = await ownConversation(req.id, userId);
-    checkRateLimit(`assistant:${auth.userID}`, { ...RATE_LIMIT, message: "Too many questions to the assistant." });
+  async (req: AskRequest): Promise<AskResponse> => answerQuestion(await prepareQuestion(req)),
+);
 
-    let emit: (event: TurnEvent) => void = () => {};
-    let signal: AbortSignal | undefined;
-    if (req.turnId) {
-      try {
-        signal = turnSignal(req.turnId, auth.userID);
-        emit = openTurn(req.turnId, auth.userID);
-      } catch (err) {
-        throw APIError.alreadyExists((err as Error).message);
-      }
-    }
+export interface StartTurnRequest {
+  id: number;
+  message: string;
+  /** Required here: the stream under this id is the only way the answer comes back. */
+  turnId: string;
+}
 
-    const user = { userID: auth.userID, permissions: auth.permissions };
-    try {
-      const earlierTurns = await questionCount(conversation.id);
-      const earlier = await history(conversation.id);
-      const refs = cleanContext(conversation.context);
-      const entries = refs.length ? await describeContext(refs, user) : [];
-      const result = await withAiPriority(SLOT_PRIORITY, async () => runTurn({
-        user,
-        history: earlier.messages,
-        historyDigests: earlier.digests,
-        contextWindow: knownContextWindow() ?? undefined,
-        question,
-        conversationId: conversation.id,
-        previousRefs: await previousRefs(conversation.id),
-        context: entries.length
-          ? { refs: entries.filter((e) => e.visible).map(({ type, id }) => ({ type, id })), briefs: entries.map((e) => e.brief) }
-          : undefined,
-        tools: catalogFor(user),
-        chat,
-        emit,
-        signal,
-        routeModel: true,
-        verify: verifyByDefault(),
-        withSlot: (fn) => withAiSlot("llm", SLOT_PRIORITY, "assistant", fn, undefined, signal),
-        log: (entry) => log.info("assistant tool call", {
-          conversation_id: conversation.id,
-          tool: entry.tool,
-          argument_keys: Object.keys(entry.arguments).join(","),
-          arguments: JSON.stringify(entry.arguments).slice(0, 300),
-          rows: entry.rows,
-          ms: entry.ms,
-          error: entry.error,
-        }),
-      }));
+export interface StartTurnResponse {
+  turnId: string;
+}
 
-      const contextUsage: ContextUsage = { ...result.context, earlierTurns, summarizedTurns: earlier.summarized };
-      const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults, contextUsage);
-      summarizeLater(conversation.id, messageId, result.transcript);
-      const fallback = fallbackTitle(question);
-      await db
-        .update(assistantConversation)
-        .set({ updated_at: sql`now()`, title: conversation.title ?? fallback })
-        .where(eq(assistantConversation.id, conversation.id));
-      if (conversation.title === null) nameConversation(conversation.id, question, fallback);
-      log.info("assistant answered", {
-        conversation_id: conversation.id,
-        rounds: result.rounds,
-        blocks: result.blocks.length,
-        context_used: contextUsage.used,
-        context_window: contextUsage.window,
-        context_estimated: contextUsage.estimated,
-        kept_turns: contextUsage.keptTurns,
-        earlier_turns: earlierTurns,
-      });
-      return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds, context_usage: contextUsage };
-    } catch (err) {
-      if (signal?.aborted) {
-        // Nothing of a stopped turn is kept, like a failed one: the next
-        // question starts from the last answer.
-        emit({ type: "cancelled" });
-        log.info("assistant turn cancelled", { conversation_id: conversation.id });
-        throw APIError.canceled("the answer was cancelled");
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      emit({ type: "error", message });
-      if (err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError) {
-        throw APIError.unavailable("the assistant's model is busy or reloading — try again in a moment");
-      }
-      if (err instanceof ContextTooLargeError) {
-        throw APIError.failedPrecondition("this conversation no longer fits the model's context — start a new one");
-      }
-      log.error(err, "assistant turn failed", { conversation_id: conversation.id });
-      if (err instanceof APIError) throw err;
-      throw APIError.internal("the assistant could not answer");
-    }
+const runningTurns = new Set<Promise<unknown>>();
+
+/**
+ * Starts a turn and returns at once; the answer arrives on
+ * `/assistant/turns/:turnId/stream` as its `done` event, with the stored
+ * message's id. A refusal (empty question, rate limit, someone else's
+ * conversation) is still this call's error. The turn runs on when the client
+ * goes away, and its answer is stored with the conversation.
+ */
+export const startAssistantTurn = api(
+  { expose: true, method: "POST", path: "/assistant/conversations/:id/turns", auth: true },
+  async (req: StartTurnRequest): Promise<StartTurnResponse> => {
+    if (!req.turnId) throw APIError.invalidArgument("turnId is required");
+    const prepared = await prepareQuestion(req);
+    const job = answerQuestion(prepared)
+      // Already reported through the turn's events and logged by turnError.
+      .catch(() => undefined)
+      .finally(() => runningTurns.delete(job));
+    runningTurns.add(job);
+    return { turnId: req.turnId };
   },
 );
+
+/** Waits for turns started in the background; for tests. */
+export async function __settleTurnsForTests(): Promise<void> {
+  await Promise.all([...runningTurns]);
+}
 
 interface CancelTurnRequest {
   turnId: string;
@@ -677,7 +751,8 @@ export const letterPdf = api.raw(
  * `tool_start`. `done` carries the final answer either way.
  */
 export interface StreamEvent {
-  type: "token" | "retract" | "tool_start" | "tool_result" | "done" | "error" | "cancelled";
+  /** `ping` carries nothing; it keeps a proxy from closing a quiet socket. */
+  type: "token" | "retract" | "tool_start" | "tool_result" | "done" | "error" | "cancelled" | "ping";
   text?: string;
   tool?: string;
   arguments?: Record<string, unknown>;
@@ -687,6 +762,12 @@ export interface StreamEvent {
   answer?: string;
   blocks?: ResultBlock[];
   message?: string;
+  /** `done`: the stored answer's id, the model rounds and how full the window got. */
+  message_id?: number;
+  rounds?: number;
+  context_usage?: ContextUsage;
+  /** `error`: the APIError code, e.g. `unavailable`. */
+  code?: string;
 }
 
 export function toStreamEvent(event: TurnEvent): StreamEvent {
@@ -700,9 +781,16 @@ export function toStreamEvent(event: TurnEvent): StreamEvent {
     case "tool_result":
       return { type: "tool_result", tool: event.tool, row_count: event.rowCount, block: event.block, error: event.error };
     case "done":
-      return { type: "done", answer: event.answer, blocks: event.blocks };
+      return {
+        type: "done",
+        answer: event.answer,
+        blocks: event.blocks,
+        message_id: event.messageId,
+        rounds: event.rounds,
+        context_usage: event.contextUsage,
+      };
     case "error":
-      return { type: "error", message: event.message };
+      return { type: "error", message: event.message, code: event.code };
     case "cancelled":
       return { type: "cancelled" };
   }
@@ -710,11 +798,23 @@ export function toStreamEvent(event: TurnEvent): StreamEvent {
 
 interface WatchHandshake {
   turnId: string;
+  /**
+   * Set when the client reconnects to a turn it already started: an unknown
+   * turn (gone after a restart, or expired) then fails at once instead of
+   * waiting for a question that will never come.
+   */
+  resume?: Query<boolean>;
 }
+
+/**
+ * A quiet socket is closed by the proxy in front of the app (Cloudflare after
+ * 100 s), and a tool searching thousands of photos sends nothing for longer.
+ */
+const PING_MS = 25_000;
 
 export const watchTurn = api.streamOut<WatchHandshake, StreamEvent>(
   { expose: true, path: "/assistant/turns/:turnId/stream", auth: true },
-  async ({ turnId }, stream) => {
+  async ({ turnId, resume }, stream) => {
     // No module check here: a browser opens this socket with `?token=`, which
     // carries only the media scope, so requirePermission would refuse every
     // caller. Nothing is lost — a turn can only be posted through `ask`, which
@@ -725,9 +825,23 @@ export const watchTurn = api.streamOut<WatchHandshake, StreamEvent>(
       await stream.close();
       return;
     }
+    if (resume && !isKnownTurn(turnId, auth.userID)) {
+      try { stream.send({ type: "error", message: "turn unknown", code: "not_found" }); } catch { /* closed */ }
+      await stream.close();
+      return;
+    }
     // stream.send() is synchronous and throws once the socket is gone
     // (realtime/subscribe.ts); a dead socket just stops the forwarding.
     let open = true;
+    const ping = setInterval(() => {
+      if (!open) return;
+      try {
+        stream.send({ type: "ping" });
+      } catch {
+        open = false;
+      }
+    }, PING_MS);
+    ping.unref?.();
     try {
       await followTurn(turnId, auth.userID, (event) => {
         if (!open) return;
@@ -741,6 +855,8 @@ export const watchTurn = api.streamOut<WatchHandshake, StreamEvent>(
       if (open) {
         try { stream.send({ type: "error", message: (err as Error).message }); } catch { /* closed */ }
       }
+    } finally {
+      clearInterval(ping);
     }
     try { await stream.close(); } catch { /* already closed */ }
   },

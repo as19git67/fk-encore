@@ -6,8 +6,11 @@
  * token to the media scope (user/auth-handler.ts), under which every
  * `requirePermission("finance.view")` and its kin fails — in this service and
  * in every service the tools call. So the question goes in as an ordinary
- * POST with the full bearer token and the agent runs there; the WebSocket only
- * watches. It needs no permission beyond being the same user.
+ * POST with the full bearer token and the agent runs as that request; the
+ * WebSocket only watches. It needs no permission beyond being the same user.
+ * The web client's POST (`startAssistantTurn`) returns at once and the turn
+ * runs on in the background, since a proxy cuts off a request that waits
+ * longer than 100 s for its answer.
  *
  * In-process, like the realtime session manager: this runs as one instance.
  * The client picks the turn id, opens the stream, then posts the question, so
@@ -16,8 +19,12 @@
 
 import type { TurnEvent } from "./types";
 
-/** How long a finished turn's events stay for a late subscriber. */
-const KEEP_FINISHED_MS = 2 * 60_000;
+/**
+ * How long a finished turn's events stay for a late subscriber — long enough
+ * for a client whose socket dropped near the end to reconnect and read the
+ * answer.
+ */
+const KEEP_FINISHED_MS = 10 * 60_000;
 /** How long a stream waits for its turn to be posted. */
 const KEEP_PENDING_MS = 60_000;
 
@@ -111,6 +118,11 @@ export function followTurn(turnId: string, userId: string, listener: Listener): 
     };
     turn.listeners.add(wrapped);
   });
+}
+
+/** Whether this user's turn is known here, running or finished. */
+export function isKnownTurn(turnId: string, userId: string): boolean {
+  return turns.get(turnId)?.userId === userId;
 }
 
 /**

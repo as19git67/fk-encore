@@ -25,15 +25,15 @@ import AssistantMessage from '../components/assistant/AssistantMessage.vue'
 import ConversationList from '../components/assistant/ConversationList.vue'
 import ContextMeter from '../components/assistant/ContextMeter.vue'
 import {
-  ask,
+  askStreaming,
   cancelTurn,
   createConversation,
   deleteConversation,
-  followTurn,
   getConversation,
   listConversations,
   newTurnId,
   setConversationContext,
+  TURN_LOST,
   type ContextItem,
   type ConversationMessage,
   type ConversationSummary,
@@ -190,6 +190,7 @@ function sendErrorText(e: unknown): string {
   if (code === 'unavailable') return 'Das Modell ist gerade beschäftigt oder wird neu geladen. Bitte gleich noch einmal versuchen.'
   if (code === 'resource_exhausted') return 'Zu viele Fragen in kurzer Zeit. Bitte einen Moment warten.'
   if (code === 'failed_precondition') return 'Diese Unterhaltung ist zu lang geworden. Bitte eine neue beginnen.'
+  if (code === TURN_LOST) return 'Die Verbindung zur laufenden Antwort ist abgerissen. Sobald sie fertig ist, steht sie in der Unterhaltung – bitte die Seite gleich neu laden.'
   return e instanceof Error ? e.message : 'Die Frage konnte nicht beantwortet werden.'
 }
 
@@ -228,38 +229,44 @@ async function send(question: string) {
     liveFor.value = conversationId
     scrollToEnd()
 
-    // Watch first, then ask: the stream replays what it missed, and if it
-    // cannot connect the POST still brings the whole answer.
+    // The stream is opened before the turn starts and replays what it
+    // missed; the answer comes over it, so no request waits for the model
+    // (a proxy cuts one off after 100 s).
     const thisTurn = newTurnId()
-    const stream = followTurn(thisTurn, (event) => {
+    turnId.value = thisTurn
+    const res = await askStreaming(conversationId, question, thisTurn, (event) => {
       if (!live.value || activeId.value !== conversationId) return
       live.value = applyEvent(live.value, event)
       scrollToEnd()
     })
-    await stream.ready
-    turnId.value = thisTurn
-    try {
-      const res = await ask(conversationId, question, thisTurn)
-      // Someone may have opened another conversation meanwhile; the answer is
-      // stored with its own and shows when that one is opened again.
-      if (activeId.value === conversationId) {
-        messages.value = [...messages.value, {
-          id: res.message_id,
-          role: 'assistant',
-          content: res.answer,
-          blocks: res.blocks,
-          context_usage: res.context_usage ?? null,
-          created_at: new Date().toISOString(),
-        }]
-      }
-    } finally {
-      stream.close()
+    // Someone may have opened another conversation meanwhile; the answer is
+    // stored with its own and shows when that one is opened again.
+    if (activeId.value === conversationId) {
+      messages.value = [...messages.value, {
+        id: res.message_id,
+        role: 'assistant',
+        content: res.answer,
+        blocks: res.blocks,
+        context_usage: res.context_usage ?? null,
+        created_at: new Date().toISOString(),
+      }]
     }
     void loadConversations()
     // The server names a new conversation after its first answer, in the
     // background; look again once that has had time to finish.
     if (openedBySend === conversationId) setTimeout(() => void loadConversations(), TITLE_RELOAD_MS)
   } catch (e) {
+    if (e instanceof ApiError && e.code === TURN_LOST && conversationId !== null) {
+      // The turn may still finish on the server and be stored; what is
+      // stored so far shows, and the question stays in the field.
+      sendError.value = sendErrorText(e)
+      if (!draft.value) draft.value = question
+      if (activeId.value === conversationId) {
+        openedBySend = null
+        await loadConversation(conversationId)
+      }
+      return
+    }
     // Stopped on purpose: no error, only the question back in the field.
     if (!(e instanceof ApiError && e.code === 'canceled')) sendError.value = sendErrorText(e)
     // The question stays in the field, so asking again is one key away.
