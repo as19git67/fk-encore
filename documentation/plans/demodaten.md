@@ -184,8 +184,8 @@ recognition and persons are shown with one's own photos.
 
 Electricity, gas, water and a small PV system with monthly readings over
 three years from a seasonal curve, through the meter service's own
-endpoints. Small and fast; it makes the PV business and the energy report
-show something.
+functions. Small and fast; it makes the PV business and the energy report
+show something (stage 5).
 
 ## Stages
 
@@ -285,8 +285,27 @@ show something.
    nothing twice. The Playwright workflows set `DEMO_DATA=small` and the
    E2E `globalSetup` waits until the run is done; `db/seed-demo.ts` and
    `E2E_SEED_DEMO` are gone.
-5. **Meters and businesses.** Meter readings, PV business with its assets,
-   so the EÜR shows a year.
+5. **Meters and businesses.** *Done.* The plan in `demo/energy.ts`: five
+   meters of the admin (grid import, feed-in, PV production, gas, water)
+   read on the first of each month of the span and today, from seasonal
+   curves (PV yield per kWp and month, household demand of which about a
+   third is covered from the roof, gas for heating, more water in summer);
+   the tariffs the energy report prices them with (grid price, base price,
+   the feed-in tariff since commissioning); a 9.8 kWp system put up two and
+   a half years before the span, so § 3 Nr. 72 EStG makes it exempt and its
+   EÜR is for information; and the bookings of that business on the
+   admin's giro account — each month's feed-in, paid in the middle of the
+   next, as the exported kWh times the feed-in tariff, so the EÜR's income
+   line and the energy report's feed-in revenue agree; the insurance, the
+   metering fee and one service visit — tagged `Photovoltaik` plus the
+   line's tag (`Einspeisung`, `Versicherung`, `Zähler`, `Wartung`).
+   `demo/energy-writer.ts` creates the meters, readings and tariffs through
+   the meter service's functions and the business with the system as an
+   asset (5 % a year from commissioning); the writer links the bookings to
+   their tags (a tag that did not exist is registered and removed with the
+   run). Removal deletes the business, the meters and the tariffs, the
+   devices, readings and assets go with them. Documents for the business
+   (feed-in statements) are left out.
 6. **Benchmark hand-off.** The generator as a function the assistant
    benchmark can call against the test database with `text: "template"`
    and a fixed seed. Agreed with the work on `assistent-wegfindung.md`

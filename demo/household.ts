@@ -41,6 +41,8 @@ export interface PlannedBooking {
   entryText: string;
   /** What the booking is, for the summary and later stages (document matching). */
   kind: BookingKind;
+  /** User tags the booking carries (the PV business's EÜR reads them). */
+  tags?: string[];
 }
 
 export type BookingKind =
@@ -64,7 +66,11 @@ export type BookingKind =
   | "car_repair"
   | "donation"
   | "tax_refund"
-  | "securities";
+  | "securities"
+  | "pv_feed_in"
+  | "pv_insurance"
+  | "pv_meter_fee"
+  | "pv_service";
 
 export interface HouseholdPlan {
   accounts: PlannedAccount[];

@@ -8,7 +8,8 @@
 import fs from "node:fs/promises";
 import { eq, inArray } from "drizzle-orm";
 import db from "../db/database";
-import { albums, demoFile, demoItem, demoRun, financeAccount, userAssessmentSettings, users, userSubjectPersons } from "../db/schema";
+import { albums, demoFile, demoItem, demoRun, financeAccount, financeTag, userAssessmentSettings, users, userSubjectPersons } from "../db/schema";
+import { removeEnergy } from "./energy-writer";
 import { purgeDocument } from "../documents/purge";
 import { removePhotos } from "./photo-writer";
 import { registered } from "./registry";
@@ -25,9 +26,20 @@ export async function removeRun(runId: number): Promise<void> {
   // Documents next: a receipt can point at a booking, and each has a file on disk.
   for (const id of await registered(runId, "documents")) await purgeDocument(id);
 
+  // The PV business, the meters with their readings and the tariffs: a reading can point at a booking.
+  await removeEnergy({
+    businesses: await registered(runId, "finance_business"),
+    meters: await registered(runId, "meters"),
+    tariffs: await registered(runId, "meter_electricity_tariffs"),
+  });
+
   const accounts = await registered(runId, "finance_account");
   await deleteBookingsOf(accounts);
   if (accounts.length) await db.delete(financeAccount).where(inArray(financeAccount.id, accounts));
+
+  // Tags the run created; their links went with the bookings.
+  const tags = await registered(runId, "finance_tag");
+  if (tags.length) await db.delete(financeTag).where(inArray(financeTag.id, tags));
 
   const assessments = await registered(runId, "user_assessment_settings");
   if (assessments.length) await db.delete(userAssessmentSettings).where(inArray(userAssessmentSettings.id, assessments));

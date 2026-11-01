@@ -14,6 +14,8 @@ import { llmReachable } from "./doc-text-llm";
 import { writeDocuments, type TextSource } from "./doc-writer";
 import { planDocuments } from "./documents";
 import { planDepot } from "./depot";
+import { planEnergy } from "./energy";
+import { writeEnergy } from "./energy-writer";
 import { createDemoDepot, loadDemoCloses } from "./depot-writer";
 import { planHousehold, type DemoSize } from "./household";
 import { defaultPhotoDeps, faceDetectorReachable, openverseReachable, type PhotoDeps } from "./photo-sources";
@@ -104,14 +106,22 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
     const loaded = await loadDemoCloses(plan.from);
     await setProgress(runId, "quotes", 1, 1);
     const depot = "closes" in loaded ? planDepot(run.seed, run.size, plan, loaded.closes) : null;
-    if (depot) {
-      plan.bookings.push(...depot.bookings);
-      plan.bookings.sort((a, b) => a.date.localeCompare(b.date) || a.account.localeCompare(b.account));
-    }
+    if (depot) plan.bookings.push(...depot.bookings);
+    // The meters and the PV system; its bookings go on the giro account with the rest.
+    const energy = planEnergy(run.seed, run.size, plan);
+    plan.bookings.push(...energy.bookings);
+    plan.bookings.sort((a, b) => a.date.localeCompare(b.date) || a.account.localeCompare(b.account));
 
     await setProgress(runId, "bookings", 0, plan.bookings.length);
     const written = await writeHousehold(runId, run.owner_user_id, plan, {
       progress: (done, total) => setProgress(runId, "bookings", done, total),
+      cancelled: () => cancelRequested(runId),
+    });
+
+    const totalReadings = energy.meters.reduce((n, m) => n + m.readings.length, 0);
+    await setProgress(runId, "meters", 0, totalReadings);
+    const metered = await writeEnergy(runId, run.owner_user_id, energy, {
+      progress: (done, total) => setProgress(runId, "meters", done, total),
       cancelled: () => cancelRequested(runId),
     });
 
@@ -177,6 +187,9 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
           photos_openverse: pics.openverse,
           photos_drawn: pics.drawn,
           albums: pics.albums,
+          meters: metered.meters,
+          meter_readings: metered.readings,
+          businesses: 1,
         },
         // Not a failure: the run is done, these parts were left out or replaced for the reasons given.
         error: notes.length ? notes.join(" · ") : null,
