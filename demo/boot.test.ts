@@ -72,7 +72,7 @@ describe("loadDemoAtBoot", () => {
     expect(await loadDemoAtBoot({ size: "small", text: "template" }, ADMIN, { today: "2026-10-26" })).toBe("loaded");
     const run = await state.currentRun();
     expect(run).toMatchObject({ owner_user_id: adminId, size: "small", text_source: "template", status: "done" });
-    expect(run!.summary).toMatchObject({ bookings: 40, documents: 30, photos: 12 });
+    expect(run!.summary).toMatchObject({ documents: 30, photos: 12, meters: 5, businesses: 1 });
 
     expect(await loadDemoAtBoot({ size: "small", text: "template" }, ADMIN)).toBe("exists");
     expect((await db.select().from(demoRun).where(eq(demoRun.owner_user_id, adminId))).length).toBe(1);

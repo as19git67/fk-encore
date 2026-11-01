@@ -58,6 +58,9 @@ const SUMMARY_LABELS: Record<string, string> = {
   photos_openverse: 'davon von Openverse (CC0)',
   photos_drawn: 'davon gezeichnet',
   albums: 'Alben',
+  meters: 'Zähler',
+  meter_readings: 'Zählerstände',
+  businesses: 'Betrieb (PV-Anlage)',
 }
 
 const FIELD_LABELS: Record<DemoTruthField, string> = {
@@ -74,6 +77,7 @@ const STAGE_LABELS: Record<string, string> = {
   quotes: 'Kurse',
   documents: 'Dokumente',
   photos: 'Fotos',
+  meters: 'Zähler',
   remove: 'Entfernen',
 }
 
@@ -193,7 +197,8 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
     <p class="demo-card__desc">
       Ein Beispielhaushalt zum Ausprobieren: eine zweite Benutzerin, ein gemeinsames Konto, drei Jahre
       Buchungen, ein Depot mit Indexfonds zu echten Kursen, 500 Dokumente, die durch die normale
-      Erkennung laufen, und 500 gemeinfreie Fotos (CC0) von Openverse ohne erkennbare Personen. Nur in
+      Erkennung laufen, 500 gemeinfreie Fotos (CC0) von Openverse ohne erkennbare Personen, Strom-, Gas-
+      und Wasserzähler mit monatlichen Ständen und eine PV-Anlage als Betrieb mit EÜR. Nur in
       einem System, in das noch niemand etwas eingetragen hat.
     </p>
 
