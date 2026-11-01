@@ -52,6 +52,8 @@ export default defineConfig({
       PHOTO_UPLOAD_DIR: "uploads/photos",
       PHOTO_THUMBNAIL_DIR: "uploads/thumbnails",
       RECAPS_EXPORT_DIR: "uploads/recap-exports",
+      // The demo stages its photos in a library folder before importing them.
+      PHOTO_LIBRARIES_ROOT: "uploads/libraries",
     },
     // frontend/** is excluded entirely: those files rely on a DOM / Vue test
     // env we haven't wired up, and even the pure-utility tests under
