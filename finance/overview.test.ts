@@ -13,6 +13,7 @@ import {
   financeTagTransaction,
   financeTanSession,
   financeTransaction,
+  financeTransactionSplit,
   financeUserPref,
   users,
 } from "../db/schema";
@@ -246,6 +247,27 @@ describe("finance/overview — defaults", () => {
     const resp = await getOverview();
     const acc = resp.sections.flatMap((s) => s.accounts).find((a) => a.id === giro);
     expect(acc?.pending_count).toBe(2);
+  });
+
+  it("counts a split booking as done once every split carries a tag", async () => {
+    const giro = await insertAccount("Paul Giro", "giro");
+    await ensureUser(7);
+    await grantAcl(giro, 7);
+    const recent = new Date().toISOString().slice(0, 10);
+
+    const allTagged = await insertTransaction(giro, recent, "a");
+    const partlyTagged = await insertTransaction(giro, recent, "b");
+    await db.insert(financeTransactionSplit).values([
+      { transaction_id: allTagged, amount: "-5.00", tags: ["Lebensmittel"] },
+      { transaction_id: allTagged, amount: "-5.00", tags: ["Drogerie"] },
+      { transaction_id: partlyTagged, amount: "-5.00", tags: ["Lebensmittel"] },
+      { transaction_id: partlyTagged, amount: "-5.00", tags: [] },
+    ]);
+
+    setAuth("7", ["finance.view"]);
+    const resp = await getOverview();
+    const acc = resp.sections.flatMap((s) => s.accounts).find((a) => a.id === giro);
+    expect(acc?.pending_count).toBe(1);
   });
 
   it("filters accounts through the per-user ACL", async () => {
