@@ -832,7 +832,16 @@ behind it.
        The related-documents panel shows the link from both sides as its
        first group, "Antwort und Bezug". There is no `source = assistant`
        column; the link and the letter row say where it came from.
-     - Photos are context only; enclosing them as pages is left for later.
+     - Photos go along as pages after the letter (`assistant/letter-photos.ts`):
+       `render_letter` takes `attachment_photo_ids`, by default the working
+       set's photos, at most 12; each is read upright and scaled to a 2000 px
+       edge, printed under "Anlage: <title>" and listed under "Anlagen". Only
+       users with `module.photos` and `photos.view` enclose any, and only
+       photos the gallery would show them (`accessiblePhotoCondition`); the
+       download re-reads them as the user asking. The card lists the photos
+       to tick off, but adds none. The letter's page count leaves them out.
+       They are stored in `assistant_letter.attachments` with `kind: "photo"`,
+       and stay in the PDF, not as members of the Sammelmappe.
 
 8. **iOS** (later, own plan). The service API is the contract; the
    stream endpoint is a WebSocket the iOS client can consume like

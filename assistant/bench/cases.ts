@@ -914,6 +914,21 @@ export const BENCH_CASES: BenchCase[] = [
     results: { render_letter: PROPOSAL("Brief „Mietzahlungen September und Oktober“ an Max Mustermann") },
   },
   {
+    id: "letter-with-photos",
+    title: "Brief mit Fotos als Anlage",
+    question: "Schreib der Hausverwaltung, dass in der Küche ein Wasserschaden ist, und leg die Fotos bei.",
+    context: {
+      refs: [{ type: "photo", id: 611 }, { type: "photo", id: 612 }],
+      briefs: [
+        "photo 611: taken 2026-08-12 in Musterstadt, Deutschland (kueche.jpg)",
+        "photo 612: taken 2026-08-12 in Musterstadt, Deutschland (decke.jpg)",
+      ],
+    },
+    // The working set's photos go along by default; passing them by id is just as right.
+    expect: [{ tool: "render_letter", args: { body: { $contains: "wasserschaden" } } }],
+    results: { render_letter: PROPOSAL("Brief „Wasserschaden in der Küche“ an Hausverwaltung, 2 Fotos als Anlage, 1 Lücke zum Ausfüllen") },
+  },
+  {
     id: "keep-answer-as-text-document",
     title: "Antwort als Textdokument ablegen",
     question: "Speichere das als Dokument.",

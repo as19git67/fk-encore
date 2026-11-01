@@ -20,6 +20,7 @@ import { AI_PRIORITY, AiSlotTimeoutError, withAiPriority, withAiSlot } from "../
 import { runTurn } from "./agent";
 import { cleanContext, describeContext, type ContextRef } from "./briefs";
 import { renderLetterPdf } from "./letter-pdf";
+import { letterPhotoPages, mayEnclosePhotos } from "./letter-photos";
 import { catalogFor } from "./catalog";
 import { chat, ContextTooLargeError, knownContextWindow, LlmServiceUnavailableError } from "./llm-client";
 import { cancelTurn, followTurn, openTurn, TURN_ID_RE, turnSignal } from "./live";
@@ -637,6 +638,8 @@ export const letterPdf = api.raw(
         .where(and(eq(assistantLetter.id, id), eq(assistantLetter.user_id, Number(auth.userID))))
         .limit(1);
       if (!letter) throw APIError.notFound("letter not found");
+      // Photos are read again as the user who asks now, so one they lost access to is not printed.
+      const photos = letter.attachments.filter((a) => a.kind === "photo");
       const pdf = await renderLetterPdf({
         sender: letter.sender,
         recipient: letter.recipient,
@@ -644,6 +647,9 @@ export const letterPdf = api.raw(
         body: letter.body,
         date: letter.letter_date,
         attachments: letter.attachments.map((a) => a.title),
+        photos: photos.length && mayEnclosePhotos(auth.permissions)
+          ? (await letterPhotoPages(Number(auth.userID), photos)).pages
+          : [],
       });
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/pdf");

@@ -3,9 +3,13 @@
  * amount below is made up.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import sharp from "sharp";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { getAuthData } from "~encore/auth";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
 vi.mock("./titles", async (importOriginal) => ({
@@ -18,7 +22,7 @@ vi.mock("./llm-client", async (importOriginal) => {
 });
 
 import db from "../db/database";
-import { assistantConversation, assistantLetter, assistantMessage, assistantProposal, users } from "../db/schema";
+import { assistantConversation, assistantLetter, assistantMessage, assistantProposal, photos, users } from "../db/schema";
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
 import { clients, resetClients } from "./clients.test-helper";
 import { chat, type ChatReply } from "./llm-client";
@@ -31,6 +35,7 @@ import {
   setConversationContext,
 } from "./assistant";
 import { DIN5008_B, gapsIn, MM, renderLetterPdf, signatureSplit } from "./letter-pdf";
+import { photoTitle } from "./letter-photos";
 import { factsLeftOut, leftOutNote, signed } from "./tools/letters";
 import { getDocumentText } from "./tools/documents";
 import type { ProposalRow } from "./proposals";
@@ -227,6 +232,113 @@ describe("render_letter", () => {
     expect(row.status).toBe("pending");
     expect(row.error).toBe("this proposal cannot be changed");
     expect(row.letter).toBeNull();
+  });
+});
+
+describe("photos enclosed with a letter", () => {
+  const OTHER = 735;
+  const FILES = fs.mkdtempSync(path.join(os.tmpdir(), "letter-photos-"));
+  const PHOTO_PERMS = [...PERMS, "module.photos", "photos.view"];
+  const made: number[] = [];
+
+  async function photo(owner: number, name: string, taken: string | null): Promise<number> {
+    const file = path.join(FILES, `${name}.jpg`);
+    await sharp({ create: { width: 60, height: 40, channels: 3, background: { r: 30, g: 90, b: 160 } } }).jpeg().toFile(file);
+    const [row] = await db
+      .insert(photos)
+      .values({ user_id: owner, filename: `letters-test-${name}.jpg`, external_path: file, original_name: `${name}.jpg`, mime_type: "image/jpeg", size: 1000, taken_at: taken })
+      .returning({ id: photos.id });
+    made.push(row!.id);
+    return row!.id;
+  }
+
+  async function cleanup() {
+    if (made.length) await db.delete(photos).where(inArray(photos.id, made.splice(0)));
+  }
+
+  beforeEach(async () => {
+    await cleanup();
+    await db.execute(sql`INSERT INTO users (id, email, name, password_hash) VALUES (${OTHER}, 'letters-other@test.local', 'User735', 'x') ON CONFLICT (id) DO NOTHING`);
+  });
+
+  afterAll(async () => {
+    await cleanup();
+    fs.rmSync(FILES, { recursive: true, force: true });
+  });
+
+  async function draftWithPhotos(context: { type: "document" | "photo"; id: number }[]) {
+    // The brief lookup says every photo exists; whether the user may see it is the tool's own check.
+    clients.photo.getPhotoDetailsBatch.mockImplementation(async ({ ids }: { ids: string }) => ({
+      photos: ids.split(",").map((id) => ({ id: Number(id), taken_at: "2026-08-12T09:30:00" })),
+    }));
+    const conversation = await createConversation({ context });
+    vi.mocked(chat).mockImplementation(async (req) => {
+      const names = (req.tools ?? []).map((t) => (t as { function: { name: string } }).function.name);
+      const asked = req.messages.filter((m) => m.role === "tool").length;
+      if (names.includes("write_plan") && asked === 0) {
+        return toolCall("write_plan", { steps: [{ tool: "render_letter", goal: "the letter" }] });
+      }
+      if (!req.messages.some((m) => m.role === "tool" && String(m.content).includes("Brief"))) {
+        return toolCall("render_letter", {
+          recipient: "Beispiel Hausverwaltung\nBeispielstraße 1\n12345 Musterstadt",
+          subject: "Wasserschaden in der Küche",
+          body: "Sehr geehrte Damen und Herren,\n\nanbei die Fotos des Wasserschadens vom 12.08.2026.\n\nMit freundlichen Grüßen",
+        });
+      }
+      return text("Der Brief liegt als Vorschlag bereit.");
+    });
+    const res = await ask({ id: conversation.id, message: "Schreib der Hausverwaltung wegen des Wasserschadens, mit den Fotos als Anlage." });
+    const block = res.blocks.find((b) => b.kind === "proposal");
+    return block!.rows[0] as unknown as ProposalRow;
+  }
+
+  it("takes the working set's photos along, but none the user cannot see", async () => {
+    setAuth(PHOTO_PERMS);
+    const kitchen = await photo(USER, "kueche", "2026-08-12 09:30:00");
+    const ceiling = await photo(USER, "decke", null);
+    const foreign = await photo(OTHER, "fremd", "2026-08-12 10:00:00");
+    const proposal = await draftWithPhotos([{ type: "photo", id: kitchen }, { type: "photo", id: ceiling }, { type: "photo", id: foreign }]);
+    expect(proposal.letter!.photos).toEqual([
+      { id: kitchen, title: "Foto vom 12.08.2026" },
+      { id: ceiling, title: "decke.jpg" },
+    ]);
+    expect(proposal.summary).toContain("2 Fotos als Anlage");
+  });
+
+  it("prints each kept photo on a page after the letter and lists it under Anlagen", async () => {
+    setAuth(PHOTO_PERMS);
+    const kitchen = await photo(USER, "kueche", "2026-08-12 09:30:00");
+    const ceiling = await photo(USER, "decke", "2026-08-13 09:30:00");
+    const proposal = await draftWithPhotos([{ type: "photo", id: kitchen }, { type: "photo", id: ceiling }]);
+    clients.documents.storeGeneratedDocument.mockResolvedValueOnce({ id: 902 });
+
+    const row = await executeAssistantProposal({
+      id: proposal.proposal_id,
+      // The ceiling photo is ticked off on the card.
+      edits: { sender: "User734\nBeispielweg 2\n12345 Musterstadt", photo_ids: [kitchen] },
+    });
+    expect(row.error).toBeNull();
+    expect(row.status).toBe("executed");
+
+    const pdf = Buffer.from(clients.documents.storeGeneratedDocument.mock.calls[0]![0].pdf_base64, "base64").toString("latin1");
+    // One letter page and one photo page, with the photo as an image.
+    expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(2);
+    expect(pdf).toContain("/Subtype /Image");
+    const [saved] = await db.select().from(assistantLetter);
+    expect(saved.attachments).toEqual([{ id: kitchen, title: "Foto vom 12.08.2026", kind: "photo" }]);
+  });
+
+  it("encloses no photo for a user without the photos module", async () => {
+    const kitchen = await photo(USER, "kueche", "2026-08-12 09:30:00");
+    const proposal = await draftWithPhotos([{ type: "photo", id: kitchen }, ...CONTEXT]);
+    expect(proposal.letter!.photos).toEqual([]);
+    expect(proposal.letter!.attachments).toHaveLength(3);
+  });
+
+  it("names a photo by its day, else by its file", () => {
+    expect(photoTitle({ id: 1, taken_at: "2026-08-12 09:30:00", original_name: "a.jpg" })).toBe("Foto vom 12.08.2026");
+    expect(photoTitle({ id: 2, taken_at: null, original_name: "b.jpg" })).toBe("b.jpg");
+    expect(photoTitle({ id: 3, taken_at: null, original_name: " " })).toBe("Foto 3");
   });
 });
 

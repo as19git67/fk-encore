@@ -4829,8 +4829,8 @@ export const assistantLetter = pgTable(
     subject: text("subject").notNull(),
     body: text("body").notNull(),
     letter_date: date("letter_date", { mode: "string" }).notNull(),
-    /** The enclosures by id and the title they had when the letter was confirmed. */
-    attachments: jsonb("attachments").$type<Array<{ id: number; title: string }>>().notNull().default([]),
+    /** The enclosures by id and the title they had when the letter was confirmed; photos carry `kind: "photo"`. */
+    attachments: jsonb("attachments").$type<Array<{ id: number; title: string; kind?: "photo" }>>().notNull().default([]),
     /** Where the letter was filed, if it was; owned by the documents service, so no foreign key. */
     document_id: integer("document_id"),
     collection_id: integer("collection_id"),

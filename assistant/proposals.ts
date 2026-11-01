@@ -105,6 +105,8 @@ export interface LetterDraft {
   subject: string;
   body: string;
   attachments: LetterAttachment[];
+  /** Photos printed after the letter, one per page. */
+  photos: LetterAttachment[];
   destinations: LetterDestination[];
   /** What the model could not fill in, as `[[…]]` in the text. */
   gaps: string[];
@@ -122,6 +124,8 @@ export interface ProposalEdits {
    * user added on the card. Visibility is checked again when the letter runs.
    */
   attachment_ids?: number[];
+  /** The proposed photos the user kept enclosed. */
+  photo_ids?: number[];
   /** A collage's layout and caption. */
   collage?: CollageEdits;
 }
