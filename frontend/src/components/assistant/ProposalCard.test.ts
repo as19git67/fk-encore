@@ -11,9 +11,13 @@ vi.mock('../../api/assistant', () => ({
 }))
 
 vi.mock('../../api/documents', () => ({ searchDocuments: vi.fn() }))
+vi.mock('../../api/photos', () => ({ listAlbums: vi.fn(), listPersons: vi.fn(), listPhotoUploaders: vi.fn() }))
 
 import { discardProposal, downloadResult, executeProposal } from '../../api/assistant'
 import { searchDocuments } from '../../api/documents'
+import { listAlbums } from '../../api/photos'
+import { useReferenceData } from '../../composables/useReferenceData'
+import { CONTINUE_AFTER_PROPOSAL } from '../../utils/proposalEffects'
 
 const pending: Proposal = {
   proposal_id: 7,
@@ -220,5 +224,51 @@ describe('ProposalCard', () => {
     button(el, 'Ausführen').click()
     await flushPromises()
     expect(vi.mocked(executeProposal).mock.calls[0]![1]!.photo_ids).toEqual([31])
+  })
+})
+
+describe('after Ausführen', () => {
+  beforeEach(() => {
+    vi.mocked(executeProposal).mockReset()
+  })
+
+  function mountWithContinue(proposal: Proposal, onContinue: (m: string) => void): HTMLElement {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    createApp({ render: () => h(ProposalCard, { proposal }) })
+      .use(PrimeVue)
+      .provide(CONTINUE_AFTER_PROPOSAL, onContinue)
+      .component('RouterLink', RouterLink)
+      .mount(el)
+    return el
+  }
+
+  it('says what comes next and asks the conversation to go on once the card ran', async () => {
+    const onContinue = vi.fn()
+    const el = mountWithContinue({ ...pending, continuation: 'eine Collage aus dem Album machen' }, onContinue)
+    expect(el.textContent).toContain('Nach dem Ausführen mache ich weiter: eine Collage aus dem Album machen')
+    vi.mocked(executeProposal).mockResolvedValue({
+      ...pending, status: 'executed', result_summary: 'Album „Sommer“ mit 3 Fotos angelegt', result_route: '/fotos/alben/31',
+      continuation: 'eine Collage aus dem Album machen',
+    })
+    button(el, 'Ausführen').click()
+    await flushPromises()
+    expect(onContinue).toHaveBeenCalledWith('Die Karte ist ausgeführt: Album „Sommer“ mit 3 Fotos angelegt. Mach jetzt weiter: eine Collage aus dem Album machen')
+  })
+
+  it('drops the cached album list, so the new album shows without a reload', async () => {
+    const { albums, fetchAlbums } = useReferenceData()
+    vi.mocked(listAlbums).mockResolvedValue({ albums: [{ id: 1, name: 'Alt' }] } as never)
+    await fetchAlbums()
+    const onContinue = vi.fn()
+    const el = mountWithContinue(pending, onContinue)
+    vi.mocked(executeProposal).mockResolvedValue({ ...pending, status: 'executed', result_summary: 'angelegt' })
+    button(el, 'Ausführen').click()
+    await flushPromises()
+    vi.mocked(listAlbums).mockResolvedValue({ albums: [{ id: 1, name: 'Alt' }, { id: 31, name: 'Sommer' }] } as never)
+    await fetchAlbums()
+    expect(albums.value.map((a) => a.id)).toEqual([1, 31])
+    // Nothing waited on this card.
+    expect(onContinue).not.toHaveBeenCalled()
   })
 })

@@ -4714,6 +4714,8 @@ export const assistantProposal = pgTable(
     summary: text("summary").notNull(),
     status: text("status").$type<"pending" | "executing" | "executed" | "discarded">().notNull().default("pending"),
     result: jsonb("result").$type<Record<string, unknown>>(),
+    /** What the assistant does once the card ran: the rest of the question that needs its result. */
+    continuation: text("continuation"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
   },

@@ -7,11 +7,12 @@
  * until it runs; while a gap is left, the foot says why "Ausführen" waits
  * and leads to the gap.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import { discardProposal, downloadResult, executeProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
 import { letterGaps } from '../../utils/letterGaps'
+import { CONTINUE_AFTER_PROPOSAL, continuationQuestion, refreshAfterProposal } from '../../utils/proposalEffects'
 import LetterEditor, { type LetterForm } from './LetterEditor.vue'
 import CollageProposal, { type CollageForm } from './CollageProposal.vue'
 import MarkdownView from '../documents/MarkdownView.vue'
@@ -78,6 +79,7 @@ const mailto = computed(() => {
 })
 
 const busy = ref<'execute' | 'discard' | null>(null)
+const continueConversation = inject(CONTINUE_AFTER_PROPOSAL, null)
 const requestError = ref<string | null>(null)
 
 const STATUS: Record<Proposal['status'], { label: string; severity: 'info' | 'success' | 'secondary' | 'warn' }> = {
@@ -116,6 +118,13 @@ async function decide(action: 'execute' | 'discard') {
       ? await (edits ? executeProposal(id, edits) : executeProposal(id))
       : await discardProposal(id)
     current.value = { ...next, count: next.count ?? current.value.count }
+    if (action === 'execute' && next.status === 'executed') {
+      refreshAfterProposal(next.tool)
+      // The assistant said it goes on once the card ran; ask it to.
+      if (next.continuation && continueConversation) {
+        continueConversation(continuationQuestion(next.result_summary ?? next.summary, next.continuation))
+      }
+    }
   } catch (e) {
     requestError.value = e instanceof Error ? e.message : 'Der Vorschlag konnte nicht bearbeitet werden.'
   } finally {
@@ -153,6 +162,10 @@ async function decide(action: 'execute' | 'discard') {
       >
         <MarkdownView :source="current.text_document.markdown" />
       </div>
+      <p v-if="current.continuation && current.status === 'pending'" class="proposal-next">
+        <i class="pi pi-arrow-right" aria-hidden="true" />
+        <span>Nach dem Ausführen mache ich weiter: {{ current.continuation }}</span>
+      </p>
       <p v-if="current.status === 'executed' && current.result_summary" class="proposal-result">
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
@@ -330,6 +343,7 @@ async function decide(action: 'execute' | 'discard') {
 }
 
 .proposal-result,
+.proposal-next,
 .proposal-error {
   display: flex;
   align-items: center;
@@ -340,6 +354,10 @@ async function decide(action: 'execute' | 'discard') {
 
 .proposal-result {
   color: var(--p-green-600);
+}
+
+.proposal-next {
+  color: var(--p-text-muted-color);
 }
 
 

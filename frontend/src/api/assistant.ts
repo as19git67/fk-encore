@@ -142,6 +142,8 @@ export interface Proposal {
   text_document: { title: string; markdown: string } | null
   /** A collage the proposal would render; afterwards the photo it became. */
   collage?: CollagePreview | null
+  /** What the assistant goes on with once the card ran; the page asks it to right after "Ausführen". */
+  continuation?: string | null
 }
 
 export type CollageTextPosition =

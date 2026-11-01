@@ -529,3 +529,56 @@ describe("a transaction report", () => {
     expect(clients.finance.previewGroupedReport.mock.calls[0][0]).toMatchObject({ transaction_ids: [1, 2, 3] });
   });
 });
+
+describe("a card the rest of the question waits for", () => {
+  it("keeps the step after the card, hands it back after Ausführen, and later turns read the card as executed", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 5 }, { id: 6 }] });
+    const conversation = await createConversation({});
+    vi.mocked(chat)
+      .mockResolvedValueOnce(toolCall("create_album", { name: "Sommer", photos: { favorite: true }, after_execute: "eine Collage aus dem Album machen" }))
+      .mockResolvedValueOnce(text("Ich habe das Album „Sommer“ vorgeschlagen; sobald du es ausführst, mache ich die Collage."));
+    const res = await ask({ id: conversation.id, message: "Leg ein Album mit meinen Favoriten an und mach dann eine Collage daraus." });
+    await __settleSummariesForTests();
+
+    const row = res.blocks.find((b) => b.kind === "proposal")!.rows[0]!;
+    expect(row).toMatchObject({ status: "pending", continuation: "eine Collage aus dem Album machen" });
+    const [stored] = await db.select().from(assistantProposal);
+    expect(stored.continuation).toBe("eine Collage aus dem Album machen");
+    // The argument is the loop's, not the action's.
+    expect(stored.arguments).not.toHaveProperty("after_execute");
+    const toolMessage = vi.mocked(chat).mock.calls[1]![0].messages.find((m) => m.role === "tool");
+    expect(toolMessage?.content).toContain("the app asks you to go on with: eine Collage aus dem Album machen");
+
+    clients.photo.createAlbum.mockResolvedValue({ id: 31, name: "Sommer" });
+    const done = await executeAssistantProposal({ id: Number(row.proposal_id) });
+    expect(done).toMatchObject({ status: "executed", continuation: "eine Collage aus dem Album machen", result_route: "/fotos/alben/31" });
+
+    // The next turn: the stored "NOT executed" is replaced by what became of the card.
+    vi.mocked(chat).mockReset();
+    vi.mocked(chat).mockResolvedValueOnce(noAreas()).mockResolvedValueOnce(text("Gut."));
+    await ask({ id: conversation.id, message: "Die Karte ist ausgeführt. Mach jetzt weiter: eine Collage aus dem Album machen" });
+    const request = vi.mocked(chat).mock.calls.map((c) => c[0]).find((r) => r.messages.some((m) => m.role === "tool"))!;
+    const earlier = request.messages.find((m) => m.role === "tool")!;
+    expect(earlier.content).toMatch(/^Proposal #\d+ \(Album „Sommer“ anlegen und 2 Fotos hinzufügen\) was EXECUTED by the user: Album „Sommer“ mit 2 Fotos angelegt \(\{"album_id":31\}\)\. It is done/);
+    expect(request.messages.some((m) => m.role === "tool" && String(m.content).includes("NOT executed"))).toBe(false);
+  });
+
+  it("a discarded card reads as discarded, and a placeholder is no continuation", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 5 }] });
+    const conversation = await createConversation({});
+    vi.mocked(chat)
+      .mockResolvedValueOnce(toolCall("create_album", { name: "Winter", photos: { favorite: true }, after_execute: "nichts" }))
+      .mockResolvedValueOnce(text("Vorgeschlagen."));
+    const res = await ask({ id: conversation.id, message: "Leg ein Album mit meinen Favoriten an." });
+    await __settleSummariesForTests();
+    const row = res.blocks.find((b) => b.kind === "proposal")!.rows[0]!;
+    expect(row.continuation).toBeNull();
+    await discardAssistantProposal({ id: Number(row.proposal_id) });
+
+    vi.mocked(chat).mockReset();
+    vi.mocked(chat).mockResolvedValueOnce(noAreas()).mockResolvedValueOnce(text("Ok."));
+    await ask({ id: conversation.id, message: "Und jetzt?" });
+    const request = vi.mocked(chat).mock.calls.map((c) => c[0]).find((r) => r.messages.some((m) => m.role === "tool"))!;
+    expect(request.messages.find((m) => m.role === "tool")!.content).toMatch(/was DISCARDED by the user; nothing was changed\.$/);
+  });
+});

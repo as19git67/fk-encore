@@ -77,6 +77,13 @@ describe("the replayed form", () => {
     expect(summaryNote([])).toBe("[summary of an earlier turn. Follow-ups on those rows use from_previous_result.]");
   });
 
+  it("notes the state a card has now, not the one its summary was written in", () => {
+    expect(summaryNote([
+      { tool: "create_album", digest: "[Proposal #5 (Album „Sommer“ anlegen) was EXECUTED by the user: Album angelegt. It is done — never say it still waits for confirmation or is not confirmed.]" },
+      { tool: "tag_transactions", digest: "[Proposal #6 (Tag setzen) was DISCARDED by the user; nothing was changed.]" },
+    ])).toBe("[summary of an earlier turn; tools then: create_album (proposal, since executed by the user: done), tag_transactions (proposal, since discarded by the user). Follow-ups on those rows use from_previous_result.]");
+  });
+
   it("is the question and the summary with its note in the answer's place", () => {
     const turn = summarizedTurn("Zeig mir die Buchungen vom Baumarkt.", "Eine Buchung über 98,40 €.", "[note]");
     expect(turn).toEqual([

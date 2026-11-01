@@ -41,6 +41,7 @@ import type {
   ToolSpec,
   TurnEvent,
 } from "./types";
+import { AFTER_EXECUTE } from "./types";
 
 export const DEFAULT_MAX_ROUNDS = 8;
 /** What the loop says itself when the model gave no answer; never the model's words. */
@@ -249,6 +250,26 @@ export function planStatus(steps: PlanStep[]): string {
   return `${done ? `Plan: ${done} of ${steps.length} steps done. ` : ""}Next: step ${next + 1}, ${step.tool}${step.goal ? ` — ${step.goal}` : ""}. Call it now; when every step is done, answer. Skip a step only when the results above already cover it.`;
 }
 
+/**
+ * The plan's status once this turn made a proposal card: the steps still
+ * open need what the card makes, which exists only after "Ausführen", so
+ * the turn ends here and goes on when the card ran. Without it the status
+ * said "call step 2 now", the model called it with an id that did not
+ * exist yet and told the user it could not do it.
+ */
+export function planWaitStatus(steps: PlanStep[]): string {
+  const open = steps.filter((s) => !s.done);
+  if (!open.length) return planStatus(steps);
+  return `A proposal card was made. The steps still open (${open.map((s) => `${s.tool}${s.goal ? ` — ${s.goal}` : ""}`).join("; ")}) wait until the user pressed "Ausführen" on it: do not call them now and do not say you cannot do them. Answer now: say what you proposed and that you go on with ${open.length === 1 ? "that step" : "those steps"} as soon as the card is executed.`;
+}
+
+/** What the turn goes on with once its card ran: the open steps of the plan, in words. */
+export function planContinuation(steps: PlanStep[]): string | null {
+  const open = steps.filter((s) => !s.done);
+  if (!open.length) return null;
+  return open.map((s) => s.goal || s.tool).join(", dann ");
+}
+
 /** Sent back once when the model answers with planned steps still open. */
 export function planNudge(steps: PlanStep[]): string {
   const open = steps.map((s, i) => ({ s, i })).filter(({ s }) => !s.done).map(({ s, i }) => `step ${i + 1}, ${s.tool}${s.goal ? ` — ${s.goal}` : ""}`);
@@ -276,6 +297,7 @@ Rules:
 - A tool result with no rows says which filter to loosen and how many rows that brings: call the tool again once with that filter dropped before you tell the user nothing exists. A tool error names the argument and the allowed values: fix that argument and call again; never repeat the same call, and never answer as if the call had worked. When a tool finds nothing even so, say so plainly and name the criteria.
 - Earlier turns show the tool calls behind each answer and what they found; an older turn shows its question and a summary of what was found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button on a card. Call one only when the user asks for that change, then say what you proposed and that it waits for "Ausführen" on the card. Never claim it is done. To correct an earlier proposal (another layout, other text, other photos), call the write tool again with the changed arguments: that makes a new card under your answer, while the earlier card stays as it was and cannot be changed. Never ask for confirmation in words instead ("Soll ich …?", "Bitte bestätige …"): without the tool call there is no card and nothing the user could confirm — the card is the confirmation. If an earlier answer asked in words anyway and the user now says yes, call the write tool now.
+- A step needing what a card makes waits for "Ausführen", no failure: name it in ${AFTER_EXECUTE} (every write tool takes it), say you go on once the card ran. A card shown as EXECUTED is done.
 - When a table helps (a few rows compared by the same columns), write it as a Markdown table: a header row, then a separator row like |---|---:|, one row per line. The app shows it as a real table. Never draw tables with +---+, box characters or spaces, and never put a table in a code block.
 - Name an item a tool printed as a Markdown link to its kind and id: "[Edeka, 28.10., 45,90 €](buchung:4711)", "[die Stromrechnung](dokument:123)"; kinds buchung, dokument, foto, konto, album, sammelmappe, zaehler, betrieb. The app opens the item from it. Never write bare ids.
 - Answer briefly in the user's language (usually German).`;
@@ -558,6 +580,12 @@ export interface TurnResult {
   planOutcome?: "plan" | "tool_call" | "none";
   /** The checker's work (stage 5); absent when no answer was checked. */
   checks?: TurnChecks;
+  /**
+   * The open steps of the plan, when this turn ended on a proposal card with
+   * steps still waiting for it: stored with the card (when the model gave no
+   * `after_execute`), so the app goes on with them after "Ausführen".
+   */
+  continuation?: { proposalId: number; text: string };
   /** Replies llama-server could not parse and the loop asked for once more (llama.cpp issue #25072); absent when none. */
   malformedReplies?: number;
 }
@@ -974,6 +1002,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     // An answer with planned steps still open: the plan was the model's
     // own, so it is sent back to it once.
     const planOpen = !reply.tool_calls.length && plan !== null && !planNudged && plan.some((s) => !s.done)
+      && !blocks.some((b) => b.kind === "proposal")
       && !(missingAreas && saysPermissionMissing(reply.content));
     // "Ja." to the previous answer's question, and the model answers in
     // words again instead of taking the step it asked about.
@@ -1224,7 +1253,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         if (step) step.done = true;
       }
       const tail = messages[messages.length - 1]!;
-      if (tail.role === "tool") messages[messages.length - 1] = { ...tail, content: `${tail.content}\n\n${planStatus(plan)}` };
+      const status = blocks.some((b) => b.kind === "proposal") ? planWaitStatus(plan) : planStatus(plan);
+      if (tail.role === "tool") messages[messages.length - 1] = { ...tail, content: `${tail.content}\n\n${status}` };
     }
   }
 
@@ -1236,6 +1266,16 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   if (noRows) {
     for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i]!.kind !== "proposal") blocks.splice(i, 1);
   }
+  // Steps of the plan still open behind a card wait for it: the card says
+  // so, and the app asks to go on with them once it ran.
+  let continuation: TurnResult["continuation"];
+  const waiting = plan ? planContinuation(plan) : null;
+  const card = [...blocks].reverse().find((b) => b.kind === "proposal");
+  const cardRow = card?.rows.at(-1);
+  if (waiting && cardRow && cardRow.status === "pending" && !cardRow.continuation) {
+    cardRow.continuation = waiting;
+    continuation = { proposalId: Number(cardRow.proposal_id), text: waiting };
+  }
   emit({ type: "done", answer: final, blocks });
   return {
     answer: final, blocks, transcript, rounds, toolResults, context: usage,
@@ -1244,5 +1284,6 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     ...(planOutcome ? { planOutcome } : {}),
     ...(checks ? { checks } : {}),
     ...(malformedReplies ? { malformedReplies } : {}),
+    ...(continuation ? { continuation } : {}),
   };
 }
