@@ -13,22 +13,45 @@ describe('applyEvent', () => {
     expect(t.finished).toBe(false)
   })
 
-  it('drops a withdrawn answer and keeps what follows', () => {
+  it('keeps a withdrawn answer as a draft and streams what follows', () => {
     const t = play([
       { type: 'token', text: '1. 01.10.2026 Beispiel GmbH −12,00 €' },
       { type: 'retract' },
       { type: 'token', text: 'Ich sehe nach.' },
     ])
     expect(t.text).toBe('Ich sehe nach.')
+    expect(t.drafts).toEqual([{ text: '1. 01.10.2026 Beispiel GmbH −12,00 €', withdrawn: true }])
   })
 
-  it('starts the text afresh when a tool is called', () => {
+  it('starts the text afresh when a tool is called and keeps the sentence before it', () => {
     const t = play([
       { type: 'token', text: 'Ich sehe nach …' },
       { type: 'tool_start', tool: 'list_transactions', arguments: { q: 'Miete' } },
     ])
     expect(t.text).toBe('')
+    expect(t.drafts).toEqual([{ text: 'Ich sehe nach …', withdrawn: false }])
     expect(t.steps).toEqual([{ tool: 'list_transactions', label: 'Buchungen durchsuchen', done: false }])
+  })
+
+  it('keeps no draft of a round that wrote nothing', () => {
+    const t = play([
+      { type: 'token', text: '  ' },
+      { type: 'tool_start', tool: 'list_transactions' },
+      { type: 'retract' },
+    ])
+    expect(t.drafts).toEqual([])
+  })
+
+  it('keeps the drafts when the final answer arrives', () => {
+    const t = play([
+      { type: 'token', text: 'Ich sehe nach …' },
+      { type: 'tool_start', tool: 'list_transactions' },
+      { type: 'token', text: 'Entwurf' },
+      { type: 'retract' },
+      { type: 'done', answer: 'Antwort.', blocks: [] },
+    ])
+    expect(t.text).toBe('Antwort.')
+    expect(t.drafts.map((d) => d.withdrawn)).toEqual([false, true])
   })
 
   it('closes the step and keeps the block a tool returned', () => {

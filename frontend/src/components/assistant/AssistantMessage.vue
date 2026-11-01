@@ -7,7 +7,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import { giveFeedback, type FeedbackVerdict, type Proposal, type ResultBlock } from '../../api/assistant'
-import type { TurnStep } from '../../utils/assistantTurn'
+import type { TurnDraft, TurnStep } from '../../utils/assistantTurn'
 import { parseBlocks } from '../../utils/assistantMarkdown'
 import { mentionedIds, type EntityKind } from '../../utils/assistantLinks'
 import ScrollX from '../layout/ScrollX.vue'
@@ -21,6 +21,12 @@ const props = withDefaults(defineProps<{
   blocks?: ResultBlock[]
   /** What the assistant is doing or did while answering. */
   steps?: TurnStep[]
+  /**
+   * Text of earlier rounds that is no longer the answer: a sentence before a
+   * tool call, or an answer the server withdrew to check once more. It stays
+   * where the user read it; once the answer is there it folds away.
+   */
+  drafts?: TurnDraft[]
   /** The answer is still arriving. */
   pending?: boolean
   error?: string
@@ -28,7 +34,7 @@ const props = withDefaults(defineProps<{
   messageId?: number
   /** Offer "Als Textdokument speichern" (the user may file documents). */
   keepable?: boolean
-}>(), { blocks: () => [], steps: () => [], pending: false, error: undefined, messageId: undefined, keepable: false })
+}>(), { blocks: () => [], steps: () => [], drafts: () => [], pending: false, error: undefined, messageId: undefined, keepable: false })
 
 const emit = defineEmits<{ keep: [content: string] }>()
 
@@ -169,6 +175,22 @@ const thinking = computed(() => props.pending && !props.content && props.steps.e
 <template>
   <article :class="['message', `message--${role}`]" :aria-busy="pending || undefined">
     <h3 class="visually-hidden">{{ role === 'user' ? 'Deine Frage' : 'Antwort des Assistenten' }}</h3>
+
+    <ol v-if="drafts.length && pending" class="drafts" aria-label="Bisher geschrieben">
+      <li v-for="(d, i) in drafts" :key="i" :class="['draft', { 'draft--withdrawn': d.withdrawn }]">
+        <span v-if="d.withdrawn" class="draft-label">Entwurf verworfen – ich prüfe das noch einmal nach</span>
+        <p class="text">{{ d.text }}</p>
+      </li>
+    </ol>
+    <details v-else-if="drafts.length" class="drafts-folded">
+      <summary>{{ drafts.length === 1 ? 'Ein Zwischenstand' : `${drafts.length} Zwischenstände` }}</summary>
+      <ol class="drafts">
+        <li v-for="(d, i) in drafts" :key="i" :class="['draft', { 'draft--withdrawn': d.withdrawn }]">
+          <span v-if="d.withdrawn" class="draft-label">Entwurf verworfen</span>
+          <p class="text">{{ d.text }}</p>
+        </li>
+      </ol>
+    </details>
 
     <ul v-if="steps.length" class="steps" aria-label="Nachgesehen">
       <li v-for="(s, i) in steps" :key="`${s.tool}-${i}`" :class="['step', { 'step--failed': !!s.error }]">
@@ -461,6 +483,49 @@ const thinking = computed(() => props.pending && !props.content && props.steps.e
 
 .text--waiting {
   color: var(--p-text-muted-color);
+}
+
+.drafts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+  max-width: min(42rem, 100%);
+}
+
+.draft {
+  display: grid;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--p-content-border-color);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+
+.draft-label {
+  font-weight: 600;
+}
+
+.drafts-folded {
+  max-width: min(42rem, 100%);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+
+.drafts-folded summary {
+  cursor: pointer;
+  width: fit-content;
+  border-radius: 0.25em;
+}
+
+.drafts-folded summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.drafts-folded .drafts {
+  margin-top: var(--space-2);
 }
 
 .steps {
