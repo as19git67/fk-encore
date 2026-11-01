@@ -57,4 +57,20 @@ export const DEMO_COUNTERPARTIES = {
   pharmacy: "Muster-Apotheke",
   fuel: "Tankstelle Musterweg",
   online: "Beispiel Versand GmbH",
+  craftsman: "Malerbetrieb Beispiel GmbH",
+  doctor: "Praxis Dr. Demo",
+  garage: "Autohaus Musterweg GmbH",
+  charity: "Beispiel-Hilfswerk e.V.",
+  taxOffice: "Finanzamt Musterstadt",
+  healthInsurer: "Demo Krankenkasse",
+  pensionFund: "Deutsche Musterrente",
+  school: "Grundschule Musterstadt",
+  club: "TSV Musterstadt e.V.",
+  carInsurer: "Muster Kfz-Versicherung AG",
 } as const;
+
+/** Every company or office the demo writes, for the check of the model's texts. */
+export const DEMO_ORGANISATIONS: readonly string[] = [
+  ...Object.values(DEMO_COUNTERPARTIES).flatMap((v) => (typeof v === "string" ? [v] : [...v])),
+  DEMO_BANK.name,
+];

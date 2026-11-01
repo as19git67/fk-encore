@@ -47,6 +47,8 @@ export interface WrittenHousehold {
   spouseId: number;
   accounts: Record<AccountKey, number>;
   bookings: number;
+  /** The id of each planned booking, by its index in the plan. */
+  bookingIds: number[];
 }
 
 export class DemoCancelled extends Error {
@@ -158,10 +160,11 @@ export async function writeHousehold(runId: number, ownerId: number, plan: House
   const accounts = await createAccounts(runId, plan, ownerId, spouseId);
 
   const BATCH = 50;
+  const bookingIds: number[] = [];
   for (let i = 0; i < plan.bookings.length; i += BATCH) {
     if (hooks.cancelled && (await hooks.cancelled())) throw new DemoCancelled();
     const batch = plan.bookings.slice(i, i + BATCH);
-    await db.insert(financeTransaction).values(
+    const inserted = await db.insert(financeTransaction).values(
       batch.map((b, j) => ({
         account_id: accounts[b.account],
         booking_date: `${b.date}T00:00:00`,
@@ -174,7 +177,9 @@ export async function writeHousehold(runId: number, ownerId: number, plan: House
         entry_text: b.entryText,
         dedupe_hash: dedupeHash(runId, i + j, b),
       })),
-    );
+    ).returning({ id: financeTransaction.id });
+    // Postgres returns the rows of a multi-row insert in the order of its VALUES.
+    bookingIds.push(...inserted.map((r) => r.id));
     await hooks.progress?.(Math.min(i + BATCH, plan.bookings.length), plan.bookings.length);
   }
 
@@ -185,7 +190,7 @@ export async function writeHousehold(runId: number, ownerId: number, plan: House
     await db.insert(financeAccountBalance).values({ account_id: accounts[a.key], as_of: asOf, balance: cents(total), source: "manual" });
   }
 
-  return { spouseId, accounts, bookings: plan.bookings.length };
+  return { spouseId, accounts, bookings: plan.bookings.length, bookingIds };
 }
 
 /** The bookings of the given accounts, for the remover: they do not cascade from their account. */

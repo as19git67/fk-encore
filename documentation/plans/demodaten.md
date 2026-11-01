@@ -79,7 +79,7 @@ The code builds one synthetic household over three years before today:
 The 500 bookings and the 500 PDFs come from this calendar. Not every
 booking has a document (card payments at the supermarket do not) and not
 every document has a booking (contracts, notices, the depot statement),
-so the overlap is about 250. That overlap is what document matching and
+so the overlap is about 180. That overlap is what document matching and
 the depot derivation show.
 
 ### Text (llm-service)
@@ -135,8 +135,8 @@ The four securities are real, widely held broad index funds (world
 equities, emerging markets, Europe, a bond index), listed in
 `demo/securities.ts`, so the demo gets real and current quotes from the
 configured provider like any depot. That needs the provider to be
-reachable when the demo is loaded; without it the run stops before the
-depot stage and says why.
+reachable when the demo is loaded; without it the run leaves the depot
+out and says why.
 
 The prices in the settlements come from the provider's real history: the
 generator first loads the quote history of the three years, then sets each
@@ -202,13 +202,56 @@ show something.
    `db/seed-demo.ts` by `size: "small"` and `DEMO_DATA=1` in the
    Playwright workflow — the E2E specs need the photos and documents of
    the seed, which the generator does not make yet.
-2. **Documents.** Skeleton for all document kinds, PDF layouts, import
-   through the pipeline, `template` texts first, then `llm` texts through
-   the `llm` queue; ground-truth report on the page.
-3. **Depot.** Removal of the Finanzkraft import beforehand (own PR).
-   Depot with settlements, dividends and statements, real index funds with
-   prices from the provider's history, the bookings that go with them.
-   (Accounts, the household bookings and the spouse came with stage 1.)
+2. **Documents.** *Done.* The plan of 500 documents (30 for `small`) in
+   `demo/documents.ts`: one per booking that has paper (payslip, phone
+   bill, utility bill, insurance premium, craftsman's invoice, doctor's
+   bill, car repair, donation receipt, tax assessment, online invoice,
+   receipts), the yearly ones (wage tax certificate, the bank's tax
+   certificate, advance plan, service charges, pension information, car
+   insurance), monthly statements of the giro accounts and quarterly ones
+   of the savings account, filled up with letters (school, club, health
+   insurer, bank, utility, insurer). The household got the bookings these
+   need (craftsman, doctor, garage, donation, tax refund). Layouts and
+   rendering in `demo/pdf-render.ts`: three letter layouts, a statement
+   table over several pages, a receipt slip; about one in ten is drawn as
+   SVG, rasterised by sharp, turned and roughened, and stored as an
+   image-only PDF. Wording by the model in `demo/doc-text-llm.ts`
+   (`/json-prompt` with a schema through the `llm` queue at background
+   priority); an answer that names a common surname, an unknown company,
+   a title, a long number or an amount the document does not have is
+   dropped and the template stays. The start offers the model or the
+   templates; a model that does not answer at the start means templates
+   for the whole run (`text_source` says which). Import and truth in
+   `demo/doc-writer.ts`, nothing prefilled, file names that say nothing
+   (`Dokument_<date>_<n>.pdf`, `Scan_…`), source folder `Demodaten`; the
+   comparison in `demo/truth.ts` (`GET /admin/demo/truth`: category or a
+   child of it, document type, sender, date, tax role where the generator
+   has one; documents still in the queue count as pending), shown on the
+   card. Removal deletes each document with its file through
+   `documents/purge.ts`, the same code as `DELETE /documents/:id`.
+   Booking purposes stay with the templates: the model words documents
+   only.
+3. **Depot.** *Done.* The Finanzkraft import was removed beforehand
+   (#1784). Four broad index funds by ISIN in `demo/securities.ts`; their
+   history comes from the configured provider through `refreshQuotes`
+   (moved to `finance/quote-refresh.ts`, so the demo service loads quotes
+   without importing the finance endpoints), and the plan in
+   `demo/depot.ts` trades at each day's close: one-off buys of three
+   funds, a monthly savings plan in the world fund, quarterly and
+   half-yearly distributions of the two distributing funds at a synthetic
+   yield, one sale two years in, a depot statement at each quarter's end.
+   Every trade and payout is a booking on the admin's giro account
+   ("Wertpapierkauf ISIN … Depot …") and a settlement PDF in label/value
+   form; the statements list each position with its labelled quantity,
+   price and value. `demo/depot-writer.ts` creates the depot account
+   (depot number on every paper) with the traded funds confirmed in its
+   securities master; the depot transactions and holdings are not
+   written — the pipeline reads them from the papers (the tests check
+   that `parseSettlement` and `inspectDepotStatement` read the rendered
+   PDFs back to the planned figures). Without a provider or without a
+   fund's history the run leaves the depot out and says why on the card
+   (not a failure). The loaded quotes stay when the demo is removed: they
+   are shared by every depot holding the fund.
 4. **Photos.** Openverse download with licence list, face filter, EXIF
    rewrite, demo library, albums. Then `db/seed-demo.ts` becomes
    `size: "small"` and the Playwright workflow sets `DEMO_DATA=1` instead

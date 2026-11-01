@@ -10,6 +10,7 @@ import { demoFile, demoItem } from "../db/schema";
 
 /** The tables a run registers rows of, in the order the remover deletes them. */
 export const DEMO_TABLES = [
+  "documents",
   "finance_account",
   "user_assessment_settings",
   "user_subject_persons",

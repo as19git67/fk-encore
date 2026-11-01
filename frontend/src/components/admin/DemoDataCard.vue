@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import ProgressBar from 'primevue/progressbar'
-import { cancelDemo, getDemoStatus, removeDemo, startDemo, type DemoContentCounts, type DemoStatus } from '../../api/demo'
+import {
+  cancelDemo,
+  getDemoStatus,
+  getDemoTruth,
+  removeDemo,
+  startDemo,
+  type DemoContentCounts,
+  type DemoStatus,
+  type DemoTruthField,
+  type DemoTruthReport,
+} from '../../api/demo'
 import { useConfirmAsync } from '../../composables/useConfirmAsync'
 
 /**
@@ -15,6 +26,10 @@ const status = ref<DemoStatus | null>(null)
 const hidden = ref(false)
 const busy = ref(false)
 const error = ref<string | null>(null)
+/** Whether the local model words the documents (hours) or the templates do (minutes). */
+const useModel = ref(true)
+const truth = ref<DemoTruthReport | null>(null)
+const truthLoading = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
 
 const run = computed(() => status.value?.run ?? null)
@@ -34,11 +49,26 @@ const SUMMARY_LABELS: Record<string, string> = {
   users: 'zweite Benutzerin',
   accounts: 'Konten',
   bookings: 'Buchungen',
+  documents: 'Dokumente',
+  worded: 'davon von der KI formuliert',
+  scans: 'davon als Scan',
+  depot: 'Depot',
+  depot_papers: 'Depotpapiere',
+}
+
+const FIELD_LABELS: Record<DemoTruthField, string> = {
+  category: 'Kategorie',
+  document_type: 'Dokumentart',
+  sender: 'Absender',
+  date: 'Datum',
+  tax_role: 'Steuerrolle',
 }
 
 const STAGE_LABELS: Record<string, string> = {
   household: 'Haushalt',
   bookings: 'Buchungen',
+  quotes: 'Kurse',
+  documents: 'Dokumente',
   remove: 'Entfernen',
 }
 
@@ -68,6 +98,7 @@ const summaryLine = computed(() => {
   const s = run.value?.summary
   if (!s) return ''
   return Object.entries(s)
+    .filter(([, n]) => n > 0)
     .map(([k, n]) => `${n} ${SUMMARY_LABELS[k] ?? k}`)
     .join(', ')
 })
@@ -87,10 +118,26 @@ function schedule() {
   timer = loading.value || run.value?.status === 'removing' ? setTimeout(() => void refresh(), 1500) : null
 }
 
+function percent(hits: number, compared: number): string {
+  return compared ? `${Math.round((hits / compared) * 100)} %` : '–'
+}
+
+async function loadTruth() {
+  truthLoading.value = true
+  try {
+    truth.value = await getDemoTruth()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Abgleich nicht abrufbar.'
+  } finally {
+    truthLoading.value = false
+  }
+}
+
 async function refresh() {
   try {
     status.value = await getDemoStatus()
     error.value = null
+    if (status.value.run?.status === 'done' && (status.value.run.summary?.documents ?? 0) > 0 && !truth.value) void loadTruth()
   } catch (e) {
     const code = (e as { code?: string }).code
     if (code === 'permission_denied') hidden.value = true
@@ -118,10 +165,11 @@ async function remove() {
   const what = summaryLine.value ? ` (${summaryLine.value})` : ''
   if (!(await askConfirm({
     header: 'Demodaten entfernen',
-    message: `Alles entfernen, was die Demo angelegt hat${what}? Die Demo-Benutzerin, ihre Konten und alle Buchungen darauf werden gelöscht. Was du selbst angelegt hast, bleibt.`,
+    message: `Alles entfernen, was die Demo angelegt hat${what}? Die Demo-Benutzerin, die Konten mit allen Buchungen und die Demo-Dokumente werden gelöscht. Was du selbst angelegt hast, bleibt.`,
     acceptLabel: 'Entfernen',
     danger: true,
   }))) return
+  truth.value = null
   await act(removeDemo)
 }
 
@@ -138,13 +186,19 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
       <span class="demo-card__label">Demodaten</span>
     </div>
     <p class="demo-card__desc">
-      Ein Beispielhaushalt zum Ausprobieren: eine zweite Benutzerin, ein gemeinsames Konto und drei Jahre
-      Buchungen. Nur in einem System, in das noch niemand etwas eingetragen hat.
+      Ein Beispielhaushalt zum Ausprobieren: eine zweite Benutzerin, ein gemeinsames Konto, drei Jahre
+      Buchungen, ein Depot mit Indexfonds zu echten Kursen und 500 Dokumente, die durch die normale
+      Erkennung laufen. Nur in einem System, in das
+      noch niemand etwas eingetragen hat.
     </p>
 
     <p v-if="!status && !error" class="demo-card__line">Wird geladen …</p>
 
     <template v-else-if="status && !run">
+      <div v-if="status.untouched" class="demo-card__option">
+        <Checkbox v-model="useModel" input-id="demo-use-model" binary />
+        <label for="demo-use-model">Texte der Dokumente von der KI schreiben lassen (dauert einige Stunden)</label>
+      </div>
       <Button
         v-if="status.untouched"
         label="Demodaten laden"
@@ -152,7 +206,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
         size="small"
         outlined
         :loading="busy"
-        @click="act(startDemo)"
+        @click="act(() => startDemo(useModel ? 'llm' : 'template'))"
       />
       <p v-else class="demo-card__line">
         Nicht verfügbar: Das System enthält schon Daten ({{ heldLine }}).
@@ -180,6 +234,35 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
     <template v-else-if="run">
       <p class="demo-card__line" aria-live="polite">{{ outcomeLine }}</p>
       <p v-if="summaryLine" class="demo-card__line">{{ summaryLine }}</p>
+      <p v-if="run.status === 'done' && run.error" class="demo-card__hint">{{ run.error }}</p>
+      <div v-if="truth && truth.documents" class="demo-truth">
+        <div class="demo-truth__head">
+          <span class="demo-truth__title">Erkennung der Dokumente</span>
+          <Button
+            icon="pi pi-refresh"
+            size="small"
+            text
+            rounded
+            aria-label="Abgleich aktualisieren"
+            :loading="truthLoading"
+            @click="loadTruth"
+          />
+        </div>
+        <p class="demo-card__hint">
+          Was die Erkennung gefunden hat, verglichen mit dem, was der Generator weiß.
+          <template v-if="truth.pending">Noch in Verarbeitung: {{ truth.pending }} von {{ truth.documents }}.</template>
+          <template v-if="truth.failed">Fehlgeschlagen: {{ truth.failed }}.</template>
+        </p>
+        <table class="demo-truth__table">
+          <tbody>
+            <tr v-for="f in truth.fields" :key="f.field">
+              <th scope="row">{{ FIELD_LABELS[f.field] }}</th>
+              <td>{{ f.hits }} von {{ f.compared }}</td>
+              <td class="demo-truth__pct">{{ percent(f.hits, f.compared) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <Button
         v-if="run.status !== 'removing'"
         label="Demodaten entfernen"
@@ -239,6 +322,57 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 .demo-card__line {
   margin: 0;
   font-size: var(--text-base);
+}
+
+.demo-card__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+}
+
+.demo-card__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+}
+
+.demo-truth {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.demo-truth__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.demo-truth__title {
+  font-weight: 600;
+}
+
+.demo-truth__table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.demo-truth__table th,
+.demo-truth__table td {
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  text-align: left;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.demo-truth__table th {
+  font-weight: 500;
+}
+
+.demo-truth__pct {
+  text-align: right;
+  color: var(--p-text-muted-color);
 }
 
 .demo-card__warn {

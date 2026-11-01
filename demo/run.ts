@@ -10,6 +10,11 @@ import { eq } from "drizzle-orm";
 import log from "encore.dev/log";
 import db from "../db/database";
 import { demoRun } from "../db/schema";
+import { llmReachable } from "./doc-text-llm";
+import { writeDocuments, type TextSource } from "./doc-writer";
+import { planDocuments } from "./documents";
+import { planDepot } from "./depot";
+import { createDemoDepot, loadDemoCloses } from "./depot-writer";
 import { planHousehold, type DemoSize } from "./household";
 import { currentRun, isUntouched } from "./state";
 import { DemoCancelled, writeHousehold } from "./writer";
@@ -22,6 +27,12 @@ export interface StartOptions {
   seed?: number;
   /** Today as YYYY-MM-DD; the household's last day. Defaults to the server's local date. */
   today?: string;
+  /**
+   * Who words the documents: the local model (`llm`, hours for 500) or the
+   * templates (`template`, minutes; the tests and the benchmark). Defaults
+   * to the model.
+   */
+  text?: TextSource;
 }
 
 /** Thrown when the system is not untouched or a demo is there already. */
@@ -52,8 +63,7 @@ export async function fileRun(ownerId: number, opts: StartOptions = {}): Promise
         owner_user_id: ownerId,
         seed: opts.seed ?? DEFAULT_SEED,
         size: opts.size ?? "full",
-        // Stage 1 has template texts only; the LLM texts come with the documents (stage 2).
-        text_source: "template",
+        text_source: opts.text ?? "llm",
         status: "running",
         stage: "household",
       })
@@ -83,18 +93,60 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
   if (!run || run.owner_user_id === null) return;
   try {
     const plan = planHousehold(run.seed, run.size, opts.today ?? localToday());
+
+    // The depot trades at the funds' real closes; without them it is left out and the run says why.
+    await setProgress(runId, "quotes", 0, 1);
+    const loaded = await loadDemoCloses(plan.from);
+    await setProgress(runId, "quotes", 1, 1);
+    const depot = "closes" in loaded ? planDepot(run.seed, run.size, plan, loaded.closes) : null;
+    if (depot) {
+      plan.bookings.push(...depot.bookings);
+      plan.bookings.sort((a, b) => a.date.localeCompare(b.date) || a.account.localeCompare(b.account));
+    }
+
     await setProgress(runId, "bookings", 0, plan.bookings.length);
     const written = await writeHousehold(runId, run.owner_user_id, plan, {
       progress: (done, total) => setProgress(runId, "bookings", done, total),
       cancelled: () => cancelRequested(runId),
     });
+
+    let depotId: number | null = null;
+    if (depot && depot.bookings.length) {
+      depotId = await createDemoDepot(runId, run.owner_user_id, [...depot.holdings.keys()]);
+    }
+
+    // The model words the documents only if it answers now; otherwise the
+    // templates do, and the run says so instead of waiting 500 times.
+    let text = run.text_source === "llm" ? "llm" : "template";
+    if (text === "llm" && !(await llmReachable())) {
+      text = "template";
+      await db.update(demoRun).set({ text_source: "template" }).where(eq(demoRun.id, runId));
+    }
+    const docPlan = planDocuments(run.seed, run.size, plan, depot?.documents ?? []);
+    await setProgress(runId, "documents", 0, docPlan.documents.length);
+    const docs = await writeDocuments(runId, run.owner_user_id, run.seed, docPlan, written.bookingIds, text as TextSource, {
+      progress: (done, total) => setProgress(runId, "documents", done, total),
+      cancelled: () => cancelRequested(runId),
+    });
+
     await db
       .update(demoRun)
       .set({
         status: "done",
         stage: null,
         finished_at: new Date().toISOString(),
-        summary: { users: 1, accounts: Object.keys(written.accounts).length, bookings: written.bookings },
+        summary: {
+          users: 1,
+          accounts: Object.keys(written.accounts).length,
+          bookings: written.bookings,
+          documents: docs.documents,
+          worded: docs.worded,
+          scans: docs.scans,
+          depot: depotId === null ? 0 : 1,
+          depot_papers: depot?.documents.length ?? 0,
+        },
+        // Not a failure: the run is done, the depot was left out for this reason.
+        error: "skipped" in loaded ? `Depot ausgelassen: ${loaded.skipped}` : null,
       })
       .where(eq(demoRun.id, runId));
   } catch (err) {

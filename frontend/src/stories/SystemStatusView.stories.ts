@@ -78,8 +78,8 @@ export const DemodatenLaufen: Story = {
         untouched: false,
         counts: NO_CONTENT,
         run: {
-          id: 1, status: 'running', stage: 'bookings', size: 'full',
-          progress: { bookings: { done: 150, total: 500 } }, summary: null, error: null,
+          id: 1, status: 'running', stage: 'documents', size: 'full', text_source: 'llm',
+          progress: { bookings: { done: 500, total: 500 }, documents: { done: 120, total: 500 } }, summary: null, error: null,
           started_at: '2026-10-31T09:00:00.000Z', finished_at: null,
         },
       }),
@@ -95,11 +95,24 @@ export const DemodatenGeladen: Story = {
         untouched: true,
         counts: NO_CONTENT,
         run: {
-          id: 1, status: 'done', stage: null, size: 'full',
-          progress: { bookings: { done: 500, total: 500 } }, summary: { users: 1, accounts: 4, bookings: 500 }, error: null,
-          started_at: '2026-10-31T09:00:00.000Z', finished_at: '2026-10-31T09:00:12.000Z',
+          id: 1, status: 'done', stage: null, size: 'full', text_source: 'llm',
+          progress: { bookings: { done: 500, total: 500 }, documents: { done: 500, total: 500 } },
+          summary: { users: 1, accounts: 5, bookings: 556, documents: 500, worded: 312, scans: 36, depot: 1, depot_papers: 61 }, error: null,
+          started_at: '2026-10-31T09:00:00.000Z', finished_at: '2026-10-31T12:40:00.000Z',
         },
-      }),
+      }).concat([
+        http.get('/api/admin/demo/truth', () => HttpResponse.json({
+          documents: 500, pending: 42, failed: 1,
+          fields: [
+            { field: 'category', compared: 457, hits: 398 },
+            { field: 'document_type', compared: 457, hits: 371 },
+            { field: 'sender', compared: 457, hits: 433 },
+            { field: 'date', compared: 457, hits: 441 },
+            { field: 'tax_role', compared: 301, hits: 262 },
+          ],
+          kinds: [],
+        })),
+      ]),
     },
   },
 }
