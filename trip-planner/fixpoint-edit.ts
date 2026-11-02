@@ -25,7 +25,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { requireOrganiser } from "./plan-access";
-import { addFixpoint, loadPlan, removeFixpoint } from "./plan-store";
+import { addFixpoint, loadPlan, removeFixpoint, setFixpointSpot, type StoredLeg } from "./plan-store";
 import type { FixpointKind } from "./fixpoints";
 import { MIN_BUFFER_MINUTES } from "./fixpoints";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
@@ -36,8 +36,12 @@ export interface AddFixpointRequest {
   legIndex?: number;
   /** Which day of the leg, counted from zero. */
   dayIndex: number;
-  /** "Letzter Zug", "Führung Alhambra", "Check-in". */
-  label: string;
+  /**
+   * "Letzter Zug", "Führung Alhambra", "Check-in". May be left empty
+   * when `spotRef` names the spot — the appointment is then called
+   * after it.
+   */
+  label?: string;
   /** "17:45", in the destination's own clock. */
   at: string;
   /**
@@ -65,6 +69,14 @@ export interface AddFixpointRequest {
    */
   lat?: number;
   lon?: number;
+  /**
+   * The spot of this leg the appointment is for — the ticket for the
+   * tower at 14:00. The plan then puts that spot at the appointment's
+   * hour, pinned, and nowhere else in the trip. Only for appointments;
+   * a departure has nothing to visit. Without a label, the appointment
+   * is called after the spot.
+   */
+  spotRef?: string;
 }
 
 export interface RemoveFixpointRequest {
@@ -88,13 +100,18 @@ export const addTripFixpoint = api(
     const day = leg.days.find((d) => d.dayIndex === req.dayIndex);
     if (!day) throw APIError.notFound(`day ${req.dayIndex} not found in leg ${legIndex}`);
 
-    const label = req.label.trim();
+    const kind: FixpointKind = req.kind === "departure" ? "departure" : "appointment";
+    const spot = req.spotRef ? spotOfLeg(leg, req.spotRef) : null;
+    if (spot && kind === "departure") {
+      throw APIError.invalidArgument("eine Abfahrt hat keinen Spot — nur ein Termin");
+    }
+
+    const label = (req.label ?? "").trim() || (spot?.name ?? "");
     if (!label) throw APIError.invalidArgument("label is required");
     if (label.length > 120) {
       throw APIError.invalidArgument("label may be at most 120 characters");
     }
 
-    const kind: FixpointKind = req.kind === "departure" ? "departure" : "appointment";
     await addFixpoint(day.id, {
       id: `${day.id}-${Date.now()}`,
       label,
@@ -106,6 +123,7 @@ export const addTripFixpoint = api(
       travelMinutes: minutes(req.travelMinutes, "travelMinutes", 0),
       bufferMinutes: buffer(req.bufferMinutes),
       ...place(req.lat, req.lon),
+      spotRef: spot?.osmRef ?? null,
     });
 
     // Re-planned from the trip as it is *now*: the re-planner reads each
@@ -157,6 +175,77 @@ export const removeTripFixpoint = api(
     return await replanAfterFrameChange(remaining, userId);
   },
 );
+
+export interface SetFixpointSpotRequest {
+  planId: number;
+  /** The appointment's row id, as the plan reports it. */
+  fixpointId: number;
+  /** The spot it is for, or null to make it an ordinary appointment again. */
+  spotRef: string | null;
+}
+
+/**
+ * Tie an appointment that is already there to a spot of the trip, or
+ * untie it (§4.4).
+ *
+ * The ticket was entered as a time before anybody thought of the spot
+ * behind it, and the planner kept the two apart: the tower stayed a
+ * candidate, or turned up on another day. Tied, the spot moves to the
+ * appointment's hour and leaves every other block; untied, it goes back
+ * to being a candidate like any other. Both re-plan, as any change to
+ * the frame does.
+ */
+export const setTripFixpointSpot = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/trip-planner/plans/:planId/fixpoints/spot",
+    auth: true,
+  },
+  async (req: SetFixpointSpotRequest): Promise<PlanResponse> => {
+    const userId = requireUser();
+    await requireOrganiser(req.planId, userId, "Feste Zeiten");
+
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+
+    const leg = plan.legs.find((l) => l.days.some((d) => d.fixpoints.some((f) => f.rowId === req.fixpointId)));
+    if (!leg) throw APIError.notFound("diese feste Zeit gehört nicht zu dieser Reise");
+    const spot = req.spotRef ? spotOfLeg(leg, req.spotRef) : null;
+
+    const changed = await setFixpointSpot(req.planId, userId, req.fixpointId, spot?.osmRef ?? null);
+    if (!changed) {
+      throw APIError.failedPrecondition(
+        "nur ein gewöhnlicher Termin lässt sich mit einem Spot verknüpfen — keine Abfahrt und kein Abendtermin",
+      );
+    }
+
+    const written = await loadPlan(req.planId, userId);
+    if (!written) throw APIError.internal("plan vanished while tying a fixed time to a spot");
+    return await replanAfterFrameChange(written, userId);
+  },
+);
+
+/**
+ * The spot of this leg a reference names — a candidate or a planned
+ * stop — or a refusal. A reference from another leg, or one the trip
+ * never had, would reserve a spot no day can place.
+ */
+function spotOfLeg(
+  leg: StoredLeg,
+  osmRef: string,
+): { osmRef: string; name: string | null } {
+  const ref = osmRef.trim();
+  const candidate = leg.pool.find((c) => c.osmRef === ref);
+  if (candidate) return { osmRef: ref, name: candidate.name ?? null };
+  for (const day of leg.days) {
+    for (const block of day.blocks) {
+      const stop = block.stops.find((s) => s.osmRef === ref);
+      if (stop) return { osmRef: ref, name: stop.title ?? stop.name ?? null };
+    }
+  }
+  throw APIError.notFound("dieser Spot gehört nicht zu diesem Reiseabschnitt");
+}
 
 /**
  * The coordinate, or nothing at all.

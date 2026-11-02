@@ -156,6 +156,31 @@ struct TripLeg: Codable, Identifiable, Sendable {
         return fix.lat == anchor.lat && fix.lon == anchor.lon
     }
 
+    /// Every spot of this leg a fixed appointment can be for — the ones
+    /// already planned on a day and the candidates — once each, by
+    /// name. The ticket for the tower is for a spot the trip knows.
+    var spotChoices: [TripSpotChoice] {
+        var seen = Set<String>()
+        var out: [TripSpotChoice] = []
+        for day in days {
+            for block in day.blocks {
+                for stop in block.stops where seen.insert(stop.osmRef).inserted {
+                    out.append(TripSpotChoice(osmRef: stop.osmRef, name: stop.displayName,
+                                              plannedOn: "Tag \(day.dayIndex + 1) · \(block.label)"))
+                }
+            }
+        }
+        for candidate in pool where seen.insert(candidate.osmRef).inserted {
+            out.append(TripSpotChoice(osmRef: candidate.osmRef, name: candidate.displayName, plannedOn: nil))
+        }
+        return out.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// The name of a spot of this leg, wherever it sits.
+    func spotName(_ osmRef: String) -> String? {
+        spotChoices.first { $0.osmRef == osmRef }?.name
+    }
+
     /// Where in the itinerary the time this fixed time shows is changed
     /// (stage 3), or nil for an ordinary appointment the day owns.
     func itineraryFocus(for fix: TripFixpoint, dayIndex: Int) -> TripItineraryFocus? {
@@ -549,6 +574,13 @@ struct TripFixpoint: Codable, Identifiable, Sendable, Equatable {
     /// True for the frame of a block: shown on the block as its hours,
     /// not in the band of fixed times — one place for one outing.
     var framesBlock: Bool { blockId != nil && spotRef != nil }
+    /// True for a booked visit: an appointment for one spot of the trip
+    /// (the ticket for the tower at 14:00). The plan puts that spot at
+    /// this hour, pinned, and nowhere else.
+    var isVisit: Bool { !isDeparture && spotRef != nil && blockId == nil }
+    /// True when this fixed time holds its spot in place — a frame or a
+    /// booked visit. That spot is not moved or sent back on its own.
+    var holdsSpot: Bool { framesBlock || isVisit }
     /// "20:10–21:00" — the window the framed block is planned for.
     var windowText: String {
         "\(TripClock.format(startMinutes))–\(TripClock.format(startMinutes + durationMinutes))"
@@ -557,6 +589,17 @@ struct TripFixpoint: Codable, Identifiable, Sendable, Equatable {
     /// over (§4.4).
     var isDeparture: Bool { kind == "departure" }
     var startsAt: String { TripClock.format(startMinutes) }
+}
+
+/// A spot an appointment can be for (§4.4): planned on a day or still a
+/// candidate. `plannedOn` says where it is now, so the list answers
+/// "is that the one already on Tuesday?" without a second screen.
+struct TripSpotChoice: Identifiable, Hashable, Sendable {
+    let osmRef: String
+    let name: String
+    let plannedOn: String?
+
+    var id: String { osmRef }
 }
 
 struct TripCandidate: Codable, Identifiable, Sendable {

@@ -617,8 +617,9 @@ final class TripPlannerViewModel {
     /// The frame, not the content: the server re-frames the day around
     /// it and re-plans, so what comes back is a day whose blocks have
     /// the minutes the train left them.
-    func addFixpoint(_ draft: TripFixpointSheet.Draft) async {
+    func addFixpoint(_ draft: TripFixpointSheet.Draft, legIndex: Int? = nil) async {
         guard requireOnline() else { return }
+        let legIndex = legIndex ?? self.legIndex
         guard let plan, plan.legs.contains(where: { $0.position == legIndex }) else { return }
         struct Body: Encodable {
             let legIndex: Int
@@ -633,6 +634,9 @@ final class TripPlannerViewModel {
             /// in it (§4.4).
             let lat: Double?
             let lon: Double?
+            /// The spot this appointment is for (§4.4): the plan puts it
+            /// at this hour and nowhere else.
+            let spotRef: String?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -641,7 +645,7 @@ final class TripPlannerViewModel {
                 "/trip-planner/plans/\(planId)/fixpoints",
                 body: Body(
                     legIndex: legIndex,
-                    dayIndex: dayIndex,
+                    dayIndex: draft.dayIndex ?? dayIndex,
                     label: draft.label,
                     at: TripClock.format(draft.minutesOfDay),
                     kind: draft.kind,
@@ -651,7 +655,41 @@ final class TripPlannerViewModel {
                     durationMinutes: draft.kind == "departure" ? 0 : draft.durationMinutes,
                     lat: draft.place?.latitude,
                     lon: draft.place?.longitude,
+                    spotRef: draft.spotRef,
                 ),
+            )
+            apply(response)
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Tie an appointment already on the day to a spot of the trip, or
+    /// untie it with nil (§4.4). The server re-plans: the spot moves to
+    /// the appointment's hour and leaves every other day — or, untied,
+    /// becomes an ordinary candidate again.
+    func setFixpointSpot(_ fixpoint: TripFixpoint, spotRef: String?) async {
+        guard requireOnline() else { return }
+        struct Body: Encodable {
+            let fixpointId: Int
+            let spotRef: String?
+
+            // Encoded as an explicit null: leaving the key out would
+            // not say "untie".
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(fixpointId, forKey: .fixpointId)
+                try container.encode(spotRef, forKey: .spotRef)
+            }
+
+            enum CodingKeys: String, CodingKey { case fixpointId, spotRef }
+        }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/fixpoints/spot",
+                body: Body(fixpointId: fixpoint.rowId, spotRef: spotRef),
             )
             apply(response)
         } catch {

@@ -232,7 +232,7 @@ async function proposalsFor(
     // A spot already framed for this evening is planned, not proposed:
     // its blue hour begins the minute its golden hour ends, and "the
     // day is over by then" would be true and beside the point.
-    const framedTonight = new Set(day.fixpoints.flatMap((f) => (f.blockId && f.spotRef ? [f.spotRef] : [])));
+    const framedTonight = new Set(day.fixpoints.flatMap((f) => (f.spotRef ? [f.spotRef] : [])));
 
     const proposals: EveningLightProposal[] = [];
     for (const spot of photoStops(leg)) {

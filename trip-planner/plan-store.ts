@@ -16,7 +16,7 @@
  * database never has an opinion about what belongs in a block.
  */
 
-import { and, asc, desc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { visibleToUser } from "./plan-access";
 import dbDefault from "../db/database";
 import {
@@ -1819,9 +1819,25 @@ export async function removeFixpointsBoundTo(
 ): Promise<number> {
   const gone = await db
     .delete(tripPlanFixpoints)
-    .where(and(eq(tripPlanFixpoints.day_id, dayId), eq(tripPlanFixpoints.spot_ref, osmRef)))
+    .where(and(
+      eq(tripPlanFixpoints.day_id, dayId),
+      eq(tripPlanFixpoints.spot_ref, osmRef),
+      isNotNull(tripPlanFixpoints.block_id),
+    ))
     .returning({ id: tripPlanFixpoints.id });
-  return gone.length;
+  // A booked visit is different: the ticket is still booked whether or
+  // not the trip wants the spot, so the appointment stays and only
+  // forgets the spot it was for.
+  const unbound = await db
+    .update(tripPlanFixpoints)
+    .set({ spot_ref: null })
+    .where(and(
+      eq(tripPlanFixpoints.day_id, dayId),
+      eq(tripPlanFixpoints.spot_ref, osmRef),
+      isNull(tripPlanFixpoints.block_id),
+    ))
+    .returning({ id: tripPlanFixpoints.id });
+  return gone.length + unbound.length;
 }
 
 /**
@@ -1850,6 +1866,42 @@ export async function removeFixpoint(
   if (!owned) return false;
 
   await db.delete(tripPlanFixpoints).where(eq(tripPlanFixpoints.id, fixpointId));
+  return true;
+}
+
+/**
+ * Tie an appointment to a spot of the trip, or untie it (§4.4).
+ *
+ * Only an ordinary appointment: a frame belongs to its block and a
+ * departure has no spot to visit. Answers false when the fixpoint is not
+ * one of this plan's appointments — the caller says which.
+ */
+export async function setFixpointSpot(
+  planId: number,
+  ownerId: number,
+  fixpointId: number,
+  spotRef: string | null,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const [owned] = await db
+    .select({ id: tripPlanFixpoints.id })
+    .from(tripPlanFixpoints)
+    .innerJoin(tripPlanDays, eq(tripPlanFixpoints.day_id, tripPlanDays.id))
+    .innerJoin(tripPlanLegs, eq(tripPlanDays.leg_id, tripPlanLegs.id))
+    .innerJoin(tripPlans, eq(tripPlanLegs.plan_id, tripPlans.id))
+    .where(and(
+      eq(tripPlanFixpoints.id, fixpointId),
+      eq(tripPlans.id, planId),
+      eq(tripPlanFixpoints.kind, "appointment"),
+      isNull(tripPlanFixpoints.block_id),
+      visibleToUser(ownerId),
+    ))
+    .limit(1);
+  if (!owned) return false;
+
+  await db.update(tripPlanFixpoints)
+    .set({ spot_ref: spotRef })
+    .where(eq(tripPlanFixpoints.id, fixpointId));
   return true;
 }
 

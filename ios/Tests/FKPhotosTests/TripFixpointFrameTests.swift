@@ -31,4 +31,26 @@ final class TripFixpointFrameTests: XCTestCase {
         // A block without a spot would be an evening framed for nothing.
         XCTAssertFalse(try fixpoint(", \"blockId\": \"evening\"").framesBlock)
     }
+
+    // MARK: - A booked visit (§4.4)
+
+    func testAnAppointmentWithASpotAndNoBlockIsAVisit() throws {
+        let visit = try fixpoint(", \"spotRef\": \"way:7\"")
+        XCTAssertTrue(visit.isVisit)
+        XCTAssertFalse(visit.framesBlock)
+        // It holds its spot in place like a frame does.
+        XCTAssertTrue(visit.holdsSpot)
+    }
+
+    func testAFrameIsNoVisitButStillHoldsItsSpot() throws {
+        let frame = try fixpoint(", \"blockId\": \"evening\", \"spotRef\": \"way:7\"")
+        XCTAssertFalse(frame.isVisit)
+        XCTAssertTrue(frame.holdsSpot)
+    }
+
+    func testAnAppointmentWithoutASpotHoldsNothing() throws {
+        let plain = try fixpoint("")
+        XCTAssertFalse(plain.isVisit)
+        XCTAssertFalse(plain.holdsSpot)
+    }
 }
