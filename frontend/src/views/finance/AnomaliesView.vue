@@ -21,9 +21,11 @@ import {
   type MandateHistoryItem,
 } from '../../api/finance'
 import { useTxSelectionStore } from '../../stores/finance/selection'
+import { useAnomalyStore } from '../../stores/finance/anomalies'
 
 const router = useRouter()
 const selectionStore = useTxSelectionStore()
+const anomalyStore = useAnomalyStore()
 
 const anomalies = ref<AnomalyItem[]>([])
 const loading = ref(false)
@@ -87,6 +89,7 @@ async function load() {
   try {
     const res = await listAnomalies()
     anomalies.value = res.anomalies
+    anomalyStore.setCount(res.total)
   } catch (e: any) {
     error.value = e?.message ?? 'Fehler beim Laden'
   } finally {
@@ -101,6 +104,7 @@ async function acknowledge(item: AnomalyItem) {
   try {
     await acknowledgeAnomaly(item.id)
     anomalies.value = anomalies.value.filter((a) => a.id !== item.id)
+    anomalyStore.setCount(anomalies.value.length)
   } catch (e: any) {
     error.value = e?.message ?? 'Konnte Anomalie nicht quittieren'
   } finally {
@@ -379,6 +383,15 @@ function formatAmountChange(item: AnomalyItem): string | null {
               <button
                 type="button"
                 class="dup-basket"
+                :aria-label="`${dupRowLabel(tx, item)} öffnen`"
+                v-tooltip.bottom="`${dupRowLabel(tx, item)} öffnen`"
+                @click.stop="openTransactionId(tx.id)"
+              >
+                <i class="pi pi-external-link" />
+              </button>
+              <button
+                type="button"
+                class="dup-basket"
                 :class="{ 'in-basket': isInBasket(tx.id) }"
                 :aria-label="isInBasket(tx.id) ? 'Aus Basket entfernen' : 'In Basket legen'"
                 :aria-pressed="isInBasket(tx.id)"
@@ -541,7 +554,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 .dup-row {
   display: grid;
-  grid-template-columns: 4.5rem 6.5rem 6.5rem 1fr auto;
+  grid-template-columns: 4.5rem 6.5rem 6.5rem 1fr auto auto;
   gap: 0.5rem;
   padding: 0.35rem 0.25rem;
   border-radius: 0.25rem;
@@ -661,7 +674,12 @@ function formatAmountChange(item: AnomalyItem): string | null {
     white-space: normal;
   }
   .dup-row {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    gap: 0.25rem 0.5rem;
+  }
+  .dup-row .history-purpose {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
   .dup-row > * {
     min-width: 0;
