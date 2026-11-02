@@ -977,6 +977,13 @@ public enum TripClock {
         return String(format: "%02d:%02d", wrapped / 60, wrapped % 60)
     }
 
+    /// "10:00" to 600, or nil for anything that is not a time of day.
+    static func minutes(fromClock text: String) -> Int? {
+        let parts = text.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2, (0..<24).contains(parts[0]), (0..<60).contains(parts[1]) else { return nil }
+        return parts[0] * 60 + parts[1]
+    }
+
     /// "3 h 20" / "45 min" — durations as they read on a block card.
     static func duration(_ minutes: Int) -> String {
         if minutes < 60 { return "\(minutes) min" }

@@ -2,8 +2,10 @@ import XCTest
 @testable import FKPhotosLib
 
 /// A journey between two legs (§22.7): which leg is being lived on the
-/// day three of them share, how long the trip is, and what the journey
-/// screen sends.
+/// day three of them share, how long the trip is, and how a journey's
+/// own ends read on the day. What the journey *screen* used to send is
+/// gone with the screen: the chain is edited in the itinerary now
+/// (`TripItineraryTests`).
 final class TripTransitTests: XCTestCase {
 
     private let berlin = TimeZone(identifier: "Europe/Berlin")!
@@ -44,7 +46,7 @@ final class TripTransitTests: XCTestCase {
     }
 
     private func at(_ isoDay: String, _ minutes: Int) -> Date {
-        TripTransitPlanning.moment(isoDay, minutes: minutes, timeZone: berlin)!
+        TripCalendar.moment(isoDay, minutes: minutes, timeZone: berlin)!
     }
 
     func testTheDayOfAJourneyBelongsToThreeLegsByTheClock() {
@@ -57,17 +59,6 @@ final class TripTransitTests: XCTestCase {
     func testTheTripIsAsLongAsTheCalendarSays() {
         // Three calendar days, although the legs' days add up to five.
         XCTAssertEqual(plan.calendarDayCount, 3)
-    }
-
-    func testAJourneyIsOfferedBetweenTwoPlaces() {
-        let stays = [
-            leg(0, start: "2026-09-05", days: [day(0)]),
-            leg(1, start: "2026-09-06", days: [day(0)]),
-        ]
-        XCTAssertEqual(TripTransitSlots.slotAfter(stays[0], in: stays), 0)
-        XCTAssertNil(TripTransitSlots.slotAfter(stays[1], in: stays))
-        // With a journey already there, not again.
-        XCTAssertNil(TripTransitSlots.slotAfter(plan.legs[0], in: plan.legs))
     }
 
     /// The departure on the first day and the arrival on the last are
@@ -93,16 +84,6 @@ final class TripTransitTests: XCTestCase {
         XCTAssertNil(plan.legs[0].journeyDayLine(dayIndex: 0))
     }
 
-    func testTheScreenSendsTheTwoMomentsOnThePhonesClock() {
-        let body = TripTransitPlanning.body(afterLegIndex: 0, depart: at("2026-09-06", 600),
-                                            arrive: at("2026-09-07", 90), mode: .car, timeZone: berlin)
-        XCTAssertEqual(body, .init(afterLegIndex: 0, departDate: "2026-09-06", departAt: "10:00",
-                                   arriveDate: "2026-09-07", arriveAt: "01:30", mode: "car"))
-        // Changing sends the moments without the neighbour's position.
-        XCTAssertEqual(body.change, .init(departDate: "2026-09-06", departAt: "10:00",
-                                          arriveDate: "2026-09-07", arriveAt: "01:30", mode: "car"))
-    }
-
     func testTheWindowOfAJourneyReadsAsFromTo() {
         XCTAssertEqual(plan.legs[1].transitWindowText, "10:00 → 16:00")
         XCTAssertNil(plan.legs[0].transitWindowText)
@@ -117,8 +98,8 @@ final class TripTransitTests: XCTestCase {
         let response = try JSONDecoder().decode(TripTransitSuggestionResponse.self, from: Data(json.utf8))
         let suggestion = try XCTUnwrap(response.suggestion)
         XCTAssertEqual(suggestion.afterLegIndex, 0)
-        XCTAssertEqual(TripTransitPlanning.minutes(fromClock: suggestion.arriveAt), 990)
-        XCTAssertNil(TripTransitPlanning.minutes(fromClock: "25:00"))
+        XCTAssertEqual(TripClock.minutes(fromClock: suggestion.arriveAt), 990)
+        XCTAssertNil(TripClock.minutes(fromClock: "25:00"))
         XCTAssertNotEqual(TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 0),
                           TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 1))
 
@@ -130,58 +111,7 @@ final class TripTransitTests: XCTestCase {
         """
         let open = try JSONDecoder().decode(TripTransitSuggestionResponse.self, from: Data(undated.utf8))
         XCTAssertNil(open.suggestion?.departDate)
-        XCTAssertEqual(open.suggestion.flatMap { TripTransitPlanning.minutes(fromClock: $0.arriveAt) }, 840)
-    }
-
-    func testAJourneyIsBlockedWhileAPlaceItTouchesHasNoDate() {
-        // Nothing dated: the journey dates the trip, nothing blocks.
-        let undated = [leg(0, start: nil, days: [day(0)]), leg(1, start: nil, days: [day(0)])]
-        XCTAssertNil(TripTransitSlots.blocker(afterLegIndex: 0, in: undated))
-        // One place dated, the other not: the server would refuse on
-        // save, so the button says why beforehand — naming the place.
-        let half = [leg(0, start: "2026-09-05", days: [day(0)]), leg(1, start: nil, days: [day(0)])]
-        XCTAssertEqual(TripTransitSlots.blocker(afterLegIndex: 0, in: half),
-                       "„Ort 1“ hat noch kein Datum — erst der Stadt ein Datum geben, dann die Weiterreise anlegen.")
-        XCTAssertNil(TripTransitSlots.blocker(afterLegIndex: -1, in: half))
-        XCTAssertTrue(TripTransitSlots.blocker(afterLegIndex: 1, in: half)?.contains("Heimreise") == true)
-        // Both dated: free.
-        let dated = [leg(0, start: "2026-09-05", days: [day(0)]), leg(1, start: "2026-09-06", days: [day(0)])]
-        XCTAssertNil(TripTransitSlots.blocker(afterLegIndex: 0, in: dated))
-    }
-
-    func testTheWayThereAndHomeAreOfferedOnlyWithAHome() {
-        let stays = [
-            leg(0, start: "2026-09-05", days: [day(0)]),
-            leg(1, start: "2026-09-06", days: [day(0)]),
-        ]
-        XCTAssertFalse(TripTransitSlots.wantsArrival(stays, hasHome: false))
-        XCTAssertNil(TripTransitSlots.wantsReturn(stays, hasHome: false))
-        XCTAssertTrue(TripTransitSlots.wantsArrival(stays, hasHome: true))
-        XCTAssertEqual(TripTransitSlots.wantsReturn(stays, hasHome: true), 1)
-        // Already beginning with a journey: not again.
-        var journeyFirst = stays
-        journeyFirst.insert(leg(-1, start: "2026-09-05", days: [day(0)], transit: (480, 720)), at: 0)
-        XCTAssertFalse(TripTransitSlots.wantsArrival(journeyFirst, hasHome: true))
-    }
-
-    func testJourneysAreOfferedOnAnUndatedTrip() {
-        let stays = [
-            leg(0, start: nil, days: [day(0)]),
-            leg(1, start: nil, days: [day(0)]),
-        ]
-        XCTAssertTrue(TripTransitSlots.wantsArrival(stays, hasHome: true))
-        XCTAssertEqual(TripTransitSlots.wantsReturn(stays, hasHome: true), 1)
-        XCTAssertEqual(TripTransitSlots.slotAfter(stays[0], in: stays), 0)
-        XCTAssertEqual(TripTransitPlanning.frameSentence(from: nil, to: "Ort 0", undated: true),
-                       "„Ort 0“ beginnt mit der Ankunft. Alle Etappen danach verschieben sich mit. "
-                       + "Die Reise bekommt damit ihr Datum.")
-    }
-
-    func testTheFrameSentenceNamesWhatMoves() {
-        XCTAssertEqual(TripTransitPlanning.frameSentence(from: nil, to: "Ort 0"),
-                       "„Ort 0“ beginnt mit der Ankunft. Alle Etappen danach verschieben sich mit.")
-        XCTAssertEqual(TripTransitPlanning.frameSentence(from: "Ort 2", to: nil),
-                       "„Ort 2“ endet mit der Abfahrt.")
+        XCTAssertEqual(open.suggestion.flatMap { TripClock.minutes(fromClock: $0.arriveAt) }, 840)
     }
 
     func testAHomeDecodesAndAnOlderServerWithoutOneStillDoes() throws {

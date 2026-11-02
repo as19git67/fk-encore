@@ -1,6 +1,6 @@
 # Itinerary: creating a trip and its stops on one screen
 
-Status: stage 1 (backend) in progress. Stages 2–4 open.
+Status: stage 1 (backend) done, PR #1800. Stage 2 (iOS itinerary screen) done. Stages 3–4 open.
 
 ## The problem
 
@@ -97,8 +97,18 @@ change a length and see the later stays move, a settled stop refusing).
 
 ## Stage 2 — iOS: the itinerary screen
 
-New `TripItineraryView`, opened by the pencil on the leg strip and the
-target of "Neue Reise": a vertical timeline of stay and journey cards.
+New `TripItineraryView`, opened by the pencil on the leg strip, by the
+header of a leg's sheet, and the target of "Neue Reise": a vertical
+timeline of stay and journey cards.
+
+Done as described below, with these particulars: the chain is a value
+type, `TripItineraryDraft` in `TripItinerary.swift`, that keeps the
+alternation itself (a stay inserted brings its journey, a stay removed
+merges the two journeys around it, home at both ends means a journey at
+both ends) and derives the dates the same way `deriveFrames` does;
+"Sichern" sends the whole chain in one `PUT`. The planner's journey
+suggestion (§22.7) fills the open journey in the chain instead of
+opening a form. Reordering uses the list's edit mode.
 
 - A stay card, folded: place, lodging, days and the computed dates (grey,
   not editable). Unfolded: its fields in place, no sheet — lodging search
@@ -117,8 +127,9 @@ target of "Neue Reise": a vertical timeline of stay and journey cards.
   swipe to delete (the two adjacent journeys become one).
 - The one date sits in the header ("Erster Tag: Mo 3.6.2027" or "Noch
   ohne Datum"); every change recomputes the other cards at once.
-- `TripLegsView`, `TripAddLegView`, `TripLegEditView` and `TripTransitView`
-  go; `TripDraftLegView` becomes the stay card.
+- `TripLegsView`, `TripAddLegView`, `TripLegEditView`, `TripTransitView`
+  and `TripDraftLegView` are gone; the stay card took the draft view's
+  fields. `TripTransitSlots` and `TripTransitPlanning` went with them.
 
 ## Stage 3 — iOS: entry and day
 

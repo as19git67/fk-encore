@@ -11,8 +11,9 @@ import SwiftUI
 /// of it, and the leg's own settings.
 ///
 /// A journey (§22.7) is a leg too: it has a pool of places on the way
-/// and a ballot over them, so it opens the same sheet, with its own
-/// editor behind "bearbeiten".
+/// and a ballot over them, so it opens the same sheet. Changing either
+/// — its place, its length, its times — happens in the itinerary, the
+/// one screen that holds the whole chain, opened on this leg.
 struct TripLegSheet: View {
     @State var viewModel: TripPlannerViewModel
     let leg: TripLeg
@@ -22,11 +23,7 @@ struct TripLegSheet: View {
         List {
             Section {
                 NavigationLink {
-                    if leg.isTransit {
-                        TripTransitView(viewModel: viewModel, afterLegIndex: leg.position - 1, existing: leg)
-                    } else {
-                        TripLegEditView(viewModel: viewModel, legIndex: leg.position)
-                    }
+                    TripItineraryView(viewModel: viewModel, focusLegId: leg.id)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(leg.displayTitle).font(.headline)
@@ -42,8 +39,8 @@ struct TripLegSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         Text(leg.isTransit
-                             ? "Abfahrt, Ankunft und Fortbewegung ändern"
-                             : "Unterkunft, Länge, Datum und Fortbewegung ändern")
+                             ? "Abfahrt, Ankunft und Fortbewegung im Reiseverlauf ändern"
+                             : "Unterkunft, Länge und Fortbewegung im Reiseverlauf ändern")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }

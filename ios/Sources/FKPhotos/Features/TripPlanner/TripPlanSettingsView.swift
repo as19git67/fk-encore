@@ -86,7 +86,7 @@ struct TripPlanSettingsView: View {
                 Text("Wie?")
             } footer: {
                 Text("Gilt für alle Städte der Reise; eine einzelne Stadt bekommt ihr eigenes "
-                     + "Verkehrsmittel unter „Städte“. Verkehrsmittel, Tempo und Begleitung "
+                     + "Verkehrsmittel im Reiseverlauf. Verkehrsmittel, Tempo und Begleitung "
                      + "bestimmen, wie viel an einem Tag Platz hat. Sichern plant die Tage neu.\n\n"
                      + "„\(TripTransportMode.transit.label)“ ist der Regelfall in einer Stadt: "
                      + "kurze Wege werden gelaufen, lange gefahren — je Weg das, was schneller "
