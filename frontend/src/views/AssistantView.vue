@@ -16,6 +16,7 @@ import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
+import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import PageLayout from '../components/layout/PageLayout.vue'
 import { navigatedFromHistory } from '../utils/scrollMemory'
@@ -30,6 +31,7 @@ import {
   createConversation,
   deleteConversation,
   getConversation,
+  getModelGate,
   listConversations,
   newTurnId,
   setConversationContext,
@@ -37,6 +39,7 @@ import {
   type ContextItem,
   type ConversationMessage,
   type ConversationSummary,
+  type ModelGate,
 } from '../api/assistant'
 import { parseContextQuery } from '../utils/assistantContext'
 import { ApiError } from '../api/client'
@@ -73,6 +76,16 @@ const messages = ref<(ConversationMessage & { drafts?: TurnDraft[] })[]>([])
 /** The working set of the open conversation. */
 const context = ref<ContextItem[]>([])
 const live = ref<LiveTurn | null>(null)
+/** Whether the loaded model takes questions; a failed lookup says nothing. */
+const gate = ref<ModelGate | null>(null)
+
+async function loadGate() {
+  try {
+    gate.value = await getModelGate()
+  } catch {
+    gate.value = null
+  }
+}
 /** The conversation the running turn belongs to. */
 const liveFor = ref<number | null>(null)
 const draft = ref('')
@@ -178,7 +191,7 @@ const CONTEXT_ICONS: Record<ContextItem['type'], string> = {
 
 onMounted(async () => {
   await startFromQuery()
-  await Promise.all([loadConversations(), loadConversation(activeId.value)])
+  await Promise.all([loadConversations(), loadConversation(activeId.value), loadGate()])
   loaded.value = true
   void nextTick(() => composer.value?.focus())
 })
@@ -274,8 +287,11 @@ async function send(question: string) {
       }
       return
     }
+    // The loaded model may have been refused since the page opened.
+    if (e instanceof ApiError && e.code === 'failed_precondition') await loadGate()
     // Stopped on purpose: no error, only the question back in the field.
-    if (!(e instanceof ApiError && e.code === 'canceled')) sendError.value = sendErrorText(e)
+    if (gate.value?.state === 'blocked') sendError.value = gate.value.message
+    else if (!(e instanceof ApiError && e.code === 'canceled')) sendError.value = sendErrorText(e)
     // The question stays in the field, so asking again is one key away.
     if (!draft.value) draft.value = question
     messages.value = messages.value.filter((m) => m.id >= 0)
@@ -350,6 +366,9 @@ function remove(conversation: ConversationSummary) {
 
     <template #notice>
       <ErrorBanner v-if="loadError" :message="loadError" closable @retry="loadConversations" @close="loadError = null" />
+      <Message v-if="gate?.message" :severity="gate.state === 'blocked' ? 'warn' : 'info'">
+        {{ gate.message }}
+      </Message>
     </template>
 
     <div class="assistant">

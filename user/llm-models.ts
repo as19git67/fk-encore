@@ -597,6 +597,8 @@ export interface LlmGpuLeaseStatus {
   lease: LlmGpuLease;
   reload: LlmReloadState;
   llm_loaded: boolean;
+  /** The configuration llm-service runs now (the CPU twin during a lease). */
+  config?: LlmLiveConfig;
 }
 
 export const getLlmGpuLease = api(
@@ -606,8 +608,9 @@ export const getLlmGpuLease = api(
       reload: LlmReloadState;
       llm_loaded: boolean;
       lease?: LlmGpuLease;
+      config?: LlmLiveConfig;
     }>("/reload/status");
-    return { lease: status.lease ?? NO_LEASE, reload: status.reload, llm_loaded: status.llm_loaded };
+    return { lease: status.lease ?? NO_LEASE, reload: status.reload, llm_loaded: status.llm_loaded, config: status.config };
   },
 );
 

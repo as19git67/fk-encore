@@ -894,9 +894,16 @@ from the model.
 - How many tool rounds a question may take before the wait is too long:
   answered by stage 1's timing — Gemma on the GPU needs a median of three
   rounds at under a second each. The CPU fallback cannot carry a tool turn
-  (11 of 26 cases, answers from imagination). Still open: offering the
-  assistant only when the active config runs on the `server` backend, with
-  the page saying so.
+  (11 of 26 cases, answers from imagination). Decided by the measurement,
+  not the backend (`assistant/model-gate.ts`): the latest finished benchmark
+  run (canned results) of the loaded model file on the same device decides.
+  At least 85 % (`ASSISTANT_MIN_PASS_RATE`) on the GPU takes questions; on
+  the CPU too, with a note that answers take longer (the Gemma twin while the
+  GPU is lent at night, 71 of 75); below it `ask` refuses with
+  `failed_precondition` and the page says why. A model without a run answers
+  under a note that it is not yet tested. The page shows no link to the
+  benchmark, which only admins can open. The verdict is kept for a minute and
+  dropped when a benchmark run ends; the benchmark itself is never gated.
 - "Immobilie" has no entity. The second question works through
   categories and the search text today; a property entity (address,
   documents, meters, bookings) is its own feature and not a prerequisite.

@@ -39,6 +39,7 @@ import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
 import { fallbackTitle, suggestTitle } from "./titles";
 import { summarizedTurn, summarizeTurn, summaryNote } from "./summary";
 import { verifyByDefault } from "./verify";
+import { gateMessage, modelGate, type ModelGate } from "./model-gate";
 import type { ChatMessage, ContextUsage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
@@ -414,6 +415,8 @@ async function prepareQuestion(req: AskRequest): Promise<PreparedQuestion> {
   }
   const conversation = await ownConversation(req.id, userId);
   checkRateLimit(`assistant:${auth.userID}`, { ...RATE_LIMIT, message: "Too many questions to the assistant." });
+  const gate = await modelGate();
+  if (gate.state === "blocked") throw APIError.failedPrecondition(gateMessage(gate)!);
 
   let emit: (event: TurnEvent) => void = () => {};
   let signal: AbortSignal | undefined;
@@ -528,6 +531,21 @@ async function answerQuestion({ auth, question, conversation, emit, signal }: Pr
  * response), so the web client starts the turn with `startAssistantTurn`
  * and reads the answer from the stream.
  */
+export interface ModelGateResponse extends ModelGate {
+  /** What the page shows above the question field; null when there is nothing to say. */
+  message: string | null;
+}
+
+/** Whether the loaded model takes questions, and what the page says about it. */
+export const getModelGate = api(
+  { expose: true, method: "GET", path: "/assistant/model-gate", auth: true },
+  async (): Promise<ModelGateResponse> => {
+    assistantUser();
+    const gate = await modelGate();
+    return { ...gate, message: gateMessage(gate) };
+  },
+);
+
 export const ask = api(
   { expose: true, method: "POST", path: "/assistant/conversations/:id/ask", auth: true },
   async (req: AskRequest): Promise<AskResponse> => answerQuestion(await prepareQuestion(req)),

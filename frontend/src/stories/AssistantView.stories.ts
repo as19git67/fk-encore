@@ -27,6 +27,8 @@ const handlers = [
     HttpResponse.json({ id: 3, title: null, created_at: '2026-10-15T10:00:00Z', updated_at: '2026-10-15T10:00:00Z' })),
   http.post('/api/assistant/conversations/:id/ask', () =>
     HttpResponse.json({ answer: 'Dazu habe ich nichts gefunden.', blocks: [], message_id: 99, rounds: 1 })),
+  http.get('/api/assistant/model-gate', () =>
+    HttpResponse.json({ state: 'ok', model: 'Beispielmodell', pass_rate: 1, threshold: 0.85, message: null })),
   ...defaultHandlers,
 ]
 
@@ -143,3 +145,20 @@ export const ImAppRahmen: Story = {
   }),
 }
 
+export const ModellGesperrt: Story = {
+  name: 'Geladenes Modell zu schwach',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/assistant/model-gate', () => HttpResponse.json({
+          state: 'blocked',
+          model: 'Beispielmodell (CPU)',
+          pass_rate: 0.42,
+          threshold: 0.85,
+          message: 'Der Assistent ist gerade nicht verfügbar: Das geladene KI-Modell hat im Test nur 42 % der Fragen richtig beantwortet (nötig sind 85 %). Er ist wieder da, sobald ein besseres Modell läuft.',
+        })),
+        ...handlers,
+      ],
+    },
+  },
+}

@@ -110,6 +110,22 @@ export interface StreamEvent {
   code?: string
 }
 
+export type ModelGateState = 'ok' | 'slow' | 'blocked' | 'unmeasured' | 'unknown'
+
+/** Whether the loaded model takes questions, measured by its latest benchmark run. */
+export interface ModelGate {
+  state: ModelGateState
+  model: string | null
+  pass_rate: number | null
+  threshold: number
+  /** What the page shows above the question field; null when there is nothing to say. */
+  message: string | null
+}
+
+export function getModelGate(): Promise<ModelGate> {
+  return apiFetch('/assistant/model-gate')
+}
+
 export function listConversations(): Promise<{ conversations: ConversationSummary[] }> {
   return apiFetch('/assistant/conversations')
 }
