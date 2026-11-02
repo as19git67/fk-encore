@@ -12,6 +12,7 @@ import { useModuleMenuActionsStore } from './stores/moduleMenuActions'
 import { useBasketStore } from './stores/basket'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
+import { useAccountsStore } from './stores/finance/accounts'
 import { useMeterAnomalyStore } from './stores/meterAnomalies'
 import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
@@ -34,6 +35,8 @@ watch(
   { immediate: true },
 )
 const anomalyStore = useAnomalyStore()
+// Kurse and Portfolio hide without a depot among the readable accounts.
+const accountsStore = useAccountsStore()
 const meterAnomalyStore = useMeterAnomalyStore()
 const feedBadgeStore = useFeedBadgeStore()
 const router = useRouter()
@@ -48,7 +51,9 @@ watch(
   (authenticated) => {
     if (authenticated && auth.hasPermission('finance.view')) {
       void anomalyStore.refresh()
+      void accountsStore.ensureLoaded()
     }
+    if (!authenticated) accountsStore.reset()
     if (authenticated && auth.hasPermission('meters.view')) {
       void meterAnomalyStore.refresh()
     }
@@ -105,12 +110,17 @@ function toggleHamburgerMenu(event: Event) {
 // permission-filtered away are dropped entirely.
 const menuActions = useModuleMenuActionsStore()
 
+function itemAllowed(item: ModuleMenuItem) {
+  if (item.permission && !auth.hasPermission(item.permission)) return false
+  return !item.requiresDepot || accountsStore.hasDepot
+}
+
 function visibleItems(items: ModuleMenuItem[]) {
   return items
-    .filter((item) => !item.permission || auth.hasPermission(item.permission))
+    .filter(itemAllowed)
     .map((item) => {
       const children = item.children
-        ?.filter((c) => !c.permission || auth.hasPermission(c.permission))
+        ?.filter(itemAllowed)
         .map((c) => ({ label: c.label, icon: c.icon, routeName: c.routeName, action: c.action }))
       return {
         label: item.label,

@@ -1,11 +1,22 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import * as api from '../../api/finance'
 
 export const useAccountsStore = defineStore('finance.accounts', () => {
   const items = ref<api.Account[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** True once a list has come back from the server at least once. */
+  const loaded = ref(false)
+  let pending: Promise<void> | null = null
+
+  /**
+   * Whether any account the user may read is a depot. Kurse and Portfolio
+   * only make sense with one, so the menu and the routes hide them without.
+   * The server already filters the list by the ACL (admins see every
+   * account), so this is exactly "a depot among the readable accounts".
+   */
+  const hasDepot = computed(() => items.value.some((a) => a.type_kind === 'depot'))
 
   async function refresh() {
     loading.value = true
@@ -13,6 +24,7 @@ export const useAccountsStore = defineStore('finance.accounts', () => {
     try {
       const resp = await api.listAccounts()
       items.value = resp.items
+      loaded.value = true
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -50,6 +62,21 @@ export const useAccountsStore = defineStore('finance.accounts', () => {
     return unlinked
   }
 
+  /** Loads the list once; later calls reuse it (or the request in flight). */
+  async function ensureLoaded() {
+    if (loaded.value) return
+    pending ??= refresh().finally(() => {
+      pending = null
+    })
+    await pending
+  }
+
+  /** Forgets the list, e.g. when the user signs out. */
+  function reset() {
+    items.value = []
+    loaded.value = false
+  }
+
   function byId(id: number): api.Account | undefined {
     return items.value.find((a) => a.id === id)
   }
@@ -58,7 +85,11 @@ export const useAccountsStore = defineStore('finance.accounts', () => {
     items,
     loading,
     error,
+    loaded,
+    hasDepot,
     refresh,
+    ensureLoaded,
+    reset,
     create,
     update,
     remove,

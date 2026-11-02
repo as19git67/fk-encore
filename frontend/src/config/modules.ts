@@ -18,6 +18,11 @@ export interface ModuleMenuItem {
   action?: string
   /** Drawn filled in the primary colour: the module's main action. */
   primary?: boolean
+  /**
+   * Shown only when one of the accounts the user may read is a depot
+   * (Kurse, Portfolio). The routes behind it carry `meta.requiresDepot`.
+   */
+  requiresDepot?: boolean
 }
 
 export interface ModuleConfig {
@@ -441,19 +446,19 @@ export const modules: ModuleConfig[] = [
         path: 'portfolio',
         name: 'finance-portfolio',
         component: () => import('../views/finance/PortfolioView.vue'),
-        meta: { permission: 'finance.view' },
+        meta: { permission: 'finance.view', requiresDepot: true },
       },
       {
         path: 'kurse',
         name: 'finance-quotes',
         component: () => import('../views/finance/QuotesView.vue'),
-        meta: { permission: 'finance.view' },
+        meta: { permission: 'finance.view', requiresDepot: true },
       },
       {
         path: 'portfolio/:key',
         name: 'finance-portfolio-position',
         component: () => import('../views/finance/PortfolioPositionView.vue'),
-        meta: { permission: 'finance.view' },
+        meta: { permission: 'finance.view', requiresDepot: true },
       },
       {
         // The analysis page is gone; sums by tag or period come from rule
@@ -533,8 +538,9 @@ export const modules: ModuleConfig[] = [
       { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
       { label: 'Erwartete Zahlungen', icon: 'pi pi-calendar-clock', routeName: 'finance-direct-debits', permission: 'finance.view' },
       { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
-      // Portfolio has no entry of its own: the Kurse page links to it.
-      { label: 'Kurse', icon: 'pi pi-wave-pulse', routeName: 'finance-quotes', permission: 'finance.view' },
+      // Portfolio has no entry of its own: the Kurse page links to it. Both
+      // need a depot among the readable accounts.
+      { label: 'Kurse', icon: 'pi pi-wave-pulse', routeName: 'finance-quotes', permission: 'finance.view', requiresDepot: true },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Prognose', icon: 'pi pi-chart-line', routeName: 'finance-forecast', permission: 'finance.view' },
       {
