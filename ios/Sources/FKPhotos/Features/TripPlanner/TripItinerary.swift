@@ -192,6 +192,20 @@ struct TripItineraryDated: Equatable {
     let endDate: String?
 }
 
+/// Where the itinerary screen opens unfolded when it is entered from
+/// somewhere in the plan (stage 3): the leg sheet names its leg, the
+/// day's frame band names the journey that wrote the time it shows.
+enum TripItineraryFocus: Hashable, Identifiable {
+    /// The card of this leg — a stay, or a journey with both times.
+    case leg(Int)
+    /// The journey that arrives at this stay.
+    case journeyBefore(legId: Int)
+    /// The journey that leaves this stay.
+    case journeyAfter(legId: Int)
+
+    var id: Self { self }
+}
+
 /// The chain as the screen edits it, and the arithmetic that keeps it
 /// a chain: stays and journeys alternate, home at both ends means a
 /// journey at both ends, and every date follows from the first.
@@ -247,6 +261,26 @@ struct TripItineraryDraft: Equatable {
     func stay(after id: TripItineraryItem.ID) -> TripItineraryItem? {
         guard let i = index(of: id), i + 1 < items.count else { return nil }
         return items[i + 1].isStay ? items[i + 1] : nil
+    }
+
+    /// The item a way into the screen points at (stage 3): a leg's own
+    /// card, or the journey on one side of a stay.
+    ///
+    /// A journey into the first stay that has no journey before it (no
+    /// home known) is the stay's own arrival, so the stay is answered;
+    /// the same for a departure after the last stay. A stay the plan no
+    /// longer has answers nil and the screen opens folded.
+    func item(focused focus: TripItineraryFocus) -> TripItineraryItem? {
+        switch focus {
+        case .leg(let legId):
+            return items.first { $0.legId == legId }
+        case .journeyBefore(let legId):
+            guard let i = items.firstIndex(where: { $0.legId == legId }) else { return nil }
+            return i > 0 && items[i - 1].isJourney ? items[i - 1] : items[i]
+        case .journeyAfter(let legId):
+            guard let i = items.firstIndex(where: { $0.legId == legId }) else { return nil }
+            return i + 1 < items.count && items[i + 1].isJourney ? items[i + 1] : items[i]
+        }
     }
 
     /// What to call a stay: its name, its lodging, or which one it is.

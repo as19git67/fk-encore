@@ -23,7 +23,7 @@ struct TripLegSheet: View {
         List {
             Section {
                 NavigationLink {
-                    TripItineraryView(viewModel: viewModel, focusLegId: leg.id)
+                    TripItineraryView(viewModel: viewModel, focus: .leg(leg.id))
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(leg.displayTitle).font(.headline)

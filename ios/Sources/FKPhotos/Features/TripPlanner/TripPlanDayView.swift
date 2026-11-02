@@ -24,6 +24,8 @@ import SwiftUI
 ///     interrogate is a plan nobody trusts (§3.8).
 struct TripPlanDayView: View {
     @State private var showSettings = false
+    /// The itinerary, opened on the journey whose time a day shows.
+    @State private var itineraryFocus: TripItineraryFocus?
     /// Which map app gets the handoff, when the traveller has not
     /// settled on one (§9.1).
     @State private var mapsChoice: TripMapsChoice?
@@ -212,19 +214,20 @@ struct TripPlanDayView: View {
                 }
             }
         }
+        .sheet(item: $itineraryFocus) { focus in
+            NavigationStack {
+                TripItineraryView(viewModel: viewModel, focus: focus)
+            }
+        }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
                 TripPlanSettingsView(
                     planId: viewModel.planId,
                     constraints: viewModel.plan?.constraints,
                     title: viewModel.plan?.title,
-                    // The mode and the dates live on the legs rather
-                    // than in the constraints, so they are handed over
-                    // separately — from the first leg, which is what
-                    // "the trip" means for a screen with one of each.
-                    mode: viewModel.plan?.legs.first?.transportMode ?? .foot,
+                    // The date lives on the legs rather than in the
+                    // constraints, so it is handed over separately.
                     startDate: viewModel.plan?.startDate,
-                    firstLeg: viewModel.plan?.legs.first,
                 ) {
                     // Saving re-plans the days, so the screen behind has
                     // to be told rather than left showing the old ones.
@@ -700,8 +703,16 @@ struct TripPlanDayView: View {
                 Text(leg.transportMode.label)
                 if viewModel.dayIndex == 0, let arrival = leg.arriveMinutes {
                     // Only on the day it applies to: the arrival
-                    // shortens the first day and no other.
-                    Text("· Ankunft \(TripClock.format(arrival))")
+                    // shortens the first day and no other. It belongs
+                    // to the journey that ends here, so it leads there.
+                    Button {
+                        itineraryFocus = .journeyBefore(legId: leg.id)
+                    } label: {
+                        Text("· Ankunft \(TripClock.format(arrival))")
+                            .underline(pattern: .dot)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Ankunft \(TripClock.format(arrival)), im Reiseverlauf ändern")
                 }
                 Spacer()
             }
@@ -963,10 +974,18 @@ struct TripPlanDayView: View {
                     // A journey's departure and arrival are its frame
                     // (§22.7): taken off here, the next re-plan would
                     // write them back, so the x did nothing. They are
-                    // changed in the journey's editor, behind the
-                    // header above.
-                    if let leg = viewModel.leg, leg.isJourneyEnd(fix, dayIndex: viewModel.dayIndex) {
-                        EmptyView()
+                    // changed in the itinerary, on the journey that
+                    // wrote them — and that is where the row leads.
+                    if let leg = viewModel.leg,
+                       let focus = leg.itineraryFocus(for: fix, dayIndex: viewModel.dayIndex) {
+                        Button { itineraryFocus = focus } label: {
+                            Image(systemName: "chevron.right")
+                                .frame(width: 44, height: 44)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Weiterreise im Reiseverlauf ändern")
                     } else {
                         removeButton("\(fix.label) entfernen") {
                             Task { await viewModel.removeFixpoint(fix) }

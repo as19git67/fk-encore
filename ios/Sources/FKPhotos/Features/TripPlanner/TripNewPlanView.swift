@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// A new trip (§4.2, §25): only what it needs to exist.
+/// A new trip (§4.2, §25, plan "Reiseverlauf" stage 3): only what it
+/// needs to exist.
 ///
-/// A name, the first place, how long and from when, how it gets about.
-/// Everything else — further legs and journeys, who comes along, the
-/// pace, what counts — is done afterwards exactly as it is changed
-/// later: in the leg strip and the trip's settings. The form once asked
+/// A name, the first place, how long and from when. Everything else —
+/// the way there, further stays and the journeys between them, how the
+/// group gets about, who comes along, the pace, what counts — is done
+/// afterwards exactly as it is changed later: in the itinerary, which
+/// "Planen" opens next, and in the trip's settings. The form once asked
 /// for all of it at once, plus a sentence a model would read; a trip
 /// that could be created in four fields took a screenful, and the
 /// screenful was not where anybody changed those things afterwards.
@@ -20,20 +22,19 @@ struct TripNewPlanView: View {
     var body: some View {
         Form {
             // Only what a trip needs to exist (§25): a name, the first
-            // place, how long, how it gets about. Further legs,
-            // journeys, who comes, what counts — all of that is done
-            // afterwards exactly as it is changed later, in the leg
-            // strip and the trip's settings.
+            // place, how long. The way there, further stays, the
+            // journeys, how the group gets about — all of that is done
+            // afterwards exactly as it is changed later, in the
+            // itinerary this screen leads into.
             nameSection
             placeSection
             lengthSection
-            modeSection
             if !model.draft.isPlannable {
                 Section {
                     EmptyView()
                 } footer: {
                     // Why "Planen" is grey — said, not left to be guessed.
-                    Label("Für jede Stadt einen Ort aus der Suche antippen, dann lässt sich planen.",
+                    Label("Einen Ort aus der Suche antippen, dann lässt sich planen.",
                           systemImage: "info.circle")
                 }
             }
@@ -150,59 +151,17 @@ struct TripNewPlanView: View {
                 DatePicker("Erster Tag", selection: $model.draft.startDate,
                            displayedComponents: .date)
             }
-            arrivalRows(for: 0)
         } header: {
             Text("Wie lange?")
         } footer: {
-            if model.draft.legs.count > 1 {
-                // The stepper above is the first city's; the trip is the
-                // sum, and nothing said so.
-                Text("Insgesamt \(model.draft.totalDays) Tage über \(model.draft.legs.count) Städte. "
-                     + "Die Länge jeder weiteren Stadt steht bei der Stadt.")
-            }
-        }
-    }
-
-    /// When the group actually gets there (§4.2).
-    ///
-    /// Without it day one gets a full Vormittag for a city the group
-    /// reaches at two in the afternoon — the planner cannot know, and
-    /// what it plans instead is a morning nobody has. Independent of
-    /// when the room is ready: arriving and checking in are two
-    /// different times, and this is the one the day is built on.
-    @ViewBuilder
-    private func arrivalRows(for index: Int) -> some View {
-        Toggle("Ankunft ist bekannt", isOn: Binding(
-            get: { model.draft.legs[index].arriveAt != nil },
-            set: { on in
-                model.draft.legs[index].arriveAt = on
-                    ? (model.draft.legs[index].arriveAt ?? Self.defaultArrival)
-                    : nil
-            },
-        ))
-        if let arrival = model.draft.legs[index].arriveAt {
-            DatePicker("Ankunft am ersten Tag", selection: Binding(
-                get: { arrival },
-                set: { model.draft.legs[index].arriveAt = $0 },
-            ), displayedComponents: .hourAndMinute)
-        }
-    }
-
-    private static var defaultArrival: Date {
-        Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
-    }
-
-    // MARK: - How
-
-    private var modeSection: some View {
-        Section {
-            TripTransportModePicker(mode: $model.draft.mode)
-        } header: {
-            Text("Wie unterwegs?")
-        } footer: {
-            Text("Gilt für diese Stadt; jede weitere kann ihr eigenes Verkehrsmittel haben. "
-                 + "Tempo, Begleitung und wonach gesucht wird stehen danach in den Einstellungen "
-                 + "der Reise.")
+            // Where the rest is: "Planen" opens the itinerary, and the
+            // arrival, the way there and how the group gets about are
+            // said there, on the chain they belong to — not as a first
+            // copy here and a second one later.
+            Text("Nach „Planen“ öffnet sich der Reiseverlauf: dort stehen Anreise und "
+                 + "Ankunft, weitere Aufenthalte und Weiterreisen und wie ihr vor Ort "
+                 + "unterwegs seid. Tempo, Begleitung und wonach gesucht wird stehen in "
+                 + "den Einstellungen der Reise.")
         }
     }
 }

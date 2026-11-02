@@ -4,18 +4,15 @@ import XCTest
 /// What the settings screen sends, and — more importantly — what it
 /// does not (§6.2).
 ///
-/// Two fields on this screen re-plan the trip and two do not, and the
-/// difference is not cosmetic: a re-plan is refused outright once a day
-/// has been ticked off. Sending the mode unchanged with every save
-/// would turn "die Reise heißt jetzt anders" into a refusal halfway
-/// through the holiday.
+/// The date is the one field here that is not a planning setting, and
+/// the screen must tell "not mentioned" from "taken off": a re-plan is
+/// refused outright once a day has been ticked off, so nothing may be
+/// sent that was not changed.
 @MainActor
 final class TripPlanSettingsTests: XCTestCase {
 
-    private func model(mode: TripTransportMode = .foot,
-                       startDate: String? = nil) -> TripPlanSettingsViewModel {
-        TripPlanSettingsViewModel(planId: 1, constraints: nil, title: "Reise",
-                                  mode: mode, startDate: startDate)
+    private func model(startDate: String? = nil) -> TripPlanSettingsViewModel {
+        TripPlanSettingsViewModel(planId: 1, constraints: nil, title: "Reise", startDate: startDate)
     }
 
     func testSayingNothingAboutTheDatesSendsNothing() {
@@ -54,10 +51,6 @@ final class TripPlanSettingsTests: XCTestCase {
         let m = model(startDate: "2026-09-17")
         XCTAssertTrue(m.isDated)
         XCTAssertEqual(TripCalendar.isoDay(m.startDate), "2026-09-17")
-    }
-
-    func testTheModeStartsWhereTheTripIs() {
-        XCTAssertEqual(model(mode: .transit).mode, .transit)
     }
 }
 
