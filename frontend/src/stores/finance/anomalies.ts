@@ -14,5 +14,14 @@ export const useAnomalyStore = defineStore('financeAnomalies', () => {
     }
   }
 
-  return { count, refresh }
+  /**
+   * The anomaly page holds the whole open list itself; it reports the
+   * number after loading and after every acknowledgement, so the badge in
+   * the menu follows each tick instead of waiting until the page is left.
+   */
+  function setCount(n: number) {
+    count.value = n
+  }
+
+  return { count, refresh, setCount }
 })

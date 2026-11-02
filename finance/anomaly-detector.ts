@@ -40,8 +40,13 @@ console.log("[boot] finance/anomaly-detector.ts: all imports resolved");
 const AMOUNT_CHANGE_THRESHOLD = 0.15; // 15 %
 /** Minimum absolute amount change (EUR) to avoid noise on tiny amounts. */
 const AMOUNT_CHANGE_MIN_ABS = 5.00;
-/** Days within which a second identical booking is flagged as duplicate. */
-const DUPLICATE_WINDOW_DAYS = 5;
+/**
+ * Days within which a second identical booking is flagged as duplicate. A
+ * real double debit lands on the same or the next banking day; three days
+ * still bridge a weekend (Friday → Monday). Wider than that, the same
+ * amount to the same payee is a second payment, not a copy of the first.
+ */
+export const DUPLICATE_WINDOW_DAYS = 3;
 /**
  * Card payments are the one channel where the same merchant, the same
  * amount and a gap of a few days is entirely normal — a coffee on Tuesday
@@ -49,7 +54,7 @@ const DUPLICATE_WINDOW_DAYS = 5;
  * capture of a card payment lands on the same booking date, so cards get
  * a same-day-only window.
  */
-const CARD_DUPLICATE_WINDOW_DAYS = 0;
+export const CARD_DUPLICATE_WINDOW_DAYS = 0;
 /** Candidates inspected per transaction before the text-date comparison. */
 const DUPLICATE_CANDIDATE_LIMIT = 20;
 /** Newly established recurring patterns above this amount get an alert. */
@@ -62,6 +67,14 @@ const NEW_RECURRING_MIN_INTERVAL_DAYS = 5;
 const NEW_RECURRING_MAX_INTERVAL_DAYS = 400;
 /** Maximum variation of the observed intervals for a new recurring pattern. */
 const NEW_RECURRING_INTERVAL_MAX_CV = 0.30;
+/**
+ * A regular payment keeps its amount: an insurer raises the premium, a
+ * utility adjusts the instalment — once in a while. A series whose amount
+ * changes again within this many days of the previous change is a shop or
+ * a bill that varies every time, not a regular booking. One increase or
+ * reduction per half year is fine; more often is a false detection.
+ */
+export const AMOUNT_CHANGE_MIN_SPACING_DAYS = 182;
 /** Minimum transactions before we trust the typical_amount baseline. */
 const BASELINE_MIN_TRANSACTIONS = 6;
 /**
@@ -231,6 +244,7 @@ export async function runAnomalyDetection(
   // not an established recurring pattern. Hide them without a migration; a
   // qualifying series can create a fresh alert on its actual pattern boundary.
   await acknowledgeLegacyNewMandateAnomalies(accountIds);
+  await acknowledgeOutdatedAnomalies(accountIds);
 
   const accountCond = accountIds && accountIds.length > 0
     ? inArray(financeTransaction.account_id, accountIds)
@@ -1288,8 +1302,8 @@ async function acknowledgeStaleMissingForMandate(mandateId: number): Promise<voi
  * samples (we need MISSING_MIN_OCCURRENCES dates → MISSING_MIN_OCCURRENCES-1 intervals).
  */
 async function getMandateIntervalCV(mandateId: number): Promise<number | null> {
-  const rows = await db.execute<{ booking_date: string }>(sql`
-    SELECT ft.booking_date
+  const rows = await db.execute<{ booking_date: string; amount: string }>(sql`
+    SELECT ft.booking_date, ft.amount
     FROM finance_transaction ft
     JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
     WHERE ft.account_id = frm.account_id
@@ -1303,6 +1317,9 @@ async function getMandateIntervalCV(mandateId: number): Promise<number | null> {
   `);
   const dates = rows.rows.map((r) => r.booking_date.slice(0, 10)).sort();
   if (dates.length < MISSING_MIN_OCCURRENCES) return null;
+  // A series whose amount keeps changing is not regular, so a gap in it
+  // is no "expected booking missing" either.
+  if (!amountIsSteady(rows.rows)) return null;
   const intervals: number[] = [];
   for (let i = 1; i < dates.length; i++) {
     intervals.push(dateDiffDays(dates[i - 1], dates[i]));
@@ -1332,8 +1349,8 @@ async function getNewRecurringPattern(
   transactionId: number,
   bookingDate: string,
 ): Promise<RecurringPattern | null> {
-  const rows = await db.execute<{ booking_date: string }>(sql`
-    SELECT ft.booking_date
+  const rows = await db.execute<{ booking_date: string; amount: string }>(sql`
+    SELECT ft.booking_date, ft.amount
     FROM finance_transaction ft
     JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
     WHERE ft.account_id = frm.account_id
@@ -1359,6 +1376,9 @@ async function getNewRecurringPattern(
   const variance = intervals.reduce((sum, days) => sum + (days - mean) ** 2, 0) / intervals.length;
   const cv = Math.sqrt(variance) / mean;
   if (cv > NEW_RECURRING_INTERVAL_MAX_CV) return null;
+  // A steady rhythm with a different amount every time is a habit, not a
+  // regular payment.
+  if (!amountIsSteady(rows.rows)) return null;
 
   return {
     occurrences: dates.length,
@@ -1493,6 +1513,81 @@ async function acknowledgeLegacyNewMandateAnomalies(accountIds?: number[]): Prom
     .where(and(...conditions));
 }
 
+/**
+ * Close open alerts that today's rules would no longer raise, so a rule
+ * that got stricter also empties the inbox it filled:
+ *   - duplicate: the original booking is gone (deleted, or its account),
+ *     or the two bookings lie further apart than DUPLICATE_WINDOW_DAYS;
+ *   - new_mandate / missing_transaction: the series' amount changes more
+ *     often than once per AMOUNT_CHANGE_MIN_SPACING_DAYS (amountIsSteady).
+ */
+async function acknowledgeOutdatedAnomalies(accountIds?: number[]): Promise<void> {
+  const accountFilter = accountIds && accountIds.length > 0
+    ? sql`AND fa.account_id IN (${sql.join(accountIds.map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
+
+  await db.execute(sql`
+    UPDATE finance_anomaly fa
+    SET acknowledged_at = NOW()
+    WHERE fa.type = 'duplicate'
+      AND fa.acknowledged_at IS NULL
+      ${accountFilter}
+      AND (
+        fa.transaction_id IS NULL
+        OR NOT EXISTS (
+          SELECT 1 FROM finance_transaction orig
+          WHERE orig.id = (NULLIF(fa.details->>'original_transaction_id', ''))::bigint
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM finance_transaction dup, finance_transaction orig
+          WHERE dup.id = fa.transaction_id
+            AND orig.id = (NULLIF(fa.details->>'original_transaction_id', ''))::bigint
+            AND ABS(dup.booking_date::date - orig.booking_date::date) > ${DUPLICATE_WINDOW_DAYS}
+        )
+      )
+  `);
+
+  const open = await db.execute<{ id: number; mandate_id: number }>(sql`
+    SELECT fa.id, fa.mandate_id
+    FROM finance_anomaly fa
+    WHERE fa.type IN ('new_mandate', 'missing_transaction')
+      AND fa.acknowledged_at IS NULL
+      AND fa.mandate_id IS NOT NULL
+      ${accountFilter}
+  `);
+  const steadyByMandate = new Map<number, boolean>();
+  const outdated: number[] = [];
+  for (const row of open.rows) {
+    const mandateId = Number(row.mandate_id);
+    let steady = steadyByMandate.get(mandateId);
+    if (steady === undefined) {
+      const bookings = await db.execute<{ booking_date: string; amount: string }>(sql`
+        SELECT ft.booking_date, ft.amount
+        FROM finance_transaction ft
+        JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
+        WHERE ft.account_id = frm.account_id
+          AND (
+            (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
+            OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
+            OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
+          )
+        ORDER BY ft.booking_date DESC, ft.id DESC
+        LIMIT ${MISSING_INTERVAL_SAMPLE_SIZE}
+      `);
+      steady = amountIsSteady(bookings.rows);
+      steadyByMandate.set(mandateId, steady);
+    }
+    if (!steady) outdated.push(Number(row.id));
+  }
+  if (outdated.length > 0) {
+    await db
+      .update(financeAnomaly)
+      .set({ acknowledged_at: sql`NOW()` })
+      .where(inArray(financeAnomaly.id, outdated));
+  }
+}
+
 // -----------------------------------------------------------------------
 // Date helpers
 // -----------------------------------------------------------------------
@@ -1507,6 +1602,30 @@ function dateDiffDays(from: string, to: string): number {
   const a = new Date(from.slice(0, 10));
   const b = new Date(to.slice(0, 10));
   return Math.round((b.getTime() - a.getTime()) / 86_400_000);
+}
+
+/**
+ * True when the amount of a series changes at most once per
+ * AMOUNT_CHANGE_MIN_SPACING_DAYS. Bookings are read in date order; every
+ * booking whose amount differs from the one before is a change, and two
+ * changes closer together than the spacing make the series fluctuate.
+ */
+export function amountIsSteady(
+  bookings: { booking_date: string; amount: string | number }[],
+): boolean {
+  const sorted = bookings
+    .map((b) => ({ date: b.booking_date.slice(0, 10), cents: Math.round(Number(b.amount) * 100) }))
+    .filter((b) => Number.isFinite(b.cents))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  let lastChange: string | null = null;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].cents === sorted[i - 1].cents) continue;
+    if (lastChange !== null && dateDiffDays(lastChange, sorted[i].date) < AMOUNT_CHANGE_MIN_SPACING_DAYS) {
+      return false;
+    }
+    lastChange = sorted[i].date;
+  }
+  return true;
 }
 
 // -----------------------------------------------------------------------
@@ -1663,7 +1782,17 @@ export const listAnomalies = api(
       }
     }
 
-    const anomalies = rows.map((r) => {
+    // A duplicate whose original booking no longer exists is no duplicate
+    // any more — and the card would offer only the second booking to open.
+    // The next detector run acknowledges it (acknowledgeOutdatedAnomalies);
+    // until then it is left out here.
+    const visibleRows = rows.filter((r) => {
+      if (r.type !== "duplicate") return true;
+      const origId = Number((r.details as Record<string, unknown>)?.original_transaction_id ?? 0);
+      return origId > 0 && txMap.has(origId) && r.transaction_id !== null && txMap.has(r.transaction_id);
+    });
+
+    const anomalies = visibleRows.map((r) => {
       const details = (r.details ?? {}) as Record<string, unknown>;
       let duplicate_transactions: DuplicateTransactionInfo[] | undefined;
       if (r.type === "duplicate") {

@@ -16,6 +16,7 @@ import {
   users,
 } from "../db/schema";
 import {
+  amountIsSteady,
   counterpartySimilarity,
   derivePaymentChannel,
   extractTextDates,
@@ -234,6 +235,27 @@ describe("finance/anomaly-detector — new_mandate", () => {
     expect(anomalies).toHaveLength(0);
   });
 
+  it("does not call a monthly series with a different amount each time recurring", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    for (const [days, amount] of [[61, "-48.20"], [31, "-55.10"], [1, "-51.75"]] as const) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount,
+        counterparty: "Mobilfunk Muster",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(0);
+  });
+
   it("does not call irregular repeat purchases recurring", async () => {
     await ensureUser(1);
     const accountId = await insertAccount();
@@ -253,6 +275,25 @@ describe("finance/anomaly-detector — new_mandate", () => {
       .from(financeAnomaly)
       .where(eq(financeAnomaly.type, "new_mandate"));
     expect(anomalies).toHaveLength(0);
+  });
+});
+
+describe("finance/anomaly-detector — amount steadiness", () => {
+  const series = (amounts: string[], stepDays = 30) =>
+    amounts.map((amount, i) => ({ booking_date: daysAgo(400 - i * stepDays), amount }));
+
+  it("accepts a constant amount and one change per half year", () => {
+    expect(amountIsSteady(series(["-20.00", "-20.00", "-20.00"]))).toBe(true);
+    // monthly: change after month 2, the next one seven months later
+    expect(amountIsSteady(series([
+      "-20.00", "-20.00", "-22.00", "-22.00", "-22.00", "-22.00",
+      "-22.00", "-22.00", "-22.00", "-24.00",
+    ]))).toBe(true);
+  });
+
+  it("rejects an amount that changes twice within six months", () => {
+    expect(amountIsSteady(series(["-20.00", "-21.50", "-20.00"]))).toBe(false);
+    expect(amountIsSteady(series(["-20.00", "-20.00", "-22.00", "-22.00", "-25.00"]))).toBe(false);
   });
 });
 
@@ -357,6 +398,31 @@ describe("finance/anomaly-detector — missing_transaction", () => {
           eq(financeAnomaly.type, "missing_transaction"),
         ),
       );
+    expect(anomalies).toHaveLength(0);
+  });
+
+  it("does NOT emit missing_transaction for a monthly series whose amount keeps changing", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    const baseAgo = 120 + 30 * 7;
+    const amounts = ["-40.10", "-52.30", "-47.80", "-44.00", "-58.90", "-41.20", "-49.60", "-53.40"];
+    for (let i = 0; i < amounts.length; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(baseAgo - i * 30),
+        amount: amounts[i],
+        counterparty: "Telefon AG",
+        mandateRef: "M-TEL-1",
+        creditorId: "DE00ZZZ0001",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "missing_transaction"));
     expect(anomalies).toHaveLength(0);
   });
 
@@ -1171,6 +1237,80 @@ describe("finance/anomaly-detector — duplicate", () => {
       .from(financeAnomaly)
       .where(eq(financeAnomaly.type, "duplicate"));
     expect(duplicates).toHaveLength(1);
+  });
+});
+
+describe("finance/anomaly-detector — duplicate distance", () => {
+  it("does NOT flag the same direct debit five days apart", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (const days of [7, 2]) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-49.00",
+        counterparty: "Musterhändler GmbH",
+        entryText: "Lastschrift",
+        transactionType: "RDDT",
+        mandateRef: "M-SHOP",
+        creditorId: "DE00SHOP0",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const duplicates = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "duplicate"));
+    expect(duplicates).toHaveLength(0);
+  });
+
+  it("closes an open duplicate whose bookings lie too far apart or whose original is gone", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    const tx = (days: number) => insertTx({
+      accountId,
+      bookingDate: daysAgo(days),
+      amount: "-49.00",
+      counterparty: "Musterhändler GmbH",
+      entryText: "Lastschrift",
+      transactionType: "RDDT",
+      mandateRef: "M-SHOP",
+      creditorId: "DE00SHOP0",
+    });
+    const farOrig = await tx(20);
+    const farDup = await tx(10);
+    const goneOrig = await tx(6);
+    const goneDup = await tx(5);
+
+    // Alerts as an older, wider rule would have left them in the inbox.
+    await db.insert(financeAnomaly).values([
+      {
+        account_id: accountId,
+        transaction_id: farDup,
+        type: "duplicate",
+        score: "0.9000",
+        details: { original_transaction_id: farOrig },
+      },
+      {
+        account_id: accountId,
+        transaction_id: goneDup,
+        type: "duplicate",
+        score: "0.9000",
+        details: { original_transaction_id: goneOrig },
+      },
+    ]);
+    await db.delete(financeTransaction).where(eq(financeTransaction.id, goneOrig));
+
+    await runAnomalyDetection([accountId]);
+
+    const open = await db
+      .select()
+      .from(financeAnomaly)
+      .where(and(eq(financeAnomaly.type, "duplicate"), isNull(financeAnomaly.acknowledged_at)));
+    expect(open).toHaveLength(0);
   });
 });
 
