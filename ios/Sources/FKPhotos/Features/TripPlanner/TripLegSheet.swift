@@ -90,7 +90,7 @@ struct TripLegSheet: View {
             } header: {
                 Text("Hinzufügen")
             } footer: {
-                Text("Alles landet im Vorrat dieser Etappe; von dort aus wird in die Tage geplant.")
+                Text("Alles landet im Vorrat; von dort aus wird in die Tage geplant.")
             }
 
             Section {
@@ -123,7 +123,7 @@ struct TripLegSheet: View {
                 Text("Vorrat")
             }
         }
-        .navigationTitle(leg.isTransit ? "Weiterreise" : "Etappe")
+        .navigationTitle(leg.isTransit ? "Weiterreise" : "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

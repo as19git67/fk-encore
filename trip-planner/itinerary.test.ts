@@ -14,7 +14,6 @@ import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, setTripStopStatus } from "./plans";
-import { addTripTransit } from "./transits";
 import { setTripHome } from "./home";
 import {
   deriveFrames,
@@ -195,6 +194,24 @@ beforeEach(async () => {
   return () => resetGeoClient();
 });
 
+/**
+ * Give the journey after the stay at `afterStay` both of its times —
+ * the gesture the app makes on a journey card — and write the chain.
+ */
+async function addJourney(
+  planId: number,
+  afterStay: number,
+  journey: { departAt: string; arriveAt: string; nights?: number },
+) {
+  const chain = await getTripItinerary({ planId });
+  const items = chain.items.map((i) => ({ ...i }));
+  const stayIndex = items.flatMap((item, index) => (item.kind === "stay" ? [index] : []))[afterStay];
+  // The gap the chain read back is replaced, not kept: a journey by day
+  // unless the caller says otherwise.
+  Object.assign(items[stayIndex + 1], { nights: 0, ...journey });
+  return putTripItinerary({ planId, startDate: chain.startDate, items });
+}
+
 async function threeStays() {
   const { plan } = await createTripPlan({
     legs: [
@@ -227,10 +244,7 @@ describe("GET /trip-planner/plans/:planId/itinerary", () => {
 
   it("reads a journey as the item that owns its times", async () => {
     const plan = await threeStays();
-    await addTripTransit({
-      planId: plan.id, afterLegIndex: 0,
-      departDate: "2026-09-06", departAt: "10:00", arriveDate: "2026-09-06", arriveAt: "16:00",
-    });
+    await addJourney(plan.id, 0, { departAt: "10:00", arriveAt: "16:00" });
     const chain = await getTripItinerary({ planId: plan.id });
     expect(chain.items[1]).toMatchObject({
       kind: "journey", departAt: "10:00", arriveAt: "16:00", nights: 0, mode: "car",
@@ -319,10 +333,7 @@ describe("PUT /trip-planner/plans/:planId/itinerary", () => {
 
   it("removes a stay that is missing from the chain, and a journey whose times are gone", async () => {
     const plan = await threeStays();
-    await addTripTransit({
-      planId: plan.id, afterLegIndex: 0,
-      departDate: "2026-09-06", departAt: "10:00", arriveDate: "2026-09-06", arriveAt: "16:00",
-    });
+    await addJourney(plan.id, 0, { departAt: "10:00", arriveAt: "16:00" });
     const chain = await getTripItinerary({ planId: plan.id });
     const [first, journey, , gap2, third] = chain.items;
 

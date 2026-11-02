@@ -1,6 +1,6 @@
 # Itinerary: creating a trip and its stops on one screen
 
-Status: stage 1 (backend) done, PR #1800. Stage 2 (iOS itinerary screen) done, PR #1802. Stage 3 (entry and day) done. Stage 4 open.
+Status: all four stages done — stage 1 (backend) PR #1800, stage 2 (iOS itinerary screen) PR #1802, stage 3 (entry and day) PR #1803, stage 4 (clean-up) follows it.
 
 ## The problem
 
@@ -159,6 +159,18 @@ Dead multi-city draft code in `TripNewPlanDraft` and
 `TripNewPlanViewModel`, one word per level in the UI (Reise, Aufenthalt,
 Weiterreise, Ort), `documentation/ios-urlaubsplanung.md` §22.7, §25.1,
 §25.2 and §25.5 updated, the old leg and transit endpoints removed.
+
+Done: `TripNewPlanDraft` holds one `TripDraftStay`; `TripDraftLeg`,
+`TripDraftTransfer` and the route helpers of the view model are gone.
+The app says „Aufenthalt" for a stay wherever it named one („Etappe",
+„Stadt"), and `itinerary.ts` names an unnamed stay „Aufenthalt n". `legs.ts`
+and `transits.ts` are deleted with their tests; what they tested that still
+matters — the two framed ends of a journey, the way there and home, „Alle an
+Bord", voting along the way, adding and changing a stay, who may — is tested
+through `PUT …/itinerary` in `itinerary-edit.test.ts`. Server messages that
+address a leg that may be a stay or a journey (pool, votes, finds) still say
+„Etappe"; the handbook (`documentation/handbuch/ios.md`, PLN) names the
+itinerary.
 
 ## Decisions taken (2026-11-02)
 

@@ -85,7 +85,7 @@ struct TripNewPlanView: View {
         } header: {
             Text("Name")
         } footer: {
-            Text("Ohne Namen heißt die Reise nach ihren Städten.")
+            Text("Ohne Namen heißt die Reise nach ihrem ersten Aufenthalt.")
         }
     }
 
@@ -105,12 +105,12 @@ struct TripNewPlanView: View {
                 model.pick(place)
             }
             if model.draft.anchor != nil {
-                TextField("Name der Stadt (optional)", text: $model.draft.legs[0].title)
+                TextField("Name des Aufenthalts (optional)", text: $model.draft.stay.title)
                     .textInputAutocapitalization(.words)
-                anchorZoneRows(for: 0)
+                anchorZoneRows
             }
         } header: {
-            Text("Wo? Die Unterkunft der ersten Stadt")
+            Text("Wo? Die Unterkunft des ersten Aufenthalts")
         } footer: {
             Text("Hotel, Campingplatz oder Adresse — hier fängt jeder Tag an und hier endet "
                  + "er, und von hier aus werden die Wege gerechnet. Eine Stadt geht auch; "
@@ -126,10 +126,10 @@ struct TripNewPlanView: View {
     /// be said. Saying it keeps the plan from claiming a precision it
     /// does not have.
     @ViewBuilder
-    private func anchorZoneRows(for index: Int) -> some View {
-        Toggle("Noch nichts gebucht", isOn: $model.draft.legs[index].anchorIsApproximate)
-        if model.draft.legs[index].anchorIsApproximate {
-            TripRadiusPicker(metres: $model.draft.legs[index].anchorRadiusM)
+    private var anchorZoneRows: some View {
+        Toggle("Noch nichts gebucht", isOn: $model.draft.stay.anchorIsApproximate)
+        if model.draft.stay.anchorIsApproximate {
+            TripRadiusPicker(metres: $model.draft.stay.anchorRadiusM)
             Text("Der Planer rechnet mit der Mitte und zeigt die Unterkunft nicht als Adresse an.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -142,9 +142,7 @@ struct TripNewPlanView: View {
         Section {
             Stepper(value: $model.draft.days,
                     in: TripNewPlanDraft.minDays...TripNewPlanDraft.maxDays) {
-                Text(model.draft.legs.count > 1
-                     ? "Erste Stadt: \(model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage")"
-                     : (model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage"))
+                Text(model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage")
             }
             Toggle("Termin steht fest", isOn: $model.draft.isDated)
             if model.draft.isDated {

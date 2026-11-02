@@ -38,7 +38,7 @@ struct TripPlaceSearchView: View {
                     Label("Nach Namen suchen", systemImage: "magnifyingglass")
                 } description: {
                     Text("Ein Museum, ein Café, ein Aussichtspunkt — was ihr findet, kommt zu "
-                         + "den Kandidaten dieser Stadt.")
+                         + "den Kandidaten dieses Aufenthalts.")
                 }
             }
 
@@ -60,7 +60,7 @@ struct TripPlaceSearchView: View {
             // Not a footnote: a search that silently skipped a region
             // would answer "nichts gefunden" for a place that is there.
             ForEach(model.unavailableLegs, id: \.self) { leg in
-                Label("Stadt \(leg + 1) konnte nicht durchsucht werden.",
+                Label("Aufenthalt \(leg + 1) konnte nicht durchsucht werden.",
                       systemImage: "exclamationmark.triangle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

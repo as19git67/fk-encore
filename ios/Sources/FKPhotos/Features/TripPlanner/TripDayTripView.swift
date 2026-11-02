@@ -129,7 +129,7 @@ struct TripDayTripView: View {
     private func nothingSection() -> some View {
         Section {
             Text(answer?.note
-                 ?? "Für diese Etappe gibt es gerade nichts vorzuschlagen.")
+                 ?? "Für diesen Aufenthalt gibt es gerade nichts vorzuschlagen.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } footer: {
@@ -138,7 +138,7 @@ struct TripDayTripView: View {
             Text(answer?.undersupplied == true
                  ? "Der Vorrat trägt die Tage nicht — es liegt nur nichts in Reichweite, "
                    + "was einen ganzen Tag füllen würde."
-                 : "Der Vorrat dieser Etappe trägt ihre Tage. Ein Ausflug wäre hier eine "
+                 : "Der Vorrat dieses Aufenthalts trägt seine Tage. Ein Ausflug wäre hier eine "
                    + "Antwort auf eine Frage, die niemand gestellt hat.")
         }
     }

@@ -8,12 +8,14 @@
  *
  * Dates are not asked for. A dated trip gets the journey on the day it
  * belongs to; an undated one gets the two clock times and no day, and
- * saving the journey is what dates the trip (see `transits.ts`).
+ * the chain stays undated until somebody gives the trip its date
+ * (`itinerary.ts`).
  *
  * The suggestion is the frame the journey screen opens with: leaving at
  * ten on the last day of the one place, arriving when the next one says
  * it expects the group (or after the drive and a margin for stops).
- * Accepting it is the ordinary `POST …/transits`; a "no" is the app's
+ * Accepting it is the ordinary `PUT …/itinerary` with the journey filled
+ * in; a "no" is the app's
  * to remember, because nothing was written that could be taken back.
  */
 
@@ -169,7 +171,7 @@ function journey(
 }
 
 function legTitle(end: JourneyEnd): string {
-  return end.title ?? end.anchorLabel ?? `Etappe ${(end.position ?? 0) + 1}`;
+  return end.title ?? end.anchorLabel ?? `Aufenthalt ${(end.position ?? 0) + 1}`;
 }
 
 export const transitSuggestion = api(

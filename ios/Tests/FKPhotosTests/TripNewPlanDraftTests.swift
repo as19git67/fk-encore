@@ -1,7 +1,8 @@
 import XCTest
 @testable import FKPhotosLib
 
-/// The decisions behind the "new trip" screen.
+/// The decisions behind the "new trip" screen (stage 4 of the
+/// itinerary plan: one stay, the rest is made in the itinerary).
 ///
 /// Two of them are worth guarding. A draft is plannable only once a
 /// coordinate has been *chosen* — the planner has no forward geocoder,
@@ -138,81 +139,6 @@ final class TripNewPlanDraftTests: XCTestCase {
         XCTAssertNil(draft.createRequest()?.legs.first?.startDate)
     }
 
-    // MARK: - Several cities (§4.2)
-
-    private let porto = TripPlace(
-        name: "Musterstadt",
-        subtitle: "Beispielland",
-        latitude: 41.1,
-        longitude: -8.6,
-    )
-
-    func testASecondCityBecomesASecondLeg() {
-        var draft = TripNewPlanDraft()
-        draft.anchor = lisbon
-        draft.days = 3
-        draft.legs.append(TripDraftLeg(place: porto, days: 2, mode: .transit))
-
-        let request = draft.createRequest()
-        XCTAssertEqual(request?.legs.count, 2)
-        XCTAssertEqual(request?.legs[1].anchor.lat, 41.1)
-        XCTAssertEqual(request?.legs[1].days, 2)
-        // The mode belongs to the leg: arriving by car does not mean
-        // driving around the old town (§4.2).
-        XCTAssertEqual(request?.legs[0].mode, "foot")
-        XCTAssertEqual(request?.legs[1].mode, "transit")
-    }
-
-    func testAHalfPickedSecondCityIsNotPlannable() {
-        // Not "plan what you have": it is a trip missing a city, and
-        // planning around the gap would quietly drop it.
-        var draft = TripNewPlanDraft()
-        draft.anchor = lisbon
-        draft.legs.append(TripDraftLeg())
-
-        XCTAssertFalse(draft.isPlannable)
-        XCTAssertNil(draft.createRequest())
-    }
-
-    func testTheTripIsNamedAfterItsRoute() {
-        var draft = TripNewPlanDraft()
-        draft.anchor = lisbon
-        draft.legs.append(TripDraftLeg(place: porto))
-
-        XCTAssertEqual(draft.effectiveTitle, "Beispielstadt → Musterstadt")
-        XCTAssertEqual(draft.totalDays, 6)
-    }
-
-    func testOnlyTheFirstLegCarriesTheDate() {
-        // The server dates the rest in sequence. Two sources for the
-        // same fact is how they come to disagree.
-        var draft = TripNewPlanDraft()
-        draft.anchor = lisbon
-        draft.legs.append(TripDraftLeg(place: porto))
-        draft.isDated = true
-        draft.startDate = TripCalendar.date(fromIsoDay: "2026-09-17")!
-
-        let request = draft.createRequest()
-        XCTAssertEqual(request?.legs[0].startDate, "2026-09-17")
-        XCTAssertNil(request?.legs[1].startDate)
-    }
-
-    func testATransferIsSentOnlyWhenATimeIsKnown() {
-        var draft = TripNewPlanDraft()
-        draft.anchor = lisbon
-        var second = TripDraftLeg(place: porto)
-        draft.legs.append(second)
-        XCTAssertNil(draft.createRequest()?.legs[1].transfer)
-
-        // A time nobody knows is not a departure at midnight (§15.3).
-        second.departAt = Calendar.current.date(
-            bySettingHour: 9, minute: 30, second: 0, of: Date())!
-        draft.legs[1] = second
-        let transfer = draft.createRequest()?.legs[1].transfer
-        XCTAssertEqual(transfer?.departAt, "09:30")
-        XCTAssertNil(transfer?.arriveAt)
-    }
-
     // MARK: - The anchor (§4.2)
 
     func testTheAnchorIsNamedApartFromTheCity() {
@@ -221,7 +147,7 @@ final class TripNewPlanDraftTests: XCTestCase {
         var draft = TripNewPlanDraft()
         draft.anchor = TripPlace(name: "Hotel Beispielhof", subtitle: nil,
                                  latitude: 38.7, longitude: -9.1)
-        draft.legs[0].title = "Beispielstadt"
+        draft.stay.title = "Beispielstadt"
 
         let leg = draft.createRequest()?.legs.first
         XCTAssertEqual(leg?.anchorLabel, "Hotel Beispielhof")
@@ -242,33 +168,12 @@ final class TripNewPlanDraftTests: XCTestCase {
         draft.anchor = lisbon
         XCTAssertNil(draft.createRequest()?.legs.first?.anchorRadiusM)
 
-        draft.legs[0].anchorIsApproximate = true
-        draft.legs[0].anchorRadiusM = 2_000
+        draft.stay.anchorIsApproximate = true
+        draft.stay.anchorRadiusM = 2_000
         XCTAssertEqual(draft.createRequest()?.legs.first?.anchorRadiusM, 2_000)
     }
 
-    // MARK: - Arriving (§4.2)
-
-    func testTheFirstCityTakesAnArrivalButNoDeparture() {
-        // Nobody transfers into the start of a holiday — but they do
-        // arrive, and day one has no morning if they land at two.
-        var draft = TripNewPlanDraft()
-        draft.anchor = lisbon
-        draft.legs[0].arriveAt = Calendar.current.date(
-            bySettingHour: 14, minute: 0, second: 0, of: Date())!
-        draft.legs[0].departAt = Calendar.current.date(
-            bySettingHour: 8, minute: 0, second: 0, of: Date())!
-
-        let transfer = draft.createRequest()?.legs.first?.transfer
-        XCTAssertEqual(transfer?.arriveAt, "14:00")
-        XCTAssertNil(transfer?.departAt)
-    }
-
-    func testNoArrivalMeansNoTransferAtAllOnTheFirstCity() {
-        var draft = TripNewPlanDraft()
-        draft.anchor = lisbon
-        XCTAssertNil(draft.createRequest()?.legs.first?.transfer)
-    }
+    // MARK: - Dating (§4.2)
 
     func testADatedTripSendsTheDayTheTravellerPicked() {
         // The date is what later tells the app which day of the trip
@@ -278,101 +183,5 @@ final class TripNewPlanDraftTests: XCTestCase {
         draft.isDated = true
         draft.startDate = TripCalendar.date(fromIsoDay: "2026-09-17")!
         XCTAssertEqual(draft.createRequest()?.legs.first?.startDate, "2026-09-17")
-    }
-}
-
-/// Removing a city from a route being drafted.
-///
-/// Two mistakes met here, and both are the same mistake: addressing a
-/// city by where it sits rather than by which one it is. The list shows
-/// the route from the *second* city on, so a delete offset of 0 means
-/// `legs[1]` — read as an absolute index it deleted the wrong city and
-/// ignored the first row entirely. And a row bound to `legs[2]` keeps
-/// that index after the list shrinks, which SwiftUI evaluates once more
-/// while dismissing the pushed screen: a crash, not a stale label.
-@MainActor
-final class TripDraftLegRemovalTests: XCTestCase {
-    private func place(_ name: String) -> TripPlace {
-        TripPlace(name: name, subtitle: nil, latitude: 48.1, longitude: 11.5)
-    }
-
-    /// Three cities, as the screen would have them.
-    private func model() -> TripNewPlanViewModel {
-        let model = TripNewPlanViewModel()
-        model.draft.anchor = place("Erste")
-        model.draft.legs.append(TripDraftLeg(place: place("Zweite")))
-        model.draft.legs.append(TripDraftLeg(place: place("Dritte")))
-        return model
-    }
-
-    func testDeletingTheFirstShownRowRemovesTheSecondCity() {
-        // Offset 0 is the first *displayed* row, which is legs[1].
-        let model = model()
-        model.removeLegs(displayedAt: IndexSet(integer: 0))
-        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Dritte"])
-    }
-
-    func testDeletingTheSecondShownRowRemovesTheThirdCity() {
-        let model = model()
-        model.removeLegs(displayedAt: IndexSet(integer: 1))
-        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Zweite"])
-    }
-
-    func testDeletingSeveralAtOnceRemovesExactlyThose() {
-        // Every removal moves the indices of what follows, so the rows
-        // are resolved to ids before anything goes.
-        let model = model()
-        model.draft.legs.append(TripDraftLeg(place: place("Vierte")))
-        model.removeLegs(displayedAt: IndexSet([0, 2]))
-        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Dritte"])
-    }
-
-    func testAnOffsetPastTheEndRemovesNothing() {
-        let model = model()
-        model.removeLegs(displayedAt: IndexSet(integer: 9))
-        XCTAssertEqual(model.draft.legs.count, 3)
-    }
-
-    func testTheFirstCityIsNotRemovableThisWay() {
-        // There is no row for it: the route list starts at the second.
-        let model = model()
-        model.removeLegs(displayedAt: IndexSet())
-        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Zweite", "Dritte"])
-    }
-
-    func testABindingSurvivesItsCityBeingRemoved() {
-        // What actually crashed: the pushed editor is evaluated once
-        // more on its way out, after the list has shrunk.
-        let model = model()
-        let id = model.draft.legs[1].id
-        let binding = model.binding(for: id)
-        model.removeLegs(displayedAt: IndexSet(integer: 0))
-
-        XCTAssertNil(binding.wrappedValue.place)
-        // And writing through a dead binding changes nothing rather
-        // than resurrecting a city or overwriting its neighbour.
-        binding.wrappedValue.days = 9
-        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Dritte"])
-        XCTAssertFalse(model.draft.legs.contains { $0.days == 9 })
-    }
-
-    func testABindingWritesThroughToTheRightCity() {
-        let model = model()
-        let binding = model.binding(for: model.draft.legs[2].id)
-        binding.wrappedValue.days = 5
-        XCTAssertEqual(model.draft.legs[2].days, 5)
-        XCTAssertNotEqual(model.draft.legs[1].days, 5)
-    }
-
-    func testPositionsFollowTheCityRatherThanTheRow() {
-        let model = model()
-        let third = model.draft.legs[2].id
-        XCTAssertEqual(model.position(of: third), 2)
-        XCTAssertEqual(model.legBefore(third)?.place?.name, "Zweite")
-
-        model.removeLegs(displayedAt: IndexSet(integer: 0))
-
-        XCTAssertEqual(model.position(of: third), 1)
-        XCTAssertEqual(model.legBefore(third)?.place?.name, "Erste")
     }
 }

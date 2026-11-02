@@ -3,9 +3,9 @@
  * (documentation/plans/reiseverlauf.md, stage 1).
  *
  * Five endpoints used to write the same four columns — `POST /legs`,
- * `PATCH /legs/:i`, `POST /transits`, `PATCH /transits/:i` and
- * `PATCH /settings` — and only one of them (`frameJourney`) moved the
- * neighbours along. A city whose length changed left its journey where
+ * `PATCH /legs/:i`, `POST /transits`, `PATCH /transits/:i` (all four
+ * gone since stage 4) and `PATCH /settings` — and only one of them
+ * moved the neighbours along. A city whose length changed left its journey where
  * it was, and the two drifted apart. Here every fact has one owner:
  *
  *   - a **stay** owns its place, its lodging, its length in days and
@@ -58,11 +58,11 @@ import {
 import { minutesOf } from "./transit-leg";
 import type { TransportMode } from "./travel";
 
-/** Mirrors `plans.ts` and `legs.ts`: counted in stays, the journeys are free. */
+/** Mirrors `plans.ts`: counted in stays, the journeys are free. */
 const MAX_STAYS = 20;
 /** Mirrors `plans.ts`: a stay longer than this is two stays. */
 const MAX_STAY_DAYS = 14;
-/** Mirrors `transits.ts`: a journey longer than this is a stay of its own. */
+/** A journey longer than this is a stay of its own. */
 const MAX_JOURNEY_NIGHTS = 6;
 /** How many days of a newly added stay are planned down to spots (§4.3). */
 const DEFAULT_DETAIL_DAYS = 2;
@@ -165,7 +165,7 @@ export const putTripItinerary = api(
     const userId = requireUser();
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
-    await requireOrganiser(req.planId, userId, "Etappen ändern");
+    await requireOrganiser(req.planId, userId, "Den Reiseverlauf");
 
     const frames = deriveFrames(
       { startDate: req.startDate, items: req.items },
@@ -410,7 +410,7 @@ export function deriveFrames(
 
 function stayTitle(item: ItineraryItem | undefined, index: number, homeLabel: string): string {
   if (!item) return homeLabel;
-  return item.title?.trim() || item.anchorLabel?.trim() || `Etappe ${index + 1}`;
+  return item.title?.trim() || item.anchorLabel?.trim() || `Aufenthalt ${index + 1}`;
 }
 
 function validateStayDays(days: number | undefined, index: number): number {
@@ -637,8 +637,8 @@ function refuseSettled(leg: StoredLeg, verb: string): void {
   const settled = firstSettledStop(leg);
   if (settled) {
     throw APIError.failedPrecondition(
-      `„${settled}" auf „${leg.title ?? `Etappe ${leg.position + 1}`}" ist schon abgehakt — `
-        + `eine begonnene Etappe wird nicht ${verb}`,
+      `„${settled}" auf „${leg.title ?? `Aufenthalt ${leg.position + 1}`}" ist schon abgehakt — `
+        + `ein begonnener Aufenthalt wird nicht ${verb}`,
     );
   }
 }

@@ -24,7 +24,7 @@ struct TripPlanIdeasView: View {
                 ContentUnavailableView(
                     "Nichts Gesammeltes hier",
                     systemImage: "lightbulb",
-                    description: Text("In den Städten dieser Reise liegt nichts aus euren "
+                    description: Text("In den Aufenthalten dieser Reise liegt nichts aus euren "
                                       + "Ideen."),
                 )
             }
@@ -46,7 +46,7 @@ struct TripPlanIdeasView: View {
     /// The city's own name — legs have one, and "Etappe 2" asked the
     /// reader to count.
     private func legTitle(_ legIndex: Int) -> String {
-        viewModel.plan?.legs.first { $0.position == legIndex }?.displayTitle ?? "Stadt \(legIndex + 1)"
+        viewModel.plan?.legs.first { $0.position == legIndex }?.displayTitle ?? "Aufenthalt \(legIndex + 1)"
     }
 
     private var legs: [Int] {
