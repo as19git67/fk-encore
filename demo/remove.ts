@@ -6,9 +6,9 @@
  */
 
 import fs from "node:fs/promises";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notExists, sql } from "drizzle-orm";
 import db from "../db/database";
-import { albums, demoFile, demoItem, demoRun, financeAccount, financeTag, userAssessmentSettings, users, userSubjectPersons } from "../db/schema";
+import { albums, demoFile, demoItem, demoRun, financeAccount, financeTag, financeTagTransaction, userAssessmentSettings, users, userSubjectPersons } from "../db/schema";
 import { removeEnergy } from "./energy-writer";
 import { purgeDocument } from "../documents/purge";
 import { removePhotos } from "./photo-writer";
@@ -37,9 +37,19 @@ export async function removeRun(runId: number): Promise<void> {
   await deleteBookingsOf(accounts);
   if (accounts.length) await db.delete(financeAccount).where(inArray(financeAccount.id, accounts));
 
-  // Tags the run created; their links went with the bookings.
+  // Tags the run created; their links went with the bookings. A tag someone
+  // else has used since (another run, a user) stays.
   const tags = await registered(runId, "finance_tag");
-  if (tags.length) await db.delete(financeTag).where(inArray(financeTag.id, tags));
+  if (tags.length) {
+    await db
+      .delete(financeTag)
+      .where(
+        and(
+          inArray(financeTag.id, tags),
+          notExists(db.select({ one: sql`1` }).from(financeTagTransaction).where(eq(financeTagTransaction.tag_id, financeTag.id))),
+        ),
+      );
+  }
 
   const assessments = await registered(runId, "user_assessment_settings");
   if (assessments.length) await db.delete(userAssessmentSettings).where(inArray(userAssessmentSettings.id, assessments));

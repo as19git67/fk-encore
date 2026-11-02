@@ -6,7 +6,7 @@
  * what it wrote so far stays registered and is removed like a finished run.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import log from "encore.dev/log";
 import db from "../db/database";
 import { demoRun } from "../db/schema";
@@ -40,6 +40,15 @@ export interface StartOptions {
   text?: TextSource;
   /** Where the photos come from; the tests hand in a fake Openverse and face detector. */
   photoDeps?: PhotoDeps;
+  /**
+   * Parts left out (demo/bench.ts): `depot: false` asks no quote provider,
+   * `photos: false` writes no photos and albums. Both default to true.
+   */
+  parts?: { depot?: boolean; photos?: boolean };
+  /** The spouse's address when the household is laid next to the demo. */
+  spouseEmail?: string;
+  /** Numbers the accounts (`planHousehold`); 1, the demo's, by default. */
+  accountSeries?: number;
 }
 
 /** Thrown when the system is not untouched or a demo is there already. */
@@ -99,11 +108,11 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
   const [run] = await db.select().from(demoRun).where(eq(demoRun.id, runId));
   if (!run || run.owner_user_id === null) return;
   try {
-    const plan = planHousehold(run.seed, run.size, opts.today ?? localToday());
+    const plan = planHousehold(run.seed, run.size, opts.today ?? localToday(), opts.accountSeries);
 
     // The depot trades at the funds' real closes; without them it is left out and the run says why.
     await setProgress(runId, "quotes", 0, 1);
-    const loaded = await loadDemoCloses(plan.from);
+    const loaded = opts.parts?.depot === false ? { skipped: "nicht angefordert" } : await loadDemoCloses(plan.from);
     await setProgress(runId, "quotes", 1, 1);
     const depot = "closes" in loaded ? planDepot(run.seed, run.size, plan, loaded.closes) : null;
     if (depot) plan.bookings.push(...depot.bookings);
@@ -116,6 +125,7 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
     const written = await writeHousehold(runId, run.owner_user_id, plan, {
       progress: (done, total) => setProgress(runId, "bookings", done, total),
       cancelled: () => cancelRequested(runId),
+      spouseEmail: opts.spouseEmail,
     });
 
     const totalReadings = energy.meters.reduce((n, m) => n + m.readings.length, 0);
@@ -150,17 +160,20 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
     const photoDeps = opts.photoDeps ?? defaultPhotoDeps();
     let photoSource: PhotoSource = "drawn";
     let photoNote: string | null = null;
-    if (run.size === "full") {
+    if (run.size === "full" && opts.parts?.photos !== false) {
       if (!(await openverseReachable(photoDeps))) photoNote = "Openverse nicht erreichbar";
       else if (!(await faceDetectorReachable(photoDeps))) photoNote = "Gesichtserkennung nicht erreichbar";
       else photoSource = "openverse";
     }
     const photoPlan = planPhotos(run.seed, run.size, plan);
-    await setProgress(runId, "photos", 0, photoPlan.shots.length);
-    const pics = await writePhotos(runId, run.owner_user_id, run.seed, photoPlan, photoSource, {
-      progress: (done, total) => setProgress(runId, "photos", done, total),
-      cancelled: () => cancelRequested(runId),
-    }, photoDeps);
+    const withPhotos = opts.parts?.photos !== false;
+    await setProgress(runId, "photos", 0, withPhotos ? photoPlan.shots.length : 0);
+    const pics = withPhotos
+      ? await writePhotos(runId, run.owner_user_id, run.seed, photoPlan, photoSource, {
+          progress: (done, total) => setProgress(runId, "photos", done, total),
+          cancelled: () => cancelRequested(runId),
+        }, photoDeps)
+      : { photos: 0, openverse: 0, drawn: 0, albums: 0, fallback: null };
     photoNote ??= pics.fallback;
 
     const notes = [
@@ -203,11 +216,18 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
       .set({
         status: cancelled ? "cancelled" : "failed",
         stage: null,
-        error: cancelled ? null : (err as Error).message,
+        error: cancelled ? null : failureText(err),
         finished_at: new Date().toISOString(),
       })
       .where(eq(demoRun.id, runId));
   }
+}
+
+/** The error and, for a failed query, the database's reason behind it. */
+function failureText(err: unknown): string {
+  const e = err as Error & { cause?: { message?: string } };
+  const cause = e.cause?.message;
+  return cause && !e.message.includes(cause) ? `${e.message}: ${cause}` : e.message;
 }
 
 /** Asks a running run to stop at its next batch. */
@@ -221,11 +241,9 @@ export async function requestCancel(runId: number): Promise<void> {
  * to remove what it wrote.
  */
 export async function markInterruptedRuns(): Promise<void> {
-  const run = await currentRun();
-  if (run && (run.status === "running" || run.status === "cancelling" || run.status === "removing")) {
-    await db
-      .update(demoRun)
-      .set({ status: "failed", stage: null, error: "interrupted by a restart", finished_at: new Date().toISOString() })
-      .where(eq(demoRun.id, run.id));
-  }
+  // Any purpose: a benchmark run cut off by the restart is just as stuck.
+  await db
+    .update(demoRun)
+    .set({ status: "failed", stage: null, error: "interrupted by a restart", finished_at: new Date().toISOString() })
+    .where(inArray(demoRun.status, ["running", "cancelling", "removing"]));
 }

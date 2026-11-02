@@ -110,19 +110,25 @@ function counterpartyIban(name: string): string {
  * Plans the household for `size`, ending on `today` (YYYY-MM-DD). The fixed
  * bookings (salaries, rent, advance payments …) come first; the variable ones
  * (groceries, fuel, pharmacy, online) fill up to the size's booking count.
+ *
+ * `accountSeries` numbers the accounts: 1 (the demo) gives 0000100001 …,
+ * another series gives other numbers and IBANs, so a benchmark household
+ * (demo/bench.ts) can stand next to the demo — IBANs are unique.
  */
-export function planHousehold(seed: number, size: DemoSize, today: string): HouseholdPlan {
+export function planHousehold(seed: number, size: DemoSize, today: string, accountSeries = 1): HouseholdPlan {
   const rnd = createRandom(seed);
   const { months, bookings: target } = SIZES[size];
   const [ty, tm] = today.split("-").map(Number);
   const startMonth = new Date(Date.UTC(ty, tm - 1 - (months - 1), 1));
   const from = iso(startMonth.getUTCFullYear(), startMonth.getUTCMonth(), 1);
 
+  const number = (n: number) => String(accountSeries * 100_000 + n).padStart(10, "0");
+  const account = (n: number) => ({ accountNumber: number(n), iban: demoIban(number(n)) });
   const accounts: PlannedAccount[] = [
-    { key: "giro_self", kind: "giro", label: "Girokonto Demo-Bank", accountNumber: "0000100001", iban: demoIban("0000100001"), owner: "self", openingCents: 250_000 },
-    { key: "giro_spouse", kind: "giro", label: "Girokonto Erika (Demo-Bank)", accountNumber: "0000100002", iban: demoIban("0000100002"), owner: "spouse", openingCents: 180_000 },
-    { key: "joint", kind: "giro", label: "Gemeinschaftskonto Demo-Bank", accountNumber: "0000100003", iban: demoIban("0000100003"), owner: "both", openingCents: 300_000 },
-    { key: "savings", kind: "tagesgeld", label: "Tagesgeld Demo-Bank", accountNumber: "0000100004", iban: demoIban("0000100004"), owner: "self", openingCents: 800_000 },
+    { key: "giro_self", kind: "giro", label: "Girokonto Demo-Bank", ...account(1), owner: "self", openingCents: 250_000 },
+    { key: "giro_spouse", kind: "giro", label: "Girokonto Erika (Demo-Bank)", ...account(2), owner: "spouse", openingCents: 180_000 },
+    { key: "joint", kind: "giro", label: "Gemeinschaftskonto Demo-Bank", ...account(3), owner: "both", openingCents: 300_000 },
+    { key: "savings", kind: "tagesgeld", label: "Tagesgeld Demo-Bank", ...account(4), owner: "self", openingCents: 800_000 },
   ];
   const ibanOf = (key: AccountKey) => accounts.find((a) => a.key === key)!.iban;
 

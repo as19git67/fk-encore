@@ -310,6 +310,20 @@ show something (stage 5).
    benchmark can call against the test database with `text: "template"`
    and a fixed seed. Agreed with the work on `assistent-wegfindung.md`
    before anything in `assistant/` changes.
+   *Done (demo side):* `demo/bench.ts` — `layBenchHousehold(ownerId,
+   { today, seed?, size?, depot?, photos? })` lays the household for any
+   owner (the benchmark account) into a system that holds data, with the
+   template texts, small by default, without depot and photos unless asked;
+   `removeBenchHousehold(runId)` takes it back. The run carries
+   `demo_run.purpose = 'benchmark'`, so `currentRun()` and Systemstatus never
+   see it as the demo and a demo can be loaded beside it. It gets its own
+   account numbers and IBANs (`accountSeries` of `planHousehold`) and its
+   own spouse address; one household per owner (the tariffs are the
+   owner's). A tag a run created is only removed with it while no other
+   booking uses it. A case computes its expected answer from the same plan
+   (`planHousehold`, `planEnergy`, `planDocuments` with the same seed and
+   today). Switching `assistant/bench/synthetic.ts` over to it, and cases
+   on it, is a separate change on the assistant side.
 
 ## Demo deployment
 

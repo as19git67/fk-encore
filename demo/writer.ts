@@ -43,6 +43,11 @@ export interface WriteHooks {
   progress?: (done: number, total: number) => Promise<void>;
   /** Checked between batches; true stops the run where it is. */
   cancelled?: () => Promise<boolean>;
+  /**
+   * The spouse's address. A benchmark run lays the household next to the
+   * demo, so it needs an address of its own (see `spouseEmailFor`).
+   */
+  spouseEmail?: string;
 }
 
 export interface WrittenHousehold {
@@ -69,12 +74,12 @@ function dedupeHash(runId: number, index: number, b: PlannedBooking): string {
   return crypto.createHash("sha256").update(`demo:${runId}:${index}:${b.date}:${b.cents}:${b.purpose}`).digest("hex");
 }
 
-async function createSpouse(runId: number): Promise<number> {
-  const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, DEMO_SPOUSE.email)).limit(1);
-  if (existing) throw new Error(`a user ${DEMO_SPOUSE.email} exists already — remove the earlier demo first`);
+async function createSpouse(runId: number, email: string): Promise<number> {
+  const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (existing) throw new Error(`a user ${email} exists already — remove the earlier demo first`);
   const [spouse] = await db
     .insert(users)
-    .values({ email: DEMO_SPOUSE.email, name: DEMO_SPOUSE.name, password_hash: NO_LOGIN_HASH })
+    .values({ email, name: DEMO_SPOUSE.name, password_hash: NO_LOGIN_HASH })
     .returning({ id: users.id });
   await register(runId, "users", [spouse.id]);
   const roleRows = await db.select({ id: roles.id }).from(roles).where(inArray(roles.name, MEMBER_ROLES));
@@ -157,7 +162,7 @@ async function createAccounts(runId: number, plan: HouseholdPlan, ownerId: numbe
 }
 
 export async function writeHousehold(runId: number, ownerId: number, plan: HouseholdPlan, hooks: WriteHooks = {}): Promise<WrittenHousehold> {
-  const spouseId = await createSpouse(runId);
+  const spouseId = await createSpouse(runId, hooks.spouseEmail ?? DEMO_SPOUSE.email);
   await createHouseholdPersons(runId, ownerId, spouseId, Number(plan.from.slice(0, 4)));
   const accounts = await createAccounts(runId, plan, ownerId, spouseId);
 

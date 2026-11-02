@@ -5231,6 +5231,12 @@ export const demoRun = pgTable("demo_run", {
   seed: integer("seed").notNull(),
   size: text("size").$type<"full" | "small">().notNull(),
   text_source: text("text_source").$type<"template" | "llm">().notNull(),
+  /**
+   * `demo`: the demo of the system, on Admin › Systemstatus. `benchmark`: a
+   * household laid for the assistant benchmark (demo/bench.ts), owned by its
+   * account, never shown or counted as the demo.
+   */
+  purpose: text("purpose").$type<"demo" | "benchmark">().notNull().default("demo"),
   status: text("status")
     .$type<"running" | "cancelling" | "done" | "failed" | "cancelled" | "removing" | "removed">()
     .notNull(),
