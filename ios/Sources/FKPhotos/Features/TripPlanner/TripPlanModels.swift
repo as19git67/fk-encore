@@ -147,6 +147,23 @@ struct TripLeg: Codable, Identifiable, Sendable {
         return dayIndex == days.count - 1 && fix.isDeparture && fix.startMinutes == endMinutes
     }
 
+    /// Is this fixed time the departure a journey without times wrote
+    /// on the last day of a stay (`journeyDeparture` in aboard.ts): a
+    /// departure at the base itself? The same rule the server uses to
+    /// find it again.
+    func isJourneyDeparture(_ fix: TripFixpoint, dayIndex: Int) -> Bool {
+        guard !isTransit, dayIndex == days.count - 1, fix.isDeparture else { return false }
+        return fix.lat == anchor.lat && fix.lon == anchor.lon
+    }
+
+    /// Where in the itinerary the time this fixed time shows is changed
+    /// (stage 3), or nil for an ordinary appointment the day owns.
+    func itineraryFocus(for fix: TripFixpoint, dayIndex: Int) -> TripItineraryFocus? {
+        if isJourneyEnd(fix, dayIndex: dayIndex) { return .leg(id) }
+        if isJourneyDeparture(fix, dayIndex: dayIndex) { return .journeyAfter(legId: id) }
+        return nil
+    }
+
     /// What a day of the journey holds, in one line (§22.7, §21.3):
     /// from the departure on the first day, up to the arrival on the
     /// last, the whole day in between — or both on a day's journey.

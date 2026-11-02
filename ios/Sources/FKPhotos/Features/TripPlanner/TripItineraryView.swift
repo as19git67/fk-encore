@@ -20,8 +20,9 @@ import SwiftUI
 /// re-planned — before writing anything.
 struct TripItineraryView: View {
     @State var viewModel: TripPlannerViewModel
-    /// A leg to open unfolded, when the screen was entered from one.
-    var focusLegId: Int? = nil
+    /// What to open unfolded, when the screen was entered from a leg or
+    /// from one of the times a journey wrote on a day.
+    var focus: TripItineraryFocus? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -708,7 +709,7 @@ struct TripItineraryView: View {
             let loaded = TripItineraryDraft(response: response)
             draft = loaded
             original = loaded
-            if let focusLegId, let item = loaded.items.first(where: { $0.legId == focusLegId }) {
+            if let focus, let item = loaded.item(focused: focus) {
                 expanded.insert(item.id)
             }
             if viewModel.plan == nil { await viewModel.load() }

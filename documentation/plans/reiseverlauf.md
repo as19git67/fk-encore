@@ -1,6 +1,6 @@
 # Itinerary: creating a trip and its stops on one screen
 
-Status: stage 1 (backend) done, PR #1800. Stage 2 (iOS itinerary screen) done. Stages 3–4 open.
+Status: stage 1 (backend) done, PR #1800. Stage 2 (iOS itinerary screen) done, PR #1802. Stage 3 (entry and day) done. Stage 4 open.
 
 ## The problem
 
@@ -138,6 +138,20 @@ lands in the itinerary. Settings lose "Wie?" and "Ankunft am ersten Tag".
 The ends of a journey in the day's frame band link into the itinerary
 with that journey unfolded. `TripLegSheet` loses the push links to the
 old editors.
+
+Done as described, with these particulars: `TripNewPlanView` keeps
+name, lodging, length and date and says in its footer that the way
+there, the arrival and the mode are the itinerary's; the draft's mode
+stays at its default and is changed there. `TripPlanSettingsView` keeps
+pace and group under "Tempo und Begleitung" and no longer patches the
+first leg. The way into the itinerary from a day is
+`TripItineraryFocus` (`.leg`, `.journeyBefore`, `.journeyAfter`),
+resolved by `TripItineraryDraft.item(focused:)`: the departure a
+journey wrote on a stay's last day (`TripLeg.isJourneyDeparture`, the
+same rule as `isJourneyDeparture` in `aboard.ts`), both ends of a
+transit leg, and the "Ankunft" in the first day's header open the
+itinerary with that journey unfolded. The multi-city fields of
+`TripNewPlanDraft` are dead code until stage 4.
 
 ## Stage 4 — clean-up
 

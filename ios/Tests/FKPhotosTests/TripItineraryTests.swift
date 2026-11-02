@@ -40,6 +40,45 @@ final class TripItineraryTests: XCTestCase {
         ])
     }
 
+    // MARK: - Where the screen opens (stage 3)
+
+    func testALegOpensOnItsOwnCard() {
+        let draft = twoStays
+        XCTAssertEqual(draft.item(focused: .leg(2))?.legId, 2)
+        XCTAssertEqual(draft.item(focused: .leg(3))?.legId, 3)
+        XCTAssertNil(draft.item(focused: .leg(99)))
+    }
+
+    func testTheArrivalAtAStayIsTheJourneyBeforeIt() {
+        let draft = twoStays
+        // The journey into B is the transit leg between the two stays.
+        XCTAssertEqual(draft.item(focused: .journeyBefore(legId: 3))?.legId, 2)
+        // The departure from A is that same journey.
+        XCTAssertEqual(draft.item(focused: .journeyAfter(legId: 1))?.legId, 2)
+    }
+
+    func testWithoutAJourneyBeforeTheFirstStayItsOwnCardOpens() {
+        // No home known: nothing leads into the first stay, so its
+        // arrival is the stay's own and the stay unfolds.
+        let draft = twoStays
+        XCTAssertEqual(draft.item(focused: .journeyBefore(legId: 1))?.legId, 1)
+        XCTAssertEqual(draft.item(focused: .journeyAfter(legId: 3))?.legId, 3)
+    }
+
+    func testWithHomeTheWayThereAndBackAreJourneys() {
+        let draft = TripItineraryDraft(startDate: nil, hasHome: true, items: [
+            stay("Ort A", days: 3, legId: 1),
+            journey(legId: nil),
+            stay("Ort B", days: 2, legId: 3),
+        ])
+        let outward = draft.item(focused: .journeyBefore(legId: 1))
+        XCTAssertEqual(outward?.kind, .journey)
+        XCTAssertEqual(outward?.id, draft.items.first?.id)
+        let homeward = draft.item(focused: .journeyAfter(legId: 3))
+        XCTAssertEqual(homeward?.kind, .journey)
+        XCTAssertEqual(homeward?.id, draft.items.last?.id)
+    }
+
     // MARK: - Dates
 
     func testTheDatesFollowFromTheFirstDayAndTheLengths() {
@@ -261,5 +300,63 @@ final class TripItineraryTests: XCTestCase {
         draft.startDate = nil
         let undated = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.request)) as? [String: Any])
         XCTAssertTrue(undated["startDate"] is NSNull)
+    }
+}
+
+/// Which of a day's fixed times are a journey's, and so lead into the
+/// itinerary rather than offering an x (stage 3).
+final class TripLegItineraryFocusTests: XCTestCase {
+
+    private let base = TripCoordinate(lat: 48.37, lon: 10.9)
+
+    private func fix(_ kind: String, at minutes: Int, lat: Double? = nil, lon: Double? = nil) -> TripFixpoint {
+        TripFixpoint(rowId: minutes, kind: kind, label: kind, startMinutes: minutes, durationMinutes: 0,
+                     travelMinutes: 0, bufferMinutes: 0, lat: lat, lon: lon)
+    }
+
+    private func day(_ index: Int, _ fixpoints: [TripFixpoint]) -> TripDay {
+        TripDay(id: index + 10, dayIndex: index, detailed: true, bufferReason: nil, blocks: [], fixpoints: fixpoints)
+    }
+
+    private func leg(days: [TripDay], transit: (depart: Int, end: Int)? = nil) -> TripLeg {
+        var leg = TripLeg(
+            id: 7, position: 0, title: "Ort", anchor: base, anchorRadiusM: nil, anchorLabel: nil,
+            arriveMinutes: nil, mode: "car", regionDb: "nom_x", awaitingRegion: nil, startDate: nil,
+            days: days, pool: [],
+        )
+        if let transit {
+            leg.kind = "transit"
+            leg.departMinutes = transit.depart
+            leg.endMinutes = transit.end
+        }
+        return leg
+    }
+
+    func testTheDepartureAJourneyWroteOnAStaysLastDayLeadsToThatJourney() {
+        // `journeyDeparture` writes the departure at the base itself.
+        let departure = fix("departure", at: 600, lat: base.lat, lon: base.lon)
+        let leg = leg(days: [day(0, []), day(1, [departure])])
+        XCTAssertTrue(leg.isJourneyDeparture(departure, dayIndex: 1))
+        XCTAssertEqual(leg.itineraryFocus(for: departure, dayIndex: 1), .journeyAfter(legId: 7))
+        // Not on an earlier day: a departure there is the day's own.
+        XCTAssertNil(leg.itineraryFocus(for: departure, dayIndex: 0))
+    }
+
+    func testADepartureSomewhereElseIsTheDaysOwn() {
+        // A train from the station, entered by hand (§4.4): the x stays.
+        let train = fix("departure", at: 1120, lat: base.lat + 0.02, lon: base.lon)
+        let leg = leg(days: [day(0, [train])])
+        XCTAssertNil(leg.itineraryFocus(for: train, dayIndex: 0))
+        XCTAssertNil(leg.itineraryFocus(for: fix("appointment", at: 600, lat: base.lat, lon: base.lon), dayIndex: 0))
+    }
+
+    func testATransitLegsEndsLeadToItsOwnCard() {
+        let depart = fix("appointment", at: 600)
+        let arrive = fix("departure", at: 960)
+        let leg = leg(days: [day(0, [depart]), day(1, [arrive])], transit: (600, 960))
+        XCTAssertEqual(leg.itineraryFocus(for: depart, dayIndex: 0), .leg(7))
+        XCTAssertEqual(leg.itineraryFocus(for: arrive, dayIndex: 1), .leg(7))
+        // A journey's own anchor is never read as a stay's departure.
+        XCTAssertFalse(leg.isJourneyDeparture(fix("departure", at: 960, lat: base.lat, lon: base.lon), dayIndex: 1))
     }
 }

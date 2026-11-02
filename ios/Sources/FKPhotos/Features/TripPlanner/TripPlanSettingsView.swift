@@ -28,14 +28,11 @@ struct TripPlanSettingsView: View {
         planId: Int,
         constraints: TripConstraints?,
         title: String?,
-        mode: TripTransportMode = .foot,
         startDate: String? = nil,
-        firstLeg: TripLeg? = nil,
         onSaved: @escaping () -> Void,
     ) {
         _model = State(initialValue: TripPlanSettingsViewModel(
-            planId: planId, constraints: constraints, title: title,
-            mode: mode, startDate: startDate, firstLeg: firstLeg))
+            planId: planId, constraints: constraints, title: title, startDate: startDate))
         self.planId = planId
         self.onSaved = onSaved
     }
@@ -52,29 +49,19 @@ struct TripPlanSettingsView: View {
                     DatePicker("Erster Tag", selection: $model.startDate,
                                displayedComponents: .date)
                 }
-                Toggle("Ankunft ist bekannt", isOn: Binding(
-                    get: { model.arriveAt != nil },
-                    set: { on in
-                        model.arriveAt = on
-                            ? (model.arriveAt ?? TripPlanSettingsViewModel.defaultArrival)
-                            : nil
-                    },
-                ))
-                if let arrival = model.arriveAt {
-                    DatePicker("Ankunft am ersten Tag", selection: Binding(
-                        get: { arrival }, set: { model.arriveAt = $0 }),
-                               displayedComponents: .hourAndMinute)
-                }
             } header: {
                 Text("Wann?")
             } footer: {
+                // The arrival and the ways between the stays are the
+                // itinerary's (stage 3): one place for the chain, not
+                // a second copy of its first time here.
                 Text("Mit einem Datum weiß die App, welcher Tag heute ist, und öffnet die "
                      + "Reise unterwegs auf dem richtigen Tag. Die Tage werden dabei nicht "
-                     + "neu geplant.")
+                     + "neu geplant. Ankunft, Abfahrt und Verkehrsmittel stehen im "
+                     + "Reiseverlauf.")
             }
 
             Section {
-                TripTransportModePicker(mode: $model.mode)
                 Picker("Tempo", selection: $model.pace) {
                     ForEach(TripPace.allCases, id: \.self) { pace in
                         Text(pace.label).tag(pace)
@@ -83,14 +70,11 @@ struct TripPlanSettingsView: View {
                 Toggle("Mit Kind", isOn: $model.withChildren)
                 Toggle("Schlecht zu Fuß", isOn: $model.limitedMobility)
             } header: {
-                Text("Wie?")
+                Text("Tempo und Begleitung")
             } footer: {
-                Text("Gilt für alle Städte der Reise; eine einzelne Stadt bekommt ihr eigenes "
-                     + "Verkehrsmittel im Reiseverlauf. Verkehrsmittel, Tempo und Begleitung "
-                     + "bestimmen, wie viel an einem Tag Platz hat. Sichern plant die Tage neu.\n\n"
-                     + "„\(TripTransportMode.transit.label)“ ist der Regelfall in einer Stadt: "
-                     + "kurze Wege werden gelaufen, lange gefahren — je Weg das, was schneller "
-                     + "ist.")
+                Text("Gilt für die ganze Reise und bestimmt, wie viel an einem Tag Platz hat. "
+                     + "Sichern plant die Tage neu. Wie ihr vor Ort unterwegs seid, steht je "
+                     + "Aufenthalt im Reiseverlauf.")
             }
 
             Section {
@@ -183,18 +167,11 @@ final class TripPlanSettingsViewModel {
     var pace: TripPace
     var withChildren: Bool
     var limitedMobility: Bool
-    /// How the group gets around. One value for the whole trip, which
-    /// is the question this screen asks; a trip through three cities
-    /// with three different modes is a leg editor, and that is a
-    /// different screen.
-    var mode: TripTransportMode
     /// Whether the trip has dates at all. A trip planned for "some
     /// time" is a real plan, and turning this off says so rather than
     /// leaving a date nobody meant.
     var isDated: Bool
     var startDate: Date
-    /// When the group arrives on the first day, nil when unknown.
-    var arriveAt: Date?
 
     private(set) var isSaving = false
     /// Set when the server refused to re-plan because the trip has
@@ -221,35 +198,15 @@ final class TripPlanSettingsViewModel {
     /// What the trip's dates were when the screen opened, so a save
     /// that did not touch them sends nothing at all.
     private let originalStartDate: String?
-    private let originalMode: TripTransportMode
-    /// What was stored for first-leg arrival (formatted as "HH:MM"), for
-    /// change detection so an untouched arrival is never patched.
-    private let originalArriveAt: String?
-    /// First leg metadata needed when patching arrival.
-    private let firstLegPosition: Int
-
-    /// Default arrival time (14:00) when "Ankunft ist bekannt" is toggled on.
-    static var defaultArrival: Date {
-        Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
-    }
-
-    private static func time(fromMinutes minutes: Int) -> Date? {
-        Calendar.current.date(
-            bySettingHour: (minutes / 60) % 24, minute: minutes % 60, second: 0, of: Date())
-    }
 
     init(
         planId: Int,
         constraints: TripConstraints?,
         title: String?,
-        mode: TripTransportMode = .foot,
         startDate: String? = nil,
-        firstLeg: TripLeg? = nil,
     ) {
         self.planId = planId
         self.title = title ?? ""
-        self.mode = mode
-        self.originalMode = mode
         self.originalStartDate = startDate
         self.isDated = startDate != nil
         self.startDate = startDate.flatMap { TripCalendar.date(fromIsoDay: $0) } ?? Date()
@@ -268,9 +225,6 @@ final class TripPlanSettingsViewModel {
         // be worse than one that cannot show it.
         self.interests = Set(constraints?.interests ?? [])
         self.maxWalkMinutes = constraints?.maxWalkMinutes
-        self.firstLegPosition = firstLeg?.position ?? 0
-        self.originalArriveAt = firstLeg?.arriveMinutes.map(TripClock.format(_:))
-        self.arriveAt = firstLeg?.arriveMinutes.flatMap(Self.time(fromMinutes:))
     }
 
     /// What to send for the dates: nothing, a date, or an explicit
@@ -304,8 +258,7 @@ final class TripPlanSettingsViewModel {
         }
     }
 
-    /// Answers true when the plan was saved (and, if the arrival changed,
-    /// the first leg was patched too).
+    /// Answers true when the plan was saved.
     func save(replan: Bool) async -> Bool {
         isSaving = true
         defer { isSaving = false }
@@ -316,7 +269,6 @@ final class TripPlanSettingsViewModel {
             let categories: [String]?
             let interests: [String]?
             let maxWalkMinutes: Int?
-            let mode: String?
             /// Double optional on purpose: absent leaves the dates
             /// alone, explicit null takes them off. `encodeIfPresent`
             /// tells the two apart; a plain optional could not.
@@ -326,7 +278,7 @@ final class TripPlanSettingsViewModel {
 
             enum CodingKeys: String, CodingKey {
                 case title, pace, group, categories, interests, maxWalkMinutes
-                case mode, startDate, replan
+                case startDate, replan
             }
 
             func encode(to encoder: Encoder) throws {
@@ -337,7 +289,6 @@ final class TripPlanSettingsViewModel {
                 try c.encodeIfPresent(categories, forKey: .categories)
                 try c.encodeIfPresent(interests, forKey: .interests)
                 try c.encodeIfPresent(maxWalkMinutes, forKey: .maxWalkMinutes)
-                try c.encodeIfPresent(mode, forKey: .mode)
                 if let startDate { try c.encode(startDate, forKey: .startDate) }
                 try c.encode(replan, forKey: .replan)
             }
@@ -353,10 +304,6 @@ final class TripPlanSettingsViewModel {
                     categories: categories,
                     interests: Array(interests).sorted(),
                     maxWalkMinutes: maxWalkMinutes,
-                    // Only when it actually changed: sending the mode
-                    // unchanged would turn every save into a re-plan,
-                    // and a re-plan is refused once a day has begun.
-                    mode: mode == originalMode ? nil : mode.rawValue,
                     startDate: dateChange,
                     replan: replan,
                 ))
@@ -375,33 +322,6 @@ final class TripPlanSettingsViewModel {
             }
             return false
         }
-
-        // Patch first-leg arrival separately when it changed — the
-        // settings endpoint does not own per-leg arrival times.
-        let wantedArrival: String? = arriveAt.map(TripDraftTransfer.time(_:))
-        if wantedArrival != originalArriveAt {
-            // Only the arrival. The title used to ride along from
-            // whatever it was when the sheet opened, and put a renamed
-            // leg back to its old name.
-            struct LegBody: Encodable {
-                let arriveAt: String??
-                enum CodingKeys: String, CodingKey { case arriveAt }
-                func encode(to encoder: Encoder) throws {
-                    var c = encoder.container(keyedBy: CodingKeys.self)
-                    if let arriveAt { try c.encode(arriveAt, forKey: .arriveAt) }
-                }
-            }
-            struct LegResponse: Decodable { let plan: TripPlan }
-            do {
-                let _: LegResponse = try await APIClient.shared.patch(
-                    "/trip-planner/plans/\(planId)/legs/\(firstLegPosition)",
-                    body: LegBody(arriveAt: .some(wantedArrival)))
-            } catch {
-                errorMessage = TripErrorText.describe(error)
-                return false
-            }
-        }
-
         return true
     }
 }
