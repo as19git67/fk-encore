@@ -48,6 +48,16 @@ enum TripCalendar {
         return calendar.dateComponents([.day], from: start, to: end).day
     }
 
+    /// A day and a time of day as one moment on the given clock.
+    static func moment(_ isoDay: String, minutes: Int, timeZone: TimeZone = .current) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = isoDay.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return calendar.date(from: DateComponents(
+            year: parts[0], month: parts[1], day: parts[2], hour: minutes / 60, minute: minutes % 60))
+    }
+
     /// `startDate` plus `offset` days.
     static func day(_ day: String, plus offset: Int, timeZone: TimeZone = .current) -> String? {
         guard let date = date(fromIsoDay: day, timeZone: timeZone) else { return nil }

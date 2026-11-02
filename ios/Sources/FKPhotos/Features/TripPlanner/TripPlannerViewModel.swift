@@ -87,6 +87,10 @@ final class TripPlannerViewModel {
     /// them.
     var legIndex: Int = 0
     var dayIndex: Int = 0
+    /// Set by "Neue Reise" right before the plan opens, read once by the
+    /// day screen: the trip was just made and its itinerary is the
+    /// screen to land on, not a day of its only stay.
+    var wantsItinerary = false
 
     /// Set once the screen has landed on a day of its own accord, so
     /// that reloading after a change does not yank the traveller back

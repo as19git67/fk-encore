@@ -83,6 +83,7 @@ struct TripPlansListView: View {
         .sheet(isPresented: $isCreating) {
             NavigationStack {
                 TripNewPlanView { planId in
+                    TripPlannerViewModel.shared(for: planId).wantsItinerary = true
                     openPlanId = planId
                 }
             }

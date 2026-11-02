@@ -821,17 +821,26 @@ struct TripPlanDayView: View {
             .buttonStyle(.plain)
             .padding(.leading, 8)
             .padding(.trailing, 12)
-            .accessibilityLabel("Etappen")
-            .accessibilityHint("Etappen und Weiterreisen hinzufügen, ändern, entfernen")
+            .accessibilityLabel("Reiseverlauf")
+            .accessibilityHint("Aufenthalte und Weiterreisen hinzufügen, ändern, entfernen")
         }
         .padding(.vertical, 6)
         .background(.bar)
         .sheet(isPresented: $editingStructure) {
             NavigationStack {
-                TripLegsView(viewModel: viewModel)
+                TripItineraryView(viewModel: viewModel)
             }
-            // A list, not a form: nothing typed is lost on a swipe, and
-            // the forms it opens guard themselves.
+            // The itinerary guards itself: a swipe asks once something
+            // was typed.
+        }
+        // "Neue Reise" lands here first (plan, "Decisions taken"): the
+        // trip exists with its first stay, and the rest of the chain is
+        // made where it is changed later.
+        .onAppear {
+            if viewModel.wantsItinerary {
+                viewModel.wantsItinerary = false
+                editingStructure = true
+            }
         }
     }
 
