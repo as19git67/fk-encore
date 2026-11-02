@@ -11,7 +11,7 @@
  * demo makes the system untouched again.
  */
 
-import { desc, inArray, not, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, not, sql } from "drizzle-orm";
 import db from "../db/database";
 import { demoRun } from "../db/schema";
 
@@ -80,12 +80,15 @@ export async function isUntouched(): Promise<boolean> {
 
 export type DemoRunRow = typeof demoRun.$inferSelect;
 
-/** The newest run that has not been removed: the demo the system holds, or the one being loaded. */
+/**
+ * The newest demo run that has not been removed: the demo the system holds,
+ * or the one being loaded. Benchmark runs (demo/bench.ts) are never it.
+ */
 export async function currentRun(): Promise<DemoRunRow | null> {
   const [row] = await db
     .select()
     .from(demoRun)
-    .where(not(inArray(demoRun.status, ["removed"])))
+    .where(and(eq(demoRun.purpose, "demo"), not(inArray(demoRun.status, ["removed"]))))
     .orderBy(desc(demoRun.id))
     .limit(1);
   return row ?? null;
