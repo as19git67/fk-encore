@@ -46,6 +46,7 @@ import { chat } from "./llm-client";
 import { BENCH_CASES, BENCH_TODAY, type BenchCase } from "./bench/cases";
 import { BenchCancelledError, runBenchCase, type CaseRun } from "./bench/runner";
 import { summarize, type BenchSummary } from "./bench/scoring";
+import { forgetModelGate } from "./model-gate";
 import {
   benchAccountUser,
   ensureBenchAccount,
@@ -483,6 +484,8 @@ async function execute(runId: number, cases: BenchCase[], device: BenchDevice, s
         updated_at: sql`now()`,
       })
       .where(eq(assistantBenchmarkRun.id, runId));
+    // A new measurement may change whether the loaded model takes questions.
+    forgetModelGate();
   };
 
   try {
