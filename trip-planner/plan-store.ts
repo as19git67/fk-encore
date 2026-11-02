@@ -472,6 +472,33 @@ export async function shiftLegsFrom(
 }
 
 /**
+ * Put every remaining leg of a plan on the position the itinerary gives
+ * it (documentation/plans/reiseverlauf.md).
+ *
+ * The caller lists every leg the plan still has; the gaps between the
+ * numbers are where new legs are inserted afterwards. Two steps, for
+ * the reason `shiftLegsFrom` gives: parking every row on a negative
+ * number first leaves no moment in which two legs share a place,
+ * whatever order the moves come in.
+ */
+export async function setLegPositions(
+  planId: number,
+  positions: ReadonlyArray<{ legId: number; position: number }>,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db
+    .update(tripPlanLegs)
+    .set({ position: sql`-(${tripPlanLegs.position} + 1)` })
+    .where(eq(tripPlanLegs.plan_id, planId));
+  for (const { legId, position } of positions) {
+    await db
+      .update(tripPlanLegs)
+      .set({ position })
+      .where(and(eq(tripPlanLegs.id, legId), eq(tripPlanLegs.plan_id, planId)));
+  }
+}
+
+/**
  * Remove a leg and close the gap it leaves.
  *
  * Days, blocks, stops, fixpoints and the pool go with it by cascade.
