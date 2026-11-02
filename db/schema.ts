@@ -2048,6 +2048,30 @@ export const photoFeedEntries = pgTable(
   ]
 );
 
+// A shared album as one card in the content feed (migration 0288): sharing an
+// album with someone is one act, so the new participant sees the album once
+// instead of every photo in it. One row per (viewer, album), same monotonic
+// sort key as photo_feed_entries; the read merges both streams.
+export const albumFeedEntries = pgTable(
+  "album_feed_entries",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    album_id: integer("album_id")
+      .notNull()
+      .references(() => albums.id, { onDelete: "cascade" }),
+    last_activity_at: timestamp("last_activity_at", { mode: "string", withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.user_id, table.album_id] }),
+    index("idx_album_feed_entries_timeline").on(
+      table.user_id,
+      table.last_activity_at,
+    ),
+  ]
+);
+
 // ========== Photo Comments ==========
 //
 // Audience for a comment is everyone with access to the photo — owner

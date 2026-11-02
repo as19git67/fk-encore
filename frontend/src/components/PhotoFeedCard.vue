@@ -7,6 +7,7 @@ import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import { getPhotoUrl, updatePhotoDescription } from '../api/photos'
 import { listCommentsPage, createComment, type PhotoComment } from '../api/reactions'
 import type { FeedPhotoItem } from '../api/photoFeed'
+import { feedInitials, formatFeedTime } from '../utils/feedTime'
 import { useScreenOrientation } from '../composables/useScreenOrientation'
 import { orientationOfDimensions, pickSideForScreen } from '../utils/orientationVariants'
 
@@ -160,25 +161,9 @@ function onImageLoad(e: Event) {
 
 const ownerName = computed(() => props.item.owner.name ?? 'Jemand')
 
-const initials = computed(() => {
-  const n = ownerName.value.trim()
-  if (!n) return '?'
-  const parts = n.split(/\s+/)
-  return (parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '')
-})
+const initials = computed(() => feedInitials(ownerName.value))
 
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const diffMin = Math.round((Date.now() - d.getTime()) / 60_000)
-  if (diffMin < 1) return 'gerade eben'
-  if (diffMin < 60) return `vor ${diffMin} min`
-  const diffH = Math.round(diffMin / 60)
-  if (diffH < 24) return `vor ${diffH} h`
-  const diffD = Math.round(diffH / 24)
-  if (diffD < 7) return `vor ${diffD} Tg.`
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
-}
+const formatTime = formatFeedTime
 
 async function submitComment() {
   const body = draft.value.trim()

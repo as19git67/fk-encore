@@ -10,6 +10,7 @@ import {
   albumUserSettings,
   photoComments,
   photoFeedEntries,
+  albumFeedEntries,
   users,
 } from "../db/schema";
 import { createUserLogic } from "../user/user.service";
@@ -30,6 +31,7 @@ describe("content feed: photo_feed_entries maintenance", () => {
 
   beforeEach(async () => {
     await db.delete(photoFeedEntries);
+    await db.delete(albumFeedEntries);
     await db.delete(photoComments);
     await db.delete(albumPhotos);
     await db.delete(albumShares);
@@ -57,6 +59,13 @@ describe("content feed: photo_feed_entries maintenance", () => {
     return rows.map((r) => r.user_id).sort((a, b) => a - b);
   }
 
+  async function albumCardsOf(albumId: number): Promise<number[]> {
+    const rows = await db.select({ user_id: albumFeedEntries.user_id })
+      .from(albumFeedEntries)
+      .where(eq(albumFeedEntries.album_id, albumId));
+    return rows.map((r) => r.user_id).sort((a, b) => a - b);
+  }
+
   async function entryTs(userId: number, photoId: number): Promise<string | null> {
     const rows = await db.select({ ts: photoFeedEntries.last_activity_at })
       .from(photoFeedEntries)
@@ -71,38 +80,56 @@ describe("content feed: photo_feed_entries maintenance", () => {
       .where(and(eq(photoFeedEntries.user_id, userId), eq(photoFeedEntries.photo_id, photoId)));
   }
 
-  it("adds an entry for the owner when a photo enters their own album", async () => {
+  /// An album nobody else sees is the owner's archive: filing photos there is
+  /// not news, so it never fills the owner's own feed.
+  it("adds no entry when a photo enters an album shared with nobody", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    expect(await viewersOf(p.id)).toEqual([]);
+
+    // Nor do a favourite, a comment or a description there.
+    await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
+    await createComment(owner.id, p.id, "nur für mich", album.id);
+    await photo.updatePhotoDescriptionLogic(owner.id, p.id, "Archiv");
+    expect(await viewersOf(p.id)).toEqual([]);
+  });
+
+  it("adds an entry for the owner when a photo enters their shared album", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     expect(await viewersOf(p.id)).toEqual([]); // not in any album yet
 
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    expect(await viewersOf(p.id)).toEqual([owner.id]);
+    expect(await viewersOf(p.id)).toEqual([owner.id, friend.id].sort((a, b) => a - b));
   });
 
-  it("fans out to all participants when the album is shared, and seeds on share", async () => {
+  /// Sharing an album is one act: the new participant gets the album once, as
+  /// a card, not every photo in it as a post of its own.
+  it("gives the new participant an album card on share instead of its photos", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
 
-    // Sharing seeds the existing photo for the new participant.
     await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
-    expect(await viewersOf(p.id)).toEqual([owner.id, friend.id].sort((a, b) => a - b));
+    expect(await viewersOf(p.id)).toEqual([]);
+    expect(await albumCardsOf(album.id)).toEqual([friend.id]);
 
-    // A subsequent add bumps both participants.
+    // A subsequent add bumps both participants, one photo at a time.
     const p2 = await uploadPhoto(owner.id, "b.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p2.id });
     expect(await viewersOf(p2.id)).toEqual([owner.id, friend.id].sort((a, b) => a - b));
 
     // The stranger never participates.
-    expect(await viewersOf(p.id)).not.toContain(stranger.id);
+    expect(await viewersOf(p2.id)).not.toContain(stranger.id);
   });
 
   it("bumps participants on a comment (viewer-accurate)", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     await backdate(owner.id, p.id);
     await backdate(friend.id, p.id);
@@ -115,9 +142,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
 
   it("bumps every viewer when a description is written", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     await backdate(owner.id, p.id);
     await backdate(friend.id, p.id);
@@ -132,6 +159,7 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// re-floating a photo because its description was deleted reads as a bug.
   it("does NOT bump when a description is cleared", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
     await photo.updatePhotoDescriptionLogic(owner.id, p.id, "Weg damit");
@@ -149,9 +177,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// the same words again is not writing a description.
   it("does NOT bump when the same description is saved again", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     await photo.updatePhotoDescriptionLogic(owner.id, p.id, "Abendessen am See");
 
     const old = "2000-01-01T00:00:00.000Z";
@@ -170,9 +198,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// the photo does not climb back to the top of everyone's feed for it.
   it("does NOT bump when a device sync carries a caption across", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     // The phone identifies the photo by its pixel hash on a metadata-only sync.
     await db.update(photos).set({ image_data_hash: "pixelhash-1" }).where(eq(photos.id, p.id));
@@ -200,9 +228,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// description, an album. Correcting a capture date is bookkeeping.
   it("does NOT bump on a corrected capture date", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     const old = "2000-01-01T00:00:00.000Z";
     await backdate(owner.id, p.id, old);
@@ -218,9 +246,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// back when the feed carried every album photo regardless.
   it("bumps every viewer on a favourite", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     const old = "2000-01-01T00:00:00.000Z";
     await backdate(owner.id, p.id, old);
@@ -237,9 +265,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// the same photo re-floats it for everybody, over and over.
   it("does NOT bump when a second person likes an already-liked photo", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
 
@@ -257,9 +285,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// first like is what counts, not the first like ever.
   it("bumps again once the earlier favourite is gone", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
     await photo.updatePhotoCurationLogic(owner.id, p.id, "visible");
@@ -276,6 +304,7 @@ describe("content feed: photo_feed_entries maintenance", () => {
   /// Changing your mind must not re-float the photo a second time.
   it("does NOT bump on un-favouriting", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
     await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
@@ -290,6 +319,7 @@ describe("content feed: photo_feed_entries maintenance", () => {
 
   it("bumps are monotonic — never lowered", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
 
@@ -304,9 +334,9 @@ describe("content feed: photo_feed_entries maintenance", () => {
 
   it("removing a photo from its only album drops all entries", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     expect((await viewersOf(p.id)).length).toBe(2);
 
     await photo.batchUpdateAlbumPhotosLogic(owner.id, { albumIds: [album.id], photoIds: [p.id], action: "remove" });
@@ -315,46 +345,73 @@ describe("content feed: photo_feed_entries maintenance", () => {
 
   it("removing from one album keeps the entry when the photo lives in another shared album", async () => {
     const a1 = await photo.createAlbumLogic(owner.id, { name: "A1" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: friend.id, accessLevel: "read" });
     const a2 = await photo.createAlbumLogic(owner.id, { name: "A2" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a2.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: a1.id, photoId: p.id });
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: a2.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: friend.id, accessLevel: "read" });
-    await photo.shareAlbumLogic(owner.id, { albumId: a2.id, userId: friend.id, accessLevel: "read" });
 
     await photo.batchUpdateAlbumPhotosLogic(owner.id, { albumIds: [a1.id], photoIds: [p.id], action: "remove" });
     // Still visible via a2 for both.
     expect(await viewersOf(p.id)).toEqual([owner.id, friend.id].sort((a, b) => a - b));
   });
 
-  it("unsharing drops the unshared user's entry but keeps it if seen via another album", async () => {
+  it("unsharing drops the unshared user's entry and card but keeps it if seen via another album", async () => {
     const a1 = await photo.createAlbumLogic(owner.id, { name: "A1" });
+    const a2 = await photo.createAlbumLogic(owner.id, { name: "A2" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: friend.id, accessLevel: "read" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a2.id, userId: friend.id, accessLevel: "read" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: stranger.id, accessLevel: "read" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    const only1 = await uploadPhoto(owner.id, "b.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: a1.id, photoId: p.id });
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: a2.id, photoId: p.id });
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: a1.id, photoId: only1.id });
+
+    await photo.removeAlbumShareLogic(owner.id, { albumId: a1.id, userId: friend.id });
+    // Friend still sees p via a2, but no longer the photo only in a1.
+    expect(await viewersOf(p.id)).toContain(friend.id);
+    expect(await viewersOf(only1.id)).toEqual([owner.id, stranger.id].sort((a, b) => a - b));
+    expect(await albumCardsOf(a1.id)).toEqual([stranger.id]);
+  });
+
+  /// When the last share goes, the album is the owner's archive again.
+  it("unsharing the last participant takes the album's photos out of the owner's feed", async () => {
+    const a1 = await photo.createAlbumLogic(owner.id, { name: "A1" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: a1.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: friend.id, accessLevel: "read" });
     expect((await viewersOf(p.id)).length).toBe(2);
 
     await photo.removeAlbumShareLogic(owner.id, { albumId: a1.id, userId: friend.id });
-    expect(await viewersOf(p.id)).toEqual([owner.id]);
+    expect(await viewersOf(p.id)).toEqual([]);
+    expect(await albumCardsOf(a1.id)).toEqual([]);
   });
 
-  it("leaving an album drops the leaver's entries", async () => {
+  it("leaving an album drops the leaver's entries and card", async () => {
     const a1 = await photo.createAlbumLogic(owner.id, { name: "A1" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: friend.id, accessLevel: "read" });
+    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: stranger.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: a1.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: a1.id, userId: friend.id, accessLevel: "read" });
 
     await photo.leaveAlbumLogic(friend.id, a1.id);
-    expect(await viewersOf(p.id)).toEqual([owner.id]);
+    expect(await viewersOf(p.id)).toEqual([owner.id, stranger.id].sort((a, b) => a - b));
+    expect(await albumCardsOf(a1.id)).toEqual([stranger.id]);
+
+    // The last one out leaves the owner with a private album again.
+    await photo.leaveAlbumLogic(stranger.id, a1.id);
+    expect(await viewersOf(p.id)).toEqual([]);
   });
 
   it("deleting an album with multiple photos drops all entries and is idempotent", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p1 = await uploadPhoto(owner.id, "a.jpg");
     const p2 = await uploadPhoto(owner.id, "b.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p1.id });
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p2.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     expect((await viewersOf(p1.id)).length).toBe(2);
     expect((await viewersOf(p2.id)).length).toBe(2);
 

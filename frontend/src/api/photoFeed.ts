@@ -38,8 +38,32 @@ export interface FeedPhotoItem {
   counterpart?: OrientationCounterpart | null
 }
 
+/**
+ * An album shared with the viewer, shown once as a card that opens the album
+ * instead of every photo in it as a post of its own.
+ */
+export interface FeedAlbumItem {
+  albumId: number
+  name: string
+  description: string | null
+  lastActivityAt: string
+  owner: { id: number; name: string | null }
+  /** Who shared it with the viewer (the inviter, else the owner). */
+  sharedBy: { id: number; name: string | null }
+  accessLevel: string
+  photoCount: number
+  /** Up to four photos: the cover first, then the newest added. */
+  previews: { photoId: number; filename: string; width: number | null; height: number | null }[]
+}
+
 export interface ListPhotoFeedResponse {
   items: FeedPhotoItem[]
+  /**
+   * Album cards in the same stretch of the timeline as `items` (newer than the
+   * request's cursor, not older than the page's last photo; on the last page
+   * everything left). Merged into the stream by `lastActivityAt`.
+   */
+  albums?: FeedAlbumItem[]
   nextCursor: PhotoFeedCursor | null
 }
 

@@ -8,8 +8,17 @@
  * an activity in album X only bumps the photo for participants of X.
  *
  * Visibility rule: a photo is in user A's feed iff it lives in at least one
- * album A participates in (album owner OR a row in album_shares). Guests
- * (public-link access) are deliberately excluded.
+ * *shared* album A participates in (album owner OR a row in album_shares,
+ * and the album is shared with at least one other user). An album nobody
+ * else sees is the owner's own archive: putting photos there is filing, not
+ * news, so it never fills the owner's feed. Guests (public-link access) are
+ * deliberately excluded, and a public link alone does not make an album
+ * "shared" here — guests have no feed.
+ *
+ * Sharing an album with someone is one act, so it is one entry: the new
+ * participant gets the album as a card (`album_feed_entries`) that opens the
+ * album, not every photo in it as a post of its own. Photos added to the
+ * album later appear one by one as usual.
  *
  * All functions are best-effort: a feed-bookkeeping failure must never break
  * the underlying photo/album operation, mirroring `emitFeedItem`. Bumps are
@@ -23,7 +32,7 @@
 
 import db from "../db/database";
 import { sql, and, eq, inArray } from "drizzle-orm";
-import { photoFeedEntries } from "../db/schema";
+import { albumFeedEntries, photoFeedEntries } from "../db/schema";
 import { realtime } from "~encore/clients";
 
 const TAG = "[content-feed]";
@@ -33,9 +42,10 @@ function nowIso(): string {
 }
 
 /**
- * Users participating in ≥1 album that contains the photo — the
- * authoritative viewer set for the content feed. Album owners plus every
- * user the containing albums were shared with.
+ * Users participating in ≥1 shared album that contains the photo — the
+ * authoritative viewer set for the content feed. Owners of shared albums plus
+ * every user the containing albums were shared with. An owner whose album is
+ * shared with nobody does not count (see the visibility rule above).
  */
 export async function feedViewersForPhoto(photoId: number): Promise<number[]> {
   const res = await db.execute<{ user_id: number }>(sql`
@@ -44,6 +54,7 @@ export async function feedViewersForPhoto(photoId: number): Promise<number[]> {
       FROM albums a
       JOIN album_photos ap ON ap.album_id = a.id
       WHERE ap.photo_id = ${photoId}
+        AND EXISTS (SELECT 1 FROM album_shares sx WHERE sx.album_id = a.id)
       UNION
       SELECT s.user_id
       FROM album_shares s
@@ -54,10 +65,15 @@ export async function feedViewersForPhoto(photoId: number): Promise<number[]> {
   return res.rows.map((r) => r.user_id);
 }
 
-/** Participants (owner + shared users) of a single album. */
+/**
+ * Participants (owner + shared users) of a single album — none when the album
+ * is shared with nobody, so activity in a private album stays out of the feed.
+ */
 async function albumParticipants(albumId: number): Promise<number[]> {
   const res = await db.execute<{ user_id: number }>(sql`
-    SELECT user_id FROM albums WHERE id = ${albumId}
+    SELECT user_id FROM albums
+    WHERE id = ${albumId}
+      AND EXISTS (SELECT 1 FROM album_shares sx WHERE sx.album_id = ${albumId})
     UNION
     SELECT user_id FROM album_shares WHERE album_id = ${albumId}
   `);
@@ -236,61 +252,57 @@ export async function onFavorite(
 }
 
 /**
- * An album was shared with a new user → that user gains every photo in the
- * album. Seed entries with each photo's existing activity (added_at, latest
- * comment in this album, metadata timestamp).
+ * An album was shared with a new user → that user gets the album as one
+ * card at the top of their feed, opened from there, instead of every photo
+ * in it as a post of its own. Re-sharing an album the user already has a card
+ * for floats the card again (monotonic, like every bump).
  */
-export async function onAlbumShared(albumId: number, userId: number): Promise<void> {
+export async function onAlbumShared(
+  albumId: number,
+  userId: number,
+  ts: string = nowIso(),
+): Promise<void> {
   try {
     await db.execute(sql`
-      INSERT INTO photo_feed_entries (user_id, photo_id, last_activity_at)
-      SELECT ${userId}, ap.photo_id,
-        GREATEST(
-          ap.added_at,
-          (SELECT MAX(GREATEST(pc.created_at, COALESCE(pc.edited_at, pc.created_at)))
-             FROM photo_comments pc
-            WHERE pc.photo_id = ap.photo_id AND pc.album_id = ${albumId}),
-          COALESCE(p.updated_at, p.created_at, NOW())
-        )
-      FROM album_photos ap
-      JOIN photos p ON p.id = ap.photo_id
-      WHERE ap.album_id = ${albumId}
-      ON CONFLICT (user_id, photo_id)
+      INSERT INTO album_feed_entries (user_id, album_id, last_activity_at)
+      VALUES (${userId}, ${albumId}, ${ts}::timestamptz)
+      ON CONFLICT (user_id, album_id)
       DO UPDATE SET last_activity_at =
-        GREATEST(photo_feed_entries.last_activity_at, EXCLUDED.last_activity_at)
+        GREATEST(album_feed_entries.last_activity_at, EXCLUDED.last_activity_at)
     `);
+    await realtime.publishEvent({
+      userIds: [String(userId)],
+      channel: "feed",
+      type: "album.shared",
+      resourceId: String(albumId),
+      payload: { albumId },
+    }).catch(() => {
+      // ignore — the next manual load will pick the card up
+    });
   } catch (err) {
     console.warn(`${TAG} onAlbumShared failed album=${albumId} user=${userId}: ${(err as Error).message}`);
   }
 }
 
 /**
- * A user lost a share (unshare / leave) → drop their entries for any of the
- * given photos they can no longer see via another album. Delete-only.
+ * A user is no longer a participant of an album (unshared / left) → drop
+ * the album's card from their feed.
  */
-export async function reconcileUserPhotos(userId: number, photoIds: number[]): Promise<void> {
-  if (photoIds.length === 0) return;
+export async function dropAlbumCard(userId: number, albumId: number): Promise<void> {
   try {
-    await db.delete(photoFeedEntries).where(and(
-      eq(photoFeedEntries.user_id, userId),
-      inArray(photoFeedEntries.photo_id, photoIds),
-      sql`NOT EXISTS (
-        SELECT 1 FROM album_photos ap
-        JOIN albums a ON a.id = ap.album_id
-        WHERE ap.photo_id = ${photoFeedEntries.photo_id}
-          AND (a.user_id = ${userId}
-               OR EXISTS (SELECT 1 FROM album_shares s
-                           WHERE s.album_id = a.id AND s.user_id = ${userId}))
-      )`,
+    await db.delete(albumFeedEntries).where(and(
+      eq(albumFeedEntries.user_id, userId),
+      eq(albumFeedEntries.album_id, albumId),
     ));
   } catch (err) {
-    console.warn(`${TAG} reconcileUserPhotos failed user=${userId}: ${(err as Error).message}`);
+    console.warn(`${TAG} dropAlbumCard failed album=${albumId} user=${userId}: ${(err as Error).message}`);
   }
 }
 
 /**
- * Photos' album membership changed (removed from album / album deleted) →
- * drop entries for any viewer who can no longer see them. Delete-only.
+ * Photos' album membership changed (removed from album / album deleted /
+ * album no longer shared with anyone) → drop entries for any viewer who can
+ * no longer see them via a shared album. Delete-only.
  */
 export async function reconcilePhotoViewers(photoIds: number[]): Promise<void> {
   if (photoIds.length === 0) return;
@@ -304,6 +316,7 @@ export async function reconcilePhotoViewers(photoIds: number[]): Promise<void> {
           AND (a.user_id = ${photoFeedEntries.user_id}
                OR EXISTS (SELECT 1 FROM album_shares s
                            WHERE s.album_id = a.id AND s.user_id = ${photoFeedEntries.user_id}))
+          AND EXISTS (SELECT 1 FROM album_shares sx WHERE sx.album_id = a.id)
       )`,
     ));
   } catch (err) {

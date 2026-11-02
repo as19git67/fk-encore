@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import PhotoFeedCard from '../components/PhotoFeedCard.vue'
+import FeedAlbumCard from '../components/FeedAlbumCard.vue'
 import RecapFeedStrip from '../components/RecapFeedStrip.vue'
 import FeedFullscreen from '../components/FeedFullscreen.vue'
 import FeedUploadAlbumDialog from '../components/FeedUploadAlbumDialog.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
-import { listPhotoFeed, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
+import { listPhotoFeed, type FeedAlbumItem, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
 import { updatePhotoCuration, listAlbums, uploadPhoto, batchUpdateAlbumPhotos, computeFileHash, checkPhotoHash } from '../api/photos'
 import {
   writableAlbums,
@@ -19,7 +20,7 @@ import {
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useAuthStore } from '../stores/auth'
 import { usePhotoFeedStore } from '../stores/photoFeed'
-import { isAtOrBeforeFeedCursor, mergePhotoFeedItems } from '../utils/photoFeedMerge'
+import { feedStream, isAtOrBeforeFeedCursor, mergeFeedAlbums, mergePhotoFeedItems } from '../utils/photoFeedMerge'
 
 const auth = useAuthStore()
 const feedCache = usePhotoFeedStore()
@@ -27,6 +28,10 @@ const feedCache = usePhotoFeedStore()
 const PAGE_SIZE = 12
 
 const items = ref<FeedPhotoItem[]>([])
+// Albums shared with the viewer, one card each; slotted into the photo
+// stream by time (see feedStream).
+const albums = ref<FeedAlbumItem[]>([])
+const stream = computed(() => feedStream(items.value, albums.value))
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref('')
@@ -155,8 +160,9 @@ async function doUpload(albumIds: number[]) {
     error.value = `${failed} von ${files.length} Foto(s) konnten nicht verarbeitet werden.`
   }
   if (photoIds.length > 0) {
-    // The added photos bump our own feed server-side; reload and go up to
-    // show them — the user just uploaded, so that is what they are waiting for.
+    // The added photos bump our own feed server-side (in shared albums; a
+    // private album stays out of the feed); reload and go up to show them —
+    // the user just uploaded, so that is what they are waiting for.
     await refreshAndJumpToTop()
   }
 }
@@ -171,6 +177,7 @@ async function loadInitial() {
   try {
     const res = await listPhotoFeed({ limit: PAGE_SIZE })
     items.value = res.items
+    albums.value = res.albums ?? []
     nextCursor.value = res.nextCursor
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden des Feeds'
@@ -189,6 +196,7 @@ async function loadMore() {
       cursorId: nextCursor.value.id,
     })
     items.value.push(...res.items)
+    albums.value = mergeFeedAlbums(albums.value, res.albums ?? [])
     nextCursor.value = res.nextCursor
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden weiterer Beiträge'
@@ -246,6 +254,7 @@ async function refresh() {
           ? { ts: items.value[0].lastActivityAt, id: items.value[0].photoId }
           : null
         const freshItems: FeedPhotoItem[] = []
+        const freshAlbums: FeedAlbumItem[] = []
         let cursor: PhotoFeedCursor | null = null
         let firstPageCursor: PhotoFeedCursor | null = null
 
@@ -256,6 +265,7 @@ async function refresh() {
             cursorId: cursor?.id,
           })
           freshItems.push(...res.items)
+          freshAlbums.push(...(res.albums ?? []))
           if (cursor === null) firstPageCursor = res.nextCursor
 
           const reachedBoundary = boundary !== null
@@ -266,6 +276,7 @@ async function refresh() {
 
         const wasEmpty = items.value.length === 0
         items.value = mergePhotoFeedItems(items.value, freshItems)
+        albums.value = mergeFeedAlbums(albums.value, freshAlbums)
         if (wasEmpty) nextCursor.value = firstPageCursor
         hasNew.value = false
         error.value = ''
@@ -297,11 +308,16 @@ async function refreshAndJumpToTop() {
 useRealtimeEvent('feed', 'photo.changed', () => {
   hasNew.value = true
 })
+// An album shared with the viewer arrives as a card — same pill.
+useRealtimeEvent('feed', 'album.shared', () => {
+  hasNew.value = true
+})
 
 onMounted(async () => {
   if (feedCache.hasCache) {
     // Returning from an album: restore the exact list + scroll position.
     items.value = feedCache.items
+    albums.value = feedCache.albums
     nextCursor.value = feedCache.nextCursor
     loading.value = false
     await nextTick()
@@ -323,6 +339,7 @@ onMounted(async () => {
 onBeforeRouteLeave(() => {
   feedCache.save({
     items: items.value,
+    albums: albums.value,
     nextCursor: nextCursor.value,
     scrollY: window.scrollY,
   })
@@ -373,21 +390,23 @@ onBeforeUnmount(() => {
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Feed wird geladen…
     </div>
-    <div v-else-if="items.length === 0" class="info-text">
-      Noch keine Beiträge. Sobald Fotos zu deinen Alben hinzugefügt oder
-      kommentiert werden, erscheinen sie hier — chronologisch, neueste zuerst.
+    <div v-else-if="stream.length === 0" class="info-text">
+      Noch keine Beiträge. Sobald Fotos zu geteilten Alben hinzugefügt oder
+      dort kommentiert werden, erscheinen sie hier — chronologisch, neueste zuerst.
     </div>
 
     <div v-else class="stream">
-      <PhotoFeedCard
-        v-for="item in items"
-        :key="item.photoId"
-        :item="item"
-        :current-user-id="auth.user?.id ?? null"
-        @like="onLike"
-        @hide="onHide"
-        @open="openFullscreen"
-      />
+      <template v-for="entry in stream" :key="entry.key">
+        <FeedAlbumCard v-if="entry.kind === 'album'" :album="entry.album" />
+        <PhotoFeedCard
+          v-else
+          :item="entry.item"
+          :current-user-id="auth.user?.id ?? null"
+          @like="onLike"
+          @hide="onHide"
+          @open="openFullscreen"
+        />
+      </template>
     </div>
 
     <div ref="sentinel" class="sentinel" />

@@ -10,12 +10,18 @@ import {
   albumUserSettings,
   photoComments,
   photoFeedEntries,
+  albumFeedEntries,
   users,
 } from "../db/schema";
 import { createUserLogic } from "../user/user.service";
 import * as photo from "../photo/photo.service";
 import { createComment } from "../photo/reactions.service";
 import { listPhotoFeedForUser } from "./feed.service";
+
+async function setCardActivity(userId: number, albumId: number, iso: string) {
+  await db.update(albumFeedEntries).set({ last_activity_at: iso })
+    .where(and(eq(albumFeedEntries.user_id, userId), eq(albumFeedEntries.album_id, albumId)));
+}
 
 /**
  * Etappe 3: content-feed read endpoint (listPhotoFeedForUser). Covers
@@ -29,6 +35,7 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   beforeEach(async () => {
     await db.delete(photoFeedEntries);
+    await db.delete(albumFeedEntries);
     await db.delete(photoComments);
     await db.delete(albumPhotos);
     await db.delete(albumShares);
@@ -56,6 +63,7 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   it("orders strictly by last_activity_at (newest first)", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p1 = await uploadPhoto(owner.id, "1.jpg");
     const p2 = await uploadPhoto(owner.id, "2.jpg");
     const p3 = await uploadPhoto(owner.id, "3.jpg");
@@ -73,6 +81,7 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   it("only shows photos the viewer can see", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "1.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
 
@@ -85,9 +94,9 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   it("reports the global like count and likedByMe", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "1.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     // Both favorite it → global count 2.
     await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
@@ -105,9 +114,9 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   it("includes comment count and the latest comment preview", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p = await uploadPhoto(owner.id, "1.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
-    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
 
     await createComment(owner.id, p.id, "erster", album.id);
     await createComment(friend.id, p.id, "zweiter und neuester", album.id);
@@ -120,6 +129,7 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   it("paginates via keyset cursor", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const ps = [];
     for (let i = 0; i < 3; i++) ps.push(await uploadPhoto(owner.id, `${i}.jpg`));
     for (const p of ps) await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
@@ -142,6 +152,7 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   it("orders a multi-photo upload by capture time (newest capture first)", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p1 = await uploadPhoto(owner.id, "1.jpg");
     const p2 = await uploadPhoto(owner.id, "2.jpg");
     const p3 = await uploadPhoto(owner.id, "3.jpg");
@@ -164,6 +175,7 @@ describe("content feed: listPhotoFeedForUser", () => {
 
   it("excludes photos the viewer has hidden", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
     const p1 = await uploadPhoto(owner.id, "1.jpg");
     const p2 = await uploadPhoto(owner.id, "2.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p1.id });
@@ -173,5 +185,71 @@ describe("content feed: listPhotoFeedForUser", () => {
 
     const res = await listPhotoFeedForUser(owner.id, {});
     expect(res.items.map((i) => i.photoId)).toEqual([p2.id]);
+  });
+
+  /// A shared album reaches the recipient as one card, not as its photos.
+  it("shows a newly shared album as one card with previews", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "Urlaub" });
+    const p1 = await uploadPhoto(owner.id, "1.jpg");
+    const p2 = await uploadPhoto(owner.id, "2.jpg");
+    const p3 = await uploadPhoto(owner.id, "3.jpg");
+    for (const p of [p1, p2, p3]) await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await db.update(albums).set({ cover_photo_id: p1.id }).where(eq(albums.id, album.id));
+
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
+
+    const res = await listPhotoFeedForUser(friend.id, {});
+    expect(res.items).toEqual([]);
+    expect(res.albums).toHaveLength(1);
+    const card = res.albums[0]!;
+    expect(card.albumId).toBe(album.id);
+    expect(card.name).toBe("Urlaub");
+    expect(card.photoCount).toBe(3);
+    expect(card.sharedBy).toEqual({ id: owner.id, name: "Owner" });
+    expect(card.previews.map((x) => x.photoId)[0]).toBe(p1.id); // cover first
+    expect(card.previews).toHaveLength(3);
+
+    // The owner gets no card for sharing their own album.
+    expect((await listPhotoFeedForUser(owner.id, {})).albums).toEqual([]);
+
+    // Gone once the friend leaves.
+    await photo.leaveAlbumLogic(friend.id, album.id);
+    expect((await listPhotoFeedForUser(friend.id, {})).albums).toEqual([]);
+  });
+
+  /// Cards ride along with the photo page whose stretch of time they fall
+  /// into, so a client can merge both by lastActivityAt — each card exactly once.
+  it("returns each album card with the page whose time window it falls into", async () => {
+    const shared = await photo.createAlbumLogic(owner.id, { name: "S" });
+    await photo.shareAlbumLogic(owner.id, { albumId: shared.id, userId: friend.id, accessLevel: "read" });
+    const ps = [];
+    for (let i = 0; i < 4; i++) ps.push(await uploadPhoto(owner.id, `${i}.jpg`));
+    for (const p of ps) await photo.addPhotoToAlbumLogic(owner.id, { albumId: shared.id, photoId: p.id });
+    await setActivity(friend.id, ps[0].id, "2021-01-01T00:00:00.000Z");
+    await setActivity(friend.id, ps[1].id, "2022-01-01T00:00:00.000Z");
+    await setActivity(friend.id, ps[2].id, "2023-01-01T00:00:00.000Z");
+    await setActivity(friend.id, ps[3].id, "2024-01-01T00:00:00.000Z");
+
+    const cards = [];
+    for (const [name, ts] of [["new", "2025-01-01"], ["mid", "2022-06-01"], ["old", "2020-01-01"]] as const) {
+      const a = await photo.createAlbumLogic(owner.id, { name });
+      await photo.shareAlbumLogic(owner.id, { albumId: a.id, userId: friend.id, accessLevel: "read" });
+      await setCardActivity(friend.id, a.id, `${ts}T00:00:00.000Z`);
+      cards.push(a.id);
+    }
+    // The "shared" album's own card is far in the past for this test.
+    await setCardActivity(friend.id, shared.id, "2019-01-01T00:00:00.000Z");
+
+    const page1 = await listPhotoFeedForUser(friend.id, { limit: 2 });
+    expect(page1.items.map((i) => i.photoId)).toEqual([ps[3].id, ps[2].id]);
+    expect(page1.albums.map((a) => a.albumId)).toEqual([cards[0]]);
+
+    const page2 = await listPhotoFeedForUser(friend.id, {
+      limit: 2, cursorTs: page1.nextCursor!.ts, cursorId: page1.nextCursor!.id,
+    });
+    expect(page2.items.map((i) => i.photoId)).toEqual([ps[1].id, ps[0].id]);
+    // The last page carries every card older than the cursor, newest first.
+    expect(page2.nextCursor).toBeNull();
+    expect(page2.albums.map((a) => a.albumId)).toEqual([cards[1], cards[2], shared.id]);
   });
 });

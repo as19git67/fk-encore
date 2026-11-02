@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { FeedPhotoItem, PhotoFeedCursor } from '../api/photoFeed'
+import type { FeedAlbumItem, FeedPhotoItem, PhotoFeedCursor } from '../api/photoFeed'
 
 /**
  * Caches the content feed's loaded items, pagination cursor and scroll
@@ -14,16 +14,19 @@ import type { FeedPhotoItem, PhotoFeedCursor } from '../api/photoFeed'
  */
 export const usePhotoFeedStore = defineStore('photoFeed', () => {
   const items = ref<FeedPhotoItem[]>([])
+  const albums = ref<FeedAlbumItem[]>([])
   const nextCursor = ref<PhotoFeedCursor | null>(null)
   const scrollY = ref(0)
   const hasCache = ref(false)
 
   function save(snapshot: {
     items: FeedPhotoItem[]
+    albums: FeedAlbumItem[]
     nextCursor: PhotoFeedCursor | null
     scrollY: number
   }) {
     items.value = snapshot.items
+    albums.value = snapshot.albums
     nextCursor.value = snapshot.nextCursor
     scrollY.value = snapshot.scrollY
     hasCache.value = true
@@ -31,10 +34,11 @@ export const usePhotoFeedStore = defineStore('photoFeed', () => {
 
   function clear() {
     items.value = []
+    albums.value = []
     nextCursor.value = null
     scrollY.value = 0
     hasCache.value = false
   }
 
-  return { items, nextCursor, scrollY, hasCache, save, clear }
+  return { items, albums, nextCursor, scrollY, hasCache, save, clear }
 })

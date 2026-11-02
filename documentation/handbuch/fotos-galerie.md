@@ -67,8 +67,12 @@ leitet auf den Feed um.
 
 ## STR: Feed (`/fotos/stream`)
 
-Chronologische Karten der neuesten Fotos aller sichtbaren Uploads, je
-Karte Bild, Uploader, Datum, Beschreibung, Gefällt-mir, Kommentare. Oben
+Chronologische Karten der Fotos aus geteilten Alben, je Karte Bild,
+Uploader, Datum, Beschreibung, Gefällt-mir, Kommentare. Ein Foto kommt nach
+oben, wenn es in ein geteiltes Album gelegt, favorisiert, kommentiert oder
+beschrieben wird. Alben, die mit niemandem geteilt sind, bleiben draußen —
+auch für ihren Eigentümer. Ein Album, das jemand mit dir teilt, erscheint
+einmal als Albumkarte (`FOT-STR-08`), nicht mit jedem seiner Fotos. Oben
 „Hochladen“ und, sobald neue Fotos eingetroffen sind, der Knopf „Neue
 Aktivität“.
 
@@ -92,9 +96,10 @@ Aktivität“.
   1. Knopf drücken, Dateien wählen (mehrere erlaubt).
   2. Dialog „In welche Alben aufnehmen?“: Alben suchen und anhaken, dann
      „Hochladen“.
-- **Ergebnis:** Der Knopf heißt „Lädt…“, danach erscheinen die Fotos als
-  Karten und in den gewählten Alben; der Scan (Metadaten, Gesichter,
-  Einbettung) läuft im Hintergrund.
+- **Ergebnis:** Der Knopf heißt „Lädt…“, danach liegen die Fotos in den
+  gewählten Alben und erscheinen als Karten, soweit ein gewähltes Album
+  geteilt ist; der Scan (Metadaten, Gesichter, Einbettung) läuft im
+  Hintergrund.
 - **Fehler und Grenzfälle:** Ein schon vorhandenes Foto (gleicher
   Inhalt) wird übersprungen und gemeldet.
 - **Test:** –
@@ -160,6 +165,19 @@ Aktivität“.
   2. „Öffnen in…“: Galerie oder eines der Alben, in denen das Foto liegt.
 - **Ergebnis:** Zielseite mit dem Foto im Blick.
 - **Fehler und Grenzfälle:** keine
+- **Test:** –
+
+### FOT-STR-08 Geteiltes Album öffnen
+
+- **Wo:** Albumkarte „… hat ein Album mit dir geteilt“ im Feed
+- **Recht:** `photos.view`
+- **Vorbedingung:** jemand hat ein Album mit dir geteilt
+- **Schritte:**
+  1. Bilder der Albumkarte anklicken.
+- **Ergebnis:** Die Albumseite öffnet sich; „Zurück“ führt an dieselbe
+  Stelle im Feed.
+- **Fehler und Grenzfälle:** Wird die Freigabe zurückgenommen oder
+  verlässt du das Album, verschwindet die Karte.
 - **Test:** –
 
 ---
@@ -854,6 +872,7 @@ Kommentar, Foto in Album, Freigabe).
 | FOT-STR-05 | Beschreibung an der Karte | upload | – |
 | FOT-STR-06 | Ausblenden | delete | – |
 | FOT-STR-07 | Vollbild und „Öffnen in…“ | view | – |
+| FOT-STR-08 | Geteiltes Album öffnen | view | – |
 | FOT-GAL-01 | Suchen in natürlicher Sprache | view | – |
 | FOT-GAL-02 | Filtern | view | – |
 | FOT-GAL-03 | Sortieren | view | – |
