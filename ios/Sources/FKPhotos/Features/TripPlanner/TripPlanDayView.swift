@@ -35,6 +35,11 @@ struct TripPlanDayView: View {
     @State private var moving: TripStopMove?
     /// Open while a hard time is being written (§4.4).
     @State private var addingFixpoint = false
+    /// The spot the hard time is for, when it was opened from a spot
+    /// ("Fester Termin …").
+    @State private var fixpointPreset: TripSpotChoice?
+    /// The appointment whose spot is being chosen (§4.4).
+    @State private var linkingFixpoint: TripFixpoint?
     @State private var settingDayAnchor = false
     /// The block being split (§6.5), while its sheet is open.
     @State private var splitting: TripSplitTarget?
@@ -195,11 +200,18 @@ struct TripPlanDayView: View {
                 await viewModel.setDayAnchor(draft)
             }
         }
-        .sheet(isPresented: $addingFixpoint) {
+        .sheet(isPresented: $addingFixpoint, onDismiss: { fixpointPreset = nil }) {
             TripFixpointSheet(
                 dayLabel: dayLabel(),
+                spots: viewModel.leg?.spotChoices ?? [],
+                presetSpot: fixpointPreset,
             ) { draft in
                 await viewModel.addFixpoint(draft)
+            }
+        }
+        .sheet(item: $linkingFixpoint) { fix in
+            TripFixpointSpotSheet(fixpoint: fix, spots: viewModel.leg?.spotChoices ?? []) { ref in
+                await viewModel.setFixpointSpot(fix, spotRef: ref)
             }
         }
         .sheet(item: $moving) { move in
@@ -962,6 +974,13 @@ struct TripPlanDayView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        // The spot the ticket is for (§4.4): it stands at
+                        // this hour in the day, and nowhere else.
+                        if fix.isVisit, let ref = fix.spotRef {
+                            Label(viewModel.leg?.spotName(ref) ?? "Spot", systemImage: "mappin")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         // And what its place does, which is more than
                         // decoration: it moved the day's route (§4.4).
                         if let effect = placeEffect(fix) {
@@ -987,6 +1006,19 @@ struct TripPlanDayView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityLabel("Weiterreise im Reiseverlauf ändern")
                     } else {
+                        // Which spot the appointment is for — the ticket
+                        // for a sight, chosen out of the trip's spots.
+                        if !fix.isDeparture {
+                            Button { linkingFixpoint = fix } label: {
+                                Image(systemName: fix.isVisit ? "mappin.circle.fill" : "mappin.circle")
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(fix.isVisit ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            .accessibilityLabel(fix.isVisit ? "Spot des Termins ändern" : "Termin mit Spot verknüpfen")
+                            .disabled(viewModel.isSavingFixpoint)
+                        }
                         removeButton("\(fix.label) entfernen") {
                             Task { await viewModel.removeFixpoint(fix) }
                         }
@@ -1226,9 +1258,15 @@ struct TripPlanDayView: View {
         viewModel.day?.fixpoints.first { $0.framesBlock && $0.blockId == block.id }
     }
 
-    /// True for the stop a frame placed: the block is at its hour for it.
+    /// True for the stop a frame or a booked visit placed: it is at that
+    /// hour because of the fixed time.
     private func isFramed(_ stop: TripStop) -> Bool {
-        viewModel.day?.fixpoints.contains { $0.framesBlock && $0.spotRef == stop.osmRef } ?? false
+        visit(of: stop) != nil
+    }
+
+    /// The fixed time that holds this stop in place, if any (§4.4, §7.3).
+    private func visit(of stop: TripStop) -> TripFixpoint? {
+        viewModel.day?.fixpoints.first { $0.holdsSpot && $0.spotRef == stop.osmRef }
     }
 
     /// How far a stop has pushed the day back (§4.7).
@@ -1595,12 +1633,27 @@ struct TripPlanDayView: View {
 
         // A stop that is done stays where it was seen (§5): the server
         // refuses the move, so it is not offered.
-        if status != .done, let blockId = viewModel.day?.blocks.first(where: {
+        // Nor one a fixed time holds at its hour (§4.4, §7.3): the server
+        // refuses that move, and the way is to change the fixed time.
+        if status != .done, !isFramed(stop), let blockId = viewModel.day?.blocks.first(where: {
             $0.stops.contains { $0.rowId == stop.rowId }
         })?.id {
             actions.append(TripPinSheetAction(id: "move", title: "In einen anderen Block",
                                               systemImage: "calendar") {
                 later { moving = TripStopMove(stop: stop, blockId: blockId) }
+            })
+        }
+        // A ticket for this spot (§4.4): the spot then stands at that
+        // hour, and on no other day. Not for one a fixed time already
+        // holds — that one is changed in the band of fixed times.
+        if status == .planned && !isFramed(stop) {
+            actions.append(TripPinSheetAction(id: "appointment", title: "Fester Termin …",
+                                              systemImage: "calendar.badge.clock") {
+                later {
+                    fixpointPreset = TripSpotChoice(osmRef: stop.osmRef, name: stop.displayName,
+                                                    plannedOn: nil)
+                    addingFixpoint = true
+                }
             })
         }
         actions.append(TripPinSheetAction(id: "pin",
@@ -1701,6 +1754,12 @@ struct TripPlanDayView: View {
                              ?? TripClock.duration(stop.dwellMinutes))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        // The ticket this stop is here for (§4.4).
+                        if let fix = visit(of: stop), fix.isVisit {
+                            Label("Termin \(fix.startsAt)", systemImage: "calendar.badge.clock")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         // What the route takes in on its way (§4.7).
                         // Said on the stop, because it is the answer to
                         // "why is the viewpoint not in the plan?".

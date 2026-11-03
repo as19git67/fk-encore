@@ -33,9 +33,10 @@ import { dayWalkOf, dayWalkOfStored } from "./day-walk";
 import {
   budgetsForSolver,
   framedSpotsOf,
+  hostVisits,
   placeFramed,
+  reservedSpotRefs,
   withoutFramed,
-  type FramedSpot,
 } from "./frame-spots";
 import {
   chargeTheWayBack,
@@ -248,6 +249,11 @@ export interface FixpointRequest {
    * for the sheet, which makes ordinary appointments.
    */
   blockId?: string;
+  /**
+   * The spot this fixpoint is for. With `blockId` the frame of an
+   * evening outing; without, a booked visit — the ticket for the tower
+   * at 14:00, whose stop the plan puts at that hour and nowhere else.
+   */
   spotRef?: string;
 }
 
@@ -977,7 +983,7 @@ export const detailTripDay = api(
     // The stored blocks already carry the frame's budget; the solver is
     // shown a framed block as full, and the frame's spot goes in after
     // it (`frame-spots.ts`).
-    const framedToday = framedSpotsOf(day.fixpoints);
+    const framedToday = framedSpotsOf(day.fixpoints, day.blocks);
     const shapes = day.blocks.map((b) => ({
       id: b.id,
       label: b.label,
@@ -1206,6 +1212,16 @@ export const moveTripStop = api(
       throw APIError.failedPrecondition(
         `„${frame.label}" ist als Abendtermin eingeplant — der Block gehört zu diesem Spot. `
           + "Erst den Termin am Block entfernen, dann verschieben.",
+      );
+    }
+    // A booked visit's stop sits at the appointment's hour; another
+    // block or another day would be a second time for one ticket.
+    const visit = sourceDay.fixpoints.find((f) => f.spotRef === osmRef && !f.blockId);
+    const hostBlock = sourceDay.blocks.find((b) => b.stops.some((s) => s.rowId === req.stopId))!;
+    if (visit && (sourceDay.id !== targetDay.id || req.toBlockId !== hostBlock.id)) {
+      throw APIError.failedPrecondition(
+        `„${moving.title ?? moving.name ?? "Dieser Spot"}" gehört zum Termin „${visit.label}" um `
+          + `${formatMinutesOfDay(visit.startMinutes)}. Erst den Termin ändern, dann verschieben.`,
       );
     }
 
@@ -1611,11 +1627,10 @@ async function planLeg(
   // Taken out before the first day is solved: otherwise the Tuesday
   // afternoon plans the terrace first, and the Thursday evening it was
   // accepted for finds it gone — or plans it a second time.
-  const framedByDay = new Map<number, FramedSpot[]>();
-  for (const [dayIndex, list] of fixpointsByDay) {
-    framedByDay.set(dayIndex, framedSpotsOf(list.map((f) => f.fixpoint)));
-  }
-  const reserved = new Set([...framedByDay.values()].flat().map((f) => f.osmRef));
+  // A booked visit (an appointment naming its spot) reserves its spot
+  // the same way: the ticket for the tower is the tower's one place in
+  // the trip.
+  const reserved = reservedSpotRefs([...fixpointsByDay.values()].flat().map((f) => f.fixpoint));
   available = available.filter((c) => !reserved.has(c.osmRef));
   // One search per destination, however many days go there. Two days in
   // Florence are two days in the same city.
@@ -1683,7 +1698,10 @@ async function planLeg(
       ? endDayAt(framed.blocks, dayTrip.returnMinutes, dayTrip.label)
       : chargeTheWayBack(framed.blocks, dayTrip?.travelMinutes ?? 0, dayTrip?.label ?? null);
     for (const d of home.dropped) dropped.push({ ...d, dayIndex });
-    framed.blocks = home.blocks;
+    // A booked visit happens inside a block, not in the gap the
+    // scheduler cut for it: the block after it opens up to hold the way
+    // there and the visit (`frame-spots.ts`).
+    framed.blocks = hostVisits(home.blocks, fixpoints.map((f) => f.fixpoint));
 
     // Beyond the detail horizon the day keeps its frame and stays
     // empty: the pool *is* the plan at trip resolution (§4.3), and
@@ -1736,7 +1754,7 @@ async function planLeg(
     const ends = dayEnds(locatedFixpoints(framed.fixpoints, fixpoints), framed.blocks);
     const walk = dayWalkOf(here, null, ends);
     // A framed block is its spot's and nobody else's (`frame-spots.ts`).
-    const framedToday = framedByDay.get(dayIndex) ?? [];
+    const framedToday = framedSpotsOf(fixpoints.map((f) => f.fixpoint), framed.blocks);
     const solved = solveDay({
       anchor: here,
       start: walk.start,
@@ -1946,7 +1964,9 @@ function groupFixpoints(
       // Both or neither: a frame without a spot is a block with no
       // budget and nothing in it.
       blockId: req.blockId && req.spotRef ? req.blockId : null,
-      spotRef: req.blockId && req.spotRef ? req.spotRef : null,
+      // Without a block, a spot makes the appointment a booked visit:
+      // the stop sits at the appointment's hour and nowhere else.
+      spotRef: req.spotRef ? req.spotRef : null,
     };
 
     const list = byDay.get(req.dayIndex) ?? [];

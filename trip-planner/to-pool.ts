@@ -60,10 +60,14 @@ export const returnStopToPool = api(
     // (§7.3). "Not today" is said by taking the outing off the block,
     // which re-plans the day; returning the stop underneath the frame
     // would leave an evening at 20:10 with nothing in it.
-    const frame = day.fixpoints.find((f) => f.spotRef === stop.osmRef && f.blockId);
+    const frame = day.fixpoints.find((f) => f.spotRef === stop.osmRef);
     if (frame) {
       throw APIError.failedPrecondition(
-        `„${frame.label}" ist als Abendtermin eingeplant — erst den Termin am Block entfernen`,
+        frame.blockId
+          ? `„${frame.label}" ist als Abendtermin eingeplant — erst den Termin am Block entfernen`
+          // A booked visit: the ticket holds the spot on this day, and
+          // the pool would only plan it a second time.
+          : `„${frame.label}" ist ein fester Termin für diesen Spot — erst den Termin entfernen`,
       );
     }
 

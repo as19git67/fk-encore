@@ -227,7 +227,7 @@ async function tickVisited(
     const sourceBlock = sourceDay.blocks.find((b) => b.stops.some((s) => s.rowId === stopId))!;
     const osmRef = sourceBlock.stops.find((s) => s.rowId === stopId)!.osmRef;
     if (sourceBlock.branches.length > 0) return;
-    if (sourceDay.fixpoints.some((f) => f.spotRef === osmRef && f.blockId)) return;
+    if (sourceDay.fixpoints.some((f) => f.spotRef === osmRef)) return;
 
     const placement = placeVisitedStop({
       days: leg.days,

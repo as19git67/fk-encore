@@ -25,6 +25,9 @@ struct TripPoolView: View {
 
     @State private var query = ""
     @State private var placing: TripCandidate?
+    /// The candidate a fixed appointment is being written for (§4.4) —
+    /// the ticket for a sight, which then stands at its hour.
+    @State private var appointmentFor: TripCandidate?
     /// A candidate whose pin was tapped on the map.
     @State private var inspecting: TripCandidate?
     /// Set while the pin sheet is still on screen and the traveller has
@@ -99,7 +102,30 @@ struct TripPoolView: View {
                 }
             }
         }
+        .sheet(item: $appointmentFor) { candidate in
+            if let leg {
+                TripFixpointSheet(
+                    dayLabel: "Tag \((placeInto?.dayIndex ?? 0) + 1)",
+                    spots: leg.spotChoices,
+                    presetSpot: TripSpotChoice(osmRef: candidate.osmRef, name: candidate.displayName,
+                                               plannedOn: nil),
+                    days: leg.days.map { day in
+                        TripDayChoice(dayIndex: day.dayIndex, label: dayChoiceLabel(day, in: leg))
+                    },
+                    presetDayIndex: placeInto?.dayIndex,
+                ) { draft in
+                    await viewModel.addFixpoint(draft, legIndex: legIndex)
+                }
+            }
+        }
         .task { if viewModel.plan == nil { await viewModel.load() } }
+    }
+
+    /// "Tag 2 · Di., 12. Mai" — the day as the day screen names it.
+    private func dayChoiceLabel(_ day: TripDay, in leg: TripLeg) -> String {
+        let number = "Tag \(day.dayIndex + 1)"
+        guard let date = leg.date(ofDayIndex: day.dayIndex) else { return number }
+        return "\(number) · \(date)"
     }
 
     // MARK: - The pool as a list
@@ -275,6 +301,12 @@ struct TripPoolView: View {
                 if await viewModel.place(candidate, inBlock: placeInto.blockId, onDay: placeInto.dayIndex) {
                     dismiss()
                 }
+            },
+            // A ticket for it (§4.4): the spot goes to that day at that
+            // hour, and the planner does not put it anywhere else.
+            TripPinSheetAction(id: "appointment", title: "Fester Termin …",
+                               systemImage: "calendar.badge.clock") {
+                later { appointmentFor = candidate }
             },
             // "Beim nächsten Mal" (§20.3): a copy into the collection;
             // the spot stays a candidate here.

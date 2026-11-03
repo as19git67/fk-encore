@@ -13,6 +13,17 @@ import SwiftUI
 /// promise nobody can keep.
 struct TripFixpointSheet: View {
     let dayLabel: String
+    /// The spots an appointment can be for — the leg's planned stops and
+    /// candidates. Empty hides the choice.
+    var spots: [TripSpotChoice] = []
+    /// Opened from a spot ("Fester Termin …"): that spot is chosen and
+    /// the appointment is called after it.
+    var presetSpot: TripSpotChoice? = nil
+    /// Opened away from a day (from the candidates): which days the
+    /// appointment can go on. Empty means the day the sheet was opened
+    /// for, named by `dayLabel`.
+    var days: [TripDayChoice] = []
+    var presetDayIndex: Int? = nil
     let onSave: (Draft) async -> Void
 
     /// What the sheet hands back.
@@ -30,6 +41,12 @@ struct TripFixpointSheet: View {
         /// the whole point of it: a located fixpoint at one end of the
         /// day moves the day's route.
         let place: TripPlace?
+        /// The spot of the trip this appointment is for, if any — the
+        /// plan then puts it at this hour and nowhere else.
+        var spotRef: String? = nil
+        /// The day, when the sheet offered a choice; nil for the day it
+        /// was opened on.
+        var dayIndex: Int? = nil
     }
 
     @State private var finder = TripPlaceFinderModel()
@@ -42,7 +59,21 @@ struct TripFixpointSheet: View {
     @State private var travelMinutes = 15
     @State private var durationMinutes = 60
     @State private var saving = false
+    @State private var spot: TripSpotChoice?
+    @State private var dayIndex = 0
+    @State private var seeded = false
     @Environment(\.dismiss) private var dismiss
+
+    /// What "Sichern" saves as the name: the one typed, or the spot's.
+    private var effectiveLabel: String {
+        let typed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        return kind == .appointment ? (spot?.name ?? "") : ""
+    }
+
+    private var headerLabel: String {
+        days.first { $0.dayIndex == dayIndex }?.label ?? dayLabel
+    }
 
     enum Kind: String, CaseIterable {
         case departure
@@ -90,14 +121,45 @@ struct TripFixpointSheet: View {
                            + "und plant um sie herum.")
                 }
 
+                if kind == .appointment, !spots.isEmpty {
+                    Section {
+                        NavigationLink {
+                            TripSpotPickAndReturn(spots: spots, selected: spot?.osmRef) { picked in
+                                spot = picked
+                            }
+                            .navigationTitle("Spot für den Termin")
+                        } label: {
+                            LabeledContent("Spot", value: spot?.name ?? "Keiner")
+                        }
+                    } footer: {
+                        Text(spot == nil
+                             ? "Ein Ticket für eine Sehenswürdigkeit? Mit dem Spot steht sie zur "
+                               + "Uhrzeit im Tag und wird nicht noch einmal eingeplant."
+                             : "Der Spot steht zur Uhrzeit des Termins im Tag, angeheftet, und "
+                               + "verschwindet von jedem anderen Tag.")
+                    }
+                }
+
+                if !days.isEmpty {
+                    Section {
+                        Picker("Tag", selection: $dayIndex) {
+                            ForEach(days) { day in
+                                Text(day.label).tag(day.dayIndex)
+                            }
+                        }
+                    }
+                }
+
                 Section {
-                    TextField(kind == .departure ? "Letzter Zug" : "Führung, Tischreservierung …",
+                    TextField(kind == .departure
+                              ? "Letzter Zug"
+                              : (spot?.name ?? "Führung, Tischreservierung …"),
                               text: $label)
                     DatePicker("Uhrzeit", selection: $time, displayedComponents: .hourAndMinute)
                 } header: {
-                    Text(dayLabel)
+                    Text(headerLabel)
                 } footer: {
-                    if label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if effectiveLabel.isEmpty {
                         // Why "Sichern" is grey — said next to the field,
                         // not left to be guessed.
                         Text("Ein Name ist nötig, damit die Zeit im Tag wiederzuerkennen ist.")
@@ -202,12 +264,14 @@ struct TripFixpointSheet: View {
                         saving = true
                         Task {
                             await onSave(Draft(
-                                label: label.trimmingCharacters(in: .whitespacesAndNewlines),
+                                label: effectiveLabel,
                                 minutesOfDay: TripDayTimeline.minutesOfDay(time),
                                 kind: kind.rawValue,
                                 travelMinutes: routePaysTheWay ? 0 : travelMinutes,
                                 durationMinutes: durationMinutes,
                                 place: place,
+                                spotRef: kind == .appointment ? spot?.osmRef : nil,
+                                dayIndex: days.isEmpty ? nil : dayIndex,
                             ))
                             saving = false
                             dismiss()
@@ -215,9 +279,43 @@ struct TripFixpointSheet: View {
                     } label: {
                         if saving { ProgressView() } else { Text("Sichern") }
                     }
-                    .disabled(saving || label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(saving || effectiveLabel.isEmpty)
                 }
             }
+            .onAppear {
+                guard !seeded else { return }
+                seeded = true
+                if let presetSpot {
+                    spot = presetSpot
+                    kind = .appointment
+                    time = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? time
+                }
+                dayIndex = presetDayIndex ?? days.first?.dayIndex ?? 0
+            }
+        }
+    }
+}
+
+/// A day an appointment can go on, when the sheet is opened away from
+/// the day itself.
+struct TripDayChoice: Identifiable, Hashable {
+    let dayIndex: Int
+    let label: String
+
+    var id: Int { dayIndex }
+}
+
+/// The spot list pushed from the sheet: picking goes back to the form.
+private struct TripSpotPickAndReturn: View {
+    let spots: [TripSpotChoice]
+    let selected: String?
+    let onPick: (TripSpotChoice?) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        TripSpotPickerList(spots: spots, selected: selected) { picked in
+            onPick(picked)
+            dismiss()
         }
     }
 }

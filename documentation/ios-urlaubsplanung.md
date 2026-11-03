@@ -487,6 +487,30 @@ train leaves at 17:45" is the framework in its purest form. In the app the
 band of fixed times now always stands above the day, even when it is empty: A
 band that only appears once one is already there is found by nobody.
 
+**An appointment can name its spot — the booked visit.** A ticket for a
+sight at a fixed hour used to be a time beside the day and the sight a
+candidate like any other: the day showed the time but not the sight, the
+candidate list offered no way to say "this ticket is for that spot", and the
+planner could put the same sight into another day as well. An appointment
+with `spotRef` and no `blockId` is now a booked visit (`isVisit` in
+`trip-planner/frame-spots.ts`). It cuts the blocks around it like any
+appointment; then the block after it opens back to when the way there begins
+(`hostVisits`) — at the end of the day the block before it is extended to the
+visit's end instead — and the spot becomes that block's pinned first (or last)
+stop, for the appointment's duration. The solver sees the host block without
+those minutes, and the spot is reserved on every day of the leg like a frame's
+(`reservedSpotRefs`), so it is planned once, at the ticket's hour. Moving it to
+another block or sending it back to the pool is refused with the
+appointment's name; hiding the spot unties the appointment rather than
+deleting it — the ticket is still booked. Calls: `spotRef` on
+`POST …/fixpoints` (the label defaults to the spot's name) and
+`POST …/fixpoints/spot` to tie an existing appointment to a spot or untie it
+(`spotRef: null`); both re-plan. In the app the fixed-time sheet offers the
+leg's spots (planned and candidates), every appointment in the band has a pin
+button to choose or change its spot, and "Fester Termin …" sits in the
+actions of a planned stop and of a candidate (the candidate's sheet asks for
+the day).
+
 **A fixpoint can additionally carry a place — and then it moves the route, not
 just the budget.** Two days of every trip are not ordinary ones, and they are
 the two that everybody remembers: on the first you arrive with luggage at the
