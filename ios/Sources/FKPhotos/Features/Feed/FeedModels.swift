@@ -66,7 +66,97 @@ struct PhotoFeedCursor: Codable, Sendable {
 
 struct ListPhotoFeedResponse: Codable, Sendable {
     let items: [FeedPhotoItem]
+    /// Albums shared with the viewer that fall into the same stretch of the
+    /// timeline as `items` — one card each instead of every photo in them.
+    /// Optional so an older server without the field still decodes.
+    var albums: [FeedAlbumItem]? = nil
     let nextCursor: PhotoFeedCursor?
+}
+
+/// An album someone shared with the viewer, shown once in the feed as a card
+/// that opens the album (`GET /feed/photos` → `albums`).
+struct FeedAlbumItem: Codable, Identifiable, Sendable {
+    var id: Int { albumId }
+
+    let albumId: Int
+    let name: String
+    let description: String?
+    let lastActivityAt: String
+    let owner: FeedOwnerRef
+    /// Who shared it with the viewer (the inviter, else the owner).
+    let sharedBy: FeedOwnerRef
+    let accessLevel: String
+    let photoCount: Int
+    /// Up to four photos: the cover first, then the newest added.
+    let previews: [FeedAlbumPreview]
+}
+
+struct FeedAlbumPreview: Codable, Sendable {
+    let photoId: Int
+    let filename: String
+    let width: Int?
+    let height: Int?
+}
+
+/// Navigation value for opening a shared album from its feed card.
+struct FeedAlbumOpen: Hashable, Sendable {
+    let id: Int
+}
+
+/// One row of the feed: a photo or a shared album.
+enum FeedEntry: Identifiable, Sendable {
+    case photo(FeedPhotoItem)
+    case album(FeedAlbumItem)
+
+    var id: String {
+        switch self {
+        case .photo(let item): "p\(item.photoId)"
+        case .album(let album): "a\(album.albumId)"
+        }
+    }
+}
+
+enum FeedStream {
+    /// Photos in server order with the album cards slotted in by
+    /// `lastActivityAt`, newest first; on a tie the photo stays first. The
+    /// photo order is never changed — the server's keyset order is the truth.
+    /// Same rule as `feedStream` in the web app (utils/photoFeedMerge.ts).
+    static func entries(items: [FeedPhotoItem], albums: [FeedAlbumItem]) -> [FeedEntry] {
+        let cards = albums.sorted {
+            $0.lastActivityAt == $1.lastActivityAt
+                ? $0.albumId > $1.albumId
+                : $0.lastActivityAt > $1.lastActivityAt
+        }
+        var out: [FeedEntry] = []
+        out.reserveCapacity(items.count + cards.count)
+        var next = 0
+        for item in items {
+            while next < cards.count, cards[next].lastActivityAt > item.lastActivityAt {
+                out.append(.album(cards[next]))
+                next += 1
+            }
+            out.append(.photo(item))
+        }
+        while next < cards.count {
+            out.append(.album(cards[next]))
+            next += 1
+        }
+        return out
+    }
+
+    /// Add freshly fetched cards to the loaded ones; a card fetched again
+    /// replaces its older copy.
+    static func mergeAlbums(_ current: [FeedAlbumItem], _ incoming: [FeedAlbumItem]) -> [FeedAlbumItem] {
+        var result = current
+        for album in incoming {
+            if let index = result.firstIndex(where: { $0.albumId == album.albumId }) {
+                result[index] = album
+            } else {
+                result.append(album)
+            }
+        }
+        return result
+    }
 }
 
 struct ActivityFeedItemSummary: Codable, Sendable {

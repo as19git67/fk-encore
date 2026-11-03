@@ -52,7 +52,18 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 - Karten der neuesten Fotos; Gefällt mir, Kommentar („Kommentar…“), Foto
   antippen öffnet das Vollbild; oben der Streifen „Rückblicke“ mit
   „Rückblick … abspielen“.
+- Nur Fotos aus geteilten Alben; private Alben bleiben draußen, auch für
+  ihren Eigentümer.
 - Leer: „Kein Feed“.
+- **Test:** –
+
+### IOS-FED-02 Geteiltes Album öffnen
+
+- Ein Album, das jemand mit dir teilt, steht einmal als Albumkarte im Feed
+  („… hat ein Album mit dir geteilt“, Name, Anzahl, Vorschaubilder), nicht
+  mit jedem seiner Fotos. Antippen öffnet das Album.
+- Wird die Freigabe zurückgenommen oder verlässt du das Album, verschwindet
+  die Karte beim nächsten Laden.
 - **Test:** –
 
 ---
@@ -304,6 +315,7 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 |---|---|---|
 | IOS-LOG-01 | Anmelden und Server wählen | – |
 | IOS-FED-01 | Feed lesen und reagieren | – |
+| IOS-FED-02 | Geteiltes Album öffnen | – |
 | IOS-ALB-01 | Albenliste | – |
 | IOS-ALB-02 | Album | – |
 | IOS-ALB-03 | Album-Einstellungen | – |
