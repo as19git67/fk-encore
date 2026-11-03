@@ -42,6 +42,14 @@ describe("docker-compose.demo.yml", () => {
   });
 });
 
+describe("docker/Dockerfile.runtime", () => {
+  it("hands /mnt/libraries to the apps user, so the demo photos can be staged without a mounted library", () => {
+    const docker = read("docker/Dockerfile.runtime");
+    expect(docker).toMatch(/mkdir -p [^\n]*\/mnt\/libraries /);
+    expect(docker).toMatch(/chown -R 568:568 [^\n]*\/mnt\/libraries /);
+  });
+});
+
 describe("scripts/host/demo-reset.sh", () => {
   const script = path.join(root, "scripts/host/demo-reset.sh");
   const run = (env: string, ...args: string[]) => {
