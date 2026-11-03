@@ -11,7 +11,9 @@
 #      first on a 16 GB card, so the demo app joins prod's network and talks
 #      to prod's llm-service (DEPLOY_LLM_SERVICE_URL). The service stays in
 #      the file under a profile nobody activates, so it never starts.
-#   2. DEMO_DATA=1: the app loads the full demo at its first boot.
+#   2. DEMO_DATA=1: the app loads the full demo at its first boot, owned by
+#      the visitors' account DEMO_OWNER_EMAIL (every module, no Admin), so
+#      the admin login stays the operator's (demo/owner.ts).
 #
 # `!override` needs Docker Compose 2.24 or later.
 
@@ -28,6 +30,9 @@ services:
         condition: service_healthy
     environment:
       DEMO_DATA: ${DEMO_DATA:-1}
+      DEMO_OWNER_EMAIL: ${DEMO_OWNER_EMAIL:-}
+      DEMO_OWNER_NAME: ${DEMO_OWNER_NAME:-Demo}
+      DEMO_OWNER_PASSWORD: ${DEMO_OWNER_PASSWORD:-}
       LLM_SERVICE_URL: ${DEPLOY_LLM_SERVICE_URL:-http://fk-encore-llm:8000}
     networks:
       - default

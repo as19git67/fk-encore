@@ -40,6 +40,15 @@ describe("docker-compose.demo.yml", () => {
     expect(read("docker-compose.yml")).toContain("DEMO_DATA: ${DEMO_DATA:-}");
     expect(read("docker-compose.env.demo.example")).toMatch(/^COMPOSE_FILE=.*docker-compose\.demo\.yml$/m);
   });
+
+  it("gives the demo to a visitors' account of its own, never to the admin", () => {
+    expect(demo).toContain("DEMO_OWNER_EMAIL: ${DEMO_OWNER_EMAIL:-}");
+    expect(demo).toContain("DEMO_OWNER_PASSWORD: ${DEMO_OWNER_PASSWORD:-}");
+    const env = read("docker-compose.env.demo.example");
+    const value = (key: string) => new RegExp(`^${key}=(.*)$`, "m").exec(env)?.[1];
+    expect(value("DEMO_OWNER_EMAIL")).toBeTruthy();
+    expect(value("DEMO_OWNER_EMAIL")).not.toBe(value("ADMIN_EMAIL"));
+  });
 });
 
 describe("docker/Dockerfile.runtime", () => {

@@ -133,8 +133,13 @@ docker compose --env-file .env.demo up -d
   (`DEPLOY_LLM_SERVICE_URL`, default `http://fk-encore-llm:8000`). Prod has
   to be up first. Needs Docker Compose 2.24 or later (`!override`).
 - **First fill.** `DEMO_DATA=1` makes the app load the full demo at boot
-  while the system is untouched; the admin from `ADMIN_EMAIL` owns it.
-  Progress is on Admin › Systemstatus. The full demo needs
+  while the system is untouched. Progress is on Admin › Systemstatus.
+- **Two logins.** The demo data belongs to `DEMO_OWNER_EMAIL`
+  (`DEMO_OWNER_PASSWORD`), the account visitors sign in with: every module
+  role, no Admin role, created by the demo run, kept when the demo is
+  removed. `ADMIN_EMAIL` stays the operator's: only it can remove or reload
+  the demo and manage users, so its password is never published. Without
+  `DEMO_OWNER_EMAIL` the demo belongs to the admin who loads it. The full demo needs
   `api.openverse.org` (otherwise the photos are drawn) and a quote
   provider (otherwise the depot is left out).
 - **Updates.** The image workflows call the demo's Watchtower after the
@@ -144,7 +149,9 @@ docker compose --env-file .env.demo up -d
 - **Nightly reset.** `scripts/host/demo-reset.sh /path/to/.env.demo`
   stops the stack, empties its database and file directories (not the
   model caches or the OSM data) and starts it again, so the app loads the
-  demo afresh. Run it every hour from cron or a TrueNAS periodic task; it
+  demo afresh: the seed creates the admin, the demo run the visitors'
+  account with the password from the env file, so a password a visitor
+  changed is back the next morning. Run it every hour from cron or a TrueNAS periodic task; it
   acts only in the hour 18 of `America/Los_Angeles` and once per day.
   It refuses an env file without `DEMO_DATA`, with an empty
   `DEPLOY_NAME_SUFFIX` or with a `DEPLOY_DATA_ROOT` that does not contain
