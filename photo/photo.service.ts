@@ -5466,8 +5466,8 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
       }
 
       // Content feed: bump every album participant (incl. the actor) for the
-      // newly-added photos. Runs regardless of sharing so owner-only albums
-      // still populate the owner's content stream.
+      // newly-added photos — only when the album is shared; a private album
+      // is the owner's archive and stays out of the feed.
       await contentFeed.onPhotosAddedToAlbum(addedPhotoIds, albumId);
 
       // Enqueue face_assignment for all shared users of this album
@@ -5615,7 +5615,7 @@ export async function shareAlbumLogic(userId: number, req: ShareAlbumRequest): P
     albumId: req.albumId,
     payload: { accessLevel: req.accessLevel },
   });
-  // Content feed: the new participant gains every photo in the album.
+  // Content feed: the new participant gets the album as one card.
   await contentFeed.onAlbumShared(req.albumId, req.userId);
 
   return { success: true };
@@ -5786,10 +5786,12 @@ export async function removeAlbumShareLogic(userId: number, req: RemoveAlbumShar
     cleanupAfterUnshare(req.userId, albumPhotoIds).catch(err => {
       console.error(`Error cleaning up after unshare of album ${req.albumId}:`, err);
     });
-    // Content feed: drop the unshared user's entries for photos they can no
-    // longer see via another album.
-    await contentFeed.reconcileUserPhotos(req.userId, albumPhotoIds);
+    // Content feed: drop entries for photos the unshared user can no longer
+    // see via another shared album — and the owner's too, when this was the
+    // album's last share and it went back to being private.
+    await contentFeed.reconcilePhotoViewers(albumPhotoIds);
   }
+  await contentFeed.dropAlbumCard(req.userId, req.albumId);
 
   // Re-run grouping so removed shared photos are no longer in groups.
   scheduleRegroup(req.userId);
@@ -5831,10 +5833,12 @@ export async function leaveAlbumLogic(userId: number, albumId: number): Promise<
     cleanupAfterUnshare(userId, albumPhotoIds).catch(err => {
       console.error(`Error cleaning up after leaving album ${albumId}:`, err);
     });
-    // Content feed: drop the leaving user's entries for photos they can no
-    // longer see via another album.
-    await contentFeed.reconcileUserPhotos(userId, albumPhotoIds);
+    // Content feed: drop entries for photos the leaving user can no longer
+    // see via another shared album — and the owner's too, when they were the
+    // last participant and the album is private again.
+    await contentFeed.reconcilePhotoViewers(albumPhotoIds);
   }
+  await contentFeed.dropAlbumCard(userId, albumId);
 
   scheduleRegroup(userId);
 

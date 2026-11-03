@@ -202,8 +202,34 @@ export interface ListPhotoFeedRequest {
   limit?: number;
 }
 
+/**
+ * An album that was shared with the viewer, shown once as a card that opens
+ * the album — instead of every photo in it as a post of its own.
+ */
+export interface FeedAlbumItem {
+  albumId: number;
+  name: string;
+  description: string | null;
+  lastActivityAt: string;
+  owner: { id: number; name: string | null };
+  /** Who shared it with the viewer (the inviter, else the owner). */
+  sharedBy: { id: number; name: string | null };
+  accessLevel: string;
+  photoCount: number;
+  /** Up to four photos for the card: the cover first, then the newest added. */
+  previews: { photoId: number; filename: string; width: number | null; height: number | null }[];
+}
+
 export interface ListPhotoFeedResponse {
   items: FeedPhotoItem[];
+  /**
+   * Album cards that fall into the same stretch of the timeline as `items`:
+   * newer than the request's cursor and not older than the page's last photo
+   * (on the last page: everything left). Clients that do not know album
+   * cards can ignore the field; ones that do merge it into the stream by
+   * `lastActivityAt`.
+   */
+  albums: FeedAlbumItem[];
   /** Keyset cursor for the next page; `null` marks the end. */
   nextCursor: PhotoFeedCursor | null;
 }
@@ -243,7 +269,8 @@ export async function listPhotoFeedForUser(
 
   const res = await db.execute<PhotoFeedRow>(sql`
     WITH viewer_albums AS (
-      SELECT a.id AS album_id, a.name AS album_name, ap.photo_id, ap.added_at
+      SELECT a.id AS album_id, a.name AS album_name, ap.photo_id, ap.added_at,
+        EXISTS (SELECT 1 FROM album_shares sx WHERE sx.album_id = a.id) AS shared
       FROM album_photos ap
       JOIN albums a ON a.id = ap.album_id
       WHERE a.user_id = ${userId}
@@ -272,7 +299,7 @@ export async function listPhotoFeedForUser(
       SELECT va.album_id, va.album_name
       FROM viewer_albums va
       WHERE va.photo_id = fe.photo_id
-      ORDER BY va.added_at DESC NULLS LAST, va.album_id DESC
+      ORDER BY va.shared DESC, va.added_at DESC NULLS LAST, va.album_id DESC
       LIMIT 1
     ) ra ON TRUE
     LEFT JOIN LATERAL (
@@ -322,10 +349,109 @@ export async function listPhotoFeedForUser(
   }));
 
   const last = page[page.length - 1];
+  const albumCards = await listAlbumCards(userId, {
+    before: hasCursor ? req.cursorTs! : null,
+    notBefore: hasMore && last ? last.last_activity_at : null,
+  });
   return {
     items,
+    albums: albumCards,
     nextCursor: hasMore && last ? { ts: last.last_activity_at, id: last.photo_id } : null,
   };
+}
+
+type AlbumCardRow = {
+  album_id: number;
+  name: string;
+  description: string | null;
+  last_activity_at: string;
+  owner_id: number;
+  owner_name: string | null;
+  shared_by_id: number;
+  shared_by_name: string | null;
+  access_level: string | null;
+  photo_count: number;
+};
+
+/**
+ * Album cards in one stretch of the timeline: `before` is exclusive (the
+ * request's cursor, so a card is never repeated on the next page), `notBefore`
+ * inclusive (the page's last photo). Only albums the viewer still takes part
+ * in — a share that was withdrawn drops its card on the spot, but the read
+ * does not trust that alone.
+ */
+async function listAlbumCards(
+  userId: number,
+  window: { before: string | null; notBefore: string | null },
+): Promise<FeedAlbumItem[]> {
+  const beforeCond = window.before != null
+    ? sql`AND fa.last_activity_at < ${window.before}::timestamptz`
+    : sql``;
+  const notBeforeCond = window.notBefore != null
+    ? sql`AND fa.last_activity_at >= ${window.notBefore}::timestamptz`
+    : sql``;
+  const res = await db.execute<AlbumCardRow>(sql`
+    SELECT
+      a.id AS album_id, a.name, a.description,
+      fa.last_activity_at,
+      a.user_id AS owner_id, ou.name AS owner_name,
+      COALESCE(s.invited_by_user_id, a.user_id) AS shared_by_id,
+      COALESCE(iu.name, ou.name) AS shared_by_name,
+      s.access_level,
+      (SELECT count(*)::int FROM album_photos ap WHERE ap.album_id = a.id) AS photo_count
+    FROM album_feed_entries fa
+    JOIN albums a ON a.id = fa.album_id
+    JOIN album_shares s ON s.album_id = a.id AND s.user_id = ${userId}
+    LEFT JOIN users ou ON ou.id = a.user_id
+    LEFT JOIN users iu ON iu.id = s.invited_by_user_id
+    WHERE fa.user_id = ${userId}
+      ${beforeCond}
+      ${notBeforeCond}
+    ORDER BY fa.last_activity_at DESC, a.id DESC
+  `);
+  if (res.rows.length === 0) return [];
+
+  const ids = res.rows.map((r) => r.album_id);
+  const previews = await db.execute<{
+    album_id: number; photo_id: number; filename: string; width: number | null; height: number | null;
+  }>(sql`
+    SELECT x.album_id, x.photo_id, x.filename, x.width, x.height
+    FROM (
+      SELECT ap.album_id, p.id AS photo_id, p.filename, p.width, p.height,
+        ROW_NUMBER() OVER (
+          PARTITION BY ap.album_id
+          ORDER BY (p.id = a.cover_photo_id) DESC, ap.added_at DESC NULLS LAST, p.id DESC
+        ) AS rn
+      FROM album_photos ap
+      JOIN albums a ON a.id = ap.album_id
+      JOIN photos p ON p.id = ap.photo_id
+      WHERE ap.album_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+        AND NOT EXISTS (
+          SELECT 1 FROM photo_curation pc
+          WHERE pc.photo_id = p.id AND pc.user_id = ${userId} AND pc.status = 'hidden'
+        )
+    ) x
+    WHERE x.rn <= 4
+    ORDER BY x.album_id, x.rn
+  `);
+  const byAlbum = new Map<number, FeedAlbumItem["previews"]>();
+  for (const r of previews.rows) {
+    const list = byAlbum.get(r.album_id) ?? [];
+    list.push({ photoId: r.photo_id, filename: r.filename, width: r.width, height: r.height });
+    byAlbum.set(r.album_id, list);
+  }
+
+  return res.rows.map((r) => ({
+    albumId: r.album_id,
+    name: r.name,
+    description: r.description,
+    lastActivityAt: r.last_activity_at,
+    owner: { id: r.owner_id, name: r.owner_name },
+    sharedBy: { id: r.shared_by_id, name: r.shared_by_name },
+    accessLevel: r.access_level ?? "read",
+    photoCount: r.photo_count,
+    previews: byAlbum.get(r.album_id) ?? [],
+  }));
 }
 
 export async function countUnread(userId: number): Promise<number> {

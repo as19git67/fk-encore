@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3'
 import PhotoFeedView from '../views/PhotoFeedView.vue'
 import { defaultHandlers } from './handlers'
 import { http, HttpResponse } from 'msw'
-import type { FeedPhotoItem } from '../api/photoFeed'
+import type { FeedAlbumItem, FeedPhotoItem } from '../api/photoFeed'
 
 const MOCK_ITEMS: FeedPhotoItem[] = [
   {
@@ -52,9 +52,29 @@ const MOCK_ITEMS: FeedPhotoItem[] = [
   },
 ]
 
+// A shared album reaches the feed once, as a card, not as its photos.
+const MOCK_ALBUMS: FeedAlbumItem[] = [
+  {
+    albumId: 12,
+    name: 'Sommerfest im Garten',
+    description: 'Alle Bilder vom Samstag.',
+    lastActivityAt: '2026-06-04T21:00:00.000Z',
+    owner: { id: 3, name: 'Tom Schmidt' },
+    sharedBy: { id: 3, name: 'Tom Schmidt' },
+    accessLevel: 'read',
+    photoCount: 37,
+    previews: [
+      { photoId: 21, filename: 'garten-tisch.jpg', width: 1600, height: 1200 },
+      { photoId: 22, filename: 'garten-grill.jpg', width: 1200, height: 1200 },
+      { photoId: 23, filename: 'garten-kinder.jpg', width: 1200, height: 1500 },
+      { photoId: 24, filename: 'garten-abend.jpg', width: 1600, height: 1067 },
+    ],
+  },
+]
+
 const feedHandlers = [
   http.get('/api/feed/photos', () =>
-    HttpResponse.json({ items: MOCK_ITEMS, nextCursor: null }),
+    HttpResponse.json({ items: MOCK_ITEMS, albums: MOCK_ALBUMS, nextCursor: null }),
   ),
   http.patch('/api/photos/:id/curation', () => HttpResponse.json({ success: true })),
   http.patch('/api/photos/:id/description', async ({ request }) => {
