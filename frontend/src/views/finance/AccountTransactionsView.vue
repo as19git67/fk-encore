@@ -1409,15 +1409,14 @@ function goBack() {
             @click="openCashTransactionForm"
           />
           <Button
-            v-if="!isDepot"
+            v-if="!isDepot && selectMode && localSelectionCount > 0"
             icon="pi pi-list"
-            :severity="selectMode && localSelectionCount > 0 ? 'primary' : 'secondary'"
+            severity="primary"
             size="small"
             text
             rounded
             aria-label="Liste der ausgewählten Buchungen"
             v-tooltip.bottom="'Ausgewählte Buchungen'"
-            :disabled="!selectMode || localSelectionCount === 0"
             @click="openSelectionPopover"
           />
         </template>
