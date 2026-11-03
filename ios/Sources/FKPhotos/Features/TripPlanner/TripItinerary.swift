@@ -336,7 +336,7 @@ struct TripItineraryDraft: Equatable {
                arrive <= depart {
                 let (from, to) = ends(of: journey)
                 found.append("Die Weiterreise von \(from) nach \(to) kommt an, bevor sie abfährt — "
-                             + "oder sie dauert eine Nacht.")
+                             + "oder sie kommt erst am nächsten Tag an.")
             }
         }
         return found
@@ -427,6 +427,17 @@ struct TripItineraryDraft: Equatable {
         normalise()
     }
 
+    /// One stay up or down by one place, from a button on its card:
+    /// the list's edit mode asked for a tap on a pencil nobody could
+    /// place. Nothing happens at either end.
+    mutating func moveStay(id: TripItineraryItem.ID, up: Bool) {
+        let stays = self.stays
+        guard let position = stays.firstIndex(where: { $0.id == id }) else { return }
+        let target = up ? position - 1 : position + 2
+        guard target >= 0, target <= stays.count else { return }
+        moveStays(fromOffsets: IndexSet(integer: position), toOffset: target)
+    }
+
     /// Home came or went: the way there and the way home with it.
     mutating func setHome(_ label: String?) {
         hasHome = label != nil
@@ -487,9 +498,20 @@ enum TripItineraryText {
         }
         parts.append(journey.transportMode.label)
         if let nights = journey.nights, nights > 0 {
-            parts.append(nights == 1 ? "1 Nacht unterwegs" : "\(nights) Nächte unterwegs")
+            parts.append(arrival(nights: nights))
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// When the journey arrives, counted in days from setting off.
+    /// "1 Nacht unterwegs" read as driving through the night; what the
+    /// number means is that the arrival is a day later.
+    static func arrival(nights: Int) -> String {
+        switch nights {
+        case ...0: return "Ankunft am selben Tag"
+        case 1: return "Ankunft am nächsten Tag"
+        default: return "Ankunft \(nights) Tage später"
+        }
     }
 
     /// "Mo, 3.6." — short enough for a card, in the phone's own words.

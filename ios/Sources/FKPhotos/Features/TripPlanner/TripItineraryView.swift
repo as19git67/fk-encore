@@ -30,15 +30,21 @@ struct TripItineraryView: View {
     /// What came from the server, to know whether anything changed.
     @State private var original: TripItineraryDraft?
     @State private var expanded: Set<TripItineraryItem.ID> = []
+    /// Whether the draft differs from what was loaded. Kept as state
+    /// and refreshed on every change of the draft, rather than compared
+    /// on the fly: the toolbar's "Sichern" is what tells the traveller
+    /// that typing landed, and it has to follow every keystroke.
+    @State private var isDirty = false
     @State private var loadError: String?
     @State private var errorMessage: String?
     @State private var isSaving = false
     @State private var confirmCancel = false
     @State private var removing: TripItineraryItem?
 
-    /// One place search for the whole screen: only one stay looks for
-    /// its lodging at a time.
-    @State private var placeFinder = TripPlaceFinderModel()
+    /// A place search per stay that is looking for its lodging. One
+    /// shared search lost what was typed for one stay the moment a
+    /// second stay was added or another stay's "Ändern" was tapped.
+    @State private var placeFinders: [TripItineraryItem.ID: TripPlaceFinderModel] = [:]
     @State private var searchingPlaceFor: TripItineraryItem.ID?
 
     /// Looking for where home is (§22.7), and what the person said in
@@ -60,7 +66,9 @@ struct TripItineraryView: View {
         var id: String { "\(legPosition)-\(dayIndex)" }
     }
 
-    private var isDirty: Bool { draft != nil && draft != original }
+    /// The one card height Apple asks for: a control under 44 points
+    /// is a control somebody misses (HIG, "Layout").
+    private static let rowHeight: CGFloat = 44
 
     var body: some View {
         Group {
@@ -84,6 +92,8 @@ struct TripItineraryView: View {
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         // Typed input must not vanish on a swipe; "Abbrechen" asks.
         .interactiveDismissDisabled(isDirty)
+        .onChange(of: draft) { refreshDirty() }
+        .onChange(of: original) { refreshDirty() }
         .confirmationDialog("Änderungen verwerfen?", isPresented: $confirmCancel, titleVisibility: .visible) {
             Button("Verwerfen", role: .destructive) { dismiss() }
             Button("Weiter bearbeiten", role: .cancel) {}
@@ -94,16 +104,17 @@ struct TripItineraryView: View {
                     if isDirty { confirmCancel = true } else { dismiss() }
                 }
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if (draft?.stayCount ?? 0) > 1 {
-                    EditButton()
-                }
+            ToolbarItem(placement: .confirmationAction) {
+                // Enabled as soon as anything changed. What still keeps
+                // the chain from being saved is said on the tap, in
+                // the banner, rather than by a button that stays grey
+                // without a word.
                 Button {
                     Task { await save() }
                 } label: {
                     if isSaving { ProgressView() } else { Text("Sichern") }
                 }
-                .disabled(isSaving || !isDirty || !(draft?.problems().isEmpty ?? false))
+                .disabled(isSaving || !isDirty)
             }
         }
         .alert("Aufenthalt entfernen?", isPresented: Binding(
@@ -166,8 +177,6 @@ struct TripItineraryView: View {
                         stayCard(stay, dated: dated[index], offsets: offsets[index], in: draft)
                     }
                     .listRowSeparator(.hidden)
-                    .moveDisabled(stays.count < 2)
-                    .deleteDisabled(stays.count < 2)
                     .swipeActions(edge: .trailing) {
                         if stays.count > 1 {
                             Button(role: .destructive) { removing = stay } label: {
@@ -175,13 +184,6 @@ struct TripItineraryView: View {
                             }
                         }
                     }
-                }
-                .onMove { from, to in
-                    self.draft?.moveStays(fromOffsets: from, toOffset: to)
-                }
-                .onDelete { offsets in
-                    guard let first = offsets.first, stays.indices.contains(first) else { return }
-                    removing = stays[first]
                 }
                 // After the last stay: add one, then the way home.
                 addStayRow(draft)
@@ -207,6 +209,11 @@ struct TripItineraryView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // Every button on a card is its own target. A button in its
+        // default style inside a list row fires on a tap anywhere in
+        // the row, and a card is one row: a tap on a hint text picked
+        // the first place of a search nobody had chosen.
+        .buttonStyle(.borderless)
     }
 
     // MARK: - Header: the one date, and home
@@ -345,39 +352,53 @@ struct TripItineraryView: View {
             Rectangle().fill(.quaternary).frame(height: 1)
             Button {
                 let previous = position > 0 ? draft.stays[position - 1].id : nil
-                let newId = self.draft?.insertStay(after: previous)
-                if let newId {
-                    expanded.insert(newId)
-                    searchingPlaceFor = newId
-                    placeFinder.query = ""
-                    placeFinder.clearResults()
-                }
+                if let newId = self.draft?.insertStay(after: previous) { startEditing(newStay: newId) }
             } label: {
                 Image(systemName: "plus.circle.fill")
                     .font(.title3)
                     .foregroundStyle(.tint)
+                    .frame(width: Self.rowHeight, height: Self.rowHeight)
+                    .contentShape(.rect)
             }
             .buttonStyle(.borderless)
             .disabled(!draft.canAddStay)
             .accessibilityLabel("Aufenthalt hier einfügen")
             Rectangle().fill(.quaternary).frame(height: 1)
         }
-        .padding(.vertical, 2)
     }
 
     private func addStayRow(_ draft: TripItineraryDraft) -> some View {
         Button {
-            let newId = self.draft?.insertStay(after: draft.stays.last?.id)
-            if let newId {
-                expanded.insert(newId)
-                searchingPlaceFor = newId
-                placeFinder.query = ""
-                placeFinder.clearResults()
-            }
+            if let newId = self.draft?.insertStay(after: draft.stays.last?.id) { startEditing(newStay: newId) }
         } label: {
             Label("Aufenthalt hinzufügen", systemImage: "plus.circle")
+                .frame(minHeight: Self.rowHeight)
         }
         .disabled(!draft.canAddStay)
+    }
+
+    /// A new stay opens unfolded with its own, empty place search.
+    /// Whatever another stay has typed into its search stays there.
+    private func startEditing(newStay id: TripItineraryItem.ID) {
+        expanded.insert(id)
+        placeFinders[id] = TripPlaceFinderModel()
+        searchingPlaceFor = id
+    }
+
+    private func placeFinder(for id: TripItineraryItem.ID) -> TripPlaceFinderModel {
+        placeFinders[id] ?? TripPlaceFinderModel()
+    }
+
+    private func refreshDirty() {
+        isDirty = draft != nil && draft != original
+    }
+
+    /// One field of a card: a row the height of a list row, so the
+    /// controls do not sit on top of each other. The card used to stack
+    /// its toggles and steppers ten points apart.
+    private func fieldRow<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .leading)
     }
 
     @ViewBuilder
@@ -429,7 +450,9 @@ struct TripItineraryView: View {
             .buttonStyle(.plain)
 
             if isOpen {
-                stayFields(stay, in: draft)
+                VStack(alignment: .leading, spacing: 0) {
+                    stayFields(stay, in: draft)
+                }
             }
         }
         .padding(12)
@@ -440,99 +463,147 @@ struct TripItineraryView: View {
     private func stayFields(_ stay: TripItineraryItem, in draft: TripItineraryDraft) -> some View {
         let item = binding(stay.id)
         Divider()
-        TextField("Name (optional)", text: Binding(
-            get: { item.wrappedValue.title ?? "" },
-            set: { item.wrappedValue.title = $0 },
-        ))
-        .textInputAutocapitalization(.words)
+        fieldRow {
+            TextField("Name (optional)", text: Binding(
+                get: { item.wrappedValue.title ?? "" },
+                set: { item.wrappedValue.title = $0 },
+            ))
+            .textInputAutocapitalization(.words)
+        }
+        Divider()
 
         // The lodging: where every day starts and ends (§4.2).
         if let place = stay.place, searchingPlaceFor != stay.id {
-            HStack {
-                Label(place.name, systemImage: "mappin.circle.fill").lineLimit(2)
-                Spacer()
-                Button("Ändern") {
-                    searchingPlaceFor = stay.id
-                    placeFinder.query = place.name
-                    placeFinder.clearResults()
+            fieldRow {
+                HStack {
+                    Label(place.name, systemImage: "mappin.circle.fill").lineLimit(2)
+                    Spacer()
+                    Button("Ändern") {
+                        let finder = placeFinder(for: stay.id)
+                        finder.query = place.name
+                        finder.clearResults()
+                        placeFinders[stay.id] = finder
+                        searchingPlaceFor = stay.id
+                    }
                 }
-                .buttonStyle(.borderless)
             }
         } else {
-            TripPlaceFinderRows(model: placeFinder, picked: nil) { place in
+            let finder = placeFinder(for: stay.id)
+            TripPlaceFinderRows(model: finder, picked: nil) { place in
                 item.wrappedValue.place = place
-                placeFinder.clearResults()
+                finder.clearResults()
                 searchingPlaceFor = nil
             }
+            .frame(minHeight: Self.rowHeight)
+            // Keep the search this card got, so what is typed survives
+            // the next redraw of the list.
+            .onAppear { if placeFinders[stay.id] == nil { placeFinders[stay.id] = finder } }
             if stay.place != nil {
-                Button("Ort behalten") { searchingPlaceFor = nil }
-                    .buttonStyle(.borderless)
+                fieldRow { Button("Ort behalten") { searchingPlaceFor = nil } }
             }
         }
         Text("Hotel, Campingplatz oder Adresse — hier fängt jeder Tag an und hier endet er. "
              + "Eine Stadt geht auch; dann plant der Planer um deren Mitte herum.")
             .font(.caption2)
             .foregroundStyle(.secondary)
+            .padding(.bottom, 8)
+        Divider()
 
-        Toggle("Noch nichts gebucht", isOn: Binding(
-            get: { item.wrappedValue.anchorRadiusM != nil },
-            set: { on in item.wrappedValue.anchorRadiusM = on ? (item.wrappedValue.anchorRadiusM ?? 1_000) : nil },
-        ))
+        fieldRow {
+            Toggle("Noch nichts gebucht", isOn: Binding(
+                get: { item.wrappedValue.anchorRadiusM != nil },
+                set: { on in item.wrappedValue.anchorRadiusM = on ? (item.wrappedValue.anchorRadiusM ?? 1_000) : nil },
+            ))
+        }
         if stay.anchorRadiusM != nil {
             TripRadiusPicker(metres: Binding(
                 get: { item.wrappedValue.anchorRadiusM ?? 1_000 },
                 set: { item.wrappedValue.anchorRadiusM = $0 },
             ))
+            .padding(.bottom, 8)
         }
+        Divider()
 
-        Stepper(value: Binding(
-            get: { item.wrappedValue.days ?? 1 },
-            set: { item.wrappedValue.days = $0 },
-        ), in: TripItineraryDraft.minStayDays...TripItineraryDraft.maxStayDays) {
-            Text(TripItineraryText.stayLength(days: stay.days ?? 1))
+        fieldRow {
+            Stepper(value: Binding(
+                get: { item.wrappedValue.days ?? 1 },
+                set: { item.wrappedValue.days = $0 },
+            ), in: TripItineraryDraft.minStayDays...TripItineraryDraft.maxStayDays) {
+                Text(TripItineraryText.stayLength(days: stay.days ?? 1))
+            }
         }
+        Divider()
 
-        TripTransportModePicker(mode: Binding(
-            get: { item.wrappedValue.transportMode },
-            set: { newMode in
-                var updated = item.wrappedValue
-                // A radius still at the old mode's default follows the
-                // mode; one somebody set stays.
-                if let current = updated.radiusM {
-                    updated.radiusM = TripReach.radius(movingFrom: updated.transportMode, to: newMode, current: current)
-                }
-                updated.transportMode = newMode
-                item.wrappedValue = updated
-            },
-        ))
-
-        Toggle("Unterkunft fährt mit", isOn: Binding(
-            get: { item.wrappedValue.quartersAboard ?? false },
-            set: { on in
-                item.wrappedValue.quartersAboard = on
-                if !on { item.wrappedValue.tenderPort = false }
-            },
-        ))
-        if stay.quartersAboard == true {
-            Toggle("Tenderhafen", isOn: Binding(
-                get: { item.wrappedValue.tenderPort ?? false },
-                set: { item.wrappedValue.tenderPort = $0 },
+        fieldRow {
+            TripTransportModePicker(mode: Binding(
+                get: { item.wrappedValue.transportMode },
+                set: { newMode in
+                    var updated = item.wrappedValue
+                    // A radius still at the old mode's default follows the
+                    // mode; one somebody set stays.
+                    if let current = updated.radiusM {
+                        updated.radiusM = TripReach.radius(movingFrom: updated.transportMode, to: newMode, current: current)
+                    }
+                    updated.transportMode = newMode
+                    item.wrappedValue = updated
+                },
             ))
+        }
+        Divider()
+
+        fieldRow {
+            Toggle("Unterkunft fährt mit", isOn: Binding(
+                get: { item.wrappedValue.quartersAboard ?? false },
+                set: { on in
+                    item.wrappedValue.quartersAboard = on
+                    if !on { item.wrappedValue.tenderPort = false }
+                },
+            ))
+        }
+        if stay.quartersAboard == true {
+            fieldRow {
+                Toggle("Tenderhafen", isOn: Binding(
+                    get: { item.wrappedValue.tenderPort ?? false },
+                    set: { item.wrappedValue.tenderPort = $0 },
+                ))
+            }
             Text("Die Unterkunft ist der Liegeplatz, und die Abfahrt heißt „Alle an Bord“ mit einer "
                  + "Stunde Puffer — in einem Tenderhafen anderthalb. Jeder Tag kann in einen anderen "
                  + "Hafen gehen; ohne Hafen ist es ein Seetag.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             portDays(stay, in: draft)
+                .padding(.bottom, 8)
         }
 
         if draft.stayCount > 1 {
-            Button(role: .destructive) {
-                removing = stay
-            } label: {
-                Label("Aufenthalt entfernen", systemImage: "trash")
+            Divider()
+            // Where the stay sits in the trip, from the card itself:
+            // the list's edit mode behind a pencil in the toolbar was a
+            // button nobody knew when to press.
+            let position = draft.stays.firstIndex { $0.id == stay.id } ?? 0
+            fieldRow {
+                HStack(spacing: 16) {
+                    Button {
+                        withAnimation(.snappy) { self.draft?.moveStay(id: stay.id, up: true) }
+                    } label: {
+                        Label("Nach oben", systemImage: "arrow.up")
+                    }
+                    .disabled(position == 0)
+                    Button {
+                        withAnimation(.snappy) { self.draft?.moveStay(id: stay.id, up: false) }
+                    } label: {
+                        Label("Nach unten", systemImage: "arrow.down")
+                    }
+                    .disabled(position == draft.stayCount - 1)
+                    Spacer()
+                    Button(role: .destructive) {
+                        removing = stay
+                    } label: {
+                        Label("Entfernen", systemImage: "trash")
+                    }
+                }
             }
-            .buttonStyle(.borderless)
         }
     }
 
@@ -542,7 +613,7 @@ struct TripItineraryView: View {
     @ViewBuilder
     private func portDays(_ stay: TripItineraryItem, in draft: TripItineraryDraft) -> some View {
         if let leg = viewModel.plan?.legs.first(where: { $0.id == stay.legId }) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(leg.days) { day in
                     Button {
                         anchorTarget = AnchorTarget(
@@ -563,6 +634,7 @@ struct TripItineraryView: View {
                                 .foregroundStyle(.tertiary)
                         }
                         .font(.subheadline)
+                        .frame(minHeight: Self.rowHeight)
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
@@ -615,7 +687,9 @@ struct TripItineraryView: View {
             .buttonStyle(.plain)
 
             if isOpen {
-                journeyFields(journey)
+                VStack(alignment: .leading, spacing: 0) {
+                    journeyFields(journey)
+                }
             }
         }
         .padding(.vertical, 10)
@@ -634,24 +708,34 @@ struct TripItineraryView: View {
             get: { item.wrappedValue.departAt },
             set: { item.wrappedValue.departAt = $0 },
         ), defaultMinutes: 10 * 60)
+        Divider()
         optionalTime("Ankunft", clock: Binding(
             get: { item.wrappedValue.arriveAt },
             set: { item.wrappedValue.arriveAt = $0 },
         ), defaultMinutes: 16 * 60)
-        Stepper(value: Binding(
-            get: { item.wrappedValue.nights ?? 0 },
-            set: { item.wrappedValue.nights = $0 },
-        ), in: 0...TripItineraryDraft.maxJourneyNights) {
-            let nights = journey.nights ?? 0
-            Text(nights == 0 ? "Ankunft am selben Tag" : nights == 1 ? "1 Nacht unterwegs" : "\(nights) Nächte unterwegs")
+        Divider()
+        fieldRow {
+            // In days, not nights: "1 Nacht unterwegs" read as driving
+            // through the night, when all it says is that the arrival
+            // is a day later.
+            Stepper(value: Binding(
+                get: { item.wrappedValue.nights ?? 0 },
+                set: { item.wrappedValue.nights = $0 },
+            ), in: 0...TripItineraryDraft.maxJourneyNights) {
+                Text(TripItineraryText.arrival(nights: journey.nights ?? 0))
+            }
         }
-        TripTransportModePicker(mode: Binding(
-            get: { item.wrappedValue.transportMode },
-            set: { item.wrappedValue.transportMode = $0 },
-        ), choices: TripTransportMode.allCases)
+        Divider()
+        fieldRow {
+            TripTransportModePicker(mode: Binding(
+                get: { item.wrappedValue.transportMode },
+                set: { item.wrappedValue.transportMode = $0 },
+            ), choices: TripTransportMode.allCases)
+        }
         Text(Self.journeyHint(journey))
             .font(.caption2)
             .foregroundStyle(.secondary)
+            .padding(.top, 8)
     }
 
     /// What the journey will do to the plan, said before it is saved.
@@ -680,22 +764,26 @@ struct TripItineraryView: View {
     /// only the hour.
     @ViewBuilder
     private func optionalTime(_ label: String, clock: Binding<String?>, defaultMinutes: Int) -> some View {
-        Toggle(label, isOn: Binding(
-            get: { clock.wrappedValue != nil },
-            set: { on in clock.wrappedValue = on ? (clock.wrappedValue ?? TripClock.format(defaultMinutes)) : nil },
-        ))
+        fieldRow {
+            Toggle(label, isOn: Binding(
+                get: { clock.wrappedValue != nil },
+                set: { on in clock.wrappedValue = on ? (clock.wrappedValue ?? TripClock.format(defaultMinutes)) : nil },
+            ))
+        }
         if let current = clock.wrappedValue {
-            DatePicker("Uhrzeit", selection: Binding(
-                get: {
-                    let minutes = TripClock.minutes(fromClock: current) ?? defaultMinutes
-                    return Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60,
-                                                 second: 0, of: Date()) ?? Date()
-                },
-                set: { date in
-                    let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-                    clock.wrappedValue = TripClock.format((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
-                },
-            ), displayedComponents: .hourAndMinute)
+            fieldRow {
+                DatePicker("Uhrzeit", selection: Binding(
+                    get: {
+                        let minutes = TripClock.minutes(fromClock: current) ?? defaultMinutes
+                        return Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60,
+                                                     second: 0, of: Date()) ?? Date()
+                    },
+                    set: { date in
+                        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                        clock.wrappedValue = TripClock.format((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
+                    },
+                ), displayedComponents: .hourAndMinute)
+            }
         }
     }
 
@@ -709,8 +797,14 @@ struct TripItineraryView: View {
             let loaded = TripItineraryDraft(response: response)
             draft = loaded
             original = loaded
+            refreshDirty()
             if let focus, let item = loaded.item(focused: focus) {
                 expanded.insert(item.id)
+            }
+            // A stay that came back without a place looks for one.
+            for stay in loaded.stays where stay.anchor == nil {
+                placeFinders[stay.id] = TripPlaceFinderModel()
+                searchingPlaceFor = searchingPlaceFor ?? stay.id
             }
             if viewModel.plan == nil { await viewModel.load() }
             await loadSuggestion()
@@ -720,7 +814,13 @@ struct TripItineraryView: View {
     }
 
     private func save() async {
-        guard let draft, draft.problems().isEmpty else { return }
+        guard let draft else { return }
+        let problems = draft.problems()
+        guard problems.isEmpty else {
+            // Said where the tap was, not with a grey button.
+            errorMessage = problems.joined(separator: "\n")
+            return
+        }
         isSaving = true
         defer { isSaving = false }
         do {

@@ -211,6 +211,29 @@ final class TripItineraryTests: XCTestCase {
         XCTAssertEqual(draft.items[1].legId, 2)
     }
 
+    func testAStayMovesOneUpOrDownFromItsCard() {
+        var draft = twoStays
+        draft.insertStay(after: draft.items[2].id)
+        var third = draft.items[4]
+        third.title = "Ort C"
+        third.anchor = TripCoordinate(lat: 1, lon: 1)
+        draft[third.id] = third
+        let c = third.id
+        draft.moveStay(id: c, up: true)
+        XCTAssertEqual(draft.stays.map(\.title), ["Ort A", "Ort C", "Ort B"])
+        draft.moveStay(id: c, up: true)
+        XCTAssertEqual(draft.stays.map(\.title), ["Ort C", "Ort A", "Ort B"])
+        // At the top, up does nothing; down takes it back.
+        draft.moveStay(id: c, up: true)
+        XCTAssertEqual(draft.stays.map(\.title), ["Ort C", "Ort A", "Ort B"])
+        draft.moveStay(id: c, up: false)
+        XCTAssertEqual(draft.stays.map(\.title), ["Ort A", "Ort C", "Ort B"])
+        draft.moveStay(id: c, up: false)
+        draft.moveStay(id: c, up: false)
+        XCTAssertEqual(draft.stays.map(\.title), ["Ort A", "Ort B", "Ort C"])
+        XCTAssertEqual(draft.items.map(\.kind), [.stay, .journey, .stay, .journey, .stay])
+    }
+
     // MARK: - Refusals, said before the server would
 
     func testAStayWithoutAPlaceAndAJourneyArrivingBeforeItLeavesAreNamed() {
@@ -243,7 +266,16 @@ final class TripItineraryTests: XCTestCase {
                        "ab 10:00 · an 15:00 · ÖPNV & zu Fuß")
         XCTAssertEqual(TripItineraryText.journeyLine(journey(mode: .car)), "Zeiten offen · mit dem Auto")
         XCTAssertEqual(TripItineraryText.journeyLine(journey(departAt: "22:00", arriveAt: "08:00", nights: 1, mode: .ship)),
-                       "ab 22:00 · an 08:00 · mit dem Schiff · 1 Nacht unterwegs")
+                       "ab 22:00 · an 08:00 · mit dem Schiff · Ankunft am nächsten Tag")
+        XCTAssertEqual(TripItineraryText.journeyLine(journey(departAt: "08:00", arriveAt: "18:00", nights: 2, mode: .car)),
+                       "ab 08:00 · an 18:00 · mit dem Auto · Ankunft 2 Tage später")
+    }
+
+    func testTheArrivalIsSaidInDaysNotNights() {
+        // "1 Nacht unterwegs" read as driving through the night.
+        XCTAssertEqual(TripItineraryText.arrival(nights: 0), "Ankunft am selben Tag")
+        XCTAssertEqual(TripItineraryText.arrival(nights: 1), "Ankunft am nächsten Tag")
+        XCTAssertEqual(TripItineraryText.arrival(nights: 3), "Ankunft 3 Tage später")
     }
 
     func testAStayIsNamedByItsTitleThenItsLodgingThenItsNumber() {
