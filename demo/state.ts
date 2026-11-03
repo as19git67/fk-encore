@@ -5,8 +5,8 @@
  *
  * "Untouched" is counted, not guessed from the boot: no photos, documents,
  * bookings, depot transactions, meter readings or trip plans, and no users
- * besides administrators and the system accounts (`…@system.local`: the AI
- * user, the benchmark account). What a demo run or the assistant's
+ * besides administrators, the system accounts (`…@system.local`: the AI
+ * user, the benchmark account) and the demo owner from `DEMO_OWNER_EMAIL`. What a demo run or the assistant's
  * synthetic benchmark wrote is registered and does not count — removing the
  * demo makes the system untouched again.
  */
@@ -14,6 +14,7 @@
 import { and, desc, eq, inArray, not, sql } from "drizzle-orm";
 import db from "../db/database";
 import { demoRun } from "../db/schema";
+import { demoOwnerEmail } from "./owner";
 
 export interface ContentCounts {
   users: number;
@@ -31,10 +32,12 @@ const benchRows = (table: string) => sql`(SELECT row_id FROM assistant_benchmark
 
 /** What the system holds that someone put in, per kind. */
 export async function contentCounts(): Promise<ContentCounts> {
+  const owner = demoOwnerEmail() ?? "";
   const result = await db.execute(sql`
     SELECT
       (SELECT count(*) FROM users u
          WHERE u.email NOT LIKE '%@system.local'
+           AND lower(u.email) <> ${owner}
            AND u.id NOT IN ${demoRows("users")}
            AND NOT EXISTS (
              SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id

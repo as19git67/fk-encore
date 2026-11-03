@@ -1,8 +1,10 @@
 /**
  * The boot switch `DEMO_DATA` (documentation/plans/demodaten.md): a test
  * installation or the demo deployment loads the demo once at boot, through
- * the same run as the button on Admin › Systemstatus, owned by the admin
- * from `ADMIN_EMAIL`, and only while the system is untouched.
+ * the same run as the button on Admin › Systemstatus, loaded by the admin
+ * from `ADMIN_EMAIL` and owned by the demo owner from `DEMO_OWNER_EMAIL`
+ * (demo/owner.ts) or, without one, by that admin; only while the system is
+ * untouched.
  *
  *   DEMO_DATA=1 (true, yes, on, full)  the full demo, worded by the model
  *   DEMO_DATA=small                    the small household of the E2E
@@ -20,6 +22,7 @@ import { users } from "../db/schema";
 import type { TextSource } from "./doc-writer";
 import type { DemoSize } from "./household";
 import { DemoRefused, executeRun, fileRun, type StartOptions } from "./run";
+import { demoOwnerFor, demoOwnerSetting, type DemoOwnerSetting } from "./owner";
 import { currentRun } from "./state";
 
 export interface BootDemo {
@@ -46,6 +49,7 @@ export async function loadDemoAtBoot(
   setting: BootDemo | null = demoDataSetting(),
   adminEmail: string = process.env.ADMIN_EMAIL || "admin@example.com",
   opts: Omit<StartOptions, "size" | "text"> = {},
+  owner: DemoOwnerSetting | null = demoOwnerSetting(),
 ): Promise<BootOutcome> {
   if (!setting) return "off";
   try {
@@ -61,7 +65,7 @@ export async function loadDemoAtBoot(
     }
     let runId: number;
     try {
-      runId = await fileRun(admin.id, { ...opts, size: setting.size, text: setting.text });
+      runId = await fileRun(await demoOwnerFor(admin.id, owner), { ...opts, size: setting.size, text: setting.text });
     } catch (err) {
       if (!(err instanceof DemoRefused)) throw err;
       log.info(`DEMO_DATA: ${err.message}`);

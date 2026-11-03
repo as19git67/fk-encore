@@ -17,6 +17,7 @@ import log from "encore.dev/log";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { isAdminUser } from "../user/admin-guard";
+import { demoOwnerFor } from "./owner";
 import { removeRun } from "./remove";
 import { truthReport, type TruthReport } from "./truth";
 import { DemoRefused, executeRun, fileRun, requestCancel } from "./run";
@@ -99,7 +100,7 @@ export const startDemo = api(
     const userId = await requireAdmin();
     let runId: number;
     try {
-      runId = await fileRun(userId, { size: p.size, text: p.text });
+      runId = await fileRun(await demoOwnerFor(userId), { size: p.size, text: p.text });
     } catch (err) {
       if (err instanceof DemoRefused) throw APIError.failedPrecondition(err.message);
       throw err;

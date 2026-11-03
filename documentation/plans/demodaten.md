@@ -350,6 +350,15 @@ How to set it up is in `DEPLOYMENT.md`, "Demo stack".
 - **First fill.** `DEMO_DATA=1` in the demo's `.env` makes the server load
   the full demo at boot while the system is untouched (`demo/boot.ts`;
   the E2E workflows set `DEMO_DATA=small`).
+- **Two logins** (decided 2026-11-03). Visitors must not hold the admin
+  login, or any of them can remove the demo, manage users and change
+  settings. The demo data belongs to the visitors' account
+  `DEMO_OWNER_EMAIL` (`DEMO_OWNER_PASSWORD`, `demo/owner.ts`): every
+  module role, never Admin, created by the run when missing and kept when
+  the demo is removed; `contentCounts` does not count it. The admin from
+  `ADMIN_EMAIL` stays the operator's and alone can remove or reload the
+  demo. Without `DEMO_OWNER_EMAIL` the demo belongs to the admin who loads
+  it, as on a test installation.
 - **Shared GPU.** A second Gemma 4 does not fit next to the first in
   16 GB; the demo app points `LLM_SERVICE_URL` at the prod llm-service
   instead of starting its own.

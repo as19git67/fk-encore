@@ -25,6 +25,7 @@ vi.mock("./state", async (importOriginal) => {
 vi.setConfig({ testTimeout: 60_000 });
 
 const ADMIN = "demo-boot-admin@beispiel.test";
+const OWNER = "demo-boot-owner@beispiel.test";
 let adminId: number;
 
 beforeAll(async () => {
@@ -43,6 +44,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await db.delete(users).where(eq(users.id, adminId));
+  await db.delete(users).where(eq(users.email, OWNER));
 });
 
 describe("demoDataSetting", () => {
@@ -76,5 +78,13 @@ describe("loadDemoAtBoot", () => {
 
     expect(await loadDemoAtBoot({ size: "small", text: "template" }, ADMIN)).toBe("exists");
     expect((await db.select().from(demoRun).where(eq(demoRun.owner_user_id, adminId))).length).toBe(1);
+  });
+
+  it("gives the demo to the demo owner from DEMO_OWNER_EMAIL, not to the admin", async () => {
+    vi.mocked(state.isUntouched).mockResolvedValue(true);
+    const owner = { email: OWNER, password: "demo-pw", name: "Demo" };
+    expect(await loadDemoAtBoot({ size: "small", text: "template" }, ADMIN, { today: "2026-10-26" }, owner)).toBe("loaded");
+    const [ownerRow] = await db.select({ id: users.id }).from(users).where(eq(users.email, OWNER));
+    expect(await state.currentRun()).toMatchObject({ owner_user_id: ownerRow.id, status: "done" });
   });
 });
