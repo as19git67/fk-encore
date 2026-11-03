@@ -286,6 +286,9 @@ Ladevorgang und sagt am Ende, wenn der Filter enger sein muss.
   2. Karten anhaken; Umschalt+Klick wählt den Bereich, Strg/Cmd+A alles.
 - **Ergebnis:** `SelectionBar` erscheint mit Zähler und Summe der
   gewählten Buchungen; Escape beendet den Modus und leert die Auswahl.
+  Sobald mindestens eine Buchung gewählt ist, erscheint in der Toolbar
+  das Listen-Symbol „Ausgewählte Buchungen“, das die Auswahl als Liste
+  zeigt; ohne Auswahl ist es nicht zu sehen.
 - **Fehler und Grenzfälle:** Die Auswahl ist unabhängig vom Basket.
 - **Test:** `finance.spec.ts` („Auswahl-Counter spiegelt Klick auf
   Selection-Checkbox“, „Pfeiltasten-Navigation in der DataTable bewegt
