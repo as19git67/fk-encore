@@ -63,7 +63,6 @@ final class TripNewPlanViewModel {
         draft.anchor != nil
             || !draft.title.trimmingCharacters(in: .whitespaces).isEmpty
             || !sentence.trimmingCharacters(in: .whitespaces).isEmpty
-            || draft.legs.count > 1
             || interestsNarrowed
     }
 
@@ -80,74 +79,6 @@ final class TripNewPlanViewModel {
     func searchPlaceHint() {
         guard let hint = draft.placeHint, !hint.isEmpty else { return }
         finder.lookUp(hint)
-    }
-
-    // MARK: - The legs
-
-    /// Add a city after the ones already there (§4.2).
-    ///
-    /// Its length and mode start from the previous leg's rather than
-    /// from the defaults: a second city on a trip you are cycling
-    /// through is almost certainly also cycled.
-    func addLeg() {
-        let previous = draft.legs.last
-        draft.legs.append(TripDraftLeg(
-            days: previous?.days ?? 3,
-            mode: previous?.mode ?? .foot,
-            radiusM: previous?.radiusM ?? TripReach.radius(for: .foot),
-        ))
-    }
-
-    /// Remove cities the list offered for deletion.
-    ///
-    /// The offsets index the **displayed** rows, and the list shows the
-    /// route from the second city on — so offset 0 is `legs[1]`. Taking
-    /// them as absolute indices deleted the wrong city and silently
-    /// ignored the first row, which is the sort of off-by-one that
-    /// looks like the list "sometimes not working".
-    ///
-    /// Resolved to ids before anything is removed, because every
-    /// removal moves the indices of everything after it.
-    func removeLegs(displayedAt offsets: IndexSet) {
-        let ids = offsets.compactMap { offset -> TripDraftLeg.ID? in
-            let index = offset + 1
-            return draft.legs.indices.contains(index) ? draft.legs[index].id : nil
-        }
-        guard !ids.isEmpty else { return }
-        draft.legs.removeAll { ids.contains($0.id) }
-    }
-
-    /// A binding to one city that survives the list changing under it.
-    ///
-    /// SwiftUI evaluates a pushed destination once more while it is
-    /// being dismissed, and a binding that subscripts by a captured
-    /// index crashes there the moment the list has grown shorter. This
-    /// one looks the city up by id every time and answers a throwaway
-    /// value when it is gone — the screen is on its way out anyway.
-    func binding(for id: TripDraftLeg.ID) -> Binding<TripDraftLeg> {
-        Binding(
-            get: { [weak self] in
-                self?.draft.legs.first { $0.id == id } ?? TripDraftLeg()
-            },
-            set: { [weak self] updated in
-                guard let self,
-                      let index = self.draft.legs.firstIndex(where: { $0.id == id })
-                else { return }
-                self.draft.legs[index] = updated
-            },
-        )
-    }
-
-    /// Where this city currently sits in the route, or nil once it is
-    /// gone. Only ever used for a label.
-    func position(of id: TripDraftLeg.ID) -> Int? {
-        draft.legs.firstIndex { $0.id == id }
-    }
-
-    /// The city one travels *from* to reach this one.
-    func legBefore(_ id: TripDraftLeg.ID) -> TripDraftLeg? {
-        guard let index = position(of: id), index > 0 else { return nil }
-        return draft.legs[index - 1]
     }
 
     // MARK: - The sentence

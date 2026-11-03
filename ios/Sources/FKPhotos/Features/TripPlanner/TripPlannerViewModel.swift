@@ -821,7 +821,7 @@ final class TripPlannerViewModel {
         let pending = pendingIdeas
         guard ideasOfferMemory.shouldOffer(planId: planId, pendingCount: pending.count) else { return nil }
         return TripIdeasOffer.sentence(pending: pending) { legIndex in
-            plan?.legs.first { $0.position == legIndex }?.displayTitle ?? "Stadt \(legIndex + 1)"
+            plan?.legs.first { $0.position == legIndex }?.displayTitle ?? "Aufenthalt \(legIndex + 1)"
         }
     }
 

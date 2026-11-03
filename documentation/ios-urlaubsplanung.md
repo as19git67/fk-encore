@@ -4076,7 +4076,8 @@ later:
    plannable in one request and unchangeable afterwards, which is not how anyone
    plans twenty days.
 
-   Three endpoints (`trip-planner/legs.ts`) and two screens close this: add a
+   Three endpoints (`trip-planner/legs.ts`; since 2026-11-02 the one
+   `PUT …/itinerary` of §22.7 does all of it) and two screens close this: add a
    city — also in the middle, the following ones move up —, move its anchor when
    the hotel changes, and strike one that did not come about. Four things that
    easily go wrong silently here and therefore have tests:
@@ -5603,6 +5604,22 @@ Found along the way: inserting or deleting a stage *before* two or more others
 failed on the uniqueness of `(plan, position)` — the renumbering in one step
 collided row by row. It now runs via negative intermediate values.
 
+**Superseded by the itinerary (2026-11-02,
+`documentation/plans/reiseverlauf.md`).** The journey is now one link of
+the trip's chain: a stay owns its place, lodging, days and mode on site, a
+journey its departure, arrival, mode and nights on the way, the trip its one
+date, and every other date follows. `GET`/`PUT …/plans/:planId/itinerary`
+read and write the whole chain; a journey with both times becomes the
+`transit` leg described above, one with fewer times only writes the arrival
+and the departure fixpoint onto its neighbours. `POST …/legs`,
+`PATCH …/legs/:i`, `DELETE …/legs/:i`, `POST …/transits` and
+`PATCH …/transits/:i` are gone with their screens; in the app the chain is
+`TripItineraryView`, entered from the pencil on the stage bar, from the
+header of a leg's sheet, from a journey's times in a day's frame band, and
+as the screen "Neue Reise" lands on. The behaviour above — the two framed
+ends, "Alle an Bord", the way there and home, voting along the way — is
+tested through the chain in `itinerary-edit.test.ts`.
+
 ## 24. Router: real travel times in tiers (2026-09-30)
 
 Up to here, the planner computes every travel time as straight-line distance
@@ -5761,11 +5778,11 @@ the place of its level:
 
 - **Trip — the stage bar at the top and the "Reise" (Trip) menu.** The bar shows
   the stages (always, even for a single one); to the right of it, fixed at the
-  edge and not scrolled along, the pencil: the structure editor, in which
-  stages are added, moved, removed and onward journeys, outbound and homeward
-  journeys are inserted (`TripLegsView`, as a sheet with „Fertig" (Done)). The
-  chips of the bar and the pencil are 44 pt high — the size Apple demands for a
-  control.
+  edge and not scrolled along, the pencil: the itinerary (`TripItineraryView`,
+  since 2026-11-02), one timeline of stays and journeys in which stays are
+  added, unfolded, moved and removed and every journey gets its times, with
+  home at both ends. The chips of the bar and the pencil are 44 pt high — the
+  size Apple demands for a control.
   The menu now contains only what belongs to the whole trip: Einstellungen
   (Settings), Planen mit (Plan with), Reisegruppe (Travel group), Dokumente
   (Documents), Änderungen (Changes), Reisebereit? (Ready to travel?), Danach
@@ -5773,9 +5790,9 @@ the place of its level:
 - **Stage — the stage header row.** A card with an arrow like a list row, the
   first row in text colour: the most important entry point of the screen must
   not look like a footnote. A tap opens the stage sheet
-  (`TripLegSheet`): at the top the stage itself (accommodation, length, date,
-  means of transport; for an onward journey departure, arrival, means of
-  transport), then **Hinzufügen** (Add; search for a place, create a route,
+  (`TripLegSheet`): at the top the stage itself, a row that opens the
+  itinerary on this stage's card (accommodation, length, means of transport;
+  for an onward journey departure, arrival, means of transport), then **Hinzufügen** (Add; search for a place, create a route,
   routes nearby, adopt from the ideas — five ways to one destination, the
   stage's pool) and **Vorrat** (Pool; candidates, wishes, day trip). An onward
   journey has the same pool and the same wishes — the places along the way —
@@ -5802,16 +5819,22 @@ Reykjavik — danach beginnt die nächste Etappe", i.e. until 08:00, arrival
 Reykjavik — the next stage begins afterwards) instead of a buffer day with
 „Diesen Tag jetzt planen" (Plan this day now); the server rejects planning such
 a day. Departure and arrival of the onward journey appear without an X in the
-frame of the day: they are the frame of the onward journey and are changed in
-its editor; the server rejects their removal (`isJourneyEnd`) instead of
-silently writing them again at the next replanning.
+frame of the day: they are the frame of the onward journey, and the row leads
+into the itinerary with that journey unfolded (`TripItineraryFocus`); the
+same for the departure a journey without times wrote onto the last day of a
+stay (`TripLeg.isJourneyDeparture`) and for the „Ankunft" in a first day's
+header. The server rejects their removal (`isJourneyEnd`) instead of silently
+writing them again at the next replanning.
 
 ### 25.2 A new trip
 
-The creation dialog asks only what a trip needs to come into being: name, first
-city, length and date, means of transport. Further cities, onward journeys,
-outbound and homeward journeys, who travels along, pace and what is searched
-for — all of that happens afterwards in the same places as with later changes.
+The creation dialog asks only what a trip needs to come into being: name,
+the first stay's lodging, length and date (since 2026-11-02 no means of
+transport and no arrival either). „Planen" then opens the itinerary, where
+the way there, the arrival, further stays and journeys and the means of
+transport on site are set; who travels along, pace and what is searched for
+are in the trip's settings — all of it in the same places as with later
+changes.
 The sentence interpreter and the interests have been taken out of the dialog;
 the former because it set things the dialog no longer shows, the latter because
 they are in the settings and there all of them are on at the start anyway
@@ -5886,7 +5909,10 @@ sheet), via `GET /trip-planner/wikipedia/article?url=…` (`wiki-article.ts`,
 
 ### 25.5 What is still outstanding
 
-- **One word per level.** The same thing is still called "Stadt" (city),
-  "Etappe" (stage) and "Ort" (place). "Etappe" for the structure, "Ort" only
-  for spots — a review of the texts is outstanding.
+- **One word per level — done in the app (2026-11-02).** The levels are
+  Reise, Aufenthalt, Weiterreise and Ort: a stay is an „Aufenthalt"
+  everywhere the app names one (the leg sheet's title, the fallback name
+  „Aufenthalt 2", the pool, the ideas, the offline bundle), a journey a
+  „Weiterreise", and „Ort" is a spot. Server messages that address a leg
+  that may be either — the pool, the votes, a find — still say „Etappe".
 

@@ -369,7 +369,7 @@ struct TripNearbyRoutesView: View {
                 // eight kilometres from town is in the list, and its
                 // start may be a hundred kilometres away.
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Gemessen vom Ausgangspunkt der Etappe bis zur nächsten Stelle "
+                    Text("Gemessen vom Ausgangspunkt des Aufenthalts bis zur nächsten Stelle "
                          + "der Strecke — nicht bis zu ihrem Anfang. Ein weiter entferntes "
                          + "Band zeigt andere Strecken, nicht mehr davon.")
                     OSMAttributionNote()

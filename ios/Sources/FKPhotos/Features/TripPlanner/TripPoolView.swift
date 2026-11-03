@@ -147,7 +147,7 @@ struct TripPoolView: View {
                     }
                 }
             } else {
-                ContentUnavailableView("Stadt nicht gefunden", systemImage: "tray")
+                ContentUnavailableView("Aufenthalt nicht gefunden", systemImage: "tray")
             }
         }
     }
@@ -174,7 +174,7 @@ struct TripPoolView: View {
                 pins(of: leg)
             }
         } else {
-            ContentUnavailableView("Stadt nicht gefunden", systemImage: "map")
+            ContentUnavailableView("Aufenthalt nicht gefunden", systemImage: "map")
         }
     }
 

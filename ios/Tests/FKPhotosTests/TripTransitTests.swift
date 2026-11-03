@@ -79,7 +79,7 @@ final class TripTransitTests: XCTestCase {
         XCTAssertEqual(journey.journeyDayLine(dayIndex: 0), "Ab 18:00, Abfahrt Start")
         XCTAssertEqual(journey.journeyDayLine(dayIndex: 1), "Den ganzen Tag")
         XCTAssertEqual(journey.journeyDayLine(dayIndex: 3),
-                       "Bis 08:00, Ankunft Ort 1 — danach beginnt die nächste Etappe")
+                       "Bis 08:00, Ankunft Ort 1 — danach beginnt der nächste Aufenthalt")
         XCTAssertEqual(plan.legs[1].journeyDayLine(dayIndex: 0), "10:00 Abfahrt Start · 16:00 Ankunft Ort 1")
         XCTAssertNil(plan.legs[0].journeyDayLine(dayIndex: 0))
     }

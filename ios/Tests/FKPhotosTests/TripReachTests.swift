@@ -38,7 +38,7 @@ final class TripReachTests: XCTestCase {
     }
 
     func testTheDraftFollowsTheModeItIsGiven() {
-        var leg = TripDraftLeg()
+        var leg = TripDraftStay()
         XCTAssertEqual(leg.radiusM, TripReach.radius(for: .foot))
         leg.mode = .car
         XCTAssertEqual(leg.radiusM, TripReach.radius(for: .car))
@@ -48,7 +48,7 @@ final class TripReachTests: XCTestCase {
     }
 
     func testTheDraftKeepsAHandPickedRadiusAcrossAModeChange() {
-        var leg = TripDraftLeg()
+        var leg = TripDraftStay()
         leg.radiusM = 750
         leg.mode = .transit
         XCTAssertEqual(leg.radiusM, 750)

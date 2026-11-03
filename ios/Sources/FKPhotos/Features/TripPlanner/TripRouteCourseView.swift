@@ -117,7 +117,7 @@ struct TripRouteCourseView: View {
                     Text("Unterwegs")
                 } footer: {
                     Text("Was OpenStreetMap bis 150 m neben der Strecke kennt, "
-                         + "im Umkreis der Etappe.")
+                         + "im Umkreis des Aufenthalts.")
                 }
             }
 

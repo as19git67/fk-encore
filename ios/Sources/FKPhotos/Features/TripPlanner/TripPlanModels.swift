@@ -177,7 +177,7 @@ struct TripLeg: Codable, Identifiable, Sendable {
         switch (first, last) {
         case (true, true): return "\(from) Abfahrt \(origin) · \(to) Ankunft \(anchorTitle)"
         case (true, false): return "Ab \(from), Abfahrt \(origin)"
-        case (false, true): return "Bis \(to), Ankunft \(anchorTitle) — danach beginnt die nächste Etappe"
+        case (false, true): return "Bis \(to), Ankunft \(anchorTitle) — danach beginnt der nächste Aufenthalt"
         case (false, false): return "Den ganzen Tag"
         }
     }
@@ -205,11 +205,11 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// server that never had the flag never had a waiting leg either.
     var isAwaitingRegion: Bool { awaitingRegion == true }
 
-    /// What to call this city. Never invents a name for a leg nobody
+    /// What to call this stay. Never invents a name for a leg nobody
     /// named (§15.3) — it says which one it is instead.
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
-        return "Stadt \(position + 1)"
+        return "Aufenthalt \(position + 1)"
     }
 }
 

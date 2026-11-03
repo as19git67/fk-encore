@@ -527,7 +527,7 @@ struct TripIdeaTakeSheet: View {
                     // Said in the plan's own words: the idea becomes a
                     // *candidate* of the leg it lies in, not a stop on a
                     // day — placing it is the plan's decision (§20.3).
-                    Text("Die Idee kommt zu den Kandidaten der passenden Stadt. Bei den Ideen "
+                    Text("Die Idee kommt zu den Kandidaten des passenden Aufenthalts. Bei den Ideen "
                          + "bleibt sie trotzdem.")
                 }
             }

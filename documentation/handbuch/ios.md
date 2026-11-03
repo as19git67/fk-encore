@@ -27,7 +27,7 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 | `REV` | Gruppen-Review | Gruppen-Review, Bewertung, Auswahl anpassen |
 | `SUC` | Tab Suche | Suche |
 | `TRP` | Tab Trip | Trip, Trip starten, Trip & Reise |
-| `PLN` | Reiseplaner | Neue Reise, Städte, Kandidaten, Tagesablauf, Karte, Ideen, Wünsche, Reisegruppe, Planen mit, Dokumente, Reisebereit?, Danach, Unterwegs ohne Netz, … |
+| `PLN` | Reiseplaner | Neue Reise, Reiseverlauf, Kandidaten, Tagesablauf, Karte, Ideen, Wünsche, Reisegruppe, Planen mit, Dokumente, Reisebereit?, Danach, Unterwegs ohne Netz, … |
 | `SET` | Tab Einstellungen | Profil, Server, Foto-Synchronisierung, Upload-Warteschlange, iPhone-Mediathek, Benachrichtigungen, Suche auf dem iPhone, Trip & Reise, Karten-App, Benutzer, Rollen, Quellen & Lizenzen |
 | `SHR` | Share-Extension | Gefunden, Fund übernehmen |
 
@@ -191,9 +191,9 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 
 ## PLN: Reiseplaner
 
-Bildschirme (je Titel ein Bildschirm): Neue Reise, Reise, Städte
-(Etappen mit „Anreise einfügen“, „Weiterreise einfügen“, „Heimreise
-einfügen“), Kandidaten (Pool mit Einplanen, Für später merken,
+Bildschirme (je Titel ein Bildschirm): Neue Reise, Reise, Reiseverlauf
+(Aufenthalte und Weiterreisen als eine Kette, Zuhause an beiden Enden,
+Plus auf der Linie, Umsortieren, ein Datum im Kopf), Kandidaten (Pool mit Einplanen, Für später merken,
 Ausblenden, Ausgeblendet), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
 Abendlicht, Wetter, „Ab hier umplanen“, „Umräumen“, „Gruppe trennen“ /
 „Wieder zusammen“), Tagesausflug, Ausflug, Karte, Strecken (anlegen,
@@ -208,10 +208,11 @@ Gerät laden“, „Vom Gerät löschen“), Änderungen (Journal), Danach
 Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 übernehmen (aus der Share-Extension).
 
-### IOS-PLN-01 Reise anlegen und Etappen planen
+### IOS-PLN-01 Reise anlegen und Aufenthalte planen
 
-- „Neue Reise“ → „Reise anlegen“; Städte als Etappen; Kandidaten je
-  Etappe aus Ideen, Suche („Ort suchen“, „Hier, wo ich bin“) und
+- „Neue Reise“ (Name, Unterkunft, Länge, Datum) → „Planen“ öffnet den
+  Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen;
+  Kandidaten je Aufenthalt aus Ideen, Suche („Ort suchen“, „Hier, wo ich bin“) und
   Entdecken („Gegend wählen“, „Andere Gegend…“).
 - **Test:** –
 
@@ -316,7 +317,7 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 | IOS-REV-01 | Gruppen entscheiden | – |
 | IOS-SUC-01 | Suchen | – |
 | IOS-TRP-01 | Trip starten und beenden | – |
-| IOS-PLN-01 | Reise anlegen und Etappen planen | – |
+| IOS-PLN-01 | Reise anlegen und Aufenthalte planen | – |
 | IOS-PLN-02 | Tag planen | – |
 | IOS-PLN-03 | Gemeinsam planen | – |
 | IOS-PLN-04 | Unterwegs | – |

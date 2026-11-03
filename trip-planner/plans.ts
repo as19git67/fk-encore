@@ -105,7 +105,7 @@ const CANDIDATE_LIMIT = 150;
 const MAX_DAYS = 14;
 /**
  * More than this is a life, not a trip — and every leg costs a search.
- * Counted in places to stay (`legs.ts` says the same): the journeys
+ * Counted in places to stay (`itinerary.ts` says the same): the journeys
  * between them are legs too and are bounded by the stays.
  */
 const MAX_STAYS = 20;
