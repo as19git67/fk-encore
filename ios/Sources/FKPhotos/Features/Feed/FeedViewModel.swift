@@ -4,12 +4,19 @@ import SwiftUI
 @Observable
 final class FeedViewModel {
     var items: [FeedPhotoItem] = []
+    /// Albums shared with the viewer, one card each (see `FeedStream`).
+    var albums: [FeedAlbumItem] = []
     var isLoading = false
     var isLoadingMore = false
     var hasMore = true
     var unreadCount = 0
     var hiddenPhotoIds: Set<Int> = []
     var errorMessage: String?
+
+    /// What the feed shows: photos with the album cards slotted in by time.
+    var entries: [FeedEntry] {
+        FeedStream.entries(items: items, albums: albums)
+    }
 
     private var nextCursor: PhotoFeedCursor?
     private let pageSize = 12
@@ -28,6 +35,7 @@ final class FeedViewModel {
                 "/feed/photos", query: query
             )
             items = response.items
+            albums = response.albums ?? []
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
             // Feeds the "recent feed activity" home-screen widget (#764);
@@ -61,6 +69,7 @@ final class FeedViewModel {
                 "/feed/photos", query: query
             )
             items.append(contentsOf: response.items)
+            albums = FeedStream.mergeAlbums(albums, response.albums ?? [])
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
         } catch {

@@ -202,24 +202,11 @@ struct FeedCardView: View {
     }
 
     private func initials(for name: String?) -> String {
-        guard let name, !name.isEmpty else { return "?" }
-        let parts = name.split(separator: " ")
-        if parts.count >= 2 {
-            return "\(parts[0].prefix(1))\(parts[1].prefix(1))".uppercased()
-        }
-        return String(name.prefix(2)).uppercased()
+        FeedFormat.initials(for: name)
     }
 
     private func relativeDate(_ isoString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: isoString)
-                ?? ISO8601DateFormatter().date(from: isoString) else {
-            return ""
-        }
-        let relative = RelativeDateTimeFormatter()
-        relative.unitsStyle = .short
-        return relative.localizedString(for: date, relativeTo: Date())
+        FeedFormat.relativeDate(isoString)
     }
 }
 
@@ -258,5 +245,29 @@ final class FeedImageLoader: @unchecked Sendable {
         } catch {
             // Silently fail
         }
+    }
+}
+
+/// Initials and relative time, shared by the photo and the album card.
+enum FeedFormat {
+    static func initials(for name: String?) -> String {
+        guard let name, !name.isEmpty else { return "?" }
+        let parts = name.split(separator: " ")
+        if parts.count >= 2 {
+            return "\(parts[0].prefix(1))\(parts[1].prefix(1))".uppercased()
+        }
+        return String(name.prefix(2)).uppercased()
+    }
+
+    static func relativeDate(_ isoString: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: isoString)
+                ?? ISO8601DateFormatter().date(from: isoString) else {
+            return ""
+        }
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .short
+        return relative.localizedString(for: date, relativeTo: Date())
     }
 }

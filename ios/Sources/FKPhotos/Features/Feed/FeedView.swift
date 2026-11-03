@@ -31,13 +31,18 @@ struct FeedView: View {
 
                 RecapFeedStripView()
 
-                ForEach(viewModel.items) { item in
-                    FeedCardView(
-                        item: item,
-                        isHiddenByMe: viewModel.hiddenPhotoIds.contains(item.photoId),
-                        onLike: { Task { await viewModel.toggleLike(photoId: item.photoId) } },
-                        onToggleHide: { Task { await viewModel.toggleHide(photoId: item.photoId) } }
-                    )
+                ForEach(viewModel.entries) { entry in
+                    switch entry {
+                    case .photo(let item):
+                        FeedCardView(
+                            item: item,
+                            isHiddenByMe: viewModel.hiddenPhotoIds.contains(item.photoId),
+                            onLike: { Task { await viewModel.toggleLike(photoId: item.photoId) } },
+                            onToggleHide: { Task { await viewModel.toggleHide(photoId: item.photoId) } }
+                        )
+                    case .album(let album):
+                        FeedAlbumCardView(album: album)
+                    }
 
                     Divider()
                         .padding(.vertical, 4)
@@ -90,6 +95,10 @@ struct FeedView: View {
         .navigationDestination(for: RecapsRef.self) { _ in
             RecapsListView()
         }
+        // A shared album's card opens the album.
+        .navigationDestination(for: FeedAlbumOpen.self) { ref in
+            AlbumDetailView(albumId: ref.id)
+        }
         // A deep link to the recaps (#768 §5a) pushes the same list from
         // here; item destination, not a path binding — see `AppDeepLinkRouter`.
         .navigationDestination(item: $router.recapsToOpen) { _ in
@@ -99,18 +108,18 @@ struct FeedView: View {
             await viewModel.loadInitial()
         }
         .overlay {
-            if viewModel.isLoading && viewModel.items.isEmpty {
+            if viewModel.isLoading && viewModel.entries.isEmpty {
                 ProgressView("Lade Feed…")
-            } else if viewModel.items.isEmpty && !viewModel.isLoading {
+            } else if viewModel.entries.isEmpty && !viewModel.isLoading {
                 ContentUnavailableView {
                     Label("Kein Feed", systemImage: "house")
                 } description: {
-                    Text("Es gibt noch keine Aktivität in deinen Alben.")
+                    Text("Es gibt noch keine Aktivität in geteilten Alben.")
                 }
             }
         }
         .task {
-            if viewModel.items.isEmpty {
+            if viewModel.entries.isEmpty {
                 await viewModel.loadInitial()
             }
         }
