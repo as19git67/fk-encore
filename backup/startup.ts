@@ -61,6 +61,9 @@ const MANAGED_HOST_SCRIPTS = [
   "install-backup-hook.sh",
   "fk-encore-backup.sh",
   "format-backup-log.sh",
+  // The demo stack's nightly reset (DEPLOYMENT.md, "Demo stack"). Shipped to
+  // every stack; it refuses any env file that is not a demo's.
+  "demo-reset.sh",
   "README.md",
 ] as const;
 

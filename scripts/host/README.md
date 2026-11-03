@@ -29,10 +29,11 @@ directory onto the backup volume at:
     ├── install-backup-hook.sh
     ├── fk-encore-backup.sh
     ├── format-backup-log.sh
+    ├── demo-reset.sh
     └── README.md
 ```
 
-(The container only ever overwrites those four files. Anything else in
+(The container only ever overwrites those five files. Anything else in
 that directory — most importantly the `backup-token` written by the
 installer — is preserved across image upgrades.)
 
@@ -50,6 +51,7 @@ upgrade-safe too.
 | `fk-encore-backup.sh`    | The daily driver. Stateless; reads everything from env vars / the sibling token file. The cron job calls this. |
 | `install-backup-hook.sh` | One-time setup helper. Generates the token file (if absent) and prints the cron-job fields to fill in the TrueNAS UI. |
 | `format-backup-log.sh`   | Optional log formatter. Reads `fk-encore-backup.sh` output (stdin or file) and emits a human-readable protocol followed by the raw log. Intended for cron mail. |
+| `demo-reset.sh`          | Nightly reset of the demo stack only (DEPLOYMENT.md, "Demo stack"). Refuses any env file that is not a demo's, so it is harmless on prod and test. |
 
 ## Install
 

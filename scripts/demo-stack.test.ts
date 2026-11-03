@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +57,13 @@ describe("docker/Dockerfile.runtime", () => {
     expect(docker).toMatch(/mkdir -p [^\n]*\/mnt\/libraries /);
     expect(docker).toMatch(/chown -R 568:568 [^\n]*\/mnt\/libraries /);
   });
+
+  it("ships the demo reset with the host scripts, so the host needs no checkout", () => {
+    const docker = read("docker/Dockerfile.runtime");
+    const copy = /COPY --chown=568:568 (scripts\/host\/[\s\S]*?)\/opt\/fk-encore\/host-scripts\//.exec(docker)?.[1] ?? "";
+    expect(copy).toContain("scripts/host/demo-reset.sh");
+    expect(read("backup/startup.ts")).toMatch(/MANAGED_HOST_SCRIPTS = \[[^\]]*"demo-reset\.sh"/);
+  });
 });
 
 describe("scripts/host/demo-reset.sh", () => {
@@ -84,6 +91,29 @@ describe("scripts/host/demo-reset.sh", () => {
     expect(run("DEMO_DATA=1\nDEPLOY_NAME_SUFFIX=-demo\nDEPLOY_DATA_ROOT=/mnt/data/fk-encore\n", "--now", "--dry-run").status).toBe(1);
     expect(run("DEMO_DATA=1\nDEPLOY_NAME_SUFFIX=-demo\nDEPLOY_DATA_ROOT=./data-demo\n", "--now", "--dry-run").status).toBe(1);
     expect(run("DEMO_DATA=1\nDEPLOY_NAME_SUFFIX=-demo\nDEPLOY_DATA_ROOT=/mnt/demo/../data\n", "--now", "--dry-run").status).toBe(1);
+  });
+
+  it("empties the data directories but keeps the host scripts it is called from", () => {
+    const base = mkdtempSync(path.join(tmpdir(), "demo-reset-run-"));
+    const dataRoot = path.join(base, "fk-encore-demo");
+    const bin = path.join(base, "bin");
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, "docker"), "#!/bin/sh\nexit 0\n");
+    chmodSync(path.join(bin, "docker"), 0o755);
+    for (const f of ["pgdata/PG_VERSION", "photos/a.jpg", "backup/old.dump", "backup/host-scripts/demo-reset.sh", "backup/host-scripts/backup-token", "llm_models/m.gguf"]) {
+      mkdirSync(path.dirname(path.join(dataRoot, f)), { recursive: true });
+      writeFileSync(path.join(dataRoot, f), "x");
+    }
+    const file = path.join(base, ".env.demo");
+    writeFileSync(file, `DEMO_DATA=1\nDEPLOY_NAME_SUFFIX=-demo\nDEPLOY_DATA_ROOT=${dataRoot}\n`);
+    const r = spawnSync("bash", [script, "--now", file], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(path.join(dataRoot, "pgdata/PG_VERSION"))).toBe(false);
+    expect(existsSync(path.join(dataRoot, "photos/a.jpg"))).toBe(false);
+    expect(existsSync(path.join(dataRoot, "backup/old.dump"))).toBe(false);
+    expect(existsSync(path.join(dataRoot, "backup/host-scripts/demo-reset.sh"))).toBe(true);
+    expect(existsSync(path.join(dataRoot, "backup/host-scripts/backup-token"))).toBe(true);
+    expect(existsSync(path.join(dataRoot, "llm_models/m.gguf"))).toBe(true);
   });
 
   it("does nothing outside the hour 18 of Los Angeles", () => {

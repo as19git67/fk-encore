@@ -156,6 +156,11 @@ docker compose --env-file .env.demo up -d
   It refuses an env file without `DEMO_DATA`, with an empty
   `DEPLOY_NAME_SUFFIX` or with a `DEPLOY_DATA_ROOT` that does not contain
   "demo". `--dry-run` shows what it would empty, `--now` resets right away.
+  The image ships the script: every container start copies it, next to the
+  backup hook, to `$DEPLOY_DATA_ROOT/backup/host-scripts/demo-reset.sh`, and
+  the reset keeps that folder. The cron job calls it from there, so the
+  host needs no checkout of the repo:
+  `bash $DEPLOY_DATA_ROOT/backup/host-scripts/demo-reset.sh /path/to/.env.demo`.
 
 ### NVIDIA document-AI profile
 

@@ -16,6 +16,11 @@
 #
 #   0 * * * *  /path/to/fk-encore/scripts/host/demo-reset.sh /path/to/fk-encore/.env.demo
 #
+# The image ships this script: every container start copies it to
+# $DEPLOY_DATA_ROOT/backup/host-scripts/ (backup/startup.ts), so the cron
+# job can call it from there without a checkout on the host. The reset
+# keeps that folder when it empties the backup directory.
+#
 # Options:
 #   --now      reset right away, whatever the time (still once per call)
 #   --dry-run  say what would be emptied and stop
@@ -101,6 +106,7 @@ EMPTY=(pgdata photos thumbnails backup documents documents-inbox documents-sourc
 if [[ $DRY -eq 1 ]]; then
   echo "would stop the stack of $ENV_FILE, empty these directories and start it again:"
   for d in "${EMPTY[@]}"; do echo "  $DATA_ROOT/$d"; done
+  echo "keeping $DATA_ROOT/backup/host-scripts (this script and the backup hook)"
   exit 0
 fi
 
@@ -111,7 +117,9 @@ for d in "${EMPTY[@]}"; do
   dir="$DATA_ROOT/$d"
   [[ -d "$dir" ]] || continue
   echo "$(date -Is) demo reset: emptying $dir"
-  find "$dir" -mindepth 1 -delete
+  # The host scripts the image seeds into backup/host-scripts stay: the cron
+  # job calls this very script from there.
+  find "$dir" -mindepth 1 -not -path "$DATA_ROOT/backup/host-scripts" -not -path "$DATA_ROOT/backup/host-scripts/*" -delete
 done
 
 echo "$(date -Is) demo reset: starting the stack; the app loads the demo at boot"
