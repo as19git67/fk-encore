@@ -48,7 +48,11 @@ gehört ihrem Ersteller; eine Gruppen-Mappe sehen die Gruppenmitglieder.
 - **Ergebnis:** Badge und Liste stimmen überein.
 - **Fehler und Grenzfälle:** In Modulen ohne Stapelaktionen zeigt der
   Drawer nur Liste und Fuß; in Fotos zusätzlich „Fotobuch gestalten“,
-  in Dokumenten und Finanzen deren Stapelaktionen über dem Fuß.
+  in Dokumenten und Finanzen deren Stapelaktionen über dem Fuß. In
+  Dokumenten gehört dazu „Neu klassifizieren“ mit dem Dialog aus
+  `DOK-DET-10`: Standard ist nur die Klassifizierung (der Text bleibt;
+  Dokumente ohne Text werden zuerst eingelesen), wahlweise mit
+  Zurücksetzen der Attributierung oder der Steuer und vorher OCR.
 - **Test:** –
 
 ### SAM-BSK-02 Basket leeren

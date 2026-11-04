@@ -201,8 +201,10 @@ function resetFilterMenu() {
 // not anyone was selecting.
 const selection = useListSelection({
   loadedIds: () => items.value.map((d) => d.id),
-  // Only what is loaded can be selected — "Mehr laden" first, then select.
-  total: () => items.value.length,
+  // "Alle auswählen" takes the whole filter result, up to MAX_PICK, not just
+  // the loaded pages; a search has only its best hits.
+  total: () => (isSearchActive.value ? items.value.length : Math.min(total.value, MAX_PICK)),
+  fetchAllIds: async () => (await fetchMatchingDocs()).map((d) => d.id),
 })
 const { selectMode, selectedIds } = selection
 
@@ -372,8 +374,84 @@ const allKnownTags = computed(() => {
 })
 
 const selectedDocs = computed(() =>
-  items.value.filter((d) => selectedIds.value.has(d.id)),
+  [...selectedIds.value]
+    .map((id) => loadedById.value.get(id) ?? pickedDocs.value.get(id))
+    .filter((d): d is DocumentSummary => !!d),
 )
+const loadedById = computed(() => new Map(items.value.map((d) => [d.id, d])))
+
+// ─── The whole filter result at once ─────────────────────────────────────────
+
+/** The most one click takes from a filter result: "Alle auswählen", "Treffer in den Basket". */
+const MAX_PICK = 2000
+/** Documents a whole-result pick fetched beyond the loaded pages. */
+const pickedDocs = ref(new Map<number, DocumentSummary>())
+const pickingAll = ref(false)
+
+/**
+ * Every document of the current filter, up to MAX_PICK, in the list's order.
+ * The pages already loaded are reused; the rest is fetched page by page with
+ * the same filter and sort. A search has no offset paging, so it is its hits.
+ */
+async function fetchMatchingDocs(): Promise<DocumentSummary[]> {
+  const docs = items.value.slice(0, MAX_PICK)
+  if (!isSearchActive.value) {
+    const wanted = Math.min(total.value, MAX_PICK)
+    const seen = new Set(docs.map((d) => d.id))
+    const s = sort.applied.value
+    let offset = items.value.length
+    while (docs.length < wanted) {
+      const res = await listDocuments({
+        ...currentFilterParams(),
+        sort_by: s.field,
+        sort_dir: s.direction,
+        limit: PAGE_SIZE,
+        offset,
+      })
+      if (res.items.length === 0) break
+      offset += res.items.length
+      for (const d of res.items) {
+        if (seen.has(d.id) || docs.length >= wanted) continue
+        seen.add(d.id)
+        docs.push(d)
+      }
+    }
+  }
+  pickedDocs.value = new Map(docs.map((d) => [d.id, d]))
+  return docs
+}
+
+/** Whether the toolbar offers to put the whole result into the basket. */
+const canPickAll = computed(
+  () => !loading.value && items.value.length > 0 && (isSearchActive.value || filter.activeCount.value > 0),
+)
+const pickAllCount = computed(() =>
+  isSearchActive.value ? items.value.length : Math.min(total.value, MAX_PICK),
+)
+const pickAllLabel = computed(() => `Alle ${pickAllCount.value} Treffer in den Basket legen`)
+
+/** One click: the whole filter result (up to MAX_PICK) into the basket. */
+async function basketAllHits() {
+  if (pickingAll.value) return
+  pickingAll.value = true
+  error.value = ''
+  try {
+    const docs = await fetchMatchingDocs()
+    const before = basket.count
+    basket.addAll(docs)
+    const added = basket.count - before
+    const capped = !isSearchActive.value && total.value > MAX_PICK
+      ? ` Es waren ${total.value} Treffer; übernommen wurden die ersten ${MAX_PICK}.`
+      : ''
+    info.value = added === docs.length
+      ? `${added} Dokument${added === 1 ? '' : 'e'} in den Basket gelegt.${capped}`
+      : `${added} Dokument${added === 1 ? '' : 'e'} in den Basket gelegt, ${docs.length - added} lag${docs.length - added === 1 ? '' : 'en'} schon darin.${capped}`
+  } catch (err: any) {
+    error.value = err.message || 'Treffer konnten nicht in den Basket gelegt werden'
+  } finally {
+    pickingAll.value = false
+  }
+}
 
 const basket = useDocSelectionStore()
 
@@ -804,6 +882,20 @@ onMounted(async () => {
             @click="searchModeMenu?.toggle($event)"
           />
           <Menu ref="searchModeMenu" :model="searchModeItems" :popup="true" />
+        </template>
+        <template v-if="canPickAll" #actions>
+          <Button
+            icon="pi pi-shopping-cart"
+            :label="compactHeader ? undefined : 'Alle in den Basket'"
+            size="small"
+            outlined
+            severity="secondary"
+            :loading="pickingAll"
+            :aria-label="pickAllLabel"
+            v-tooltip.bottom="pickAllLabel"
+            data-testid="documents-basket-all"
+            @click="basketAllHits"
+          />
         </template>
       </ListToolbar>
     </template>

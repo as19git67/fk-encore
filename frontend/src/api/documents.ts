@@ -952,10 +952,18 @@ export function batchUpdateDocumentSubjectPersons(payload: BatchUpdateSubjectPer
 export interface BatchReclassifyPayload {
   document_ids: number[]
   force_ocr?: boolean
+  /** Keep the text, run only classification and embedding again. */
+  classify_only?: boolean
+  /** Hand the human-pinned attribution (category, tags, persons) back to the classifier first. */
+  reset_attributes?: boolean
+  /** Hand the human-pinned tax assignment back to the classifier first. */
+  reset_tax?: boolean
 }
 
 export interface BatchReclassifyResponse {
   affected_documents: number
+  /** With `classify_only`: documents without text that ran the full pipeline. */
+  extracted_first?: number
 }
 
 export function batchReclassifyDocuments(payload: BatchReclassifyPayload) {

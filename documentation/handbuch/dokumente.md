@@ -168,8 +168,10 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 ### DOK-LST-08 Mehrere Dokumente auswählen und ablegen
 
 - **Wo:** „Auswählen“ in der Toolbar, dann Kästchen an den Zeilen;
-  `Ctrl/Cmd+A` für alle, Umschalt+Klick für einen Bereich; Auswahlzeile mit
-  Zähler und Aktionen
+  `Ctrl/Cmd+A` oder das Kästchen der Auswahlzeile für alle, Umschalt+Klick
+  für einen Bereich; Auswahlzeile mit Zähler und Aktionen. „Alle“ nimmt das
+  ganze Filterergebnis bis 2000 Dokumente, auch was noch nicht geladen ist;
+  bei einer Suche die geladenen Treffer.
 - **Aktionen der Auswahlzeile:** „Ablegen“ (Basket oder Mappe) und, mit
   `module.assistant`, „An den Assistenten“ (höchstens 20 Dokumente, sonst
   ausgegraut mit Tooltip)
@@ -244,6 +246,17 @@ die Liste oder das Kachelraster. Auf breiten Bildschirmen im Querformat
 
 - **Ergebnis:** „Noch keine Dokumente vorhanden“ mit „Lade ein Dokument
   hoch oder lass den Scan-Ordner überwachen.“
+- **Test:** –
+
+### DOK-LST-16 Alle Treffer in den Basket
+
+- **Wo:** „Alle in den Basket“ in der Toolbar, solange ein Filter oder eine
+  Suche aktiv ist und es Treffer gibt
+- **Ergebnis:** Ein Klick legt das ganze Filterergebnis in den Basket, bis
+  2000 Dokumente, auch was noch nicht geladen ist; bei einer Suche die
+  geladenen Treffer. Die Meldung nennt, wie viele neu dazukamen und wie
+  viele schon darin lagen; bei mehr als 2000 Treffern, dass die ersten 2000
+  in der Sortierung der Liste übernommen wurden.
 - **Test:** –
 
 ---
@@ -364,15 +377,26 @@ für den Cloud-Lehrer (`documents.edit`), Hilfe zu den Aktionen, Löschen
 
 ### DOK-DET-10 Neu klassifizieren
 
-- **Wo:** Menü „⋮“ › „Neu klassifizieren“
+- **Wo:** Menü „⋮“ › „Neu klassifizieren …“; derselbe Dialog im Basket
 - **Recht:** `documents.edit`
-- **Ergebnis:** Status springt auf „KI-Analyse“ und läuft live bis
-  „Fertig“; manuell bestätigte Felder bleiben.
+- **Schritte:** Dialog mit drei Kästchen, alle aus: „Attributierung
+  zurücksetzen“ (von Hand gesetzte Kategorie, Titel, Datum, Absender, Tags,
+  Bezugspersonen und „Zuordnung bestätigt“), „Steuerliche Einordnung
+  zurücksetzen“ (Steuerrolle, Steuerjahr, Sektionen, Pin), „Vorher OCR
+  ausführen“ (nicht bei Textdokumenten). Mit einem Zurücksetzen wird der
+  Knopf rot („Zurücksetzen und klassifizieren“) mit Warnhinweis.
+- **Ergebnis:** Ohne Kästchen bleibt der Text, Status springt auf
+  „KI-Analyse“ und läuft live bis „Fertig“; manuell gesetzte Felder bleiben.
+  Zurückgesetztes bestimmt die KI neu. Labels des Cloud-Lehrers und die
+  Kategorie eines Kassenbon-Uploads gelten nicht als manuell und bleiben.
+  Die steuerliche Einordnung eines Dokuments mit von Hand gesetzter
+  Kategorie wird nur zusammen mit der Attributierung neu bestimmt.
 - **Test:** –
 
 ### DOK-DET-11 OCR erzwingen
 
-- **Wo:** Menü „⋮“ › „OCR erzwingen“ (nicht bei Textdokumenten)
+- **Wo:** Kästchen „Vorher OCR ausführen“ im Dialog „Neu klassifizieren“
+  (`DOK-DET-10`; nicht bei Textdokumenten)
 - **Recht:** `documents.edit`
 - **Ergebnis:** Die Textebene der PDF wird ignoriert und das Dokument
   komplett per OCR neu gelesen, danach neu klassifiziert; Status läuft über
@@ -775,6 +799,18 @@ Schwärzungen), gehört zur Mappe, nicht zum Dokument.
   Dokumentenliste oder dem Arbeitskorb hinzufügen.“
 - **Test:** –
 
+### DOK-MPD-13 Mit allen oder ausgewählten Dokumenten arbeiten
+
+- **Wo:** über der Dokumentliste der Mappe: „Alle in den Basket“ und „In der
+  Liste auswählen“
+- **Ergebnis:** „Alle in den Basket“ legt jedes Dokument der Mappe in den
+  Basket, dessen Schublade die Stapelaktionen hat (Tags, Kategorie, Datum,
+  Steuer, Personen, Sichtbarkeit, Neu klassifizieren,
+  Zuordnung bestätigen); ausgegraut, wenn schon alle darin liegen. „In der
+  Liste auswählen“ öffnet die Dokumentliste auf die Mappe eingeschränkt
+  (`DOK-LST-10`), dort wählen und ablegen (`DOK-LST-08`, `DOK-LST-16`).
+- **Test:** –
+
 ---
 
 ## BZP: Bezugspersonen & Haushalt (`/dokumente/bezugspersonen`)
@@ -1106,6 +1142,7 @@ Admin-Karten: „Dokument-Verarbeitung“, „Herkunftsordner nachtragen“,
 | DOK-LST-13 | Warteschlange einsehen | view | – |
 | DOK-LST-14 | Hilfe, Hochladen, Schreiben | view/upload | – |
 | DOK-LST-15 | Leere Liste | view | – |
+| DOK-LST-16 | Alle Treffer in den Basket | view | – |
 | DOK-DET-01 | Zurück | view | – |
 | DOK-DET-02 | Durch Mappe/Basket blättern | view | – |
 | DOK-DET-03 | Herunterladen | view | – |
@@ -1159,6 +1196,7 @@ Admin-Karten: „Dokument-Verarbeitung“, „Herkunftsordner nachtragen“,
 | DOK-MPD-10 | Öffnen / entfernen | view | – |
 | DOK-MPD-11 | PDF erzeugen, laden, teilen | view | – |
 | DOK-MPD-12 | Leere Mappe | view | – |
+| DOK-MPD-13 | Mit allen/ausgewählten arbeiten | view | – |
 | DOK-BZP-01 | Veranlagungsart | view | – |
 | DOK-BZP-02 | Bezugsperson hinzufügen | view | – |
 | DOK-BZP-03 | Felder ändern | view | – |

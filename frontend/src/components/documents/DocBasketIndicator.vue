@@ -401,8 +401,12 @@ function handleVisibilityDone(payload: { affected: number; skipped: number }) {
     (payload.skipped > 0 ? ` ${payload.skipped} übersprungen (keine Berechtigung).` : '')
 }
 
-function handleReprocessDone(payload: { affected: number }) {
-  reportDone(payload.affected, 'OCR & KI-Neustart')
+function handleReprocessDone(payload: { affected: number; extractedFirst: number; reset: boolean; ocr: boolean }) {
+  reportDone(payload.affected, payload.reset ? 'Zurücksetzen und neu klassifizieren' : 'Neu klassifizieren')
+  if (payload.extractedFirst > 0 && !payload.ocr) {
+    actionInfo.value +=
+      ` ${payload.extractedFirst} ohne Text ${payload.extractedFirst === 1 ? 'wird' : 'werden'} zuerst eingelesen.`
+  }
 }
 </script>
 
@@ -472,13 +476,14 @@ function handleReprocessDone(payload: { affected: number }) {
           <div v-if="canEdit" class="action-row">
             <Button label="Sichtbarkeit" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openVisibilityDialog" />
             <Button
-              label="OCR & KI neu"
-              icon="pi pi-refresh"
+              label="Neu klassifizieren"
+              icon="pi pi-sparkles"
               size="small"
               severity="secondary"
               outlined
               :disabled="count === 0"
-              v-tooltip.bottom="'Text-Extraktion (OCR) und KI-Analyse für alle Dokumente im Basket erneut starten'"
+              v-tooltip.bottom="'KI-Analyse für alle Dokumente im Basket erneut starten; im Dialog wahlweise mit Zurücksetzen oder OCR'"
+              data-testid="basket-reclassify"
               @click="openReprocessDialog"
             />
           </div>

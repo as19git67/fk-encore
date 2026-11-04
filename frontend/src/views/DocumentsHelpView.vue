@@ -147,19 +147,18 @@ function goBack() {
 
       <h3>Aktionen in der Kopfzeile</h3>
       <p>
-        „Neu klassifizieren“ und „OCR erzwingen“ stehen immer im Menü
+        „Neu klassifizieren …“ steht immer im Menü
         <strong>⋮</strong> am Ende der Kopfzeile.
       </p>
       <ul>
         <li>
           <strong>Neu klassifizieren</strong> – startet die KI-Analyse erneut
           (z.&nbsp;B. nach einem Modell-Update oder wenn eine neue Kategorie
-          angelegt wurde).
-        </li>
-        <li>
-          <strong>OCR erzwingen</strong> – ignoriert den vorhandenen
-          Text-Layer der PDF und liest sie komplett per OCR neu ein. Hilft
-          bei Scans mit fehlenden Leerzeichen oder schlechter Text-Qualität.
+          angelegt wurde). Standard ist nur die Klassifizierung; was von Hand
+          gesetzt wurde, bleibt. Im Dialog lässt sich zusätzlich die
+          Attributierung oder die steuerliche Einordnung zurücksetzen und
+          vorher OCR ausführen (ignoriert den Text-Layer der PDF, hilft bei
+          Scans mit fehlenden Leerzeichen). Dieselbe Aktion gibt es im Basket.
         </li>
         <li>
           <strong>Löschen</strong> – entfernt das Dokument endgültig
@@ -249,8 +248,8 @@ function goBack() {
       </ul>
       <p>
         Typische Reaktion: Dokument öffnen → Felder anpassen → Speichern,
-        oder bei Fehlern <strong>Neu klassifizieren</strong> bzw.
-        <strong>OCR erzwingen</strong>.
+        oder bei Fehlern <strong>Neu klassifizieren</strong> (bei
+        schlechtem Text mit OCR).
       </p>
     </section>
 
