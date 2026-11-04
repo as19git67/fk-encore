@@ -108,7 +108,15 @@ merges the two journeys around it, home at both ends means a journey at
 both ends) and derives the dates the same way `deriveFrames` does;
 "Sichern" sends the whole chain in one `PUT`. The planner's journey
 suggestion (§22.7) fills the open journey in the chain instead of
-opening a form. Reordering uses the list's edit mode.
+opening a form. Reordering is done from the stay's own card ("Nach
+oben", "Nach unten"), not through the list's edit mode: the pencil in
+the toolbar was a button nobody knew when to press (feedback
+2026-11-03). The same round made every control on a card a row of
+list height (44 points), gave each stay its own place search so what
+is typed for one stay survives adding another, enabled "Sichern" on
+any change and says on the tap what still blocks saving, and says a
+journey's length as "Ankunft am nächsten Tag" instead of "1 Nacht
+unterwegs", which read as driving through the night.
 
 - A stay card, folded: place, lodging, days and the computed dates (grey,
   not editable). Unfolded: its fields in place, no sheet — lodging search
