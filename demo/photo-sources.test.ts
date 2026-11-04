@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import { downloadPhoto, drawPhoto, hasRecognisableFace, MAX_EDGE, searchOpenverse, usableResult, type PhotoDeps } from "./photo-sources";
+import { downloadPhoto, drawPhoto, faceDetectorProblem, hasRecognisableFace, MAX_EDGE, openverseProblem, searchOpenverse, usableResult, type PhotoDeps } from "./photo-sources";
 
 function deps(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): PhotoDeps {
   return {
@@ -30,6 +30,17 @@ const result = (over: Record<string, unknown>) => ({
   mature: false,
   tags: [{ name: "garden" }],
   ...over,
+});
+
+describe("openverseProblem and faceDetectorProblem", () => {
+  it("say nothing when the service answers, and name the status or the network error when not", async () => {
+    expect(await openverseProblem(deps(() => new Response("{}", { status: 200 })))).toBeNull();
+    expect(await openverseProblem(deps(() => new Response("", { status: 403 })))).toBe("HTTP 403");
+    const offline = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    expect(await openverseProblem(deps(() => { throw offline; }))).toBe("ENOTFOUND");
+    expect(await faceDetectorProblem(deps(() => new Response("", { status: 503 })))).toBe("HTTP 503");
+    expect(await faceDetectorProblem(deps(() => new Response("ok")))).toBeNull();
+  });
 });
 
 describe("searchOpenverse", () => {

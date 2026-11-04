@@ -84,26 +84,33 @@ interface OpenverseResult {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** True when Openverse answers a search at all. */
-export async function openverseReachable(deps: PhotoDeps): Promise<boolean> {
+/** Why a request did not get through, in words for the Systemstatus card: the status code, or the network error's code. */
+function failureReason(err: unknown): string {
+  const e = err as { name?: string; message?: string; cause?: { code?: string } };
+  if (e?.name === "TimeoutError") return "keine Antwort in 10 s";
+  return e?.cause?.code ?? e?.message ?? String(err);
+}
+
+/** Null when Openverse answers a search; otherwise why not ("HTTP 403", "ENOTFOUND", …). */
+export async function openverseProblem(deps: PhotoDeps): Promise<string | null> {
   try {
     const res = await deps.fetch(`${deps.openverseUrl}/v1/images/?q=garden&license=cc0&page_size=1`, {
       headers: { "User-Agent": USER_AGENT },
       signal: AbortSignal.timeout(10_000),
     });
-    return res.ok;
-  } catch {
-    return false;
+    return res.ok ? null : `HTTP ${res.status}`;
+  } catch (err) {
+    return failureReason(err);
   }
 }
 
-/** True when the face detector answers its health check. */
-export async function faceDetectorReachable(deps: PhotoDeps): Promise<boolean> {
+/** Null when the face detector answers its health check; otherwise why not. */
+export async function faceDetectorProblem(deps: PhotoDeps): Promise<string | null> {
   try {
     const res = await deps.fetch(`${deps.insightfaceUrl}/health`, { signal: AbortSignal.timeout(10_000) });
-    return res.ok;
-  } catch {
-    return false;
+    return res.ok ? null : `HTTP ${res.status}`;
+  } catch (err) {
+    return failureReason(err);
   }
 }
 

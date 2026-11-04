@@ -18,7 +18,7 @@ import { planEnergy } from "./energy";
 import { writeEnergy } from "./energy-writer";
 import { createDemoDepot, loadDemoCloses } from "./depot-writer";
 import { planHousehold, type DemoSize } from "./household";
-import { defaultPhotoDeps, faceDetectorReachable, openverseReachable, type PhotoDeps } from "./photo-sources";
+import { defaultPhotoDeps, faceDetectorProblem, openverseProblem, type PhotoDeps } from "./photo-sources";
 import { writePhotos, type PhotoSource } from "./photo-writer";
 import { planPhotos } from "./photos";
 import { currentRun, isUntouched } from "./state";
@@ -161,8 +161,10 @@ export async function executeRun(runId: number, opts: StartOptions = {}): Promis
     let photoSource: PhotoSource = "drawn";
     let photoNote: string | null = null;
     if (run.size === "full" && opts.parts?.photos !== false) {
-      if (!(await openverseReachable(photoDeps))) photoNote = "Openverse nicht erreichbar";
-      else if (!(await faceDetectorReachable(photoDeps))) photoNote = "Gesichtserkennung nicht erreichbar";
+      const openverse = await openverseProblem(photoDeps);
+      const faces = openverse ? null : await faceDetectorProblem(photoDeps);
+      if (openverse) photoNote = `Openverse nicht erreichbar (${openverse})`;
+      else if (faces) photoNote = `Gesichtserkennung nicht erreichbar (${faces})`;
       else photoSource = "openverse";
     }
     const photoPlan = planPhotos(run.seed, run.size, plan);
