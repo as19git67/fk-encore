@@ -63,7 +63,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-rechnungen",
         name: "Rechnungen",
-        hint: "Rechnungen, Kaufbelege, Zahlungsaufforderungen über Lieferungen/Leistungen ohne eigene fachliche Kategorie: Hotel und Reise, Software-/Cloud-Abos, Online-Händler, Lieferscheine, Dienstleister. Rechnung erkannt, keine fachliche Kategorie passend? Hierher — NICHT nach sonstiges, auch bei unbekanntem Absender. NICHT: Gehalt (finanzen-gehalt), Arzt (gesundheit-arzt), Pflege (gesundheit-pflege), Handwerker am Eigenheim (wohnen-haus-instandhaltung), Kfz-Werkstatt (fahrzeug-werkstatt), Gerätekauf mit Garantie (anschaffungen), Kassenbons (belege), Beiträge (versicherungen-*, altersvorsorge-*), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
+        hint: "Rechnungen, Kaufbelege, Zahlungsaufforderungen über Lieferungen/Leistungen ohne eigene fachliche Kategorie: Hotel und Reise, Software-/Cloud-Abos, Online-Händler, Lieferscheine, Dienstleister. Rechnung erkannt, keine fachliche Kategorie passend? Hierher — NICHT nach sonstiges, auch bei unbekanntem Absender. NICHT: Gehalt (finanzen-gehalt), Arzt (gesundheit-arzt), Pflege (gesundheit-pflege), Handwerker am Eigenheim (wohnen-haus-instandhaltung), Kfz-Werkstatt (fahrzeug-werkstatt), Gerät/Elektronik/Möbel/Werkzeug (anschaffungen, auch ohne Garantie), Telefon/Internet (vertraege-telekom), Kassenbons (belege), Beiträge (versicherungen-*, altersvorsorge-*), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
       },
       {
         slug: "finanzen-wertpapiere",
@@ -212,7 +212,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "altersvorsorge-lebensversicherung",
         name: "Kapital-Lebensversicherung",
-        hint: "NUR klassische Kapital-Lebensversicherung mit Ablaufleistung/Deckungskapital/Rückkaufswert: Kündigung, Ablauf, Standmitteilung. NICHT fondsgebundene Rentenversicherung, NICHT Riester/Rürup (→ altersvorsorge-rentenversicherung). 'Rentenversicherung' oder §92 EStG im Text → rentenversicherung; 'Deckungskapital', 'Rückkaufswert' → hierher. Fondsgebundene LV nach Leistung: Kapital → hierher, Rente → rentenversicherung.",
+        hint: "NUR Kapital-Lebensversicherung (klassisch oder fondsgebunden) mit Ablaufleistung/Deckungskapital/Rückkaufswert: Kündigung, Ablauf, Standmitteilung. NICHT fondsgebundene Rentenversicherung, NICHT Riester/Rürup (→ altersvorsorge-rentenversicherung). §92 EStG → rentenversicherung; 'Deckungskapital', 'Rückkaufswert' → hierher. Fondsgebundene Policen nach Vertragsname: Lebensversicherung → hierher (auch mit Rentenoption), Rentenversicherung → rentenversicherung.",
       },
       {
         slug: "altersvorsorge-rentenversicherung",
@@ -314,7 +314,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "vertraege-telekom",
         name: "Telekommunikation",
-        hint: "Telefon, Internet, Mobilfunk, Kabel (z. B. Telekom, Vodafone).",
+        hint: "Telefon, Internet, Mobilfunk, Kabel: Verträge, Tarife und Rechnungen der Anbieter (z. B. Telekom, Vodafone).",
       },
       {
         slug: "vertraege-strom",

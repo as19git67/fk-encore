@@ -144,6 +144,16 @@ export const CONTENT_RULES: readonly ContentRule[] = [
     category: "altersvorsorge-rentenversicherung",
   },
   {
+    // A unit-linked policy is filed by its product name: "fondsgebundene
+    // Lebensversicherung" stays a life insurance even with an annuity option,
+    // a "fondsgebundene Rentenversicherung" is a pension (the Riester rule above
+    // catches that one first). The sender cannot tell them apart.
+    note: "Fondsgebundene Lebensversicherung (Vertragsname) → Kapital-Lebensversicherung",
+    keywords: ["fondsgebundenelebensversicherung"],
+    excludeAny: ["fondsgebundenerentenversicherung"],
+    category: "altersvorsorge-lebensversicherung",
+  },
+  {
     // High-precision Kindergeld document markers. Deliberately no bare
     // "kindergeld": an Einkommensteuerbescheid or Anlage Kind may mention it
     // without being a Familienkasse document.

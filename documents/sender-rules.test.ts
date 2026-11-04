@@ -172,6 +172,15 @@ describe("matchContentRule", () => {
     ).toBe("altersvorsorge-rentenversicherung");
   });
 
+  it("files a unit-linked policy by its product name", () => {
+    expect(
+      matchContentRule({ title: "Erhöhungsnachtrag", text: "Ihre fondsgebundene Lebensversicherung Nr. 0000000, Rentenoption" }),
+    ).toBe("altersvorsorge-lebensversicherung");
+    expect(
+      matchContentRule({ title: "Statusreport", text: "Fondsgebundene Rentenversicherung, früher fondsgebundene Lebensversicherung" }),
+    ).toBe("altersvorsorge-rentenversicherung");
+  });
+
   it("routes a stand-alone BU policy, but not a BU rider on a pension contract", () => {
     expect(
       matchContentRule({ title: "Erhöhungsnachtrag zum Versicherungsschein", text: "Flexible Berufsunfähigkeitsversicherung" }),
