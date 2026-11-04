@@ -88,6 +88,7 @@ import {
   applyKirchensteuerBescheidYearTaxRule,
   applyIncomeTaxAssessmentTaxRule,
   applyIncomeTaxReturnTaxRule,
+  applyHealthNoExpenseTaxRule,
   applyInsuranceAdminTaxRule,
   incomeTaxReturnYear,
   isIncomeTaxReturn,
@@ -783,6 +784,17 @@ export async function runClassify(documentId: number): Promise<{ classification:
   //     can't rescue a Dynamik-Widerspruch.
   {
     const adjusted = applyInsuranceAdminTaxRule({
+      text: clipped,
+      taxSections: classification.tax_sections,
+      taxRole: classification.tax_role,
+    });
+    classification.tax_sections = adjusted.taxSections;
+    classification.tax_role = adjusted.taxRole;
+  }
+  // 7c. Health insurer's reimbursement statement or a bare prescription: about
+  //     außergewöhnliche Belastungen, but the paid invoice is the evidence.
+  {
+    const adjusted = applyHealthNoExpenseTaxRule({
       text: clipped,
       taxSections: classification.tax_sections,
       taxRole: classification.tax_role,

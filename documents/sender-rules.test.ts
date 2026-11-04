@@ -142,6 +142,27 @@ describe("matchContentRule", () => {
     ).toBe("altersvorsorge-rentenversicherung");
   });
 
+  it("leaves tax paperwork that merely names Riester or §10a to the model", () => {
+    expect(
+      matchContentRule({
+        title: "Einkommensteuerbescheid 2023",
+        text: "Bescheid für 2023 über Einkommensteuer. Altersvorsorgebeiträge nach § 10a EStG, Altersvorsorgezulage.",
+      }),
+    ).toBeNull();
+    expect(
+      matchContentRule({
+        title: "Bescheid über Eigenheimzulage",
+        text: "Festsetzung der Eigenheimzulage: Grundförderung und Kinderzulage für zwei Kinder.",
+      }),
+    ).toBeNull();
+    expect(
+      matchContentRule({ title: "Freistellungsauftrag für Kapitalerträge", text: "Riester-Vertrag Beispielversicherung AG" }),
+    ).toBeNull();
+    expect(
+      matchContentRule({ title: "Antrag auf Nichtveranlagungsbescheinigung", text: "Rürup-Rente, Basisrente" }),
+    ).toBeNull();
+  });
+
   it("files a Riester Zulage application under Rentenversicherung although it asks for the Kindergeldnummer", () => {
     expect(
       matchContentRule({

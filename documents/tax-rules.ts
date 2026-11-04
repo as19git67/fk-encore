@@ -119,6 +119,66 @@ export function applyInsuranceAdminTaxRule(input: {
 }
 
 /**
+ * Health paperwork that is about außergewöhnliche Belastungen but shows no
+ * own expense (2026-11 audit: the local model marked these `beleg`):
+ *
+ *   - the health insurer's Erstattungs-/Leistungsabrechnung — the money flows
+ *     TO the insured; the evidence is the paid invoice it refers to;
+ *   - a prescription (Rezept/Verordnung) without an amount — the evidence is
+ *     the pharmacy receipt with the Zuzahlung.
+ *
+ * Both become `bezug` and keep their sections, so they are listed next to the
+ * invoice. A text that carries an invoice or payment marker stays untouched:
+ * a physiotherapy invoice quoting the Verordnung, a pharmacy receipt.
+ */
+const HEALTH_REIMBURSEMENT_MARKERS: readonly string[] = [
+  "erstattungsabrechnung",
+  "leistungsabrechnung",
+  "erstattungsmitteilung",
+];
+
+const PRESCRIPTION_MARKERS: readonly string[] = [
+  "rezept",
+  "verordnung",
+];
+
+const PAID_EXPENSE_MARKERS: readonly string[] = [
+  "rechnung",
+  "liquidation",
+  "quittung",
+  "zuzahlung",
+  "eigenanteil",
+  "kassenbon",
+  "zahlbetrag",
+  "gesamtbetrag",
+];
+
+export function applyHealthNoExpenseTaxRule(input: {
+  text: string;
+  taxSections: readonly TaxAssignment[];
+  taxRole: TaxRole;
+}): TaxRuleResult {
+  const passthrough: TaxRuleResult = {
+    taxSections: [...input.taxSections],
+    taxRole: input.taxRole,
+    matched: false,
+  };
+  if (input.taxRole !== "beleg") return passthrough;
+  if (!input.taxSections.some((s) => s.slug === "aussergewoehnliche")) return passthrough;
+
+  const ctx = normalizeForMatch(input.text);
+  if (!ctx) return passthrough;
+
+  const reimbursement = HEALTH_REIMBURSEMENT_MARKERS.some((m) => ctx.includes(m));
+  const prescription =
+    PRESCRIPTION_MARKERS.some((m) => ctx.includes(m)) &&
+    !PAID_EXPENSE_MARKERS.some((m) => ctx.includes(m));
+  if (!reimbursement && !prescription) return passthrough;
+
+  return { taxSections: [...input.taxSections], taxRole: "bezug", matched: true };
+}
+
+/**
  * A Familienkasse Kindergeld decision is not a tax assessment, but it is a
  * supporting document for Anlage Kind and the Kindergeld/Kinderfreibetrag
  * comparison. Small local models often route the statutory wording (EStG,

@@ -6,6 +6,7 @@ import {
   incomeTaxReturnYear,
   isIncomeTaxAssessment,
   isIncomeTaxReturn,
+  applyHealthNoExpenseTaxRule,
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
   applyKirchensteuerBescheidYearTaxRule,
@@ -605,5 +606,49 @@ describe("applyIncomeTaxAssessmentTaxRule", () => {
       taxRole: "bezug",
       matched: true,
     });
+  });
+});
+
+describe("applyHealthNoExpenseTaxRule", () => {
+  const AB = [{ slug: "aussergewoehnliche", confidence: 0.8 }];
+
+  it("turns a health insurer's reimbursement statement into bezug and keeps its section", () => {
+    const out = applyHealthNoExpenseTaxRule({
+      text: "Beispiel Krankenversicherung a.G. Erstattungsabrechnung. Erstattet werden 84,20 EUR auf Ihr Konto.",
+      taxSections: AB,
+      taxRole: "beleg",
+    });
+    expect(out).toEqual({ taxSections: AB, taxRole: "bezug", matched: true });
+  });
+
+  it("turns a prescription without an amount into bezug", () => {
+    const out = applyHealthNoExpenseTaxRule({
+      text: "Privatrezept. Patient: Max Mustermann. Ibuprofen 600, N2.",
+      taxSections: AB,
+      taxRole: "beleg",
+    });
+    expect(out.taxRole).toBe("bezug");
+  });
+
+  it("keeps a pharmacy receipt or an invoice quoting the Verordnung as beleg", () => {
+    for (const text of [
+      "Apotheke Musterstadt. Quittung. Rezept vom 01.02.2025, Zuzahlung 5,00 EUR.",
+      "Praxis für Physiotherapie. Rechnung Nr. 1. Ärztliche Verordnung vom 03.03.2025. Gesamtbetrag 120,00 EUR.",
+    ]) {
+      expect(applyHealthNoExpenseTaxRule({ text, taxSections: AB, taxRole: "beleg" }).matched).toBe(false);
+    }
+  });
+
+  it("leaves other sections and roles untouched", () => {
+    expect(
+      applyHealthNoExpenseTaxRule({
+        text: "Erstattungsabrechnung",
+        taxSections: [{ slug: "vorsorgeaufwand", confidence: 0.9 }],
+        taxRole: "beleg",
+      }).matched,
+    ).toBe(false);
+    expect(
+      applyHealthNoExpenseTaxRule({ text: "Erstattungsabrechnung", taxSections: AB, taxRole: "keine" }).taxRole,
+    ).toBe("keine");
   });
 });

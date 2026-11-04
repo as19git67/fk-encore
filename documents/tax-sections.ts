@@ -72,7 +72,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-kap-inv",
     group: "einkuenfte",
     name: "Anlage KAP-INV — Investmentfonds ohne Steuerbescheinigung",
-    hint: "Erträge aus Investmentfonds, für die KEINE deutsche Jahressteuerbescheinigung vorliegt: Fonds in ausländischen Depots (Interactive Brokers, Degiro, ausländische Bank), Vorabpauschale und Ausschüttungen aus Depotauszügen ohne deutschen Steuerabzug, Fondsabrechnungen mit Teilfreistellung ohne KESt. Gehört NICHT hierher: eine deutsche Jahressteuerbescheinigung, in der die Fondserträge schon enthalten sind — die ist Anlage KAP.",
+    hint: "Erträge aus Investmentfonds, für die KEINE deutsche Jahressteuerbescheinigung vorliegt: Fonds in ausländischen Depots (Interactive Brokers, Degiro, ausländische Bank), Vorabpauschale und Ausschüttungen aus Depotauszügen ohne deutschen Steuerabzug, Fondsabrechnungen mit Teilfreistellung ohne KESt. Gehört NICHT hierher: eine deutsche Jahressteuerbescheinigung, in der die Fondserträge schon enthalten sind — die ist Anlage KAP; ebenso NICHT Abrechnungen einer deutschen Depotbank mit einbehaltener KESt.",
   },
   {
     slug: "anlage-aus",
@@ -102,7 +102,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-r-av",
     group: "einkuenfte",
     name: "Anlage R-AV/bAV",
-    hint: "Leistungsmitteilung zu Riester-Auszahlungen oder betrieblicher Altersvorsorge (Pensionskasse, Pensionsfonds, Direktversicherung); nicht: Beitrags-/Zulagenbescheinigung während der Einzahlphase (anlage-av).",
+    hint: "Leistungsmitteilung zu Riester-Auszahlungen oder betrieblicher Altersvorsorge (Pensionskasse, Pensionsfonds, Direktversicherung); nicht: Beitrags-/Zulagenbescheinigung während der Einzahlphase (anlage-av), Statusreport, Vertragsänderung oder Standmitteilung ohne Auszahlung.",
   },
   {
     slug: "anlage-g",
@@ -140,7 +140,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "werbungskosten-n",
     group: "abzuege",
     name: "Werbungskosten (Anlage N)",
-    hint: "Arbeitnehmer-Werbungskosten: Fahrtenbuch/Pendler, Arbeitsmittel (PC, Literatur), Fortbildungsrechnungen, Reisekostenabrechnung, Arbeitszimmer, Gewerkschaftsbeitrag. NICHT: Handwerkerrechnungen für die Privatwohnung (→ haushaltsnahe) — es sei denn, die Rechnung betrifft explizit das häusliche Arbeitszimmer.",
+    hint: "Arbeitnehmer-Werbungskosten: Fahrtenbuch/Pendler, Arbeitsmittel (PC, Literatur), Fortbildungsrechnungen, Reisekostenabrechnung, Arbeitszimmer, Gewerkschaftsbeitrag. NICHT: Handwerkerrechnungen für die Privatwohnung (→ haushaltsnahe) — es sei denn, die Rechnung betrifft explizit das häusliche Arbeitszimmer. Privat genutzte Käufe und Abos (App Store, Unterhaltung, Haushalt) nur, wenn das Dokument einen beruflichen Bezug zeigt.",
   },
   {
     slug: "werbungskosten-v",
@@ -194,7 +194,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "aussergewoehnliche",
     group: "abzuege",
     name: "Außergewöhnliche Belastungen",
-    hint: "Selbst getragene Krankheitskosten: privatärztliche/zahnärztliche Liquidation (GOÄ/GOZ), Rezeptgebühren, Brille/Hörgerät, Pflegeheim-/Pflegekosten, Kur, Beerdigungskosten; nicht: laufende Versicherungsbeiträge (vorsorgeaufwand).",
+    hint: "Selbst getragene Krankheitskosten: privatärztliche/zahnärztliche Liquidation (GOÄ/GOZ), Rezeptgebühren, Brille/Hörgerät, Pflegeheim-/Pflegekosten, Kur, Beerdigungskosten; nicht: laufende Versicherungsbeiträge (vorsorgeaufwand). Erstattungsabrechnung der Krankenversicherung und Rezept ohne Betrag haben nur Bezug (tax_role=bezug), Beleg ist die bezahlte Rechnung.",
   },
   {
     slug: "haushaltsnahe",
@@ -206,7 +206,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-kind",
     group: "abzuege",
     name: "Anlage Kind",
-    hint: "Unterlagen pro Kind: Kindergeldbescheid/Familienkasse, Kita-/Hort-Rechnung mit Überweisungsnachweis. Zeugnisse, Elternbriefe und Schul-/Studien-/Ausbildungsbescheinigungen haben Bezug zur Anlage Kind, sind aber kein Beleg (tax_role=bezug): die Bescheinigung fordert die Familienkasse für das Kindergeld an, nicht das Finanzamt.",
+    hint: "Unterlagen pro Kind: Kindergeldbescheid/Familienkasse, Kita-/Hort-Rechnung mit Überweisungsnachweis. Zeugnisse, Elternbriefe und Schul-/Studien-/Ausbildungsbescheinigungen haben Bezug zur Anlage Kind, sind aber kein Beleg (tax_role=bezug): die Bescheinigung fordert die Familienkasse für das Kindergeld an, nicht das Finanzamt. NICHT: Eigenheimzulage (steuerfrei, keine Anlage Kind), Riester-Kinderzulage (anlage-av).",
   },
   {
     slug: "anlage-unterhalt",
