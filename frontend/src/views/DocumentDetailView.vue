@@ -8,6 +8,7 @@ import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
+import DocumentBatchReprocessDialog from '../components/DocumentBatchReprocessDialog.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import { buildCategoryOptions, filterOptions, type SlugOption } from '../utils/categoryOptions'
 import { scrollSelectedOptionIntoView } from '../utils/autocompleteScroll'
@@ -677,23 +678,19 @@ async function onUnpinTax() {
   }
 }
 
-async function onReclassify(options: { forceOcr?: boolean } = {}) {
-  if (!doc.value) return
-  saving.value = true
+// "Neu klassifizieren" opens the shared dialog: classify only by default,
+// optional resets and OCR (the former "OCR erzwingen" item is one of its boxes).
+const reprocessOpen = ref(false)
+
+function onReprocessDone(payload: { reset: boolean; ocr: boolean }) {
   error.value = ''
-  info.value = ''
-  try {
-    await reclassifyDocument(doc.value.id, options)
-    info.value = options.forceOcr
-      ? 'OCR wurde erzwungen — Neuanalyse läuft.'
+  info.value = payload.ocr
+    ? 'OCR und KI-Neuanalyse wurden gestartet.'
+    : payload.reset
+      ? 'Zurückgesetzt — KI-Neuanalyse läuft.'
       : 'KI-Neuanalyse wurde gestartet.'
-    // Refresh after a short delay so status updates become visible.
-    setTimeout(load, 1500)
-  } catch (err: any) {
-    error.value = err.message || 'Neuanalyse konnte nicht gestartet werden'
-  } finally {
-    saving.value = false
-  }
+  // Refresh after a short delay so status updates become visible.
+  setTimeout(load, 1500)
 }
 
 async function onToggleTeacherRequested() {
@@ -964,23 +961,12 @@ const headerActions = computed<ToolbarItem[]>(() => {
   if (canEdit) {
     items.push({
       key: 'reclassify',
-      icon: busy('pi pi-refresh', saving.value),
-      title: 'Neu klassifizieren',
+      icon: busy('pi pi-sparkles', saving.value),
+      title: 'Neu klassifizieren …',
       text: true,
       menuOnly: true,
       disabled: saving.value,
-      command: () => void onReclassify(),
-    })
-  }
-  if (canEdit && !isTextDocument.value) {
-    items.push({
-      key: 'force-ocr',
-      icon: 'pi pi-eye',
-      title: 'OCR erzwingen',
-      text: true,
-      menuOnly: true,
-      disabled: saving.value,
-      command: () => void onReclassify({ forceOcr: true }),
+      command: () => { reprocessOpen.value = true },
     })
   }
   return items
@@ -1768,21 +1754,14 @@ onBeforeUnmount(() => {
           <i class="pi pi-ellipsis-v" aria-hidden="true" />
           <div>
             <strong>Weitere Aktionen</strong>
-            <span>Im Menü am Zeilenende: was nicht mehr in die Zeile passt, und immer „Neu klassifizieren“ und „OCR erzwingen“.</span>
+            <span>Im Menü am Zeilenende: was nicht mehr in die Zeile passt, und immer „Neu klassifizieren …“.</span>
           </div>
         </li>
         <li v-if="auth.hasPermission('documents.edit')">
-          <i class="pi pi-refresh" aria-hidden="true" />
+          <i class="pi pi-sparkles" aria-hidden="true" />
           <div>
             <strong>Neu klassifizieren</strong>
-            <span>KI analysiert Kategorie, Datum, Absender und Zusammenfassung erneut.</span>
-          </div>
-        </li>
-        <li v-if="auth.hasPermission('documents.edit')">
-          <i class="pi pi-eye" aria-hidden="true" />
-          <div>
-            <strong>OCR erzwingen</strong>
-            <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
+            <span>KI analysiert Kategorie, Datum, Absender, Steuer und Zusammenfassung erneut. Im Dialog wahlweise von Hand gesetzte Attribute oder die steuerliche Einordnung zurücksetzen und vorher OCR ausführen.</span>
           </div>
         </li>
         <li v-if="auth.hasPermission('documents.delete')">
@@ -1857,6 +1836,13 @@ onBeforeUnmount(() => {
         />
       </template>
     </Dialog>
+    <DocumentBatchReprocessDialog
+      v-if="doc"
+      v-model:visible="reprocessOpen"
+      :document-ids="[doc.id]"
+      :allow-ocr="!isTextDocument"
+      @done="onReprocessDone"
+    />
   </PageLayout>
 </template>
 

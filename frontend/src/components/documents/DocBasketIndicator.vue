@@ -17,7 +17,7 @@ import TreeSelect from 'primevue/treeselect'
 import type { TreeNode } from 'primevue/treenode'
 import MultiSelectDialog from '../MultiSelectDialog.vue'
 import DocumentBatchVisibilityDialog from '../DocumentBatchVisibilityDialog.vue'
-import DocumentBatchReprocessDialog, { type ReprocessMode } from '../DocumentBatchReprocessDialog.vue'
+import DocumentBatchReprocessDialog from '../DocumentBatchReprocessDialog.vue'
 import { useDocSelectionStore } from '../../stores/documents/selection'
 import {
   batchUpdateDocumentAttributes,
@@ -383,7 +383,6 @@ async function savePersons() {
 
 const visibilityDialogVisible = ref(false)
 const reprocessDialogVisible = ref(false)
-const reprocessMode = ref<ReprocessMode>('classify')
 
 async function openVisibilityDialog() {
   resetMessages()
@@ -391,9 +390,8 @@ async function openVisibilityDialog() {
   visibilityDialogVisible.value = true
 }
 
-function openReprocessDialog(mode: ReprocessMode) {
+function openReprocessDialog() {
   resetMessages()
-  reprocessMode.value = mode
   reprocessDialogVisible.value = true
 }
 
@@ -403,9 +401,9 @@ function handleVisibilityDone(payload: { affected: number; skipped: number }) {
     (payload.skipped > 0 ? ` ${payload.skipped} übersprungen (keine Berechtigung).` : '')
 }
 
-function handleReprocessDone(payload: { affected: number; mode: ReprocessMode; extractedFirst: number }) {
-  reportDone(payload.affected, payload.mode === 'classify' ? 'Neu klassifizieren' : 'OCR & KI-Neustart')
-  if (payload.extractedFirst > 0) {
+function handleReprocessDone(payload: { affected: number; extractedFirst: number; reset: boolean; ocr: boolean }) {
+  reportDone(payload.affected, payload.reset ? 'Zurücksetzen und neu klassifizieren' : 'Neu klassifizieren')
+  if (payload.extractedFirst > 0 && !payload.ocr) {
     actionInfo.value +=
       ` ${payload.extractedFirst} ohne Text ${payload.extractedFirst === 1 ? 'wird' : 'werden'} zuerst eingelesen.`
   }
@@ -477,28 +475,16 @@ function handleReprocessDone(payload: { affected: number; mode: ReprocessMode; e
           </div>
           <div v-if="canEdit" class="action-row">
             <Button label="Sichtbarkeit" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openVisibilityDialog" />
-          </div>
-          <div v-if="canEdit" class="action-row">
             <Button
-              label="Nur klassifizieren"
+              label="Neu klassifizieren"
               icon="pi pi-sparkles"
               size="small"
               severity="secondary"
               outlined
               :disabled="count === 0"
-              v-tooltip.bottom="'KI-Analyse für alle Dokumente im Basket erneut starten, der vorhandene Text bleibt'"
-              data-testid="basket-classify-only"
-              @click="openReprocessDialog('classify')"
-            />
-            <Button
-              label="OCR & KI neu"
-              icon="pi pi-refresh"
-              size="small"
-              severity="secondary"
-              outlined
-              :disabled="count === 0"
-              v-tooltip.bottom="'Text-Extraktion (OCR) und KI-Analyse für alle Dokumente im Basket erneut starten'"
-              @click="openReprocessDialog('extract')"
+              v-tooltip.bottom="'KI-Analyse für alle Dokumente im Basket erneut starten; im Dialog wahlweise mit Zurücksetzen oder OCR'"
+              data-testid="basket-reclassify"
+              @click="openReprocessDialog"
             />
           </div>
           <div v-if="canEdit" class="action-row">
@@ -665,7 +651,6 @@ function handleReprocessDone(payload: { affected: number; mode: ReprocessMode; e
 
     <DocumentBatchReprocessDialog
       v-model:visible="reprocessDialogVisible"
-      :initial-mode="reprocessMode"
       :document-ids="selectionStore.ids as number[]"
       @done="handleReprocessDone"
     />

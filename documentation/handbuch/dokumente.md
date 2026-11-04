@@ -377,15 +377,26 @@ für den Cloud-Lehrer (`documents.edit`), Hilfe zu den Aktionen, Löschen
 
 ### DOK-DET-10 Neu klassifizieren
 
-- **Wo:** Menü „⋮“ › „Neu klassifizieren“
+- **Wo:** Menü „⋮“ › „Neu klassifizieren …“; derselbe Dialog im Basket
 - **Recht:** `documents.edit`
-- **Ergebnis:** Status springt auf „KI-Analyse“ und läuft live bis
-  „Fertig“; manuell bestätigte Felder bleiben.
+- **Schritte:** Dialog mit drei Kästchen, alle aus: „Attributierung
+  zurücksetzen“ (von Hand gesetzte Kategorie, Titel, Datum, Absender, Tags,
+  Bezugspersonen und „Zuordnung bestätigt“), „Steuerliche Einordnung
+  zurücksetzen“ (Steuerrolle, Steuerjahr, Sektionen, Pin), „Vorher OCR
+  ausführen“ (nicht bei Textdokumenten). Mit einem Zurücksetzen wird der
+  Knopf rot („Zurücksetzen und klassifizieren“) mit Warnhinweis.
+- **Ergebnis:** Ohne Kästchen bleibt der Text, Status springt auf
+  „KI-Analyse“ und läuft live bis „Fertig“; manuell gesetzte Felder bleiben.
+  Zurückgesetztes bestimmt die KI neu. Labels des Cloud-Lehrers und die
+  Kategorie eines Kassenbon-Uploads gelten nicht als manuell und bleiben.
+  Die steuerliche Einordnung eines Dokuments mit von Hand gesetzter
+  Kategorie wird nur zusammen mit der Attributierung neu bestimmt.
 - **Test:** –
 
 ### DOK-DET-11 OCR erzwingen
 
-- **Wo:** Menü „⋮“ › „OCR erzwingen“ (nicht bei Textdokumenten)
+- **Wo:** Kästchen „Vorher OCR ausführen“ im Dialog „Neu klassifizieren“
+  (`DOK-DET-10`; nicht bei Textdokumenten)
 - **Recht:** `documents.edit`
 - **Ergebnis:** Die Textebene der PDF wird ignoriert und das Dokument
   komplett per OCR neu gelesen, danach neu klassifiziert; Status läuft über
@@ -794,7 +805,7 @@ Schwärzungen), gehört zur Mappe, nicht zum Dokument.
   Liste auswählen“
 - **Ergebnis:** „Alle in den Basket“ legt jedes Dokument der Mappe in den
   Basket, dessen Schublade die Stapelaktionen hat (Tags, Kategorie, Datum,
-  Steuer, Personen, Sichtbarkeit, Nur klassifizieren, OCR & KI neu,
+  Steuer, Personen, Sichtbarkeit, Neu klassifizieren,
   Zuordnung bestätigen); ausgegraut, wenn schon alle darin liegen. „In der
   Liste auswählen“ öffnet die Dokumentliste auf die Mappe eingeschränkt
   (`DOK-LST-10`), dort wählen und ablegen (`DOK-LST-08`, `DOK-LST-16`).

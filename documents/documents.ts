@@ -104,7 +104,7 @@ import {
 } from "./reference-numbers";
 import { applyDossierRulesQuietly } from "./dossiers";
 import { triggerWorkers } from "./scan-worker";
-import { requeueClassifyOnly } from "./reprocess";
+import { reprocessDocuments, resetManualAttributes, resetManualTax } from "./reprocess";
 import { queueTaxValuesIfEvidence } from "./tax-values";
 import { unreadTaxEvidence } from "./tax-values-api";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
@@ -2436,9 +2436,13 @@ export interface BatchReclassifyRequest {
    * When true, keep the extracted text and run only classification and the
    * embedding again ("nur klassifizieren"). A document without text has
    * nothing to classify from, so it still starts with text extraction.
-   * Ignores `force_ocr`.
+   * `force_ocr: true` wins over it.
    */
   classify_only?: boolean;
+  /** Hand the human-pinned attribution (category, tags, persons) back to the classifier first. */
+  reset_attributes?: boolean;
+  /** Hand the human-pinned tax assignment back to the classifier first. */
+  reset_tax?: boolean;
 }
 
 export interface BatchReclassifyResponse {
@@ -2486,8 +2490,12 @@ export const batchReclassify = api(
       return { affected_documents: 0 };
     }
 
-    if (req.classify_only) {
-      const { extractedFirst } = await requeueClassifyOnly(visibleRows);
+    if (req.classify_only || req.force_ocr === true) {
+      const { extractedFirst } = await reprocessDocuments(visibleRows, {
+        ocr: req.force_ocr === true,
+        resetAttributes: req.reset_attributes,
+        resetTax: req.reset_tax,
+      });
       triggerWorkers();
       return {
         affected_documents: docIds.length,
@@ -2495,6 +2503,8 @@ export const batchReclassify = api(
       };
     }
 
+    if (req.reset_attributes) await resetManualAttributes(docIds);
+    if (req.reset_tax) await resetManualTax(docIds);
     const patch: Partial<typeof documents.$inferInsert> = {
       status: "pending",
       last_error: null,
@@ -2781,6 +2791,12 @@ export interface ReclassifyDocumentRequest {
    * layer has missing spaces or garbled glyphs.
    */
   force_ocr?: boolean;
+  /** Keep the text and run only classification and embedding (see the batch endpoint). */
+  classify_only?: boolean;
+  /** Hand the human-pinned attribution back to the classifier first. */
+  reset_attributes?: boolean;
+  /** Hand the human-pinned tax assignment back to the classifier first. */
+  reset_tax?: boolean;
 }
 
 export const reclassifyDocument = api(
@@ -2791,7 +2807,18 @@ export const reclassifyDocument = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
+    const doc = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
+    if (req.classify_only || req.force_ocr === true) {
+      await reprocessDocuments([{ id: req.id, has_text: doc.extracted_text != null }], {
+        ocr: req.force_ocr === true,
+        resetAttributes: req.reset_attributes,
+        resetTax: req.reset_tax,
+      });
+      triggerWorkers();
+      return { success: true };
+    }
+    if (req.reset_attributes) await resetManualAttributes([req.id]);
+    if (req.reset_tax) await resetManualTax([req.id]);
     const patch: Partial<typeof documents.$inferInsert> = {
       status: "pending",
       last_error: null,

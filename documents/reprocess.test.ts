@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { requeueClassifyOnly } from "./reprocess";
+import { reprocessDocuments, requeueClassifyOnly } from "./reprocess";
 
 const USER_ID = 94_101;
 
@@ -43,6 +43,7 @@ async function state(id: number): Promise<{ status: string; last_error: string |
 }
 
 afterAll(async () => {
+  await db.execute(sql`DELETE FROM document_tags WHERE name LIKE 'rp-test-%'`);
   await db.execute(sql`DELETE FROM document_scan_queue WHERE document_id IN (SELECT id FROM documents WHERE user_id = ${USER_ID})`);
   await db.execute(sql`DELETE FROM documents WHERE user_id = ${USER_ID}`);
   await db.execute(sql`DELETE FROM users WHERE id = ${USER_ID}`);
@@ -75,5 +76,78 @@ describe("documents.reprocess requeueClassifyOnly", () => {
     expect(s.last_error).toBeNull();
     expect(s.services).toContain("text_extract");
     expect(s.services).toContain("classify");
+  });
+});
+
+describe("documents.reprocess reprocessDocuments", () => {
+  async function pin(id: number): Promise<number> {
+    await db.execute(sql`
+      UPDATE documents SET attributes_reviewed = true, tax_reviewed = true, category_source = 'user'
+      WHERE id = ${id}
+    `);
+    const tag = await db.execute<{ id: number }>(sql`
+      INSERT INTO document_tags (name) VALUES (${`rp-test-${id}`}) RETURNING id
+    `);
+    const tagId = tag.rows[0]!.id;
+    await db.execute(sql`
+      INSERT INTO document_tag_links (document_id, tag_id, source) VALUES (${id}, ${tagId}, 'user')
+    `);
+    return tagId;
+  }
+
+  async function pins(id: number) {
+    const doc = await db.execute<{ attributes_reviewed: boolean; tax_reviewed: boolean; category_source: string; force_ocr: boolean }>(
+      sql`SELECT attributes_reviewed, tax_reviewed, category_source, force_ocr FROM documents WHERE id = ${id}`,
+    );
+    const tags = await db.execute<{ source: string }>(
+      sql`SELECT source FROM document_tag_links WHERE document_id = ${id}`,
+    );
+    return { ...doc.rows[0]!, tagSources: tags.rows.map((r) => r.source) };
+  }
+
+  it("leaves what a human pinned alone by default", async () => {
+    await ensureUser();
+    const id = await insertDoc("Text");
+    await pin(id);
+
+    await reprocessDocuments([{ id, has_text: true }]);
+
+    expect(await pins(id)).toMatchObject({
+      attributes_reviewed: true,
+      tax_reviewed: true,
+      category_source: "user",
+      tagSources: ["user"],
+    });
+    expect((await state(id)).services).toEqual(["classify", "embed"]);
+  });
+
+  it("hands attribution and tax back to the classifier when asked", async () => {
+    await ensureUser();
+    const id = await insertDoc("Text");
+    await pin(id);
+
+    await reprocessDocuments([{ id, has_text: true }], { resetAttributes: true });
+    expect(await pins(id)).toMatchObject({
+      attributes_reviewed: false,
+      tax_reviewed: true,
+      category_source: "ai",
+      tagSources: ["ai"],
+    });
+
+    await reprocessDocuments([{ id, has_text: true }], { resetTax: true });
+    expect((await pins(id)).tax_reviewed).toBe(false);
+  });
+
+  it("runs the whole pipeline with OCR when asked", async () => {
+    await ensureUser();
+    const id = await insertDoc("Text");
+
+    const res = await reprocessDocuments([{ id, has_text: true }], { ocr: true });
+
+    expect(res.extractedFirst).toBe(1);
+    expect((await pins(id)).force_ocr).toBe(true);
+    const s = await state(id);
+    expect(s.status).toBe("pending");
+    expect(s.services).toContain("text_extract");
   });
 });

@@ -954,6 +954,10 @@ export interface BatchReclassifyPayload {
   force_ocr?: boolean
   /** Keep the text, run only classification and embedding again. */
   classify_only?: boolean
+  /** Hand the human-pinned attribution (category, tags, persons) back to the classifier first. */
+  reset_attributes?: boolean
+  /** Hand the human-pinned tax assignment back to the classifier first. */
+  reset_tax?: boolean
 }
 
 export interface BatchReclassifyResponse {
