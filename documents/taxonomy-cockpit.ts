@@ -13,6 +13,7 @@ import { requirePermission } from "../user/auth-handler";
 import { eq, sql, desc, and, count as drizzleCount } from "drizzle-orm";
 import { dailyAtUtc, schedule } from "../lib/local-cron";
 import db from "../db/database";
+import { isSuggestionVisible, pruneStaleCategorySuggestions } from "./suggestion-writer";
 import {
   documents,
   documentCategories,
@@ -63,10 +64,22 @@ async function captureSnapshot(): Promise<TaxonomySnapshot> {
     sonstigesCount = r?.n ?? 0;
   }
 
-  const [suggestionsRow] = await db
-    .select({ n: sql<number>`count(*)::int` })
+  // Drop the evidence that went stale since yesterday, then count what the
+  // suggestions list actually shows: an auto-mined suggestion below its
+  // support threshold is hidden there and must not inflate the KPI either.
+  await pruneStaleCategorySuggestions().catch((err) =>
+    console.warn(`[documents] category suggestion sweep failed: ${(err as Error).message}`),
+  );
+  const openSuggestions = await db
+    .select({
+      rationale: documentCategorySuggestions.rationale,
+      example_document_ids: documentCategorySuggestions.example_document_ids,
+    })
     .from(documentCategorySuggestions)
     .where(eq(documentCategorySuggestions.status, "open"));
+  const visibleSuggestions = openSuggestions.filter((r) =>
+    isSuggestionVisible(r.rationale, (r.example_document_ids ?? []).length),
+  ).length;
 
   const [catCountRow] = await db
     .select({ n: sql<number>`count(DISTINCT ${documents.category_id})::int` })
@@ -85,7 +98,7 @@ async function captureSnapshot(): Promise<TaxonomySnapshot> {
     avg_confidence: totals?.avg_conf != null ? Math.round(totals.avg_conf * 1000) / 1000 : null,
     low_confidence_count: totals?.low_conf ?? 0,
     teacher_requested_count: totals?.teacher_requested ?? 0,
-    open_suggestions_count: suggestionsRow?.n ?? 0,
+    open_suggestions_count: visibleSuggestions,
     category_count: catCountRow?.n ?? 0,
   };
 
