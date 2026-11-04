@@ -51,6 +51,8 @@ import {
 import { listCorrespondents, listGroups, type CorrespondentFacet, type GroupSummary } from '../api/documents'
 import { canShareFiles, shareFile, triggerDownload } from '../utils/shareFile'
 import { useModuleBack } from '../composables/useModuleBack'
+import { useBasketStore } from '../stores/basket'
+import { typeListRoute } from '../utils/collectionRoute'
 import { useDragReorder } from '../composables/useDragReorder'
 import {
   anchorKey,
@@ -394,6 +396,30 @@ function resolveListAnchor(anchor: ListAnchor | null): AnchorResolution {
  * `mappe` tells the detail page which folder it was opened from, so it can
  * step to the previous and next document of this folder directly.
  */
+const basket = useBasketStore()
+const allInBasket = computed(
+  () => items.value.length > 0 && items.value.every((it) => basket.has({ entity_type: 'document', entity_id: it.document_id })),
+)
+
+/** Every member into the shared basket, where the batch actions live. */
+function basketAll() {
+  const fresh = items.value.filter((it) => !basket.has({ entity_type: 'document', entity_id: it.document_id }))
+  basket.add(
+    fresh.map((it) => ({
+      entity_type: 'document' as const,
+      entity_id: it.document_id,
+      display: { title: it.title || it.original_filename, subtitle: it.sender, date: it.doc_date },
+    })),
+  )
+  info.value = `${fresh.length} Dokument${fresh.length === 1 ? '' : 'e'} in den Basket gelegt.`
+}
+
+/** The members in the document list, with its selection and "Ablegen". */
+function openInList() {
+  const target = collection.value ? typeListRoute('document', collection.value.id) : null
+  if (target) void router.push(target)
+}
+
 function openDocument(item: DocumentCollectionItem) {
   saveListAnchor(listAnchorKey.value, { kind: 'document', id: item.document_id })
   router.push({
@@ -749,10 +775,37 @@ onBeforeUnmount(() => {
     </section>
 
     <section>
-      <h3 class="cd-list-title">
-        Dokumente
-        <span class="cd-list-count">({{ includedCount }} von {{ items.length }} im PDF)</span>
-      </h3>
+      <div class="cd-list-head">
+        <h3 class="cd-list-title">
+          Dokumente
+          <span class="cd-list-count">({{ includedCount }} von {{ items.length }} im PDF)</span>
+        </h3>
+        <!-- Batch work on the members happens where it does for every
+             document: in the basket, or picked in the list. -->
+        <div v-if="items.length > 0" class="cd-list-actions">
+          <Button
+            icon="pi pi-shopping-cart"
+            label="Alle in den Basket"
+            size="small"
+            severity="secondary"
+            outlined
+            :disabled="allInBasket"
+            v-tooltip.bottom="allInBasket ? 'Alle Dokumente der Mappe liegen schon im Basket' : 'Alle Dokumente der Mappe in den Basket legen und dort gemeinsam bearbeiten'"
+            data-testid="collection-basket-all"
+            @click="basketAll"
+          />
+          <Button
+            icon="pi pi-check-square"
+            label="In der Liste auswählen"
+            size="small"
+            severity="secondary"
+            text
+            v-tooltip.bottom="'Die Dokumente der Mappe in der Dokumentliste zeigen, dort auswählen und ablegen'"
+            data-testid="collection-open-list"
+            @click="openInList"
+          />
+        </div>
+      </div>
 
       <div v-if="items.length > 1 || autoSorted" class="cd-sort">
         <span class="cd-sort-label">Reihenfolge</span>
@@ -1048,10 +1101,23 @@ onBeforeUnmount(() => {
   font-size: var(--text-base);
   color: var(--p-text-color);
 }
+.cd-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 0 8px;
+}
+.cd-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
 .cd-list-title {
   font-size: var(--text-lg);
   font-weight: 600;
-  margin: 0 0 8px;
+  margin: 0;
 }
 .cd-sort {
   display: flex;

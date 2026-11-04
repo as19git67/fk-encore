@@ -1,23 +1,49 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
-import Checkbox from 'primevue/checkbox'
+import RadioButton from 'primevue/radiobutton'
 import Message from 'primevue/message'
 import { batchReclassifyDocuments } from '../api/documents'
 
-const props = defineProps<{
-  visible: boolean
-  /** IDs of the currently selected documents. */
-  documentIds: number[]
-}>()
+/** What runs again: only the AI on the text there is, text and AI, or OCR and AI. */
+export type ReprocessMode = 'classify' | 'extract' | 'ocr'
+
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    /** IDs of the currently selected documents. */
+    documentIds: number[]
+    /** The choice the dialog opens with. */
+    initialMode?: ReprocessMode
+  }>(),
+  { initialMode: 'classify' },
+)
 
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
-  (e: 'done', payload: { affected: number }): void
+  (e: 'done', payload: { affected: number; mode: ReprocessMode; extractedFirst: number }): void
 }>()
 
-const forceOcr = ref(false)
+const MODES: { value: ReprocessMode; label: string; hint: string }[] = [
+  {
+    value: 'classify',
+    label: 'Nur klassifizieren',
+    hint: 'Der vorhandene Text bleibt; nur die KI-Analyse (Kategorie, Titel, Tags, Steuer) und die semantische Indexierung laufen neu. Dokumente ohne Text werden dabei zuerst eingelesen.',
+  },
+  {
+    value: 'extract',
+    label: 'Text neu einlesen und klassifizieren',
+    hint: 'Text-Extraktion (OCR nur bei Bedarf), KI-Analyse und Indexierung laufen neu.',
+  },
+  {
+    value: 'ocr',
+    label: 'OCR erzwingen und klassifizieren',
+    hint: 'Text-Layer der PDF ignorieren und komplett per OCR neu einlesen (hilft bei Scans mit fehlenden Leerzeichen oder fehlerhaften Zeichen).',
+  },
+]
+
+const mode = ref<ReprocessMode>(props.initialMode)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
@@ -25,22 +51,27 @@ watch(
   () => props.visible,
   (v) => {
     if (!v) return
-    // Default to the cheaper path (reuse the existing text layer); the
-    // user opts into full OCR explicitly via the checkbox.
-    forceOcr.value = false
+    mode.value = props.initialMode
     error.value = null
   },
 )
+
+const header = computed(() => (mode.value === 'classify' ? 'Neu klassifizieren' : 'OCR & KI neu starten'))
 
 async function apply() {
   saving.value = true
   error.value = null
   try {
-    const res = await batchReclassifyDocuments({
-      document_ids: props.documentIds,
-      force_ocr: forceOcr.value,
+    const res = await batchReclassifyDocuments(
+      mode.value === 'classify'
+        ? { document_ids: props.documentIds, classify_only: true }
+        : { document_ids: props.documentIds, force_ocr: mode.value === 'ocr' },
+    )
+    emit('done', {
+      affected: res.affected_documents,
+      mode: mode.value,
+      extractedFirst: res.extracted_first ?? 0,
     })
-    emit('done', { affected: res.affected_documents })
     emit('update:visible', false)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -56,7 +87,7 @@ async function apply() {
     :visible="visible"
     :modal="true"
     :closable="!saving"
-    header="OCR & KI neu starten"
+    :header="header"
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >
     <p class="count">
@@ -65,22 +96,17 @@ async function apply() {
     </p>
 
     <p class="hint">
-      Text-Extraktion (inkl. OCR bei Bedarf), KI-Klassifikation und die
-      semantische Indexierung werden für die ausgewählten Dokumente erneut
-      ausgeführt. Bestehende Kategorien, Titel und Tags können dabei
-      überschrieben werden.
+      Bestehende Kategorien, Titel und Tags können dabei überschrieben werden.
     </p>
 
-    <div class="option">
-      <Checkbox v-model="forceOcr" :binary="true" inputId="batch-force-ocr" />
-      <label for="batch-force-ocr">
-        OCR erzwingen
-        <span class="option-sub">
-          Text-Layer der PDF ignorieren und komplett per OCR neu einlesen
-          (hilft bei Scans mit fehlenden Leerzeichen oder fehlerhaften
-          Zeichen).
-        </span>
-      </label>
+    <div class="options" role="radiogroup" aria-label="Was neu laufen soll">
+      <div v-for="m in MODES" :key="m.value" class="option">
+        <RadioButton v-model="mode" :value="m.value" :input-id="`batch-reprocess-${m.value}`" name="batch-reprocess-mode" />
+        <label :for="`batch-reprocess-${m.value}`">
+          {{ m.label }}
+          <span class="option-sub">{{ m.hint }}</span>
+        </label>
+      </div>
     </div>
 
     <Message v-if="error" severity="error" :closable="false" class="error-msg">
@@ -94,7 +120,12 @@ async function apply() {
         :disabled="saving"
         @click="emit('update:visible', false)"
       />
-      <Button label="Neu starten" icon="pi pi-refresh" :loading="saving" @click="apply" />
+      <Button
+        :label="mode === 'classify' ? 'Klassifizieren' : 'Neu starten'"
+        :icon="mode === 'classify' ? 'pi pi-sparkles' : 'pi pi-refresh'"
+        :loading="saving"
+        @click="apply"
+      />
     </template>
   </Dialog>
 </template>
@@ -109,6 +140,11 @@ async function apply() {
   margin: 0 0 1rem;
   font-size: var(--text-base);
   line-height: 1.4;
+}
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 .option {
   display: flex;

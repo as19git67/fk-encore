@@ -104,6 +104,7 @@ import {
 } from "./reference-numbers";
 import { applyDossierRulesQuietly } from "./dossiers";
 import { triggerWorkers } from "./scan-worker";
+import { requeueClassifyOnly } from "./reprocess";
 import { queueTaxValuesIfEvidence } from "./tax-values";
 import { unreadTaxEvidence } from "./tax-values-api";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
@@ -2431,10 +2432,19 @@ export interface BatchReclassifyRequest {
    * runs OCR — mirrors the single-document `force_ocr` option.
    */
   force_ocr?: boolean;
+  /**
+   * When true, keep the extracted text and run only classification and the
+   * embedding again ("nur klassifizieren"). A document without text has
+   * nothing to classify from, so it still starts with text extraction.
+   * Ignores `force_ocr`.
+   */
+  classify_only?: boolean;
 }
 
 export interface BatchReclassifyResponse {
   affected_documents: number;
+  /** With `classify_only`: documents without text that ran the full pipeline. */
+  extracted_first?: number;
 }
 
 /**
@@ -2457,9 +2467,12 @@ export const batchReclassify = api(
     }
 
     const groupIds = await loadUserGroupIds(userId);
-    const visibleRows = await dbAll<{ id: number }>(
+    const visibleRows = await dbAll<{ id: number; has_text: boolean }>(
       db
-        .select({ id: documents.id })
+        .select({
+          id: documents.id,
+          has_text: sql<boolean>`${documents.extracted_text} IS NOT NULL`,
+        })
         .from(documents)
         .where(
           and(
@@ -2471,6 +2484,15 @@ export const batchReclassify = api(
     const docIds = visibleRows.map((r) => r.id);
     if (docIds.length === 0) {
       return { affected_documents: 0 };
+    }
+
+    if (req.classify_only) {
+      const { extractedFirst } = await requeueClassifyOnly(visibleRows);
+      triggerWorkers();
+      return {
+        affected_documents: docIds.length,
+        ...(extractedFirst ? { extracted_first: extractedFirst } : {}),
+      };
     }
 
     const patch: Partial<typeof documents.$inferInsert> = {

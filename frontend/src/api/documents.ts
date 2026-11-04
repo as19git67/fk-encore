@@ -952,10 +952,14 @@ export function batchUpdateDocumentSubjectPersons(payload: BatchUpdateSubjectPer
 export interface BatchReclassifyPayload {
   document_ids: number[]
   force_ocr?: boolean
+  /** Keep the text, run only classification and embedding again. */
+  classify_only?: boolean
 }
 
 export interface BatchReclassifyResponse {
   affected_documents: number
+  /** With `classify_only`: documents without text that ran the full pipeline. */
+  extracted_first?: number
 }
 
 export function batchReclassifyDocuments(payload: BatchReclassifyPayload) {

@@ -48,7 +48,11 @@ gehört ihrem Ersteller; eine Gruppen-Mappe sehen die Gruppenmitglieder.
 - **Ergebnis:** Badge und Liste stimmen überein.
 - **Fehler und Grenzfälle:** In Modulen ohne Stapelaktionen zeigt der
   Drawer nur Liste und Fuß; in Fotos zusätzlich „Fotobuch gestalten“,
-  in Dokumenten und Finanzen deren Stapelaktionen über dem Fuß.
+  in Dokumenten und Finanzen deren Stapelaktionen über dem Fuß. In
+  Dokumenten gehört dazu „Nur klassifizieren“ (der Text bleibt, nur
+  KI-Analyse und Indexierung laufen neu; Dokumente ohne Text werden zuerst
+  eingelesen) neben „OCR & KI neu“; beide öffnen denselben Dialog mit drei
+  Wegen: nur klassifizieren, Text neu einlesen, OCR erzwingen.
 - **Test:** –
 
 ### SAM-BSK-02 Basket leeren

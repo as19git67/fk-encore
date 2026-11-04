@@ -208,6 +208,10 @@ defineExpose({
   /* The drawer's content starts flush under the header and clips: room for the ring. */
   margin-top: var(--focus-ring-reach);
   margin-bottom: var(--space-2);
+  /* The icon stands on the same edge as the group headings and rows below:
+     a slim inner padding for the hover, taken back by the negative margin. */
+  padding-inline: var(--space-1);
+  margin-inline-start: calc(-1 * var(--space-1));
 }
 
 .basket-empty {
