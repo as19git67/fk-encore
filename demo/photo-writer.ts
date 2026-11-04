@@ -26,6 +26,7 @@ import {
   downloadPhoto,
   drawPhoto,
   hasRecognisableFace,
+  OPENVERSE_QUERIES,
   searchOpenverse,
   type OpenverseCandidate,
   type PhotoDeps,
@@ -45,10 +46,23 @@ export interface WrittenPhotos {
   fallback: string | null;
 }
 
-/** Searches per topic before it counts as used up: 10 pages of 20. */
+/** Why the shots without a fitting candidate were drawn, for the Systemstatus card. */
+function shortfallNote(usedUp: PhotoTopic[], faces: number, broken: number): string {
+  const parts = [
+    usedUp.length === PHOTO_TOPICS.length ? "Treffer aller Themen aufgebraucht" : usedUp.length ? `Treffer aufgebraucht für ${usedUp.join(", ")}` : null,
+    faces ? `${faces} mit Gesicht verworfen` : null,
+    broken ? `${broken} nicht ladbar` : null,
+  ].filter((p): p is string => p !== null);
+  return parts.join("; ") || "keine passenden Treffer";
+}
+
+/** Pages of 20 searched per query before the topic's next query is tried. */
 const MAX_PAGES = 10;
-/** Candidates tried for one shot before it is drawn instead. */
-const MAX_TRIES = 8;
+/**
+ * Candidates tried for one shot before it is drawn instead. Many fall away
+ * (a face, a dead link), so this is generous: a drawn picture is the last resort.
+ */
+const MAX_TRIES = 30;
 
 interface Chosen {
   shot: PlannedShot;
@@ -59,13 +73,19 @@ interface Chosen {
 /** The Openverse candidates per topic: the previous run's set first, then fresh searches. */
 class Pool {
   private queues = new Map<PhotoTopic, OpenverseCandidate[]>();
-  private pages = new Map<PhotoTopic, number>();
+  /** Where the search of a topic stands: which of its queries, which page. */
+  private cursor = new Map<PhotoTopic, { query: number; page: number }>();
   private exhausted = new Set<PhotoTopic>();
   private seen = new Set<string>();
   private searched = false;
 
   constructor(private deps: PhotoDeps, previous: Array<{ topic: string; candidate: OpenverseCandidate }>) {
     for (const p of previous) this.push(p.topic as PhotoTopic, [p.candidate]);
+  }
+
+  /** The topics whose searches have all run out. */
+  get usedUp(): PhotoTopic[] {
+    return PHOTO_TOPICS.filter((t) => this.exhausted.has(t));
   }
 
   private push(topic: PhotoTopic, list: OpenverseCandidate[]): void {
@@ -79,20 +99,27 @@ class Pool {
   }
 
   async next(topic: PhotoTopic): Promise<OpenverseCandidate | null> {
+    const queries = OPENVERSE_QUERIES[topic];
     for (;;) {
       const q = this.queues.get(topic);
       if (q && q.length) return q.shift()!;
       if (this.exhausted.has(topic)) return null;
-      const page = (this.pages.get(topic) ?? 0) + 1;
-      this.pages.set(topic, page);
-      if (page > MAX_PAGES) {
+      const at = this.cursor.get(topic) ?? { query: 0, page: 0 };
+      at.page += 1;
+      if (at.page > MAX_PAGES) {
+        at.query += 1;
+        at.page = 1;
+      }
+      this.cursor.set(topic, at);
+      if (at.query >= queries.length) {
         this.exhausted.add(topic);
         return null;
       }
       if (this.searched && this.deps.searchPauseMs > 0) await new Promise((r) => setTimeout(r, this.deps.searchPauseMs));
       this.searched = true;
-      const found = await searchOpenverse(this.deps, topic, page);
-      if (!found.length) this.exhausted.add(topic);
+      const found = await searchOpenverse(this.deps, topic, at.page, queries[at.query]!);
+      // No result at all on this page: the query is done, the next one starts on page 1.
+      if (!found.length) at.page = MAX_PAGES;
       this.push(topic, found);
     }
   }
@@ -176,6 +203,8 @@ export async function writePhotos(
 
   const pool = source === "openverse" ? new Pool(deps, await previousSet(runId)) : null;
   let fallback: string | null = null;
+  let faces = 0;
+  let broken = 0;
   const chosen: Chosen[] = [];
   let albumCount = 0;
 
@@ -195,7 +224,14 @@ export async function writePhotos(
               if (!c) break;
               tries += 1;
               const img = await downloadPhoto(deps, c.url);
-              if (!img || (await hasRecognisableFace(deps, img))) continue;
+              if (!img) {
+                broken += 1;
+                continue;
+              }
+              if (await hasRecognisableFace(deps, img)) {
+                faces += 1;
+                continue;
+              }
               jpeg = img;
               candidate = c;
               break;
@@ -265,10 +301,15 @@ export async function writePhotos(
     }
 
     const imported = chosen.filter((c) => c.candidate).length;
+    const drawn = chosen.length - imported;
+    if (pool && !fallback && drawn > 0) {
+      fallback = shortfallNote(pool.usedUp, faces, broken);
+      log.info("demo photos: some shots found no Openverse photo", { runId, drawn, faces, broken, usedUp: pool.usedUp });
+    }
     return {
       photos: chosen.length,
       openverse: imported,
-      drawn: chosen.length - imported,
+      drawn,
       albums: albumCount,
       fallback,
     };

@@ -39,20 +39,24 @@ export function defaultPhotoDeps(): PhotoDeps {
 
 const USER_AGENT = "fk-encore-demo/1.0 (demo data generator; https://github.com/as19git67/fk-encore)";
 
-/** The search terms per topic; the first that still has results is used. */
-const QUERIES: Record<PhotoTopic, string> = {
-  beach: "beach sea coast",
-  mountains: "mountain landscape alps",
-  snow: "snow winter landscape",
-  city: "old town square architecture",
-  landscape: "landscape countryside",
-  garden: "garden flowers",
-  food: "food dish meal",
-  animals: "cat dog pet",
-  sports: "bicycle hiking trail",
-  celebration: "birthday cake candles",
-  christmas: "christmas tree decoration",
-  fireworks: "fireworks night",
+/**
+ * The search terms per topic, tried in turn: when one runs out of pages
+ * the next one is searched. Short terms find more than long ones — a long
+ * query only matches pictures that carry every word.
+ */
+export const OPENVERSE_QUERIES: Record<PhotoTopic, readonly string[]> = {
+  beach: ["beach", "sea coast", "seaside", "sand dunes", "harbour boats"],
+  mountains: ["mountains", "alps", "mountain lake", "summit", "valley"],
+  snow: ["snow", "winter landscape", "snowy forest", "ski slope", "frost"],
+  city: ["old town", "town square", "architecture", "street", "cathedral"],
+  landscape: ["landscape", "countryside", "meadow", "forest", "lake"],
+  garden: ["garden", "flowers", "roses", "tulips", "park"],
+  food: ["food", "breakfast", "cake", "vegetables", "pasta"],
+  animals: ["cat", "dog", "horse", "bird", "cows"],
+  sports: ["bicycle", "hiking trail", "football", "sailing", "kayak"],
+  celebration: ["birthday cake", "candles", "balloons", "party table", "champagne"],
+  christmas: ["christmas tree", "christmas", "christmas market", "advent", "gingerbread"],
+  fireworks: ["fireworks", "sparkler", "night sky", "new year", "lanterns"],
 };
 
 /** Tags that mean people are in the picture: such candidates are not even downloaded. */
@@ -124,9 +128,14 @@ export function usableResult(r: OpenverseResult): boolean {
 }
 
 /** One page of CC0/PDM results for a topic; an empty list when there are no more. Waits out a 429 up to three times. */
-export async function searchOpenverse(deps: PhotoDeps, topic: PhotoTopic, page: number): Promise<OpenverseCandidate[]> {
+export async function searchOpenverse(
+  deps: PhotoDeps,
+  topic: PhotoTopic,
+  page: number,
+  query: string = OPENVERSE_QUERIES[topic][0],
+): Promise<OpenverseCandidate[]> {
   const params = new URLSearchParams({
-    q: QUERIES[topic],
+    q: query,
     license: "cc0,pdm",
     mature: "false",
     page_size: "20",

@@ -173,4 +173,29 @@ describe("writePhotos from Openverse", () => {
     const chosen = await db.select().from(demoPhoto).where(eq(demoPhoto.run_id, runId));
     expect(chosen.every((c) => c.source === "drawn" && c.license === null)).toBe(true);
   });
+
+  it("searches a topic's next query when one runs dry, and names why the rest was drawn", async () => {
+    await removeRun(runs[2]);
+    await db.delete(demoPhoto).where(inArray(demoPhoto.run_id, runs));
+    const runId = await newRun();
+    // Only the third beach query finds anything, two photos, the first with a face.
+    const fake = fakeServices();
+    const inner = fake.deps.fetch;
+    fake.deps.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.host === "openverse.test") {
+        const q = url.searchParams.get("q");
+        fake.searches.push(`${q}#${url.searchParams.get("page")}`);
+        if (q !== "seaside" || url.searchParams.get("page") !== "1") return Response.json({ results: [] });
+        const r = (id: string) => ({ id, title: id, creator: "Beispiel", license: "cc0", url: `https://img.test/${id}.jpg`, width: 2000, height: 1500, tags: [] });
+        return Response.json({ results: [r("sea-0"), r("sea-1")] });
+      }
+      return inner(input, init);
+    }) as typeof fetch;
+    const plan: PhotoPlan = { shots: [shot(0, {}), shot(1, {})], albums: [] };
+    const written = await writePhotos(runId, ownerId, 1, plan, "openverse", {}, fake.deps);
+    expect(fake.searches.slice(0, 3)).toEqual(["beach#1", "sea coast#1", "seaside#1"]);
+    expect(written).toMatchObject({ photos: 2, openverse: 1, drawn: 1 });
+    expect(written.fallback).toBe("Treffer aller Themen aufgebraucht; 1 mit Gesicht verworfen");
+  });
 });
