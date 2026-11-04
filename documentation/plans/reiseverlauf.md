@@ -116,7 +116,13 @@ list height (44 points), gave each stay its own place search so what
 is typed for one stay survives adding another, enabled "Sichern" on
 any change and says on the tap what still blocks saving, and says a
 journey's length as "Ankunft am nächsten Tag" instead of "1 Nacht
-unterwegs", which read as driving through the night.
+unterwegs", which read as driving through the night. A second round
+(2026-11-04): the mode on a card opens as a sheet from its own button,
+not a `NavigationLink` — a link anywhere in a list row makes the whole
+row tappable, so a tap on "Noch nichts gebucht" opened the choice of
+modes; and the screen loads the chain once, because `.task` runs again
+whenever the view comes back into view and a second load threw away
+every unsaved change, the stay just added among them.
 
 - A stay card, folded: place, lodging, days and the computed dates (grey,
   not editable). Unfolded: its fields in place, no sheet — lodging search
