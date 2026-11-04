@@ -20,6 +20,7 @@ import {
   documents,
 } from "../db/schema";
 import { normalizeForMatch } from "./sender-rules";
+import { AUTO_MINING_MARKER } from "./suggestion-writer";
 import { TAX_SECTIONS, isValidTaxSectionSlug } from "./tax-sections";
 import log from "encore.dev/log";
 
@@ -27,7 +28,7 @@ import log from "encore.dev/log";
 
 const MIN_REVIEWED_DOCS = 30;
 const MAX_EXAMPLES = 20;
-const MINING_MARKER = "auto-mining:";
+const MINING_MARKER = AUTO_MINING_MARKER;
 const MAX_KEYWORDS_PER_SECTION = 8;
 const MAX_SENDERS_PER_SECTION = 10;
 

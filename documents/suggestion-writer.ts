@@ -12,7 +12,7 @@
  * a failure here must never break the classify pipeline.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { documentCategorySuggestions } from "../db/schema";
@@ -216,4 +216,76 @@ export async function recordUserCategoryProposal(params: {
     .update(documentCategorySuggestions)
     .set({ example_document_ids: plan.exampleIds })
     .where(eq(documentCategorySuggestions.id, plan.id));
+}
+
+/** Marker of the weekly hint-mining job's category-gap suggestions
+ *  (hint-mining.ts). Repeated here so the sweep below knows them as auto-mined. */
+export const AUTO_MINING_MARKER = "auto-mining:";
+
+/** Whether a suggestion was mined by the app rather than proposed by a person.
+ *  Only these are swept: a user's proposal is a decision the app never undoes. */
+export function isAutoMinedSuggestion(rationale: string | null | undefined): boolean {
+  const r = rationale ?? "";
+  return r.startsWith(AUTO_SENDER_MARKER) || r.startsWith(AUTO_MINING_MARKER);
+}
+
+export interface SuggestionSweepResult {
+  /** Suggestions removed because none of their documents is still in „Sonstiges“. */
+  removed: number;
+  /** Suggestions whose example list lost documents that left „Sonstiges“. */
+  trimmed: number;
+}
+
+/**
+ * Keep auto-mined suggestions in step with the documents they are about.
+ *
+ * A suggestion says "documents of this sender keep landing in Sonstiges". Its
+ * evidence is its example list, and that evidence goes stale: a document gets a
+ * real category (by hand, batch, sender rule, re-classify), or is deleted.
+ * Nothing on those paths knew about the suggestion, so suggestions only ever
+ * grew. This drops every example that no longer exists or is no longer in
+ * `sonstiges`, and deletes the suggestion when no example is left — it never
+ * carried a human decision, and the next document of that sender landing in
+ * Sonstiges records it afresh. User-proposed suggestions are left alone.
+ *
+ * Runs with the daily taxonomy snapshot; migration 0289 ran it once for the
+ * backlog.
+ */
+export async function pruneStaleCategorySuggestions(): Promise<SuggestionSweepResult> {
+  const result = await db.execute<{ removed: number; trimmed: number }>(sql`
+    WITH auto AS (
+      SELECT s.id,
+             s.example_document_ids AS old_ids,
+             COALESCE(
+               array_agg(e.doc_id ORDER BY e.ord) FILTER (WHERE c.slug = 'sonstiges'),
+               '{}'::integer[]
+             ) AS keep_ids
+      FROM document_category_suggestions s
+      LEFT JOIN LATERAL unnest(s.example_document_ids) WITH ORDINALITY AS e(doc_id, ord) ON true
+      LEFT JOIN documents d ON d.id = e.doc_id
+      LEFT JOIN document_categories c ON c.id = d.category_id
+      WHERE s.status = 'open'
+        AND (s.rationale LIKE ${AUTO_SENDER_MARKER + "%"} OR s.rationale LIKE ${AUTO_MINING_MARKER + "%"})
+      GROUP BY s.id
+    ),
+    removed AS (
+      DELETE FROM document_category_suggestions t
+      USING auto
+      WHERE t.id = auto.id AND cardinality(auto.keep_ids) = 0
+      RETURNING t.id
+    ),
+    trimmed AS (
+      UPDATE document_category_suggestions t
+      SET example_document_ids = auto.keep_ids
+      FROM auto
+      WHERE t.id = auto.id
+        AND cardinality(auto.keep_ids) > 0
+        AND auto.keep_ids <> auto.old_ids
+      RETURNING t.id
+    )
+    SELECT (SELECT count(*) FROM removed)::int AS removed,
+           (SELECT count(*) FROM trimmed)::int AS trimmed
+  `);
+  const row = result.rows[0];
+  return { removed: Number(row?.removed ?? 0), trimmed: Number(row?.trimmed ?? 0) };
 }
