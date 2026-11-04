@@ -132,6 +132,14 @@ export const CONTENT_RULES: readonly ContentRule[] = [
       "svbrutto",
       "auszahlungsbetrag",
       "nettoverdienst",
+      // Tax paperwork that names §10a, Riester or the Altersvorsorgezulage
+      // without being a pension contract (2026-11 audit: twelve of them landed
+      // here). The own return is caught earlier by `isIncomeTaxReturn`.
+      "einkommensteuerbescheid",
+      "übereinkommensteuer", // "Bescheid für 2023 über Einkommensteuer …"
+      "eigenheimzulage", // its Kinderzulage is not the Riester one
+      "freistellungsauftrag",
+      "nichtveranlagung",
     ],
     category: "altersvorsorge-rentenversicherung",
   },
