@@ -1,6 +1,6 @@
 # The assistant in the iOS app
 
-Status: **stage 1 done (#1821), stage 2 in progress.** Follows `ki-assistent.md` (what the
+Status: **stages 1 (#1821) and 2 (#1822) done, stage 3 in progress.** Follows `ki-assistent.md` (what the
 assistant is) and `assistent-wegfindung.md` (how it finds its way). This plan
 is about bringing the same assistant to the iOS app, and about the shape the
 iOS code needs so that a Finance app and a Documents app can share it later.
@@ -108,11 +108,34 @@ What the web client holds and a native client would have to hold too:
    renamed; `FKPhotosLib` stays the Photos app's module. CI builds the
    package, its tests and both extensions on macOS (`ios-tests.yml`), which
    is the proof — the server-side sandbox has no Swift toolchain.
-3. **Read-only assistant.** Package `F4milAssistant`: conversation list,
-   chat screen, `URLSessionWebSocketTask` stream with ping, resume and
-   cancel, Markdown answers, tool steps, generic rows from `display`,
-   photos and albums native, documents as PDF preview, everything else in
-   the web view (login once). Entry: a toolbar button in the Photos app.
+3. **Read-only assistant** — in progress. Package `F4milAssistant`
+   (`Sources/F4milAssistant`, on `F4milCore` only): the wire types of
+   `/assistant` as the server writes them (`Models/`), `AssistantAPI` over
+   `APIClient`, and `TurnFollower`, a `URLSessionWebSocketTask` that opens
+   the stream with the bearer token as a header (`APIClient.webSocketRequest`,
+   full scope, no `?token=`), posts the turn once the socket is up, treats
+   60 s of silence as a dead socket (the server pings every 25 s), reopens
+   with `resume=true` on the web's schedule (1, 2, 4, 8, 15, 30 s) and skips
+   the replayed events it has shown (`ReplayCursor`). `LiveTurn` is the
+   reducer of `assistantTurn.ts` ported one to one — drafts before a tool
+   call, withdrawn answers, steps, blocks — so web and phone read a turn the
+   same way, with a test per event. The screens: `AssistantRootView`
+   (conversations, swipe to delete, "Neue Unterhaltung"), `ConversationView`
+   (messages, the running turn with its steps and "Abbrechen", the model
+   gate's notice, the question field; the conversation is created on the
+   first question), `BlockView` and `ResultRowView` (title, "n von total",
+   "Liste", one generic row from `display`: date, thumbnail through the API
+   client, title, subtitle, figure coloured by `tone`; folded after eight
+   rows), `MarkdownText` (paragraphs, headings, lists; inline Markdown via
+   `AttributedString`). Opening a row (`RowOpener`): the host app first
+   (`AssistantHost.openRoute`, given the route and its web URL), else
+   `/dokumente/<id>` as a QuickLook preview of `/documents/:id/file`, else
+   the web page under `/app` in `SFSafariViewController` (login once until
+   stage 5). The Photos app (`Features/Assistant/AssistantEntry.swift`)
+   shows the button in the feed toolbar to whoever has `module.assistant`
+   and takes the rows `AppDeepLink.parse` knows — photos, albums, persons,
+   recaps — through `AppDeepLinkRouter`, the same way a notification tap
+   does. Proposal cards show as rows for now; stage 4 gives them buttons.
 4. **Proposal cards.** Execute, discard, the continuation after execute,
    invalidating the app's caches (albums). The letter as PDF preview with
    the share sheet; editing the letter on the phone is not in this stage.
@@ -126,8 +149,10 @@ What the web client holds and a native client would have to hold too:
 
 ## Risks
 
-- Stage 2 is written without a Swift toolchain at hand; the iOS workflow on
-  macOS is what proves it, and a red run there is worked from its log.
+- Stages 2 and 3 are written without a Swift toolchain at hand; the iOS
+  workflow on macOS is what proves it, and a red run there is worked from
+  its log. Stage 2's one red run was a test reading a moved file by its old
+  path, not the Swift.
 - Two renderers, web and iOS, would drift; `display` from the server is the
   answer, and a new block kind gets its rule in `present.ts` first.
 - A finance row without the handover token ends on a login page in the

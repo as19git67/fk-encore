@@ -11,6 +11,9 @@ let package = Package(
         // What every app built here shares; a later Finance or Documents
         // app links this without `FKPhotosLib`.
         .library(name: "F4milCore", targets: ["F4milCore"]),
+        // The assistant: chat, stream, generic rows. Knows no app; the app
+        // hands in what it opens itself (`AssistantHost`).
+        .library(name: "F4milAssistant", targets: ["F4milAssistant"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.4.0"),
@@ -31,10 +34,24 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
+        // The KI-Assistent as a package of its own (plan, stage 3): the
+        // conversations, the chat screen, the WebSocket that watches a turn,
+        // and one generic row drawn from the server's `display`. It sits on
+        // `F4milCore` only, so a Finance or Documents app links it without
+        // the Photos app; what an app shows natively it hands in at start.
+        .target(
+            name: "F4milAssistant",
+            dependencies: ["F4milCore"],
+            path: "Sources/F4milAssistant",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
         .target(
             name: "FKPhotosLib",
             dependencies: [
                 "F4milCore",
+                "F4milAssistant",
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
                 .product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession"),
             ],
@@ -54,6 +71,17 @@ let package = Package(
             name: "FKPhotosTests",
             dependencies: ["FKPhotosLib", "F4milCore"],
             path: "Tests/FKPhotosTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        // The assistant's reading of the stream and of the blocks, held
+        // against the shapes the server writes — the one place a drift
+        // between web and phone would show before a device does.
+        .testTarget(
+            name: "F4milAssistantTests",
+            dependencies: ["F4milAssistant", "F4milCore"],
+            path: "Tests/F4milAssistantTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
