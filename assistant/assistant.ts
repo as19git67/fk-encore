@@ -40,6 +40,7 @@ import { fallbackTitle, suggestTitle } from "./titles";
 import { summarizedTurn, summarizeTurn, summaryNote } from "./summary";
 import { verifyByDefault } from "./verify";
 import { gateMessage, modelGate, type ModelGate } from "./model-gate";
+import { presentBlocks } from "./present";
 import type { ChatMessage, ContextUsage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
@@ -181,7 +182,7 @@ export const getConversation = api(
         role: m.role as "user" | "assistant",
         content: m.content ?? "",
         // Proposal cards show what became of them since, not the state they were stored in.
-        blocks: await refreshProposalBlocks((m.blocks ?? []) as ResultBlock[], Number(auth.userID)),
+        blocks: presentBlocks(await refreshProposalBlocks((m.blocks ?? []) as ResultBlock[], Number(auth.userID))),
         context_usage: (m.context_usage as ContextUsage | null) ?? null,
         created_at: m.created_at,
       })));
