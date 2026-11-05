@@ -58,6 +58,15 @@ struct TripItineraryView: View {
 
     /// A port day being sent ashore (§21.3): which leg, which day.
     @State private var anchorTarget: AnchorTarget?
+    /// Which item is choosing its mode, as a sheet. Not a
+    /// `NavigationLink`: a link anywhere in a list row makes the whole
+    /// row tappable, and a card is one row — a tap on "Noch nichts
+    /// gebucht" opened the choice of modes.
+    @State private var modeChoice: ModeChoice?
+    private struct ModeChoice: Identifiable {
+        let id: TripItineraryItem.ID
+        let choices: [TripTransportMode]
+    }
     private struct AnchorTarget: Identifiable {
         let legPosition: Int
         let dayIndex: Int
@@ -139,9 +148,26 @@ struct TripItineraryView: View {
                 await viewModel.setDayAnchor(anchorDraft)
             }
         }
+        .sheet(item: $modeChoice) { choice in
+            NavigationStack {
+                TripTransportModeChoiceView(mode: Binding(
+                    get: { draft?[choice.id]?.transportMode ?? .foot },
+                    set: { setMode($0, of: choice.id) },
+                ), choices: choice.choices)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Fertig") { modeChoice = nil }
+                    }
+                }
+            }
+        }
         .task {
-            await load()
-            userHome = await TripUserHome.load()
+            // Once. `.task` runs again whenever the view comes back
+            // into view — after a sheet, after a pushed page — and a
+            // second load threw away every unsaved change, the stay
+            // just added among them.
+            if draft == nil { await load() }
+            if userHome == nil { userHome = await TripUserHome.load() }
         }
     }
 
@@ -401,6 +427,41 @@ struct TripItineraryView: View {
             .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .leading)
     }
 
+    /// The mode row of a card: looks like `TripTransportModePicker`,
+    /// but opens the choices as a sheet from a button of its own.
+    private func modeRow(_ item: TripItineraryItem, choices: [TripTransportMode]) -> some View {
+        Button {
+            modeChoice = ModeChoice(id: item.id, choices: choices)
+        } label: {
+            HStack {
+                Text("Fortbewegung")
+                    .foregroundStyle(.primary)
+                Spacer()
+                Label(item.transportMode.label, systemImage: item.transportMode.systemImage)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, minHeight: Self.rowHeight)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Fortbewegung: \(item.transportMode.label)")
+    }
+
+    private func setMode(_ newMode: TripTransportMode, of id: TripItineraryItem.ID) {
+        guard var updated = draft?[id] else { return }
+        // A stay's radius still at the old mode's default follows the
+        // mode; one somebody set stays.
+        if updated.isStay, let current = updated.radiusM {
+            updated.radiusM = TripReach.radius(movingFrom: updated.transportMode, to: newMode, current: current)
+        }
+        updated.transportMode = newMode
+        draft?[id] = updated
+    }
+
     @ViewBuilder
     private func stayCard(_ stay: TripItineraryItem, dated: TripItineraryDated,
                           offsets: (first: Int, last: Int), in draft: TripItineraryDraft) -> some View {
@@ -535,19 +596,7 @@ struct TripItineraryView: View {
         Divider()
 
         fieldRow {
-            TripTransportModePicker(mode: Binding(
-                get: { item.wrappedValue.transportMode },
-                set: { newMode in
-                    var updated = item.wrappedValue
-                    // A radius still at the old mode's default follows the
-                    // mode; one somebody set stays.
-                    if let current = updated.radiusM {
-                        updated.radiusM = TripReach.radius(movingFrom: updated.transportMode, to: newMode, current: current)
-                    }
-                    updated.transportMode = newMode
-                    item.wrappedValue = updated
-                },
-            ))
+            modeRow(stay, choices: TripTransportMode.forPlaces)
         }
         Divider()
 
@@ -727,10 +776,7 @@ struct TripItineraryView: View {
         }
         Divider()
         fieldRow {
-            TripTransportModePicker(mode: Binding(
-                get: { item.wrappedValue.transportMode },
-                set: { item.wrappedValue.transportMode = $0 },
-            ), choices: TripTransportMode.allCases)
+            modeRow(journey, choices: TripTransportMode.allCases)
         }
         Text(Self.journeyHint(journey))
             .font(.caption2)
