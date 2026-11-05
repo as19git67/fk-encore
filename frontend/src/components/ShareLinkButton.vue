@@ -21,7 +21,7 @@ const { copied, shareLink } = useShareLink()
 
 <template>
   <Button
-    :icon="copied ? 'pi pi-check' : 'pi pi-link'"
+    :icon="copied ? 'pi pi-check' : 'pi pi-send'"
     text
     rounded
     severity="secondary"

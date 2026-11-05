@@ -1378,7 +1378,7 @@ onUnmounted(() => {
                  unlike "Foto teilen", which hands over the image file. -->
             <Button
               v-if="props.linkTo"
-              :icon="linkCopied ? 'pi pi-check' : 'pi pi-link'"
+              :icon="linkCopied ? 'pi pi-check' : 'pi pi-send'"
               rounded text
               severity="secondary"
               :aria-label="linkCopied ? 'Link kopiert' : 'Link teilen'"
@@ -2156,6 +2156,13 @@ onUnmounted(() => {
   height: 2.5em;
   color: #fff; /* audit-ok: icons on the dark action bar over the photo */
 }
+/* Never let the flex row squeeze a button narrower than it is tall: the
+   highlight of an active toggle (Details, Text, Play) would turn into an
+   upright oval. When the row is wider than the screen it scrolls instead. */
+.fs-actions-bar :deep(.p-button),
+.fs-actions-bar :deep(.p-select) {
+  flex: 0 0 auto;
+}
 
 /* Highlighted state for toggle buttons (e.g. Details when open). */
 .fs-actions-bar :deep(.fs-toolbar-btn--active) {
@@ -2165,5 +2172,15 @@ onUnmounted(() => {
 @media (max-width: 767px) {
   /* Datum in TopBar kürzer */
   .fs-date-bar { font-size: 0.8em; }
+  /* A phone has room for about nine round buttons only when they sit
+     tighter than on a desktop — otherwise the last ones scroll away. */
+  .fs-actions-bar {
+    gap: 0.125em;
+    padding: 0.4em 0.5em;
+  }
+  .fs-actions-bar :deep(.p-button-rounded) {
+    width: 2.25em;
+    height: 2.25em;
+  }
 }
 </style>
