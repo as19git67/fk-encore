@@ -47,7 +47,7 @@ Three sentences the user may say, and what they become:
 | Sentence | Chain |
 | --- | --- |
 | "On 23 Nov I am in City A for 3 days" | first day 23 Nov; stay City A, 3 days. No home, so no journeys. |
-| "A cruise starting 26 Nov in Port A, 13 days; 27 Nov 08:00 to 28 Nov 22:00 in Port B; 29 Nov 06:00 to 21:00 in Port C" | first day 26 Nov; one stay "Kreuzfahrt", 13 days, `quartersAboard`. Its days carry the port calls as day anchors: 27 Nov Port B from 08:00 (no return), 28 Nov Port B until 22:00, 29 Nov Port C 06:00–21:00; every other day is a sea day. No journey cards between ports, the ship moves by itself. |
+| "A cruise starting 26 Nov in Port A, 13 days; 27 Nov 08:00 to 28 Nov 22:00 in Port B; 29 Nov 06:00 to 21:00 in Port C" | first day 26 Nov; one stay per port with `quartersAboard` (Port A 1 day, Port B 2 days, Port C 1 day), the sea between them a journey by ship with its nights on the way, "Alle an Bord" as the departure of every port day. As implemented on 2026-10-02 and kept by the itinerary: a day anchor is a day trip out of the quarters, not a port call. |
 | "Flight on 20 Feb to City B, three nights, then by train to City C, 4 nights in a named hotel" | first day 20 Feb; journey by plane, times open; stay City B 3 nights (= 4 days, the fourth with the departure); journey by train, times open; stay City C 4 nights, lodging named. |
 
 Days and nights are both everyday language. The stepper on a stay shows
@@ -127,9 +127,11 @@ every unsaved change, the stay just added among them.
 - A stay card, folded: place, lodging, days and the computed dates (grey,
   not editable). Unfolded: its fields in place, no sheet — lodging search
   or "Noch nichts gebucht" with a radius, stepper days · nights, mode on
-  site, "Unterkunft fährt mit". A stay with the quarters aboard also
-  lists its days with port and shore hours; tapping a day edits the day
-  anchor in place.
+  site, "Unterkunft fährt mit". A stay with the quarters aboard lists no
+  days: a port call is a stay of its own, the sea between two ports a
+  journey by ship, and a day ashore is planned on the day itself
+  (2026-11-05; the list the card used to carry called a day without an
+  outing a "Seetag", which on a port call is the day at the berth).
 - A journey card sits between two stays. Folded: "ab 10:00 · an 15:00 ·
   Bahn" and the computed date. Unfolded: departure, arrival, mode, nights
   on the way (default 0). Without times it says "Zeiten offen".
