@@ -462,7 +462,7 @@ struct ActivityView: UIViewControllerRepresentable {
     let images: [UIImage]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: images, applicationActivities: nil)
+        UIActivityViewController.excludingOwnApp(items: images)
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
@@ -474,7 +474,7 @@ struct FileActivityView: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        UIActivityViewController.excludingOwnApp(items: [url])
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}

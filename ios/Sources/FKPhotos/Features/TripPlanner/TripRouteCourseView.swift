@@ -466,7 +466,7 @@ struct TripFileShareSheet: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        UIActivityViewController.excludingOwnApp(items: [url])
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}

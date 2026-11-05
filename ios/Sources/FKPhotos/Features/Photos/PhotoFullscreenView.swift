@@ -93,6 +93,9 @@ struct PhotoFullscreenView: View {
     @State private var showTransforms = false
     @State private var isProcessingAction = false
     @State private var toastMessage: ToastMessage?
+    /// The system share sheet for the current photo, without F4mil itself
+    /// as a target (`OwnAppShareExclusion`).
+    @State private var shareManager = PhotoShareManager()
 
     /// Slideshow (issue #767, Stage 2; rules in documentation/photo-slideshow.md).
     /// The viewer does not play photos itself — the play button hands the
@@ -454,6 +457,25 @@ struct PhotoFullscreenView: View {
                         Button {
                             Task {
                                 guard let photo = currentPhoto else { return }
+                                await shareManager.share(filenames: [photo.filename])
+                                if shareManager.images.isEmpty {
+                                    toastMessage = .error("Foto konnte nicht geladen werden.")
+                                }
+                            }
+                        } label: {
+                            if shareManager.isLoading {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.title2)
+                            }
+                        }
+                        .disabled(shareManager.isLoading || currentPhoto == nil)
+                        .accessibilityLabel("Teilen")
+
+                        Button {
+                            Task {
+                                guard let photo = currentPhoto else { return }
                                 let next: CurationStatus = currentCuration == .favorite ? .visible : .favorite
                                 struct Body: Codable { let status: CurationStatus }
                                 struct Response: Codable { let success: Bool }
@@ -552,6 +574,9 @@ struct PhotoFullscreenView: View {
             Button("Abbrechen", role: .cancel) {}
         } message: {
             Text("Das Foto wird in den Papierkorb verschoben.")
+        }
+        .sheet(isPresented: $shareManager.isPresented) {
+            ActivityView(images: shareManager.images)
         }
         .sheet(isPresented: $showTransforms) {
             if let photo = currentPhoto {
