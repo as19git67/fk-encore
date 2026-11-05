@@ -50,7 +50,7 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 ### IOS-FED-01 Feed lesen und reagieren
 
 - Karten der neuesten Fotos; Gefällt mir, Kommentar („Kommentar…“), Foto
-  antippen öffnet das Vollbild; oben der Streifen „Rückblicke“ mit
+  einmal antippen öffnet das Vollbild; oben der Streifen „Rückblicke“ mit
   „Rückblick … abspielen“.
 - Nur Fotos aus geteilten Alben; private Alben bleiben draußen, auch für
   ihren Eigentümer.
@@ -119,6 +119,9 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
   Album hinzufügen“, „Diashow“ mit „Intervall“ und „Andere Musik“,
   „Datum ändern“, „Zuschnitt…“ und „Frei zuschneiden und bearbeiten…“,
   Formatvariante wechseln, „Löschen“.
+- „Teilen“ (Symbol unten links) öffnet das Teilen-Menü von iOS; F4mil
+  selbst steht dort nicht als Ziel, damit ein Foto nicht in die App
+  zurückgeteilt wird. Das gilt für jedes Teilen-Menü, das die App öffnet.
 - **Test:** –
 
 ### IOS-FOT-02 Zuschnitt und Bearbeiten

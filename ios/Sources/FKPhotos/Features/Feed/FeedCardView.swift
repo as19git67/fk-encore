@@ -93,11 +93,13 @@ struct FeedCardView: View {
                 }
             }
             .contentShape(Rectangle())
-            // Double tap opens the photo fullscreen (where pinch-to-zoom
-            // lives); liking stays on the heart button below.
-            .onTapGesture(count: 2) {
+            // A tap opens the photo fullscreen (where pinch-to-zoom and
+            // sharing live); liking stays on the heart button below.
+            .onTapGesture {
                 Task { await openFullscreen() }
             }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Öffnet das Foto im Vollbild")
 
             // Actions
             HStack(spacing: 16) {
