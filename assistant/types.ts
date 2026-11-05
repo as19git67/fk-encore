@@ -64,6 +64,8 @@ export interface ResultBlock {
   route?: string;
   /** A line under the title: the account and its balance of a booking list. */
   subtitle?: string;
+  /** The block's heading for a client without a renderer per kind (`present.ts`). */
+  title?: string;
 }
 
 /** The kinds of objects a later tool can take over from an earlier result. */

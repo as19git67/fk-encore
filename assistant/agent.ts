@@ -41,6 +41,7 @@ import type {
   ToolSpec,
   TurnEvent,
 } from "./types";
+import { presentBlock } from "./present";
 import { AFTER_EXECUTE } from "./types";
 
 export const DEFAULT_MAX_ROUNDS = 8;
@@ -1211,7 +1212,10 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         digests.set(call.id, outcome.digest);
         toolResults[call.id] = { digest: outcome.digest, ref: outcome.ref };
         if (outcome.ref) refs.set(outcome.ref.type, outcome.ref.ids);
-        if (outcome.block) {
+        // Every row carries how it reads, so a client without a renderer per
+        // kind (the iOS app) shows the same list as the web app.
+        const block = outcome.block ? presentBlock(outcome.block) : undefined;
+        if (block) {
           // A repeated search replaces its earlier block: the model searched
           // again because the first rows did not fit, and showing both put
           // a table of near misses above the one the answer is about.
@@ -1222,16 +1226,16 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           // tax documents, then a search, then the three it read are one
           // trail to one list, not three lists. The steps line keeps the
           // trail; the answer carries the list it is about.
-          const family = narrowingFamily(outcome.block.kind);
+          const family = narrowingFamily(block.kind);
           if (family) {
             for (let i = blocks.length - 1; i >= 0; i--) if (narrowingFamily(blocks[i]!.kind) === family) blocks.splice(i, 1);
           }
-          blocks.push(outcome.block);
+          blocks.push(block);
         }
         result(withHint(outcome, args));
         if (outcome.rowCount === 0 && outcome.loosen) loosenMemory.set(name, { args, ...outcome.loosen });
         ranOk.push(name);
-        emit({ type: "tool_result", tool: name, rowCount: outcome.rowCount, block: outcome.block });
+        emit({ type: "tool_result", tool: name, rowCount: outcome.rowCount, block });
         input.log?.({ tool: name, arguments: args, rows: outcome.rowCount, ms: Date.now() - started });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
