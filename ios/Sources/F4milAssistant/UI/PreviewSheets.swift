@@ -82,8 +82,9 @@ struct QuickLookPreview: UIViewControllerRepresentable {
 }
 
 /// `SFSafariViewController` for a row the app has no screen for: the web
-/// app's page, signed in by the web app's own session until the handover
-/// token of stage 5 exists (the page asks for a login once).
+/// app's page, opened through `/handover` so it is signed in as the app's
+/// user (`WebHandover` in F4milCore). The view controller keeps its storage
+/// per app, so a later row finds the web session still there.
 struct SafariSheet: UIViewControllerRepresentable {
     let url: URL
     let onDone: () -> Void

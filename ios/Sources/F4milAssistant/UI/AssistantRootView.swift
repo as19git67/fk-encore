@@ -88,6 +88,39 @@ enum AssistantDestination: Hashable {
     case conversation(id: Int)
 }
 
+/// One conversation as a screen of its own, for the two ways in that do not
+/// pass the list: a push for a finished answer opens its conversation, and
+/// „Assistent fragen" over a selection opens a new one with that working
+/// set (documentation/plans/assistent-ios.md, stage 6). Lives inside the
+/// app's `NavigationStack`.
+public struct AssistantChatView: View {
+    let conversationId: Int?
+    let context: [ContextRef]
+    let host: AssistantHost
+    let api: AssistantAPI
+
+    /// An existing conversation.
+    public init(conversationId: Int, host: AssistantHost, api: AssistantAPI = AssistantAPI()) {
+        self.conversationId = conversationId
+        self.context = []
+        self.host = host
+        self.api = api
+    }
+
+    /// A new conversation about `context` — at most `ContextRef.maxItems`
+    /// objects; the rest is dropped, as the server would drop it.
+    public init(context: [ContextRef], host: AssistantHost, api: AssistantAPI = AssistantAPI()) {
+        self.conversationId = nil
+        self.context = Array(context.prefix(ContextRef.maxItems))
+        self.host = host
+        self.api = api
+    }
+
+    public var body: some View {
+        ConversationView(conversationId: conversationId, context: context, host: host, api: api)
+    }
+}
+
 extension ISO8601DateFormatter {
     /// The server writes fractional seconds; a stored row without them must parse too.
     static let lenient: ISO8601DateFormatter = {

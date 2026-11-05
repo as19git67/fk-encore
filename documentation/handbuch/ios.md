@@ -313,12 +313,36 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   ist (gesperrt: Feld aus).
 - Zeile antippen: Foto, Album, Person oder Rückblick öffnen in der App;
   ein Dokument als PDF-Vorschau mit Teilen; alles andere (Buchungen, Konten,
-  Zähler, …) als Webseite im In-App-Browser, dort einmal anmelden.
+  Zähler, …) als Webseite im In-App-Browser, angemeldet als der Nutzer der
+  App (einmaliger Übergabe-Code, eine Minute gültig; schlägt die Übergabe
+  fehl, fragt die Seite einmal nach der Anmeldung).
 - Verbindung weg: die Antwort läuft auf dem Server weiter; die App
   verbindet sich bis zu sechsmal neu, danach „Die Verbindung zur laufenden
   Antwort ist abgerissen …“, und die Antwort steht nach dem Neuladen da.
 - Vorschläge (Album anlegen, Tags …) erscheinen als Zeilen „Vorschlag“;
   Ausführen geht noch nur in der Web-App.
+- **Test:** –
+
+### IOS-ASS-02 Assistent zu Fotos fragen
+
+- In der Auswahl (Zeitstrahl, Monatsraster, Album) „Assistent fragen“ in
+  der Toolbar, im Menü (⋯) eines Albums „Assistent fragen“ für die
+  gezeigten Fotos — nur mit dem Recht `module.assistant` und nur bis 25
+  Fotos; ein größeres Album über eine Auswahl fragen.
+- Öffnet eine neue Unterhaltung mit den Fotos als Kontext (Chips über dem
+  Chat, wie auf der Web-Seite `/assistent?context=`), Beispielfragen zu den
+  Fotos.
+- **Test:** –
+
+### IOS-ASS-03 Antwort als Mitteilung
+
+- Verlässt man die App, während eine Antwort läuft, läuft sie auf dem
+  Server weiter; ist sie fertig und niemand schaut zu, kommt eine Mitteilung
+  mit dem Titel der Unterhaltung und dem Anfang der Antwort. Antippen
+  öffnet die Unterhaltung. Zurück in der App zeigt der Chat die Antwort
+  auch ohne Mitteilung.
+- Abschaltbar im Web unter Profil › Benachrichtigungen › „Assistent“.
+  Voraussetzung: Mitteilungen in der App eingeschaltet (IOS-SET-03).
 - **Test:** –
 
 ## SHR: Share-Extension
@@ -364,6 +388,8 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 | IOS-PLN-03 | Gemeinsam planen | – |
 | IOS-PLN-04 | Unterwegs | – |
 | IOS-ASS-01 | Fragen stellen | – |
+| IOS-ASS-02 | Assistent zu Fotos fragen | – |
+| IOS-ASS-03 | Antwort als Mitteilung | – |
 | IOS-SET-01 | Profil und Server | – |
 | IOS-SET-02 | Foto-Synchronisierung | – |
 | IOS-SET-03 | Benachrichtigungen und Spotlight | – |

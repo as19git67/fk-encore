@@ -97,6 +97,22 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
 });
 
+// ========== Web handover tokens ==========
+//
+// A signed-in app hands its session to the web app it opens in an in-app
+// browser (documentation/plans/assistent-ios.md, stage 5): one token, used
+// once, good for a minute. Redeeming it issues an ordinary session, so the
+// bearer token itself never travels in a URL.
+
+export const handoverTokens = pgTable("auth_handover_tokens", {
+  token: text("token").primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  created_at: timestamp("created_at").defaultNow(),
+  expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
+});
+
 // ========== User Invites ==========
 //
 // Accounts are created by invitation only: somebody holding `users.create`

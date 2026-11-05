@@ -1,4 +1,5 @@
 import Foundation
+import F4milCore
 import Observation
 
 /// What happens when a row is tapped: the app first, then the PDF preview,
@@ -32,7 +33,10 @@ final class RowOpener {
         case .documentPDF(let id):
             pdf = PDFItem(documentId: id)
         case .web:
-            web = WebItem(url: url)
+            // Signed in as the app's user through a one-time handover token
+            // (assistent-ios.md, stage 5); the plain page, which asks for a
+            // login once, when the server would not issue one.
+            web = WebItem(url: await WebHandover.signedInURL(for: route, client: api.client) ?? url)
         }
     }
 }

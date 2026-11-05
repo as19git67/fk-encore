@@ -20,7 +20,7 @@ import { safeLoginRedirect } from '../utils/loginRedirect'
 // the entry. Public auth routes are excluded so logging out and back in
 // doesn't snap the user back to /login.
 export const LAST_ROUTE_KEY = 'app_last_route'
-const PUBLIC_ROUTE_NAMES = new Set(['login', 'register', 'forgot-password', 'shared-album', 'shared-collection'])
+const PUBLIC_ROUTE_NAMES = new Set(['login', 'register', 'forgot-password', 'handover', 'shared-album', 'shared-collection'])
 
 function readLastRoute(): string | null {
   const raw = localStorage.getItem(LAST_ROUTE_KEY)
@@ -31,7 +31,7 @@ function readLastRoute(): string | null {
   // any module landed, and remembering it kept them there after they got one.
   if (!raw.startsWith('/') || raw === '/' || raw.startsWith('/login') ||
       raw.startsWith('/register') || raw.startsWith('/forgot-password') ||
-      raw.startsWith('/profile')) {
+      raw.startsWith('/handover') || raw.startsWith('/profile')) {
     return null
   }
   return raw
@@ -73,6 +73,9 @@ const router = createRouter({
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
     { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView },
+    // The iOS app's in-app browser arrives here with a one-time token in the
+    // URL fragment and leaves signed in (assistent-ios.md, stage 5).
+    { path: '/handover', name: 'handover', component: () => import('../views/HandoverView.vue') },
 
     // Shared authenticated routes
     { path: '/profile', name: 'profile', component: ProfileView },

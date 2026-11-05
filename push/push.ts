@@ -344,3 +344,32 @@ export const notifyReceiptIncomplete = api(
     return await svc.sendToUser(req.userId, notification);
   },
 );
+
+interface NotifyAssistantAnswerRequest {
+  userId: number;
+  conversationId: number;
+  /** The conversation's title, shown as the notification's. */
+  title: string;
+  /** The answer; the notification shows its first words. */
+  answer: string;
+}
+
+/**
+ * Called by `assistant/assistant.ts` when a turn finished with nobody
+ * watching its stream (stage 6 of assistent-ios.md).
+ */
+export const notifyAssistantAnswer = api(
+  { expose: false },
+  async (req: NotifyAssistantAnswerRequest): Promise<FanoutFeedResponse> => {
+    const prefs = await svc.getNotificationPrefs(req.userId);
+    if (!svc.isKindEnabled(prefs, "assistant_answer")) {
+      return { sent: 0, pruned: 0 };
+    }
+    const notification = svc.buildAssistantAnswerNotification({
+      conversationId: req.conversationId,
+      title: req.title,
+      answer: req.answer,
+    });
+    return await svc.sendToUser(req.userId, notification);
+  },
+);

@@ -26,6 +26,26 @@ public struct ConversationSummary: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// An object handed to a new conversation as its working set (#1534;
+/// `ContextRef` in assistant/briefs.ts): what the app passes, before the
+/// server has described it.
+public struct ContextRef: Codable, Hashable, Sendable {
+    public let type: String
+    public let id: Int
+
+    public init(type: String, id: Int) {
+        self.type = type
+        self.id = id
+    }
+
+    public static func photo(_ id: Int) -> ContextRef { ContextRef(type: "photo", id: id) }
+    public static func document(_ id: Int) -> ContextRef { ContextRef(type: "document", id: id) }
+    public static func transaction(_ id: Int) -> ContextRef { ContextRef(type: "transaction", id: id) }
+
+    /// As many objects as the server keeps in one working set (`MAX_CONTEXT`).
+    public static let maxItems = 25
+}
+
 /// One object of the working set the conversation was started with (#1534).
 public struct ContextItem: Codable, Hashable, Sendable {
     public let type: String

@@ -144,4 +144,21 @@ public enum SuggestedQuestions {
         if has("meters.view") { out.append("Wie viel Strom haben wir letztes Jahr verbraucht?") }
         return out
     }
+
+    /// First questions over a working set, by what is in it (`ContextRef.type`).
+    public static func questions(aboutContext types: Set<String>) -> [String] {
+        var out: [String] = []
+        if types.contains("photo") {
+            out.append("Was ist auf diesen Fotos zu sehen?")
+            out.append("Wann und wo wurden diese Fotos aufgenommen?")
+        }
+        if types.contains("document") {
+            out.append("Fasse diese Dokumente kurz zusammen.")
+            out.append("Entwirf eine Antwort auf dieses Schreiben.")
+        }
+        if types.contains("transaction") {
+            out.append("Was haben diese Buchungen gemeinsam?")
+        }
+        return out
+    }
 }

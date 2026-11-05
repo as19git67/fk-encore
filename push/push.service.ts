@@ -463,6 +463,52 @@ export function buildReceiptIncompleteNotification(input: {
 
 // ---------- Notification preferences ----------
 
+/** How much of an answer a notification shows; Apple cuts the alert anyway. */
+const ASSISTANT_ANSWER_EXCERPT = 180;
+
+/**
+ * The answer's first words, as plain text: the model writes Markdown, and a
+ * notification shows the asterisks and hashes as they are.
+ */
+export function answerExcerpt(answer: string, limit = ASSISTANT_ANSWER_EXCERPT): string {
+  const plain = answer
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/\*\*|__|`/g, "")
+    .replace(/(^|[\s(])[*_](?=\S)/g, "$1")
+    .replace(/(?<=\S)[*_](?=[\s).,;:!?]|$)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= limit) return plain;
+  const cut = plain.slice(0, limit - 1);
+  const atWord = cut.lastIndexOf(" ");
+  return `${atWord > limit / 2 ? cut.slice(0, atWord) : cut}…`;
+}
+
+/**
+ * "The assistant has answered" — sent when a turn finished and nobody was
+ * watching its stream (stage 6 of assistent-ios.md). The tap opens the
+ * conversation; one notification per conversation, the newest replacing an
+ * unread older one.
+ */
+export function buildAssistantAnswerNotification(input: {
+  conversationId: number;
+  title: string;
+  answer: string;
+}): PushPayload {
+  const title = input.title.trim() || "Assistent";
+  const body = answerExcerpt(input.answer) || "Die Antwort ist fertig.";
+  return {
+    title,
+    body,
+    url: `/app/assistent?c=${input.conversationId}`,
+    tag: `assistant-answer:${input.conversationId}`,
+    data: { kind: "assistant_answer", conversationId: input.conversationId },
+  };
+}
+
 export type NotificationKind =
   | "photo_added"
   | "album_shared"
@@ -473,7 +519,8 @@ export type NotificationKind =
   | "document_failed"
   | "document_follow_up"
   | "receipt_booked"
-  | "receipt_incomplete";
+  | "receipt_incomplete"
+  | "assistant_answer";
 
 export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>;
 
