@@ -8,6 +8,9 @@ let package = Package(
     ],
     products: [
         .library(name: "FKPhotosLib", targets: ["FKPhotosLib"]),
+        // What every app built here shares; a later Finance or Documents
+        // app links this without `FKPhotosLib`.
+        .library(name: "F4milCore", targets: ["F4milCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.4.0"),
@@ -15,9 +18,23 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-openapi-urlsession", from: "1.0.2"),
     ],
     targets: [
+        // The session, the API client, the keychain, the App Group storage
+        // and the deep-link catalog (documentation/plans/assistent-ios.md,
+        // stage 2). Knows no module's models: every request is generic over
+        // its reply, and what an app does around a sign-out it hands in as
+        // closures. The assistant package of stage 3 and any later app sit on
+        // this; `FKPhotosLib` re-exports it so its own files need no import.
+        .target(
+            name: "F4milCore",
+            path: "Sources/F4milCore",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
         .target(
             name: "FKPhotosLib",
             dependencies: [
+                "F4milCore",
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
                 .product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession"),
             ],
@@ -35,7 +52,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FKPhotosTests",
-            dependencies: ["FKPhotosLib"],
+            dependencies: ["FKPhotosLib", "F4milCore"],
             path: "Tests/FKPhotosTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5),

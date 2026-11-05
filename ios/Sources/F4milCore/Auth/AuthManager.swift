@@ -5,23 +5,37 @@ import SwiftUI
 import UIKit
 #endif
 
+/// The session: sign-in, the stored tokens, refresh, sign-out. Shared by
+/// every app built on this package, so it knows nothing of what an app keeps
+/// per user on the device. What has to happen around a sign-out — tell the
+/// server to stop pushing, forget the widgets' snapshots, wipe a search
+/// index — the app hands in as `willLogout` and `didClearSession`
+/// (`AuthManager.forPhotosApp()` in the Photos app).
 @Observable
 public final class AuthManager: @unchecked Sendable {
-    private(set) var currentUser: UserWithRolesAndPermissions?
-    private(set) var isAuthenticated = false
-    private(set) var isLoading = false
+    public private(set) var currentUser: UserWithRolesAndPermissions?
+    public private(set) var isAuthenticated = false
+    public private(set) var isLoading = false
+
+    /// Runs at the start of `logout()`, while the session is still valid:
+    /// what the server has to be told by a signed-in client (#765).
+    @ObservationIgnored public var willLogout: (@MainActor @Sendable () async -> Void)?
+    /// Runs whenever the stored session is gone — after `logout()`, after a
+    /// 401 the refresh could not cure. What this device keeps per user is
+    /// dropped here, so the next account does not find it.
+    @ObservationIgnored public var didClearSession: (@Sendable () -> Void)?
 
     private let tokenKey = "auth_token"
     private let refreshTokenKey = "refresh_token"
     private let userKey = "auth_user"
     private let passwordKey = "saved_login_password"
-    static let savedEmailKey = "saved_login_email"
+    public static let savedEmailKey = "saved_login_email"
 
-    var token: String? {
+    public var token: String? {
         KeychainHelper.loadString(forKey: tokenKey)
     }
 
-    var refreshToken: String? {
+    public var refreshToken: String? {
         KeychainHelper.loadString(forKey: refreshTokenKey)
     }
 
@@ -29,7 +43,7 @@ public final class AuthManager: @unchecked Sendable {
     /// login/refresh. `nil` when unknown (older server, or not yet refreshed
     /// since the app was updated). Stored in the App Group so the APIClient and
     /// the Share Extension share the same view.
-    var accessTokenExpiry: Date? {
+    public var accessTokenExpiry: Date? {
         let epoch = SharedStorage.defaults.double(forKey: SharedStorage.tokenExpiryKey)
         return epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
     }
@@ -58,7 +72,7 @@ public final class AuthManager: @unchecked Sendable {
     /// protected data becomes available and when the app returns to the
     /// foreground, so unlocking the iPhone always regains access to the stored
     /// token instead of prompting for the password again.
-    func retryRestoreIfNeeded() {
+    public func retryRestoreIfNeeded() {
         guard !isAuthenticated else { return }
         restoreSession()
     }
@@ -99,7 +113,7 @@ public final class AuthManager: @unchecked Sendable {
     }
 
     @MainActor
-    func login(email: String, password: String) async throws {
+    public func login(email: String, password: String) async throws {
         isLoading = true
         defer { isLoading = false }
 
@@ -124,10 +138,10 @@ public final class AuthManager: @unchecked Sendable {
     }
 
     @MainActor
-    func logout() async {
+    public func logout() async {
         // The server must stop pushing to this phone before the session that
         // could tell it so is gone (#765).
-        await RemotePushManager.shared.handleSignOut()
+        await willLogout?()
         // Try server-side logout, but don't block on failure
         let body = LogoutRequest(refreshToken: refreshToken)
         try? await APIClient.shared.post("/auth/logout", body: body) as SuccessResponse
@@ -137,7 +151,7 @@ public final class AuthManager: @unchecked Sendable {
 
     /// Attempt to refresh the access token using the stored refresh token.
     /// Returns `true` if the refresh succeeded.
-    func tryRefresh() async -> Bool {
+    public func tryRefresh() async -> Bool {
         // Prefer the App Group copy: the Share Extension may have rotated the
         // refresh token. Fall back to the Keychain (first run after update).
         let rt = SharedStorage.defaults.string(forKey: SharedStorage.refreshTokenKey)
@@ -191,11 +205,11 @@ public final class AuthManager: @unchecked Sendable {
         }
     }
 
-    func hasPermission(_ permission: String) -> Bool {
+    public func hasPermission(_ permission: String) -> Bool {
         currentUser?.permissions.contains(permission) ?? false
     }
 
-    func handleUnauthorized() {
+    public func handleUnauthorized() {
         clearSession()
     }
 
@@ -253,13 +267,10 @@ public final class AuthManager: @unchecked Sendable {
         SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenKey)
         SharedStorage.defaults.removeObject(forKey: SharedStorage.refreshTokenKey)
         SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenExpiryKey)
-        WidgetSnapshotStore.clearAll()
+        didClearSession?()
         Task { @MainActor in
             currentUser = nil
             isAuthenticated = false
-            // The Spotlight index is per device, the library per user: the
-            // next account on this phone must not find this one's photos.
-            await SpotlightIndexer.shared.wipeAll()
         }
     }
 }

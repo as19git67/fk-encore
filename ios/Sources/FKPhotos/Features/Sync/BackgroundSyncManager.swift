@@ -674,7 +674,7 @@ public final class BackgroundSyncManager {
         }
 
         do {
-            let result = try await APIClient.shared.uploadPhoto(
+            let result: APIClient.UploadResult<Photo> = try await APIClient.shared.uploadPhoto(
                 data: data,
                 filename: item.filename,
                 mimeType: mimeType,
@@ -685,7 +685,8 @@ public final class BackgroundSyncManager {
                 capturedAtString: item.capturedAtString,
                 assetLocalId: localId,
                 latitude: uploadLatitude,
-                longitude: uploadLongitude
+                longitude: uploadLongitude,
+                allowsCellularAccess: !PhotoSyncPreferences.wifiOnly
             )
             return .succeeded(photoId: result.photoId)
         } catch APIError.duplicatePhoto(let existingId) {

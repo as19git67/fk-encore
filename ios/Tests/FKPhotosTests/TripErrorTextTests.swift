@@ -1,5 +1,6 @@
 import XCTest
 @testable import FKPhotosLib
+@testable import F4milCore
 
 /// What a failed request says to the traveller.
 ///

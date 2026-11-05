@@ -19,39 +19,9 @@ struct UserWithRoles: Codable, Identifiable, Sendable {
     let roles: [Role]
 }
 
-struct UserWithRolesAndPermissions: Codable, Identifiable, Sendable {
-    let id: Int
-    let email: String
-    let name: String
-    let created_at: String
-    let updated_at: String
-    let roles: [Role]
-    let permissions: [String]
-}
-
-// MARK: - Auth
-
-struct LoginRequest: Codable, Sendable {
-    let email: String
-    let password: String
-}
-
-struct LoginResponse: Codable, Sendable {
-    let user: UserWithRolesAndPermissions
-    let token: String
-    let refreshToken: String
-    /// ISO-8601 instant the access token expires. Optional so decoding still
-    /// succeeds against an older server that doesn't send it yet.
-    let expiresAt: String?
-}
-
 // MARK: - Role & Permission
-
-struct Role: Codable, Identifiable, Sendable {
-    let id: Int
-    let name: String
-    let description: String
-}
+// `Role`, `UserWithRolesAndPermissions`, `LoginRequest`, `LoginResponse` and
+// `SuccessResponse` live in F4milCore (Models/AuthModels.swift).
 
 struct Permission: Codable, Identifiable, Sendable {
     let id: Int
@@ -456,7 +426,3 @@ struct DeleteResponse: Codable, Sendable {
     let message: String
 }
 
-struct SuccessResponse: Codable, Sendable {
-    let success: Bool
-    let message: String
-}

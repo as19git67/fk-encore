@@ -1,5 +1,6 @@
 import XCTest
 @testable import FKPhotosLib
+@testable import F4milCore
 
 /// The plan the phone keeps (§3.9).
 ///

@@ -1,5 +1,6 @@
 import XCTest
 @testable import FKPhotosLib
+@testable import F4milCore
 
 /// The App Group the code names has to be one the targets are signed for.
 ///

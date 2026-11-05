@@ -23,11 +23,20 @@ device.
   **Feed**, **Alben** (albums), **Trip**, **Suche** (search), **Einstellungen**
   (settings). People hang off the album list; **Rückblicke** (look-backs) and
   **Gruppen-Review** (group review) hang off the feed toolbar.
-- **Network:** `Core/Networking/APIClient.swift` (+ `AuthInterceptor`),
-  talks to the same Encore.ts API as the web frontend.
-- **Auth:** `Core/Auth/` – `AuthManager`, `KeychainHelper`, `PasskeyManager`.
-- **Storage/cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`,
-  `SharedStorage` (shared with the share extension).
+- **Shared package `F4milCore`** (`Sources/F4milCore/`, plan
+  `documentation/plans/assistent-ios.md`): what every app built on this
+  package shares and no module owns — `Networking/APIClient.swift` (+
+  `AuthInterceptor`, talks to the same Encore.ts API as the web frontend),
+  `Auth/` (`AuthManager`, `KeychainHelper`, `PasskeyManager`,
+  `SharedSession`), `Storage/SharedStorage.swift` (the App Group suite the
+  share extension reads too), `Routing/AppDeepLink.swift` and the session's
+  wire types (`Models/AuthModels.swift`). Everything in it is `public`;
+  `FKPhotosLib` re-exports it (`Core/CoreExports.swift`), so the app's files
+  need no import line. `APIClient` knows no model: `uploadPhoto` is generic
+  over the record the server returns, and what the app does around a
+  sign-out (push, widgets, Spotlight) it hands in as closures
+  (`AuthManager.forPhotosApp()`).
+- **Storage/cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`.
 - **App targets:** main app, **share extension** (code in `F4milShare/`, its
   `Info.plist` in `App/ShareExtension/`) for uploading from other apps.
 - **Language:** The app is German throughout — and tells the system so:
@@ -722,7 +731,7 @@ documented**:
 
 ### 2.11 Deep Links and Universal Links (#768 §5a)
 
-- **One parser, one router.** `AppDeepLink` (`App/AppDeepLink.swift`) reads
+- **One parser, one router.** `AppDeepLink` (`F4milCore/Routing/AppDeepLink.swift`) reads
   two URL forms onto the same destinations: the app's own scheme
   (`f4milphotos://album/12`, `photo/34`, `person/5`, `recap/7`, `recaps`,
   `feed`, `review-queue`, `shared-album/<token>`) and the web routes of the

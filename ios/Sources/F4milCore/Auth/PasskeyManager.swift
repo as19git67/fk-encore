@@ -8,13 +8,13 @@ import Foundation
 /// - POST /passkeys/auth/options
 /// - POST /passkeys/auth/verify
 @Observable
-final class PasskeyManager: NSObject, @unchecked Sendable {
-    var isProcessing = false
-    var errorMessage: String?
+public final class PasskeyManager: NSObject, @unchecked Sendable {
+    public var isProcessing = false
+    public var errorMessage: String?
 
     private let relyingPartyIdentifier: String
 
-    init(relyingPartyIdentifier: String = "localhost") {
+    public init(relyingPartyIdentifier: String = "localhost") {
         self.relyingPartyIdentifier = relyingPartyIdentifier
         super.init()
     }
@@ -23,7 +23,7 @@ final class PasskeyManager: NSObject, @unchecked Sendable {
 
     /// Initiates passkey registration for the current user.
     @MainActor
-    func register() async throws -> Bool {
+    public func register() async throws -> Bool {
         isProcessing = true
         defer { isProcessing = false }
 
@@ -64,7 +64,7 @@ final class PasskeyManager: NSObject, @unchecked Sendable {
 
     /// Initiates passkey authentication.
     @MainActor
-    func authenticate() async throws -> LoginResponse? {
+    public func authenticate() async throws -> LoginResponse? {
         isProcessing = true
         defer { isProcessing = false }
 

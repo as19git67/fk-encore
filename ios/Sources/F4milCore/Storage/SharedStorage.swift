@@ -26,15 +26,15 @@ import Foundation
 /// must be at least as accessible as the function it belongs to, even
 /// though the function body itself never leaves this module.
 public enum SharedStorage {
-    static let appGroupID        = "group.de.f4mil.photos"
-    static let tokenKey          = "shared.auth_token"
-    static let refreshTokenKey   = "shared.refresh_token"
+    public static let appGroupID        = "group.de.f4mil.photos"
+    public static let tokenKey          = "shared.auth_token"
+    public static let refreshTokenKey   = "shared.refresh_token"
     /// Access-token expiry as epoch seconds (Double). Lets the APIClient and the
     /// Share Extension refresh proactively — the token itself is opaque, so its
     /// expiry can't be derived from it.
-    static let tokenExpiryKey    = "shared.auth_token_expiry"
-    static let serverURLKey      = "shared.serverURL"
-    static let recentAlbumIdsKey = "shared.recentAlbumIds"
+    public static let tokenExpiryKey    = "shared.auth_token_expiry"
+    public static let serverURLKey      = "shared.serverURL"
+    public static let recentAlbumIdsKey = "shared.recentAlbumIds"
 
     /// Returns the App Group UserDefaults suite, falling back to `.standard`
     /// if the entitlement is not configured (e.g. in unit tests).
@@ -42,11 +42,11 @@ public enum SharedStorage {
         UserDefaults(suiteName: appGroupID) ?? .standard
     }
 
-    static var recentAlbumIds: [Int] {
+    public static var recentAlbumIds: [Int] {
         defaults.array(forKey: recentAlbumIdsKey) as? [Int] ?? []
     }
 
-    static func saveRecentAlbumIds(_ ids: [Int]) {
+    public static func saveRecentAlbumIds(_ ids: [Int]) {
         defaults.set(ids, forKey: recentAlbumIdsKey)
     }
 }

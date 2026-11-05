@@ -1,5 +1,6 @@
 import XCTest
 @testable import FKPhotosLib
+@testable import F4milCore
 
 /// Who owns the session the share extension reads.
 ///

@@ -443,7 +443,7 @@ struct CollageView: View {
             isFavorite: false,
             capturedAtString: ""
         )
-        let uploaded: APIClient.UploadResult
+        let uploaded: APIClient.UploadResult<Photo>
         do {
             uploaded = try await APIClient.shared.uploadPhoto(
                 data: jpeg,
@@ -458,7 +458,8 @@ struct CollageView: View {
                 // sync protocol keys on, so it gets the filename it was made
                 // under rather than an empty string.
                 assetLocalId: filename,
-                dateTaken: CollageRenderer.inheritedDate(from: order.map { photos[$0] })
+                dateTaken: CollageRenderer.inheritedDate(from: order.map { photos[$0] }),
+                allowsCellularAccess: !PhotoSyncPreferences.wifiOnly
             )
         } catch {
             report(error.localizedDescription, isError: true)
