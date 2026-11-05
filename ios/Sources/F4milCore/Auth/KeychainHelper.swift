@@ -1,7 +1,9 @@
 import Foundation
 import Security
 
-enum KeychainHelper {
+/// The app's Keychain items, under one service name shared by every app
+/// built on this package: a session stored by one is read by the next.
+public enum KeychainHelper {
     private static let service = "dev.fk-encore.FKPhotos"
 
     /// Stores `data` under `key`. `accessible` controls when the item is
@@ -10,7 +12,7 @@ enum KeychainHelper {
     /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` for more sensitive
     /// items (e.g. a stored password) that must never sync to iCloud or appear
     /// in encrypted backups.
-    static func save(
+    public static func save(
         _ data: Data,
         forKey key: String,
         accessible: CFString = kSecAttrAccessibleAfterFirstUnlock
@@ -34,7 +36,7 @@ enum KeychainHelper {
         }
     }
 
-    static func load(forKey key: String) -> Data? {
+    public static func load(forKey key: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -50,7 +52,7 @@ enum KeychainHelper {
         return result as? Data
     }
 
-    static func delete(forKey key: String) {
+    public static func delete(forKey key: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -59,7 +61,7 @@ enum KeychainHelper {
         SecItemDelete(query as CFDictionary)
     }
 
-    static func saveString(
+    public static func saveString(
         _ value: String,
         forKey key: String,
         accessible: CFString = kSecAttrAccessibleAfterFirstUnlock
@@ -68,16 +70,16 @@ enum KeychainHelper {
         try save(data, forKey: key, accessible: accessible)
     }
 
-    static func loadString(forKey key: String) -> String? {
+    public static func loadString(forKey key: String) -> String? {
         guard let data = load(forKey: key) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 }
 
-enum KeychainError: Error, LocalizedError {
+public enum KeychainError: Error, LocalizedError {
     case saveFailed(OSStatus)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .saveFailed(let status):
             return "Keychain save failed with status: \(status)"

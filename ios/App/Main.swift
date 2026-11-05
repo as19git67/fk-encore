@@ -129,7 +129,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 @main
 struct FKPhotosEntry: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State private var authManager = AuthManager()
+    @State private var authManager = AuthManager.forPhotosApp()
 
     var body: some Scene {
         WindowGroup {

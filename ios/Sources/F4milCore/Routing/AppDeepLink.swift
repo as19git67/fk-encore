@@ -48,16 +48,16 @@ public enum AppDeepLink: Equatable, Sendable {
     /// matching route to map onto.
     case tripDay(planId: Int)
 
-    static let scheme = "f4milphotos"
+    public static let scheme = "f4milphotos"
 
     /// Path prefix the web app is served under (`web/static.ts`).
-    static let appBasePath = "/app"
+    public static let appBasePath = "/app"
 
     // MARK: - URLs the app itself generates
 
     /// The URL that opens the review queue. Used by the notification, which
     /// cannot hold a view.
-    static var reviewQueueURL: URL { url(for: .reviewQueue) }
+    public static var reviewQueueURL: URL { url(for: .reviewQueue) }
 
     /// The app-scheme URL for a target — what notifications, widgets and
     /// Spotlight items carry. Round-trips through `parse`.
@@ -85,7 +85,7 @@ public enum AppDeepLink: Equatable, Sendable {
 
     /// The web URL for a target on the given server — what Handoff and
     /// „im Browser öffnen" use. `nil` when there is no server configured.
-    static func webURL(for link: AppDeepLink, serverURL: URL?) -> URL? {
+    public static func webURL(for link: AppDeepLink, serverURL: URL?) -> URL? {
         guard let serverURL else { return nil }
         if case .search = link { return nil }
         let origin = serverURL.absoluteString
@@ -116,7 +116,7 @@ public enum AppDeepLink: Equatable, Sendable {
     ///
     /// An unknown shape returns `nil`: the app then opens on whatever it was
     /// showing rather than somewhere arbitrary.
-    static func parse(_ url: URL, serverURL: URL? = nil) -> AppDeepLink? {
+    public static func parse(_ url: URL, serverURL: URL? = nil) -> AppDeepLink? {
         guard let scheme = url.scheme?.lowercased() else { return nil }
         if scheme == Self.scheme {
             return parseAppScheme(url)

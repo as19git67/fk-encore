@@ -1,6 +1,7 @@
 import XCTest
 import Security
 @testable import FKPhotosLib
+@testable import F4milCore
 
 final class FKPhotosTests: XCTestCase {
 

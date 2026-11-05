@@ -581,7 +581,7 @@ browser; nothing else changes.
 iOS fetches the document when the app is installed (via Apple's CDN,
 which can lag by up to a day). The paths the app claims are listed in
 `web/app-site-association.ts`; the app's own routing of them is in
-`ios/Sources/FKPhotos/App/AppDeepLink.swift`. Everything outside the
+`ios/Sources/F4milCore/Routing/AppDeepLink.swift`. Everything outside the
 photo module stays in the browser.
 
 ## Data & volumes

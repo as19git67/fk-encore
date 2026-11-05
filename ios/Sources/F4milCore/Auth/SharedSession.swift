@@ -15,13 +15,13 @@ import Foundation
 /// undo a rotation the extension just made — and the server's grace on
 /// a rotated refresh token is five minutes, after which only a fresh
 /// login helps.
-enum SharedSession {
+public enum SharedSession {
     /// Should the app write its Keychain session into the App Group?
     ///
     /// Yes when the group holds no usable pair: a first run, an app
     /// update from a version that never wrote one, cleared app-group
     /// data. No when it does — that pair is at least as new as this one.
-    static func shouldMirror(groupToken: String?, groupRefreshToken: String?) -> Bool {
+    public static func shouldMirror(groupToken: String?, groupRefreshToken: String?) -> Bool {
         let hasToken = groupToken?.isEmpty == false
         let hasRefresh = groupRefreshToken?.isEmpty == false
         // Both halves or nothing: a token without the means to renew it

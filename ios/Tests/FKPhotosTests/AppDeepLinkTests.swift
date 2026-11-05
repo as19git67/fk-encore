@@ -1,5 +1,6 @@
 import XCTest
 @testable import FKPhotosLib
+@testable import F4milCore
 
 /// Parsing deep links (#768 §5a) — the one table every „open X" source
 /// (notification, widget, Spotlight, shared link) has to agree with.

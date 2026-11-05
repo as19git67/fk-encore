@@ -1,5 +1,6 @@
 import XCTest
 @testable import FKPhotosLib
+@testable import F4milCore
 
 /// The App Group the code names has to be one the targets are signed for.
 ///
@@ -64,7 +65,7 @@ final class SharedStorageGroupTests: XCTestCase {
             "F4milShare/ShareViewController.swift",
             "F4milShare/TripSharePayload.swift",
             "F4milShare/TripShareCapture.swift",
-            "Sources/FKPhotos/Core/Storage/SharedStorage.swift",
+            "Sources/F4milCore/Storage/SharedStorage.swift",
             "Sources/FKPhotos/Features/Sync/UploadQueue.swift",
             "Sources/FKPhotos/Features/TripPlanner/TripSharePayload.swift",
             "Sources/FKPhotos/Features/TripPlanner/TripShareInbox.swift",

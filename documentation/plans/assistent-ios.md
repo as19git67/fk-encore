@@ -1,6 +1,6 @@
 # The assistant in the iOS app
 
-Status: **stage 1 in progress.** Follows `ki-assistent.md` (what the
+Status: **stage 1 done (#1821), stage 2 in progress.** Follows `ki-assistent.md` (what the
 assistant is) and `assistent-wegfindung.md` (how it finds its way). This plan
 is about bringing the same assistant to the iOS app, and about the shape the
 iOS code needs so that a Finance app and a Documents app can share it later.
@@ -85,15 +85,29 @@ What the web client holds and a native client would have to hold too:
 
 ## Stages
 
-1. **Display hints from the server** — in progress. `assistant/present.ts`
+1. **Display hints from the server** — done (#1821). `assistant/present.ts`
    with `presentBlock` (one rule per kind, mirroring `AssistantBlock.vue`),
    applied in the agent loop when a block arrives and when a conversation is
    read, so stored blocks carry it too. Nothing in the web app changes.
-2. **Packages.** Split `ios/Package.swift` into `F4milCore` and
-   `F4milPhotos` (the current app) without changing behaviour: move files,
-   make the types the app uses `public`, keep the Xcode project pointing at
-   the package. Build and tests are the proof. Needs Xcode; this is the one
-   stage that cannot be checked from the server side.
+2. **Packages** — in progress. `ios/Package.swift` gets a second library
+   target, `F4milCore` (`Sources/F4milCore`): `APIClient`,
+   `AuthInterceptor`, `AuthManager`, `KeychainHelper`, `PasskeyManager`,
+   `SharedSession`, `SharedStorage`, `AppDeepLink` and the session's wire
+   types (`Role`, `UserWithRolesAndPermissions`, `LoginRequest`,
+   `LoginResponse`, `SuccessResponse`), all `public`. `FKPhotosLib` depends
+   on it and re-exports it (`@_exported import` in `Core/CoreExports.swift`),
+   so none of the app's files changes its imports and the Xcode project
+   keeps linking `FKPhotosLib`. Two seams had to be cut for the module
+   boundary: `APIClient.uploadPhoto` is generic over the record the server
+   returns (`UploadResult<Created>`, the app passes `Photo`) and takes the
+   "Wi-Fi only" preference as `allowsCellularAccess` instead of reading
+   `PhotoSyncPreferences`; `AuthManager` no longer calls `RemotePushManager`,
+   `WidgetSnapshotStore` and `SpotlightIndexer` itself but runs the
+   `willLogout` and `didClearSession` closures the app hands in
+   (`AuthManager.forPhotosApp()`, used by `Main.swift`). The app is not
+   renamed; `FKPhotosLib` stays the Photos app's module. CI builds the
+   package, its tests and both extensions on macOS (`ios-tests.yml`), which
+   is the proof — the server-side sandbox has no Swift toolchain.
 3. **Read-only assistant.** Package `F4milAssistant`: conversation list,
    chat screen, `URLSessionWebSocketTask` stream with ping, resume and
    cancel, Markdown answers, tool steps, generic rows from `display`,
@@ -112,8 +126,8 @@ What the web client holds and a native client would have to hold too:
 
 ## Risks
 
-- Stage 2 changes hundreds of files for access control alone and cannot be
-  verified without Xcode; it goes as its own PR, built locally before merge.
+- Stage 2 is written without a Swift toolchain at hand; the iOS workflow on
+  macOS is what proves it, and a red run there is worked from its log.
 - Two renderers, web and iOS, would drift; `display` from the server is the
   answer, and a new block kind gets its rule in `present.ts` first.
 - A finance row without the handover token ends on a login page in the

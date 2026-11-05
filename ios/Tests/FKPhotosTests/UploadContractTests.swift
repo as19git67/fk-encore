@@ -1,5 +1,6 @@
 import XCTest
 @testable import FKPhotosLib
+@testable import F4milCore
 
 /// Pins the client side of the upload HTTP contract (issue #591): that
 /// `APIClient.uploadPhoto` sends exactly the `X-*` headers, encodings and body
@@ -42,7 +43,7 @@ final class UploadContractTests: XCTestCase {
         _ client: APIClient,
         latitude: Double? = 48.137154,
         longitude: Double? = 11.576124
-    ) async throws -> APIClient.UploadResult {
+    ) async throws -> APIClient.UploadResult<Photo> {
         try await client.uploadPhoto(
             data: Data("the-image-bytes".utf8),
             filename: "IMG 1.heic",

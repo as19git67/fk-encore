@@ -1,11 +1,18 @@
 import Foundation
 
-actor APIClient {
-    static let shared = APIClient()
-    static let serverURLKey = "apiServerURL"
+/// The one HTTP client every app talks to the server through: bearer token
+/// from the `AuthManager`, one refresh at a time on a 401, the server URL
+/// mirrored into the App Group for the extensions. Knows no module's types —
+/// every request is generic over its `Decodable` reply, and the photo upload
+/// is generic over the record the server returns — so the Photos app, the
+/// assistant and a later Finance app share this file unchanged
+/// (documentation/plans/assistent-ios.md, stage 2).
+public actor APIClient {
+    public static let shared = APIClient()
+    public static let serverURLKey = "apiServerURL"
 
     // Default to localhost for development. Override via Admin → Server settings.
-    var baseURL: URL
+    public var baseURL: URL
 
     /// The session every request runs through. Defaults to `.shared`;
     /// injectable so upload-contract tests can drive a `MockURLProtocol`
@@ -26,7 +33,7 @@ actor APIClient {
     private var isRefreshing = false
     private var pendingRefreshContinuations: [CheckedContinuation<Bool, Never>] = []
 
-    init(session: URLSession = .shared) {
+    public init(session: URLSession = .shared) {
         self.session = session
         // Prefer the App Group suite (readable by the Share Extension) with a
         // migration fallback to the old standard UserDefaults location.
@@ -42,11 +49,11 @@ actor APIClient {
         SharedStorage.defaults.set(self.baseURL.absoluteString, forKey: SharedStorage.serverURLKey)
     }
 
-    func setAuthManager(_ manager: AuthManager) {
+    public func setAuthManager(_ manager: AuthManager) {
         self.authManager = manager
     }
 
-    func setBaseURL(_ url: URL) {
+    public func setBaseURL(_ url: URL) {
         self.baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: APIClient.serverURLKey)
         SharedStorage.defaults.set(url.absoluteString, forKey: SharedStorage.serverURLKey)
@@ -54,7 +61,7 @@ actor APIClient {
 
     // MARK: - Generic Requests
 
-    func get<T: Decodable>(_ path: String, query: [String: String]? = nil) async throws -> T {
+    public func get<T: Decodable>(_ path: String, query: [String: String]? = nil) async throws -> T {
         let url = buildURL(path: path, query: query)
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "GET"
@@ -62,7 +69,7 @@ actor APIClient {
         return try await performWithRefresh(request)
     }
 
-    func post<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
+    public func post<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -72,7 +79,7 @@ actor APIClient {
     }
 
     /// POST without automatic 401 retry — used by the refresh endpoint itself to avoid loops.
-    func postWithoutRetry<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
+    public func postWithoutRetry<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -81,7 +88,7 @@ actor APIClient {
         return try await perform(request)
     }
 
-    func put<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
+    public func put<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -90,7 +97,7 @@ actor APIClient {
         return try await performWithRefresh(request)
     }
 
-    func patch<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
+    public func patch<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -99,7 +106,7 @@ actor APIClient {
         return try await performWithRefresh(request)
     }
 
-    func delete<T: Decodable>(_ path: String) async throws -> T {
+    public func delete<T: Decodable>(_ path: String) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "DELETE"
         applyAuth(&request)
@@ -118,7 +125,7 @@ actor APIClient {
     /// lets the sync add such a photo to its target album directly.
     /// `matches` is absent on servers predating that field; the hashes then
     /// still dedup correctly, only the album reconciliation is skipped.
-    func syncCheck(hashes: [String]) async throws -> [String: Int] {
+    public func syncCheck(hashes: [String]) async throws -> [String: Int] {
         struct Body: Encodable { let hashes: [String] }
         struct Match: Decodable { let hash: String; let photoId: Int }
         struct Response: Decodable {
@@ -138,7 +145,7 @@ actor APIClient {
     // MARK: - Metadata-only sync
 
     /// Result of a metadata-only sync call to POST /photos/sync/metadata.
-    enum MetadataSyncResult {
+    public enum MetadataSyncResult: Sendable {
         case updated(photoId: Int)
         case notFound
     }
@@ -146,7 +153,7 @@ actor APIClient {
     /// Sends a body-less metadata sync when only caption/favorite/date changed
     /// but the pixel data is identical. Returns `.notFound` when the server
     /// doesn't recognise the photo — caller should fall back to a full upload.
-    func syncPhotoMetadata(
+    public func syncPhotoMetadata(
         imageDataHash: String,
         fullHash: String,
         caption: String,
@@ -189,13 +196,14 @@ actor APIClient {
     // MARK: - Raw Upload
 
     /// Result of a photo upload.
-    /// - `created`: 201 — server stored a new photo record.
+    /// - `created`: 201 — server stored a new photo record, decoded as `Created`
+    ///   (the app's `Photo`; this module does not know it).
     /// - `updated`: 200 — server already had the photo (hash match); only metadata was updated.
-    enum UploadResult {
-        case created(Photo)
+    public enum UploadResult<Created: Decodable & Identifiable> where Created.ID == Int {
+        case created(Created)
         case updated(photoId: Int)
 
-        var photoId: Int {
+        public var photoId: Int {
             switch self {
             case .created(let p): return p.id
             case .updated(let id): return id
@@ -210,7 +218,9 @@ actor APIClient {
     /// - Returns `.created` (201) for a newly stored photo or `.updated` (200) when the
     ///   server already had this full-hash and only updated metadata.
     /// - Throws `APIError.duplicatePhoto` on 409.
-    func uploadPhoto(
+    /// - `allowsCellularAccess`: the caller's "Wi-Fi only" preference; this
+    ///   module has no preferences of its own.
+    public func uploadPhoto<Created: Decodable & Identifiable>(
         data: Data,
         filename: String,
         mimeType: String,
@@ -222,11 +232,12 @@ actor APIClient {
         assetLocalId: String,
         latitude: Double? = nil,
         longitude: Double? = nil,
-        dateTaken: String? = nil
-    ) async throws -> UploadResult {
+        dateTaken: String? = nil,
+        allowsCellularAccess: Bool = true
+    ) async throws -> UploadResult<Created> where Created.ID == Int {
         var request = URLRequest(url: buildURL(path: "/photos"), timeoutInterval: 120)
         request.httpMethod = "POST"
-        request.allowsCellularAccess = !PhotoSyncPreferences.wifiOnly
+        request.allowsCellularAccess = allowsCellularAccess
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         request.setValue(percentEncodeHeaderValue(filename), forHTTPHeaderField: "X-File-Name")
         request.setValue(imageDataHash, forHTTPHeaderField: "X-Image-Data-Hash")
@@ -286,7 +297,7 @@ actor APIClient {
             print("[Upload] \(filename) → metadata-only update, photoId=\(photoId)")
             return .updated(photoId: photoId)
         case 201:
-            let photo = try decoder.decode(Photo.self, from: responseData)
+            let photo = try decoder.decode(Created.self, from: responseData)
             print("[Upload] \(filename) → NEW photo created, id=\(photo.id)")
             return .created(photo)
         case 409:
@@ -300,7 +311,7 @@ actor APIClient {
             guard (200...299).contains(http.statusCode) else {
                 throw APIError.httpError(http.statusCode, parseErrorMessage(responseData))
             }
-            return .created(try decoder.decode(Photo.self, from: responseData))
+            return .created(try decoder.decode(Created.self, from: responseData))
         }
     }
 
@@ -319,12 +330,17 @@ actor APIClient {
     /// server responded 304 Not Modified (caller's cached view is still
     /// current), otherwise returns the new ETag and the body. Used by the
     /// background sync to skip work when nothing changed (issue #303 phase 5).
-    struct CachedResponse {
-        let etag: String?
-        let body: Data
+    public struct CachedResponse: Sendable {
+        public let etag: String?
+        public let body: Data
+
+        public init(etag: String?, body: Data) {
+            self.etag = etag
+            self.body = body
+        }
     }
 
-    func getWithETag(_ path: String, ifNoneMatch: String?, query: [String: String]? = nil) async throws -> CachedResponse? {
+    public func getWithETag(_ path: String, ifNoneMatch: String?, query: [String: String]? = nil) async throws -> CachedResponse? {
         let url = buildURL(path: path, query: query)
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "GET"
@@ -352,7 +368,7 @@ actor APIClient {
         return CachedResponse(etag: etag, body: data)
     }
 
-    func downloadData(_ path: String, query: [String: String]? = nil) async throws -> Data {
+    public func downloadData(_ path: String, query: [String: String]? = nil) async throws -> Data {
         let url = buildURL(path: path, query: query)
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -492,7 +508,7 @@ actor APIClient {
     /// force-rotated the refresh token on every call — each rotation was a
     /// chance to lose the new token if the background task was suspended,
     /// which surfaced as a logout after long background gaps.
-    func ensureFreshToken() async {
+    public func ensureFreshToken() async {
         guard let manager = authManager else { return }
         if let expiry = manager.accessTokenExpiry, expiry.timeIntervalSinceNow > 120 {
             return
@@ -514,7 +530,7 @@ actor APIClient {
 
 // MARK: - Error Types
 
-enum APIError: Error, LocalizedError {
+public enum APIError: Error, LocalizedError {
     case invalidResponse
     case httpError(Int, String?)
     /// Raised by `uploadPhoto` when the server detected a content-hash duplicate.
@@ -522,7 +538,7 @@ enum APIError: Error, LocalizedError {
     /// (e.g. add to an album). `nil` when the server did not include an id.
     case duplicatePhoto(photoId: Int?)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "Ungültige Server-Antwort"
