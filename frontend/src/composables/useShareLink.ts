@@ -82,7 +82,7 @@ export function useShareLink() {
     return {
       key: 'share-link',
       title: copied.value ? 'Link kopiert' : 'Link teilen',
-      icon: copied.value ? 'pi pi-check' : 'pi pi-link',
+      icon: copied.value ? 'pi pi-check' : 'pi pi-send',
       text: true,
       severity: 'secondary',
       menuOnly: true,
