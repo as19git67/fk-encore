@@ -749,6 +749,8 @@ struct TripItineraryView: View {
             return "An Bord wird nichts hineingeplant — die Tage sagen, dass ihr auf See seid."
         case .transit:
             return "Mit Bahn oder Bus wird nichts hineingeplant — die Weiterreise sagt nur, wo ihr seid."
+        case .plane:
+            return "Im Flugzeug wird nichts hineingeplant — die Weiterreise sagt nur, wo ihr seid."
         }
     }
 

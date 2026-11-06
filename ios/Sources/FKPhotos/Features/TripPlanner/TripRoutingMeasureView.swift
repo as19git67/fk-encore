@@ -168,6 +168,8 @@ struct TripRoutingMeasureView: View {
         case "bike": return "Fahrrad"
         case "car": return "Auto"
         case "transit": return "ÖPNV"
+        case "ship": return "Schiff"
+        case "plane": return "Flugzeug"
         default: return mode
         }
     }
@@ -177,6 +179,8 @@ struct TripRoutingMeasureView: View {
         case "foot": return "figure.walk"
         case "bike": return "bicycle"
         case "car": return "car"
+        case "ship": return "ferry"
+        case "plane": return "airplane"
         default: return "tram"
         }
     }

@@ -41,8 +41,12 @@ export const WALKING_SPEED_M_PER_MIN = 75;
  * `ship` is a journey's mode only (§21.3): the sea days between two
  * ports. Nothing is planned into it — the planner knows no ports of
  * call and no deck plan — and a stay never gets about by ship.
+ *
+ * `plane` is a journey's mode only as well: the way to the first stay
+ * and between two far apart. Nothing is planned into it either, and
+ * its speed and overhead only ever size the journey itself.
  */
-export type TransportMode = "foot" | "bike" | "transit" | "car" | "ship";
+export type TransportMode = "foot" | "bike" | "transit" | "car" | "ship" | "plane";
 
 /**
  * Speeds in metres per minute while actually moving, deliberately
@@ -67,6 +71,9 @@ export const SPEED_M_PER_MIN: Readonly<Record<TransportMode, number>> = {
   // ~30 km/h: a ship under way. Only ever asked for a journey's own
   // length, never for a hop between two stops.
   ship: 500,
+  // ~750 km/h in the air. Like the ship, only for a journey's own
+  // length; the hours before take-off are the overhead below.
+  plane: 12_500,
 };
 
 /**
@@ -113,6 +120,8 @@ export const DETOUR_FACTOR_BY_MODE: Readonly<Record<TransportMode, number>> = {
   car: 1.4,
   // Great-circle more or less: a ship goes where it is pointed.
   ship: 1.15,
+  // Straighter still, within the airways.
+  plane: 1.1,
 };
 
 /**
@@ -133,6 +142,10 @@ const OVERHEAD_MINUTES: Readonly<Record<TransportMode, number>> = {
   car: 6,
   // Embarkation: nobody steps aboard and casts off.
   ship: 30,
+  // The way to the airport, check-in, security and the wait at the
+  // gate on one side; the baggage belt and the way into town on the
+  // other.
+  plane: 180,
 };
 
 /**

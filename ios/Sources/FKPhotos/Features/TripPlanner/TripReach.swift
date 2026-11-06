@@ -21,6 +21,7 @@ enum TripReach {
         case .car:     return 25_000
         // Never a place's mode (§21.3); a port day gets about on foot.
         case .ship:    return 3_000
+        case .plane:   return 3_000
         }
     }
 

@@ -734,8 +734,7 @@ struct TripPlanDayView: View {
     }
 
     private func headerSymbol(_ leg: TripLeg) -> String {
-        if viewModel.day?.anchor != nil { return "car" }
-        return leg.anchorRadiusM == nil ? "house" : "circle.dashed"
+        leg.anchorRadiusM == nil ? "house" : "circle.dashed"
     }
 
     /// "Start: Hauptbahnhof · Ziel: Hotel Adler" — the day's two ends.
@@ -744,11 +743,11 @@ struct TripPlanDayView: View {
     /// every day both ends *are* the accommodation and naming it twice
     /// would be noise.
     private func headerLine(_ leg: TripLeg) -> String {
-        // A day trip says where the day is, not where the bed is: the
-        // anchor is still true and no longer the useful half (§4.5).
-        if let trip = viewModel.day?.anchor {
-            return "Ausflug: \(trip.summary)"
-        }
+        // Always the stay, even on a day trip (§4.5): the header is the
+        // way into the stay, and when it read "Ausflug: …" a tap on the
+        // outing's name opened the stay's sheet, titled after the
+        // city. The outing has its own row in the frame band, and that
+        // row opens the outing.
         let anchor = leg.anchorRadiusM == nil
             ? leg.anchorTitle
             : "\(leg.anchorTitle) (ungefähr)"
@@ -778,48 +777,35 @@ struct TripPlanDayView: View {
     /// screen read as two different controls.
     private static let pickerChipHeight: CGFloat = 48
 
-    /// The chip's second line: how long a stay is, how a journey goes.
+    /// The chip's second line: how long the leg is. A journey's mode is
+    /// its symbol on the line, so the line under it says its length
+    /// like a stay's does.
     private func legChipDetail(_ leg: TripLeg) -> String {
-        if leg.isTransit { return leg.transportMode.label }
-        return leg.days.count == 1 ? "1 Tag" : "\(leg.days.count) Tage"
+        leg.days.count == 1 ? "1 Tag" : "\(leg.days.count) Tage"
     }
 
+    /// The strip is the trip in order, and it is drawn as one: a line
+    /// joins the stays, and a journey with nights sits on that line as
+    /// its symbol rather than as a chip of its own. "An Bord nach …" as
+    /// a chip was twice the width of the port it leads to, and a row
+    /// of equal chips said nothing about which follows which.
     private var legPicker: some View {
-        HStack(spacing: 0) {
+        let legs = viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []
+        return HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
-                        Button {
-                            viewModel.select(leg: leg.position)
-                        } label: {
-                            // The same shape as a day's chip below —
-                            // two lines, the same corners, the same
-                            // highlight — so the two strips read as
-                            // one control at two levels.
-                            VStack(spacing: 2) {
-                                Text(leg.displayTitle)
-                                    .font(.subheadline.weight(
-                                        leg.position == viewModel.legIndex ? .semibold : .regular))
-                                HStack(spacing: 3) {
-                                    Text(legChipDetail(leg))
-                                    if leg.isAwaitingRegion {
-                                        Image(systemName: "map.circle")
-                                    }
-                                }
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .frame(minWidth: 56, minHeight: Self.pickerChipHeight)
-                            .background(
-                                leg.position == viewModel.legIndex
-                                    ? AnyShapeStyle(.tint.opacity(0.15))
-                                    : AnyShapeStyle(.clear),
-                                in: .rect(cornerRadius: 10),
-                            )
-                            .contentShape(.rect)
+                HStack(spacing: 0) {
+                    ForEach(Array(legs.enumerated()), id: \.element.id) { index, leg in
+                        // Two stays with nothing between them — a
+                        // journey without nights is not a leg — still
+                        // follow one another.
+                        if index > 0, !leg.isTransit, !legs[index - 1].isTransit {
+                            chainLink(width: 24)
                         }
-                        .buttonStyle(.plain)
+                        if leg.isTransit {
+                            journeyChip(leg)
+                        } else {
+                            stayChip(leg)
+                        }
                     }
                 }
                 .padding(.horizontal)
@@ -865,6 +851,90 @@ struct TripPlanDayView: View {
                 editingStructure = true
             }
         }
+    }
+
+    private func stayChip(_ leg: TripLeg) -> some View {
+        Button {
+            viewModel.select(leg: leg.position)
+        } label: {
+            // The same shape as a day's chip below — two lines, the
+            // same corners, the same highlight — so the two strips
+            // read as one control at two levels.
+            VStack(spacing: 2) {
+                Text(leg.displayTitle)
+                    .font(.subheadline.weight(
+                        leg.position == viewModel.legIndex ? .semibold : .regular))
+                HStack(spacing: 3) {
+                    Text(legChipDetail(leg))
+                    if leg.isAwaitingRegion {
+                        Image(systemName: "map.circle")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .frame(minWidth: 56, minHeight: Self.pickerChipHeight)
+            .background(
+                leg.position == viewModel.legIndex
+                    ? AnyShapeStyle(.tint.opacity(0.15))
+                    : AnyShapeStyle(.clear),
+                in: .rect(cornerRadius: 10),
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A journey on the line: its mode as a symbol between the two
+    /// stays it joins, its length beneath. Selected, the disc fills
+    /// like a chip does.
+    private func journeyChip(_ leg: TripLeg) -> some View {
+        let selected = leg.position == viewModel.legIndex
+        return Button {
+            viewModel.select(leg: leg.position)
+        } label: {
+            VStack(spacing: 2) {
+                HStack(spacing: 0) {
+                    chainLine(width: 14)
+                    Image(systemName: leg.transportMode.systemImage)
+                        .font(.footnote.weight(selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .frame(width: 24, height: 24)
+                        .background(
+                            selected ? AnyShapeStyle(.tint.opacity(0.15)) : AnyShapeStyle(.clear),
+                            in: .circle,
+                        )
+                        .overlay(Circle().strokeBorder(.quaternary))
+                    chainLine(width: 14)
+                }
+                Text(legChipDetail(leg))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: Self.pickerChipHeight)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(leg.displayTitle), \(leg.transportMode.label), \(legChipDetail(leg))")
+    }
+
+    /// The line between two stays, at the height of a journey's disc,
+    /// with the caption line kept free beneath so it stays level with
+    /// the symbols either side of it.
+    private func chainLink(width: CGFloat) -> some View {
+        VStack(spacing: 2) {
+            chainLine(width: width).frame(height: 24)
+            Text(" ").font(.caption2)
+        }
+        .frame(minHeight: Self.pickerChipHeight)
+        .accessibilityHidden(true)
+    }
+
+    private func chainLine(width: CGFloat) -> some View {
+        Rectangle()
+            .fill(.quaternary)
+            .frame(width: width, height: 1)
     }
 
     private func dayPicker(_ leg: TripLeg) -> some View {
@@ -956,6 +1026,15 @@ struct TripPlanDayView: View {
         // do the separating. Six points between two footnote-sized
         // labels looked like one paragraph and hit like one target.
         VStack(alignment: .leading, spacing: 0) {
+            // Where the day happens comes first: the outing is what the
+            // whole day is planned around, and the hard times below
+            // are hours inside it. It used to sit between the hard
+            // times and "Abendlicht", under the row that adds a hard
+            // time, which read as one list in no order.
+            if let outing = day.anchor {
+                outingRow(outing)
+                Divider()
+            }
             // A fixpoint that frames a block is that block's hours and
             // is shown there (§7.3); listing it here as well would be
             // the two places this band was accused of.
@@ -1033,8 +1112,12 @@ struct TripPlanDayView: View {
                 addingFixpoint = true
             }
             Divider()
-            outingRow(day)
-            Divider()
+            if day.anchor == nil {
+                frameAction("Ausflug planen", systemImage: "car") {
+                    settingDayAnchor = true
+                }
+                Divider()
+            }
             // When the light is good, after the planned day is over
             // (§7.3) — a thing of this day, so it sits with the day's
             // frame rather than in a menu (§25).
@@ -1061,45 +1144,47 @@ struct TripPlanDayView: View {
                     in: .rect(cornerRadius: 12))
     }
 
-    /// Where the day happens, and the way to send it elsewhere (§4.5).
+    /// Where the day happens (§4.5), once, as the first row of the frame.
     ///
     /// The set outing reads like a fixpoint because it works like one:
     /// it is a thing the day has to be planned around, it costs the day
-    /// time, and it can be taken back off. Removing it is the same one
-    /// tap as removing a hard time — going through the sheet for that
-    /// was two taps and a scroll.
-    @ViewBuilder
-    private func outingRow(_ day: TripDay) -> some View {
-        if let outing = day.anchor {
-            HStack(spacing: 8) {
-                Image(systemName: "car").foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(outing.displayName).font(.subheadline)
-                    Text(outing.costLine).font(.caption).foregroundStyle(.secondary)
+    /// time, and it can be taken back off. The row itself opens the
+    /// outing — the one place that changes it, so a tap on its name
+    /// never lands anywhere else — and the x is the same one tap as
+    /// removing a hard time.
+    private func outingRow(_ outing: TripDayAnchor) -> some View {
+        HStack(spacing: 8) {
+            Button { settingDayAnchor = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "car").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Ausflug: \(outing.displayName)").font(.subheadline.weight(.semibold))
+                        Text(outing.costLine).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer()
-                Button("Ändern") { settingDayAnchor = true }
-                    .buttonStyle(.borderless)
-                    .font(.subheadline)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .disabled(viewModel.isSavingFixpoint)
-                removeButton("Ausflugsziel \(outing.displayName) entfernen") {
-                    confirmRemoveOuting = true
-                }
-                .confirmationDialog("Ausflugsziel entfernen?", isPresented: $confirmRemoveOuting,
-                                    titleVisibility: .visible) {
-                    Button("Entfernen", role: .destructive) { removeOuting() }
-                    Button("Abbrechen", role: .cancel) {}
-                } message: {
-                    Text("Der Tag wird wieder um die Unterkunft herum geplant.")
-                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(.rect)
             }
-            .frame(minHeight: 44)
-        } else {
-            frameAction("Ausflug planen", systemImage: "car") {
-                settingDayAnchor = true
+            .buttonStyle(.plain)
+            .disabled(viewModel.isSavingFixpoint)
+            .accessibilityLabel("Ausflug \(outing.displayName), \(outing.costLine)")
+            .accessibilityHint("Ausflugsziel und Zeiten ändern")
+            removeButton("Ausflugsziel \(outing.displayName) entfernen") {
+                confirmRemoveOuting = true
+            }
+            .confirmationDialog("Ausflugsziel entfernen?", isPresented: $confirmRemoveOuting,
+                                titleVisibility: .visible) {
+                Button("Entfernen", role: .destructive) { removeOuting() }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Der Tag wird wieder um die Unterkunft herum geplant.")
             }
         }
+        .frame(minHeight: 44)
     }
 
     /// The x-tap's target, kept apart so the confirmation can call it.
