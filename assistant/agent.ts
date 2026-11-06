@@ -539,6 +539,8 @@ export interface TurnInput {
   conversationId?: number;
   /** The latest result sets of earlier turns, by type. */
   previousRefs?: Partial<Record<RefType, number[]>>;
+  /** The types whose latest earlier result was cut at a read cap. */
+  previousTruncated?: RefType[];
   /** The working set the user handed over, and a brief of each object (#1534). */
   context?: { refs: ContextRef[]; briefs: string[] };
   /** Per tool call: name, argument keys and row count — never row content. */
@@ -772,12 +774,14 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     if (input.previousRefs?.[r.type]) continue;
     refs.set(r.type, [...(refs.get(r.type) ?? []), r.id]);
   }
+  const truncated = new Set<RefType>(input.previousTruncated ?? []);
   const toolResults: TurnResult["toolResults"] = {};
   const ctx = {
     user: input.user,
     today: localIso(now),
     conversationId: input.conversationId,
     previous: (type: RefType) => refs.get(type),
+    previousTruncated: (type: RefType) => truncated.has(type),
     context: input.context?.refs ?? [],
     turnResults: () => turnResults(messages.slice(questionIndex), metaTools),
   };
@@ -1211,7 +1215,11 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         const outcome = await tool.run(args, ctx);
         digests.set(call.id, outcome.digest);
         toolResults[call.id] = { digest: outcome.digest, ref: outcome.ref };
-        if (outcome.ref) refs.set(outcome.ref.type, outcome.ref.ids);
+        if (outcome.ref) {
+          refs.set(outcome.ref.type, outcome.ref.ids);
+          if (outcome.ref.truncated) truncated.add(outcome.ref.type);
+          else truncated.delete(outcome.ref.type);
+        }
         // Every row carries how it reads, so a client without a renderer per
         // kind (the iOS app) shows the same list as the web app.
         const block = outcome.block ? presentBlock(outcome.block) : undefined;

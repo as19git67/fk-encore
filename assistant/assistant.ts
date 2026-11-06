@@ -348,7 +348,7 @@ async function questionCount(conversationId: number): Promise<number> {
 }
 
 /** The latest result set of each type in the conversation, for `from_previous_result`. */
-async function previousRefs(conversationId: number): Promise<Partial<Record<RefType, number[]>>> {
+async function previousRefs(conversationId: number): Promise<{ refs: Partial<Record<RefType, number[]>>; truncated: RefType[] }> {
   const rows = await db
     .select({ ref: assistantMessage.result_ref })
     .from(assistantMessage)
@@ -356,10 +356,14 @@ async function previousRefs(conversationId: number): Promise<Partial<Record<RefT
     .orderBy(desc(assistantMessage.id))
     .limit(50);
   const refs: Partial<Record<RefType, number[]>> = {};
+  const truncated: RefType[] = [];
   for (const { ref } of rows) {
-    if (ref && !refs[ref.type]) refs[ref.type] = ref.ids;
+    if (ref && !refs[ref.type]) {
+      refs[ref.type] = ref.ids;
+      if (ref.truncated) truncated.push(ref.type);
+    }
   }
-  return refs;
+  return { refs, truncated };
 }
 
 async function persist(
@@ -474,6 +478,7 @@ async function answerQuestion(
     const earlier = await history(conversation.id);
     const refs = cleanContext(conversation.context);
     const entries = refs.length ? await describeContext(refs, user) : [];
+    const earlierRefs = await previousRefs(conversation.id);
     const result = await withAiPriority(SLOT_PRIORITY, async () => runTurn({
       user,
       history: earlier.messages,
@@ -481,7 +486,8 @@ async function answerQuestion(
       contextWindow: knownContextWindow() ?? undefined,
       question,
       conversationId: conversation.id,
-      previousRefs: await previousRefs(conversation.id),
+      previousRefs: earlierRefs.refs,
+      previousTruncated: earlierRefs.truncated,
       context: entries.length
         ? { refs: entries.filter((e) => e.visible).map(({ type, id }) => ({ type, id })), briefs: entries.map((e) => e.brief) }
         : undefined,

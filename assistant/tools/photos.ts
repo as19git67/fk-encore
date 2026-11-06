@@ -6,15 +6,18 @@
 import { feed, photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
-import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { similarPairs, thinSimilar } from "../../photo/photo-book-subjects";
+import { compositeKey, dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const PHOTOS = ["module.photos", "photos.view"];
 
 /** Photos counted per call; past this the answer says "more than". */
 const PHOTO_COUNT_CAP = 2000;
-/** Photos read to narrow a previous result; the most the endpoint returns. */
+/** Photos read to narrow a previous result or to group; the most the endpoint returns. */
 const NARROW_CAP = 5000;
+/** With `distinct`, this many candidates per pick are compared before the picks are taken. */
+const DISTINCT_POOL = 4;
 
 /**
  * What a photo list is ranked by, in the words of the tool and of the photo
@@ -38,6 +41,7 @@ const GROUPS = {
   month: "taken, YYYY-MM",
   country: "of the place",
   city: "of the place",
+  person: "of person_ids, each person on its own (needs person_ids)",
 } as const;
 type PhotoGroup = keyof typeof GROUPS;
 
@@ -46,6 +50,8 @@ interface PhotoRow {
   filename?: string; original_name?: string; mime_type?: string; size?: number; latitude?: number; longitude?: number;
   ai_quality_score?: number; ai_quality_details?: Record<string, number>; description?: string; keywords?: string[];
   curation_status?: string; orientation?: string | null; rank_value?: number;
+  /** Set when the rows were read per person (`group_by person`). */
+  person_id?: number;
 }
 
 /** The value of a field a row carries itself, for ranking an earlier result without the service. */
@@ -72,6 +78,7 @@ function rankCell(p: PhotoRow, field: PhotoRankField): number | string | undefin
 }
 
 function groupKey(p: PhotoRow, by: PhotoGroup): string | undefined {
+  if (by === "person") return p.person_id === undefined ? undefined : `person ${p.person_id}`;
   const date = p.taken_at ?? p.created_at;
   if (by === "year" || by === "month") return dateKey(date, by);
   return by === "country" ? p.location_country || undefined : p.location_city || undefined;
@@ -213,6 +220,7 @@ export const listPhotos: ToolSpec = {
       ...rankProperties(RANK_FIELDS, "taken_at"),
       ...groupProperties(GROUPS),
       limit: { type: "integer", description: "at most 60 (default 15); with group_by: groups shown" },
+      distinct: { type: "boolean", description: "'nicht zu ähnlich', 'unterschiedliche': leave out a photo that looks like a better-ranked one taken within hours" },
       from_previous_result: { type: "boolean", description: "narrow the previous answer's photos" },
       hidden: HIDDEN_PARAM,
     },
@@ -238,6 +246,9 @@ export const listPhotos: ToolSpec = {
     const ranking = parseRanking(args, RANK_FIELDS, "taken_at");
     if (ranking.field === "person_face" && personIds.length === 0) throw new Error("rank_by person_face needs person_ids (ids from list_persons)");
     const grouping = parseGrouping(args, GROUPS);
+    const perPerson = grouping?.by === "person" || grouping?.thenBy === "person";
+    if (perPerson && personIds.length === 0) throw new Error("group_by person needs person_ids (ids from list_persons)");
+    const distinct = bool(args.distinct) === true;
     const oldest = ranking.direction === "asc";
     const limit = int(args.limit, { min: 1, max: 60 }) ?? 15;
     const fromPrevious = bool(args.from_previous_result) === true;
@@ -269,15 +280,42 @@ export const listPhotos: ToolSpec = {
     // A metric the service computes is read from the service even for an
     // earlier result: the rows of that result do not carry it.
     if (!previous || serverFilter || !RANK_FIELDS[ranking.field].own) {
-      const res = await (photo.listPhotos({
+      // Grouped, every group needs its own best rows: the top of one capped
+      // ranking holds only the groups that rank high overall.
+      const cap = previous || grouping ? NARROW_CAP : PHOTO_COUNT_CAP;
+      const read = async (persons: number[], period?: Period, limit = cap + 1) => (await (photo.listPhotos({
         ...filter,
+        ...(period ? { dateFrom: period.from, dateTo: period.to } : {}),
+        personIds: persons.length ? persons.join(",") : undefined,
         hiddenMode: hidden,
-        sortBy: RANK_FIELDS[ranking.field].sortBy,
-        sortDir: ranking.direction,
-        limit: (previous ? NARROW_CAP : PHOTO_COUNT_CAP) + 1,
-      })) as unknown as { photos: PhotoRow[] };
-      capped = res.photos.length > PHOTO_COUNT_CAP;
-      rows = res.photos.slice(0, PHOTO_COUNT_CAP);
+        sortBy: period?.edge ? "date" : RANK_FIELDS[ranking.field].sortBy,
+        sortDir: period?.edge ?? ranking.direction,
+        limit,
+      })) as unknown as { photos: PhotoRow[] }).photos;
+      // Grouped, every group needs its own best rows: a read cut at the cap
+      // holds only the groups that rank high overall. Such a read is split by
+      // time until each part fits (readComplete), whatever the groups are.
+      const readGroup = async (persons: number[]) => {
+        if (!grouping || previous) {
+          const all = await read(persons);
+          return { rows: all.slice(0, cap), capped: all.length > cap, split: false };
+        }
+        return readComplete((period) => read(persons, period), (edge) => read(persons, { from: dateFrom, to: dateTo, edge }, 1), cap, { from: dateFrom, to: dateTo });
+      };
+      const rankOf = (p: PhotoRow) => ownValue(p, ranking.field);
+      if (perPerson) {
+        // One read per person: a photo of both is in both groups.
+        rows = [];
+        for (const id of personIds) {
+          const own = await readGroup([id]);
+          capped ||= own.capped;
+          rows.push(...(own.split ? rankedMerge(own.rows, rankOf, ranking.direction) : own.rows).map((p) => ({ ...p, person_id: id })));
+        }
+      } else {
+        const all = await readGroup(personIds);
+        capped = all.capped;
+        rows = all.split ? rankedMerge(all.rows, rankOf, ranking.direction) : all.rows;
+      }
       if (previous) {
         const keep = new Set(previous);
         rows = rows.filter((p) => keep.has(p.id));
@@ -303,8 +341,19 @@ export const listPhotos: ToolSpec = {
     const hint = advice?.hint;
     // Grouped: the rows become the first of every group; the count stays the
     // count of what matched, so "more than 2000" still says it was capped.
-    const groups = grouping ? groupRows(rows, (p) => groupKey(p, grouping.by), grouping.perGroup) : undefined;
-    const shownRows = groups ? groups.flatMap((g) => g.rows.map((p) => ({ ...p, group: g.key }))) : rows.map((p) => ({ ...p, group: undefined as string | undefined }));
+    const keyOf = grouping ? (p: PhotoRow) => compositeKey(grouping, (by) => groupKey(p, by)) : undefined;
+    let groups = grouping ? groupRows(rows, keyOf!, grouping.perGroup * (distinct ? DISTINCT_POOL : 1)) : undefined;
+    let ungrouped = rows;
+    if (distinct) {
+      // The best of each look-alike set stays, in rank order; then the picks are taken.
+      const pool = groups ? groups.flatMap((g) => g.rows) : rows.slice(0, limit * DISTINCT_POOL);
+      const unique = [...new Map(pool.map((p) => [p.id, p])).values()];
+      const pairs = await similarPairs(unique.map((p) => ({ id: p.id, takenAt: p.taken_at ?? p.created_at ?? null })));
+      const thin = (list: PhotoRow[]) => thinSimilar(list.map((p, i) => ({ id: p.id, takenAt: p.taken_at ?? null, score: list.length - i, row: p })), pairs).map((c) => c.row);
+      if (groups) groups = groups.map((g) => ({ key: g.key, rows: thin(g.rows).slice(0, grouping!.perGroup) }));
+      else ungrouped = thin(pool).slice(0, limit);
+    }
+    const shownRows = groups ? groups.flatMap((g) => g.rows.map((p) => ({ ...p, group: g.key }))) : ungrouped.map((p) => ({ ...p, group: undefined as string | undefined }));
     const rankColumn = ranking.field === "taken_at" ? [] : [ranking.field];
     const columns = [...(groups ? ["group"] : []), "id", "taken", ...rankColumn, "place", "description", "keywords", "quality"];
     const tableRows = shownRows.map((p) => [
@@ -315,7 +364,12 @@ export const listPhotos: ToolSpec = {
       p.keywords?.length ? p.keywords.slice(0, 5).join(", ") : undefined, percent(p.ai_quality_score),
     ]);
     const rowCap = groups ? Math.min(shownRows.length, limit * grouping!.perGroup) : limit;
-    const resultIds = shownRows.map((p) => p.id);
+    // What a follow-up ("leg sie in ein Album") takes: the picks when the call
+    // picked (a ranking, a limit, groups, look-alikes left out) — "die 5
+    // besten" put every match in the album before —, else all that matched.
+    const picks = !!groups || distinct || args.limit !== undefined || ranking.field !== "taken_at";
+    const resultIds = [...new Set((picks && !groups ? shownRows.slice(0, rowCap) : shownRows).map((p) => p.id))];
+    const truncated = !picks && capped;
     const countText = capped ? `more than ${PHOTO_COUNT_CAP}` : String(count);
     // The gallery knows neither a place by name, the text filters, nor "the previous result".
     const galleryCanShow = !previous && !placeTerm && hasDescription === undefined && !text && !keyword && !sight && !orientation;
@@ -334,26 +388,101 @@ export const listPhotos: ToolSpec = {
         {
           cap: rowCap,
           total: groups ? shownRows.length : count,
-          note: `photo count: ${countText}, ${rankNote(ranking, grouping, groups?.length ?? 0)}, ${HIDDEN_NOTE[hidden]}${previous ? " (narrowed from the previous result)" : ""}. For everything known about a few photos call photo_details(ids).`,
+          note: `photo count: ${countText}, ${rankNote(ranking, grouping, groups?.length ?? 0)}${distinct ? ", look-alikes left out" : ""}, ${HIDDEN_NOTE[hidden]}${previous ? " (narrowed from the previous result)" : ""}. ${followUpNote(resultIds.length, picks, truncated)} For everything known about a few photos call photo_details(ids).`,
         },
       ),
       digest: digestOf("list_photos", groups ? shownRows.length : count, resultIds),
       rowCount: groups ? shownRows.length : count,
       hint,
       loosen: advice?.loosen,
-      // Grouped, the result is the picks: a follow-up (an album) takes them, not everything that matched.
-      ref: { type: "photo", ids: resultIds },
+      ref: { type: "photo", ids: resultIds, ...(truncated ? { truncated: true } : {}) },
       block: {
         kind: "photos",
         tool: "list_photos",
         total: groups ? shownRows.length : count,
         // The filename is what a thumbnail URL is built from.
-        rows: shownRows.slice(0, Math.max(rowCap, 12)).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
+        // Picked from a ranking, the list shows the picks and no row beyond them.
+        rows: shownRows.slice(0, picks && !groups ? rowCap : Math.max(rowCap, 12)).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
         route,
       },
     };
   },
 };
+
+/** A stretch of time to read, as the photo filter takes it; `edge` reads its first or last photo by date. */
+interface Period { from?: string; to?: string; edge?: "asc" | "desc" }
+
+/** Photos one grouped read takes in all, over every part; past this it says "more than". */
+const GROUPED_READ_MAX = 60_000;
+
+/**
+ * Every row of a read that the cap would cut, read in parts of time: the
+ * whole range, else year by year, else month by month. A month that alone
+ * exceeds the cap stays cut and says so. Generic over the grouping: whether
+ * the groups are years, months, places or persons, none of them loses its
+ * rows because others rank higher overall.
+ */
+async function readComplete(
+  read: (period?: Period) => Promise<PhotoRow[]>,
+  edge: (dir: "asc" | "desc") => Promise<PhotoRow[]>,
+  cap: number,
+  range: Period,
+): Promise<{ rows: PhotoRow[]; capped: boolean; split: boolean }> {
+  const whole = await read(range.from || range.to ? range : undefined);
+  if (whole.length <= cap) return { rows: whole, capped: false, split: false };
+  const day = (p: PhotoRow | undefined) => (p?.taken_at ?? p?.created_at ?? "").slice(0, 10) || undefined;
+  const from = range.from ?? day((await edge("asc"))[0]);
+  const to = range.to ?? day((await edge("desc"))[0]);
+  if (!from || !to) return { rows: whole.slice(0, cap), capped: true, split: false };
+  const out: PhotoRow[] = [];
+  let capped = false;
+  const visit = async (period: Required<Pick<Period, "from" | "to">>): Promise<void> => {
+    if (out.length >= GROUPED_READ_MAX) { capped = true; return; }
+    const rows = await read(period);
+    if (rows.length <= cap) { out.push(...rows); return; }
+    const parts = splitPeriod(period.from, period.to);
+    if (!parts) { out.push(...rows.slice(0, cap)); capped = true; return; }
+    for (const part of parts) await visit(part);
+  };
+  for (const part of splitPeriod(from, to) ?? [{ from, to }]) await visit(part);
+  return { rows: out, capped, split: true };
+}
+
+/** The years of a range, or its months when it lies in one year; null for a single month. */
+export function splitPeriod(from: string, to: string): Array<{ from: string; to: string }> | null {
+  const [fy, fm] = [Number(from.slice(0, 4)), Number(from.slice(5, 7))];
+  const [ty, tm] = [Number(to.slice(0, 4)), Number(to.slice(5, 7))];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const clamp = (a: string, b: string) => ({ from: a < from ? from : a, to: b > to ? to : b });
+  if (fy !== ty) {
+    return Array.from({ length: ty - fy + 1 }, (_, i) => clamp(`${fy + i}-01-01`, `${fy + i}-12-31`));
+  }
+  if (fm !== tm) {
+    const last = (m: number) => new Date(Date.UTC(fy, m, 0)).getUTCDate();
+    return Array.from({ length: tm - fm + 1 }, (_, i) => clamp(`${fy}-${pad(fm + i)}-01`, `${fy}-${pad(fm + i)}-${pad(last(fm + i))}`));
+  }
+  return null;
+}
+
+/** Rows read in parts, back in one ranking; rows without a value last, ties in read order. */
+function rankedMerge(rows: PhotoRow[], valueOf: (p: PhotoRow) => number | undefined, direction: "asc" | "desc"): PhotoRow[] {
+  const sign = direction === "asc" ? 1 : -1;
+  return rows
+    .map((p, i) => ({ p, i, v: valueOf(p) }))
+    .sort((a, b) => {
+      if (a.v === undefined && b.v === undefined) return a.i - b.i;
+      if (a.v === undefined) return 1;
+      if (b.v === undefined) return -1;
+      return sign * (a.v - b.v) || a.i - b.i;
+    })
+    .map((x) => x.p);
+}
+
+/** What `from_previous_result` will take from this list, in the model's words. */
+function followUpNote(n: number, picks: boolean, truncated: boolean): string {
+  if (truncated) return `from_previous_result would take only the first ${PHOTO_COUNT_CAP}; to put all of them in an album pass the filter as photos instead.`;
+  return picks ? `from_previous_result takes these ${n} picked photos.` : `from_previous_result takes all ${n} photos that matched.`;
+}
 
 /** Ids per call of the details endpoint, which takes them in the query string. */
 const DETAILS_BATCH = 500;

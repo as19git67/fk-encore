@@ -4722,7 +4722,7 @@ export const assistantMessage = pgTable(
     /** Tool rows: the one-line digest a later turn replays instead of the result. */
     digest: text("digest"),
     /** Tool rows: the ids the result held, for `from_previous_result`. */
-    result_ref: jsonb("result_ref").$type<{ type: "photo" | "document" | "transaction"; ids: number[] }>(),
+    result_ref: jsonb("result_ref").$type<{ type: "photo" | "document" | "transaction"; ids: number[]; truncated?: boolean }>(),
     /** Answer rows: how full the model's window got in this turn (assistant/types.ts ContextUsage). */
     context_usage: jsonb("context_usage").$type<Record<string, unknown>>(),
     /**

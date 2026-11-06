@@ -260,6 +260,14 @@ describe("write tools", () => {
     )).rejects.toThrow("list_photos with from_previous_result");
   });
 
+  it("refuses previous photos that were cut at the read cap: they do not hold every match", async () => {
+    clients.photo.listAlbums.mockResolvedValue({ albums: [{ id: 1, name: "Beispielalbum" }] });
+    await expect(tool("add_photos_to_album").run(
+      { album_id: 1, from_previous_result: true },
+      { ...ctx(), previous: (type) => (type === "photo" ? [1, 2, 3] : undefined), previousTruncated: (type) => type === "photo" },
+    )).rejects.toThrow("cut at its read cap");
+  });
+
   it("refuses a follow-up in the past", async () => {
     await expect(tool("create_document_follow_up").run({ document_ids: [1], date: "2026-10-01" }, ctx()))
       .rejects.toThrow("past");

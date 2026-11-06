@@ -79,6 +79,8 @@ export type RefType = "photo" | "document" | "transaction";
 export interface ResultRef {
   type: RefType;
   ids: number[];
+  /** The set was cut at the tool's read cap: a write must not take it as "all of them". */
+  truncated?: boolean;
 }
 
 /** What a tool hands back. */
@@ -109,6 +111,8 @@ export interface ToolContext {
   conversationId?: number;
   /** The latest result of this type in the conversation, this turn included. */
   previous?: (type: RefType) => number[] | undefined;
+  /** Whether that latest result was cut at the tool's read cap. */
+  previousTruncated?: (type: RefType) => boolean;
   /** The working set the user handed over for this conversation (#1534). */
   context?: Array<{ type: RefType; id: number }>;
   /** The tool results of this turn so far, with the call behind each: what a letter can be held against. */

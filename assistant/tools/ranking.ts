@@ -26,7 +26,16 @@ export interface Ranking<F extends string> {
 
 export interface Grouping<G extends string> {
   by: G;
+  /** A second key inside each group ('je Person und Jahr'). */
+  thenBy?: G;
   perGroup: number;
+}
+
+/** The key of a row under a grouping: one key, or both joined. */
+export function compositeKey<G extends string>(grouping: Grouping<G>, keyOf: (by: G) => string | undefined): string | undefined {
+  const first = keyOf(grouping.by) ?? "(none)";
+  if (!grouping.thenBy) return keyOf(grouping.by);
+  return `${first} · ${keyOf(grouping.thenBy) ?? "(none)"}`;
 }
 
 /** The most rows a group keeps; a report, not a list. */
@@ -74,6 +83,11 @@ export function groupProperties<G extends string>(groups: Record<G, string>): Re
       enum: names,
       description: `'für jedes/je …': the first per_group rows of every ${names.map((n) => `${n} (${groups[n]})`).join(", ")} in rank_by order`,
     },
+    then_by: {
+      type: "string",
+      enum: names,
+      description: "a second group inside each group_by ('je Person und Jahr' = group_by person, then_by year); never the same as group_by",
+    },
     per_group: { type: "integer", description: `rows per group, 1 (default) to ${PER_GROUP_MAX}` },
   };
 }
@@ -97,7 +111,9 @@ export function parseRanking<F extends string>(args: Record<string, unknown>, fi
 export function parseGrouping<G extends string>(args: Record<string, unknown>, groups: Record<G, string>): Grouping<G> | undefined {
   const s = str(args.group_by);
   if (!s || !Object.prototype.hasOwnProperty.call(groups, s)) return undefined;
-  return { by: s as G, perGroup: int(args.per_group, { min: 1, max: PER_GROUP_MAX }) ?? 1 };
+  const t = str(args.then_by);
+  const thenBy = t && t !== s && Object.prototype.hasOwnProperty.call(groups, t) ? (t as G) : undefined;
+  return { by: s as G, ...(thenBy ? { thenBy } : {}), perGroup: int(args.per_group, { min: 1, max: PER_GROUP_MAX }) ?? 1 };
 }
 
 export interface Group<T> {
@@ -136,5 +152,6 @@ export function dateKey(date: string | null | undefined, unit: "year" | "month" 
 export function rankNote(ranking: Ranking<string>, grouping: Grouping<string> | undefined, groupCount: number): string {
   const order = `${ranking.field} ${ranking.direction === "asc" ? "ascending (lowest or oldest first)" : "descending (highest or newest first)"}`;
   if (!grouping) return `ordered by ${order}`;
-  return `ordered by ${order}, ${grouping.perGroup === 1 ? "the first row" : `the first ${grouping.perGroup} rows`} of each ${grouping.by} (${groupCount} groups); the group column says which`;
+  const of = grouping.thenBy ? `${grouping.by} and ${grouping.thenBy}` : grouping.by;
+  return `ordered by ${order}, ${grouping.perGroup === 1 ? "the first row" : `the first ${grouping.perGroup} rows`} of each ${of} (${groupCount} groups); the group column says which`;
 }
