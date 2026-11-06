@@ -56,8 +56,6 @@ struct TripItineraryView: View {
     /// The one journey the planner would suggest (§22.7), or nil.
     @State private var suggestion: TripTransitSuggestion?
 
-    /// A port day being sent ashore (§21.3): which leg, which day.
-    @State private var anchorTarget: AnchorTarget?
     /// Which item is choosing its mode, as a sheet. Not a
     /// `NavigationLink`: a link anywhere in a list row makes the whole
     /// row tappable, and a card is one row — a tap on "Noch nichts
@@ -66,13 +64,6 @@ struct TripItineraryView: View {
     private struct ModeChoice: Identifiable {
         let id: TripItineraryItem.ID
         let choices: [TripTransportMode]
-    }
-    private struct AnchorTarget: Identifiable {
-        let legPosition: Int
-        let dayIndex: Int
-        let label: String
-        let current: TripDayAnchor?
-        var id: String { "\(legPosition)-\(dayIndex)" }
     }
 
     /// The one card height Apple asks for: a control under 44 points
@@ -140,13 +131,6 @@ struct TripItineraryView: View {
                  : "„\(draft?.title(of: stay) ?? "Der Aufenthalt")“ wird beim Sichern mit allen Tagen und allen "
                    + "Kandidaten gelöscht — auch mit dem, was jemand von Hand hinzugefügt hat. "
                    + "Die Weiterreise davor führt dann zum nächsten Aufenthalt.")
-        }
-        .sheet(item: $anchorTarget) { target in
-            TripDayAnchorSheet(dayLabel: target.label, current: target.current) { anchorDraft in
-                viewModel.select(leg: target.legPosition)
-                viewModel.select(dayIndex: target.dayIndex)
-                await viewModel.setDayAnchor(anchorDraft)
-            }
         }
         .sheet(item: $modeChoice) { choice in
             NavigationStack {
@@ -616,12 +600,16 @@ struct TripItineraryView: View {
                     set: { item.wrappedValue.tenderPort = $0 },
                 ))
             }
+            // The sea between two ports is a journey by ship, and a day
+            // ashore is planned on the day itself ("Ausflug planen"):
+            // the card lists no days. It used to, and called a day
+            // without an outing a "Seetag" — on a port call it is the
+            // day at the berth.
             Text("Die Unterkunft ist der Liegeplatz, und die Abfahrt heißt „Alle an Bord“ mit einer "
-                 + "Stunde Puffer — in einem Tenderhafen anderthalb. Jeder Tag kann in einen anderen "
-                 + "Hafen gehen; ohne Hafen ist es ein Seetag.")
+                 + "Stunde Puffer — in einem Tenderhafen anderthalb. Jeder Hafen ist ein eigener "
+                 + "Aufenthalt; die Seetage dazwischen sind eine Weiterreise mit dem Schiff.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            portDays(stay, in: draft)
                 .padding(.bottom, 8)
         }
 
@@ -656,46 +644,6 @@ struct TripItineraryView: View {
         }
     }
 
-    /// The days of a stay aboard (§21.3), each with its port, or the
-    /// plain fact that it is a sea day. Only for a stay the server has:
-    /// a new one has no days to send ashore yet.
-    @ViewBuilder
-    private func portDays(_ stay: TripItineraryItem, in draft: TripItineraryDraft) -> some View {
-        if let leg = viewModel.plan?.legs.first(where: { $0.id == stay.legId }) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(leg.days) { day in
-                    Button {
-                        anchorTarget = AnchorTarget(
-                            legPosition: leg.position, dayIndex: day.dayIndex,
-                            label: "Tag \(day.dayIndex + 1)", current: day.anchor)
-                    } label: {
-                        HStack {
-                            Text("Tag \(day.dayIndex + 1)")
-                            if let date = leg.date(ofDayIndex: day.dayIndex) {
-                                Text(date).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(day.anchor?.summary ?? "Seetag")
-                                .foregroundStyle(day.anchor == nil ? .secondary : .primary)
-                                .lineLimit(1)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .font(.subheadline)
-                        .frame(minHeight: Self.rowHeight)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.top, 4)
-        } else {
-            Text("Die Häfen lassen sich eintragen, sobald der Aufenthalt gesichert ist.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-    }
 
     @ViewBuilder
     private func journeyCard(_ journey: TripItineraryItem, dated: TripItineraryDated,
