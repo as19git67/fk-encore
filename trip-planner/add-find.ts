@@ -26,9 +26,10 @@ import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { loadPlan } from "./plan-store";
 import { addPoolEntry, mergeIntoPoolEntry, type StoredPoolEntry } from "./find-store";
-import { DEFAULT_DWELL_MINUTES } from "./candidates";
+import { DEFAULT_DWELL_MINUTES, MANUAL_REASON, MANUAL_SCORE } from "./candidates";
 import { chooseLeg, findDuplicate, manualRef } from "./finds";
 import { extentOf, type SpotExtent } from "./extent";
+import { fameFor } from "./spot-fame";
 
 /** How far around a find to look for the OSM entry it might be. */
 const MATCH_RADIUS_M = 80;
@@ -189,9 +190,11 @@ export const addFind = api(
       // is what we know, and the solver can see it is not a real one.
       category: category ?? "unknown",
       dwellMinutes,
-      // 2. A suggestion, not an appointment. It enters at the score a
-      // plain candidate would get, and earns its place from there.
-      score: 1,
+      // 2. A suggestion, not an appointment: it goes into the pool and
+      // nothing plans it into a day. But a top pick of the pool —
+      // whoever adds a place wants to see it (stage 0 of the ranking
+      // plan); only a heart wish outranks it.
+      score: MANUAL_SCORE,
       reasons: reasonsFor(note, req.sourceUrl),
       origin: "manual",
       note,
@@ -202,6 +205,21 @@ export const addFind = api(
       unmatched: match === null && !extent && req.osmRef === undefined,
       extent: extent ?? undefined,
     });
+
+    // Its picture (ranking plan, stage 2), looked up after the answer
+    // rather than before it: a find is saved the moment it is shared,
+    // and the card fills in on the next load. Most places people add by
+    // hand have no article, so this is usually a photograph taken
+    // within a few metres.
+    void fameFor([{
+      osmRef: entry.osmRef,
+      name: entry.name,
+      lat: entry.lat,
+      lon: entry.lon,
+      wikidataQid: match?.wikidataQid ?? null,
+      wikipedia: match?.wikipedia ?? null,
+      website: match?.website ?? null,
+    }], position).catch(() => undefined);
 
     return {
       entry,
@@ -291,7 +309,7 @@ function resolveDwell(stated: number | undefined, category: string | null): numb
  * says. Where it came from is part of the answer.
  */
 function reasonsFor(note: string | null, sourceUrl: string | undefined): string[] {
-  const reasons = ["selbst hinzugefügt"];
+  const reasons = [MANUAL_REASON];
   if (note) reasons.push(note);
   if (sourceUrl) {
     const host = hostnameOf(sourceUrl);

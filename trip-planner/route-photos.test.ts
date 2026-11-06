@@ -94,6 +94,7 @@ class FakeCommons implements CommonsClient {
     if (this.fail) throw new Error("commons down");
     return this.near.get(`${point.lat.toFixed(3)},${point.lon.toFixed(3)}`) ?? [];
   }
+  async category(): Promise<CommonsPhoto[]> { return []; }
 }
 
 let geo: InMemoryGeoClient;

@@ -27,7 +27,7 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 | `REV` | Gruppen-Review | Gruppen-Review, Bewertung, Auswahl anpassen |
 | `SUC` | Tab Suche | Suche |
 | `TRP` | Tab Trip | Trip, Trip starten, Trip & Reise |
-| `PLN` | Reiseplaner | Neue Reise, Reiseverlauf, Kandidaten, Tagesablauf, Karte, Ideen, Wünsche, Reisegruppe, Planen mit, Dokumente, Reisebereit?, Danach, Unterwegs ohne Netz, … |
+| `PLN` | Reiseplaner | Neue Reise, Reiseverlauf, Kandidaten mit Wünschen, Tagesablauf, Karte, Ideen, Reisegruppe, Planen mit, Dokumente, Reisebereit?, Danach, Unterwegs ohne Netz, … |
 | `ASS` | Assistent (aus der Feed-Toolbar) | Assistent, Neue Unterhaltung, Dokument |
 | `SET` | Tab Einstellungen | Profil, Server, Foto-Synchronisierung, Upload-Warteschlange, iPhone-Mediathek, Benachrichtigungen, Suche auf dem iPhone, Trip & Reise, Karten-App, Benutzer, Rollen, Quellen & Lizenzen |
 | `SHR` | Share-Extension | Gefunden, Fund übernehmen |
@@ -208,14 +208,15 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 
 Bildschirme (je Titel ein Bildschirm): Neue Reise, Reise, Reiseverlauf
 (Aufenthalte und Weiterreisen als eine Kette, Zuhause an beiden Enden,
-Plus auf der Linie, Umsortieren, ein Datum im Kopf), Kandidaten (Pool mit Einplanen, Für später merken,
-Ausblenden, Ausgeblendet), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
+Plus auf der Linie, Umsortieren, ein Datum im Kopf), Kandidaten (Pool mit Bild, Grund und
+Abstimmungs-Ring je Zeile, Einplanen, Für später merken, Ausblenden,
+Ausgeblendet, „Damit neu planen“, Fairness, „Schon eingeplant“), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
 Abendlicht, Wetter, „Ab hier umplanen“, „Umräumen“, „Gruppe trennen“ /
 „Wieder zusammen“), Tagesausflug, Ausflug, Karte, Strecken (anlegen,
 auf der Karte, in der Nähe, Als GPX exportieren), Reisezeiten prüfen,
 Fortbewegung, Ideen (In der Nähe, Ausflug, Essen in der Nähe, Artikel
 lesen und auslesen, Artikel-Sprachen, „In eine Reise übernehmen“, „Wer
-schreibt mit“), Wünsche (Abstimmung), Reisegruppe und Mobilität,
+schreibt mit“), Reisegruppe und Mobilität,
 Jemanden eintragen, Planen mit (Teilnehmer, „Rolle übergeben“, „Reise
 verlassen“), Dokumente, Reisebereit?, Unterwegs ohne Netz („Plan fürs
 Gerät laden“, „Vom Gerät löschen“), Änderungen (Journal), Danach
@@ -248,7 +249,9 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 
 ### IOS-PLN-03 Gemeinsam planen
 
-- Teilnehmer einladen („Planen mit“), Wünsche abstimmen („Wünsche“),
+- Teilnehmer einladen („Planen mit“), Wünsche abstimmen (der Ring an jeder
+  Zeile der Kandidaten: Will ich, Egal, Lieber nicht, Herzenswunsch; Namen
+  darunter, „Damit neu planen“ oben in der Liste),
   Ideen teilen („Wer schreibt mit“), Rolle übergeben, Reise verlassen.
 - **Test:** –
 

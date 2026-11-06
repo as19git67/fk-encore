@@ -2031,6 +2031,41 @@
       "when": 1790344000000,
       "tag": "0290_auth_handover_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 291,
+      "version": "7",
+      "when": 1790345000000,
+      "tag": "0291_trip_pool_manual_top_pick",
+      "breakpoints": true
+    },
+    {
+      "idx": 292,
+      "version": "7",
+      "when": 1790346000000,
+      "tag": "0292_trip_spot_fame",
+      "breakpoints": true
+    },
+    {
+      "idx": 293,
+      "version": "7",
+      "when": 1790347000000,
+      "tag": "0293_trip_spot_fame_image",
+      "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "7",
+      "when": 1790348000000,
+      "tag": "0294_trip_pool_curation",
+      "breakpoints": true
+    },
+    {
+      "idx": 295,
+      "version": "7",
+      "when": 1790349000000,
+      "tag": "0295_trip_spot_description",
+      "breakpoints": true
     }
   ]
 }

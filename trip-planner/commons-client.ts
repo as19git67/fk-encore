@@ -50,6 +50,8 @@ export interface CommonsClient {
   files(titles: readonly string[]): Promise<CommonsPhoto[]>;
   /** Pictures taken within `radiusM` of a point, usable ones only. */
   nearby(point: { lat: number; lon: number }, radiusM: number, limit: number): Promise<CommonsPhoto[]>;
+  /** The photographs in a Commons category (P373), usable ones only. */
+  category(name: string, limit: number): Promise<CommonsPhoto[]>;
 }
 
 /** Commons or Wikidata did not answer. The caller shows no pictures. */
@@ -93,6 +95,15 @@ export class HttpCommonsClient implements CommonsClient {
     url.searchParams.set("ggsradius", String(Math.min(Math.max(Math.round(radiusM), 10), 10_000)));
     url.searchParams.set("ggsnamespace", "6");
     url.searchParams.set("ggslimit", String(Math.min(Math.max(limit, 1), 50)));
+    return parseImageInfo(await getJson(url));
+  }
+
+  async category(name: string, limit: number): Promise<CommonsPhoto[]> {
+    const url = commonsQuery();
+    url.searchParams.set("generator", "categorymembers");
+    url.searchParams.set("gcmtitle", `Category:${name}`);
+    url.searchParams.set("gcmtype", "file");
+    url.searchParams.set("gcmlimit", String(Math.min(Math.max(limit, 1), 50)));
     return parseImageInfo(await getJson(url));
   }
 }

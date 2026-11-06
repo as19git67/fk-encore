@@ -651,7 +651,7 @@ struct TripPlanDayView: View {
         }
         .buttonStyle(.plain)
         .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 12))
-        .accessibilityHint("Hinzufügen, Kandidaten, Wünsche und Einstellungen dieses Aufenthalts")
+        .accessibilityHint("Hinzufügen, Kandidaten und Einstellungen dieses Aufenthalts")
         .sheet(isPresented: $editingLeg) {
             NavigationStack {
                 TripLegSheet(viewModel: viewModel, leg: leg)

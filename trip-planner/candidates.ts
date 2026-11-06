@@ -18,6 +18,7 @@ import { keepsSelection, matchedInterests, selectionOf } from "./interests";
 import { lightWindows } from "./sun";
 import type { Coordinate } from "./travel";
 import { spotLight } from "./light";
+import type { Prominence } from "./prominence";
 
 /**
  * How long people typically stay, per category, in minutes. Rough by
@@ -49,9 +50,59 @@ export const DEFAULT_DWELL_MINUTES: Readonly<Record<string, number>> = {
 
 const FALLBACK_DWELL_MINUTES = 30;
 
+/**
+ * What a place somebody brought in is worth: more than anything the
+ * region search can score, less than one heart wish (`HEART_WEIGHT`).
+ *
+ * Whoever adds a place wants to see it, whichever way it came in — from
+ * the idea collection, the place search, a shared link or a web page
+ * (plan `kandidaten-ranking.md`, stage 0). It used to be 10 only for an
+ * idea taken out of the collection and 1 for the same place added in
+ * the trip, which planned it after every museum of the city.
+ */
+export const MANUAL_SCORE = 10;
+
+/** The reason a manual entry carries, so the order can be argued with. */
+export const MANUAL_REASON = "von euch hinzugefügt";
+
 export interface ScoredCandidate extends Candidate {
   /** Human-readable contributions to `score`, for "why here?" (§8.3). */
   reasons: string[];
+  /**
+   * What the scoring gave it before the local model's order and before
+   * any vote (stage 3). Stored, so a curation that lands later can move
+   * the entry without re-planning.
+   */
+  searchScore?: number;
+  /** The score from the model's order, where it ranked this place. */
+  curatedScore?: number;
+  /** The model's sentence about it, after the gate. */
+  curatedReason?: string | null;
+}
+
+/**
+ * Where the local model's order puts a place: between everything the
+ * open data can say (at most about 4.75 with a tourism tag and a
+ * golden-light bonus) and a place the family brought (`MANUAL_SCORE`).
+ * Rank 0 gets the top of the band, the last pick its floor, evenly
+ * between — so within the band the model's order is the order, and no
+ * page-view count can reach into it (plan `kandidaten-ranking.md`,
+ * "The sorting rule").
+ */
+export const CURATED_FLOOR = 5;
+export const CURATED_TOP = 9;
+
+export function curatedScore(rank: number, of: number): number {
+  if (of <= 1) return CURATED_TOP;
+  const share = (of - 1 - Math.min(Math.max(rank, 0), of - 1)) / (of - 1);
+  return Math.round((CURATED_FLOOR + (CURATED_TOP - CURATED_FLOOR) * share) * 1000) / 1000;
+}
+
+/** One place in the model's order. */
+export interface CuratedPlace {
+  rank: number;
+  of: number;
+  reason: string | null;
 }
 
 export interface ScoringOptions {
@@ -70,6 +121,19 @@ export interface ScoringOptions {
   interests?: readonly string[];
   /** Per-category overrides for the dwell defaults. */
   dwellMinutes?: Readonly<Record<string, number>>;
+  /**
+   * How well known each place is, from open data (`prominence.ts`).
+   * Where a place has an answer it replaces the Wikidata and Wikipedia
+   * points; where it has none, those still count, so a pool looked up
+   * halfway is not upended.
+   */
+  prominence?: ReadonlyMap<string, Prominence>;
+  /**
+   * The local model's order of this stay's pool (`curation.ts`, stage
+   * 3). A place it ranked takes its score from the rank; the open-data
+   * reasons stay on the card below the model's sentence.
+   */
+  curated?: ReadonlyMap<string, CuratedPlace>;
 }
 
 export interface LightScoringOptions {
@@ -174,15 +238,26 @@ export function toCandidates(
     // did, and both ended up in a morning.
     let prominence = 0;
 
-    if (spot.wikidataQid) {
-      score += 1;
-      prominence += 1;
-      reasons.push("in Wikidata verzeichnet");
-    }
-    if (spot.wikipedia) {
-      score += 1;
-      prominence += 1;
-      reasons.push("hat einen Wikipedia-Artikel");
+    const known = opts.prominence?.get(spot.osmRef);
+    if (spot.wikidataQid) prominence += 1;
+    if (spot.wikipedia) prominence += 1;
+    // A travel guide naming it is a judgement too, like the mapper's tag.
+    if (known?.reasons.includes("in Wikivoyage genannt")) prominence += 1;
+    if (known) {
+      // What people read, in how many languages, what a travel guide
+      // lists — instead of "has an item, has an article", which in a
+      // city every candidate has (stage 1 of the ranking plan).
+      score += known.points;
+      reasons.push(...known.reasons);
+    } else {
+      if (spot.wikidataQid) {
+        score += 1;
+        reasons.push("in Wikidata verzeichnet");
+      }
+      if (spot.wikipedia) {
+        score += 1;
+        reasons.push("hat einen Wikipedia-Artikel");
+      }
     }
     // Somebody tagged it as a thing to see, which is a judgement a
     // mapper made on the ground.
@@ -224,6 +299,11 @@ export function toCandidates(
     // spot's own tags.
     const names = readableName(spot);
 
+    const searchScore = score;
+    const curated = opts.curated?.get(spot.osmRef);
+    const fromRank = curated ? curatedScore(curated.rank, curated.of) : undefined;
+    if (curated?.reason) reasons.unshift(curated.reason);
+
     candidates.push({
       osmRef: spot.osmRef,
       name: names.display,
@@ -239,8 +319,10 @@ export function toCandidates(
       lon: spot.lon,
       category,
       dwellMinutes: dwellFor(category, opts.dwellMinutes),
-      score,
+      score: fromRank ?? searchScore,
       reasons,
+      searchScore,
+      ...(fromRank !== undefined ? { curatedScore: fromRank, curatedReason: curated?.reason ?? null } : {}),
     });
   }
 

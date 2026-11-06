@@ -38,14 +38,24 @@ enum TripPoolFilter {
     /// note especially: "beste Pastéis laut Blog" is often the only part
     /// of a find anybody recalls, and a search that ignored it would
     /// miss exactly the entries a person added by hand (§9.2).
-    static func matches(in pool: [TripCandidate], query: String) -> [TripCandidate] {
+    ///
+    /// `voices` are the names that voted on a place, by reference: since
+    /// the wishes went into this list, „was will eigentlich Alex?" is a
+    /// question it has to answer (§6.1). Searching never filters by
+    /// *how* somebody voted — that would be a ranking by the back door.
+    static func matches(
+        in pool: [TripCandidate],
+        query: String,
+        voices: [String: [String]] = [:],
+    ) -> [TripCandidate] {
         let sorted = pool.sorted {
             $0.score != $1.score ? $0.score > $1.score : $0.displayName < $1.displayName
         }
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !needle.isEmpty else { return sorted }
         return sorted.filter { candidate in
-            [candidate.displayName, TripCategory.label(candidate.category), candidate.note ?? ""]
+            ([candidate.displayName, TripCategory.label(candidate.category), candidate.note ?? ""]
+                + (voices[candidate.osmRef] ?? []))
                 .contains { $0.lowercased().contains(needle) }
         }
     }

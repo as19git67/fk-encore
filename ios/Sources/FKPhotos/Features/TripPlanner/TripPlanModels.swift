@@ -103,6 +103,11 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// OpenStreetMap region is still being imported (§4.3). Optional so
     /// a response from an older server still decodes.
     let awaitingRegion: Bool?
+    /// Where the local model's order of this stay's pool stands:
+    /// "pending", "running", "done" or "failed" (ranking plan, stage 3).
+    /// Optional so an older server still decodes; `var` with a default
+    /// so the memberwise initialisers of the tests need not name it.
+    var curation: String? = nil
     /// "YYYY-MM-DD", or nil when the trip has no dates yet.
     let startDate: String?
     let days: [TripDay]
@@ -229,6 +234,10 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// Is this leg waiting for its maps? Absent means no — an older
     /// server that never had the flag never had a waiting leg either.
     var isAwaitingRegion: Bool { awaitingRegion == true }
+
+    /// Is the local model still putting this stay's candidates in order?
+    /// The list is usable meanwhile; it re-sorts when the order lands.
+    var isBeingSorted: Bool { curation == "pending" || curation == "running" }
 
     /// What to call this stay. Never invents a name for a leg nobody
     /// named (§15.3) — it says which one it is instead.
@@ -513,6 +522,12 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// Where it finishes, when that is not where it starts (§4.7). Nil
     /// for the ordinary point, and for a plan from an older server.
     var extent: TripSpotExtent? = nil
+    /// The picture on the card (candidate ranking, stage 2): Wikipedia's
+    /// main image, Wikidata's, or one taken close by. Nil where there is
+    /// none, and from an older server.
+    var image: TripRoutePhoto? = nil
+    /// What the place is, with its source (candidate ranking, stage 4).
+    var description: TripSpotDescription? = nil
     /// What this stop walks past on its way (§4.7): spots that lie on a
     /// route and are therefore seen without being planned. Nil or empty
     /// for every ordinary stop.
@@ -635,6 +650,10 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     let photoStop: Bool?
     /// See `TripStop.extent`.
     var extent: TripSpotExtent? = nil
+    /// See `TripStop.image`.
+    var image: TripRoutePhoto? = nil
+    /// What the place is, with its source (candidate ranking, stage 4).
+    var description: TripSpotDescription? = nil
 
     var id: String { osmRef }
     var isPhotoStop: Bool { photoStop == true }

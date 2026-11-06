@@ -59,6 +59,10 @@ struct TripPinDetail: Equatable {
     /// "Strecke · 10 km · 600 Hm" for a spot whose way is the point
     /// (§4.7); nil for a place.
     var extentText: String? = nil
+    /// The place's picture (candidate ranking, stage 2), nil where it has none.
+    var image: TripRoutePhoto? = nil
+    /// What the place is, with its source (candidate ranking, stage 4).
+    var description: TripSpotDescription? = nil
 
     /// Everything the map knows about one stop, gathered once.
     ///
@@ -88,7 +92,9 @@ struct TripPinDetail: Equatable {
                 blockText: block.map(blockText),
                 isPinned: stop.pinned,
             ),
-            extentText: stop.extent?.summary
+            extentText: stop.extent?.summary,
+            image: stop.image,
+            description: stop.description
         )
     }
 
@@ -111,7 +117,9 @@ struct TripPinDetail: Equatable {
             sourceUrl: candidate.sourceUrl.flatMap(URL.init(string:)),
             coordinate: candidate.coordinate,
             planned: nil,
-            extentText: candidate.extent?.summary
+            extentText: candidate.extent?.summary,
+            image: candidate.image,
+            description: candidate.description
         )
     }
 

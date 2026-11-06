@@ -41,6 +41,9 @@ import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
 import { travelClassFor, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
+import { imagesFor, type SpotImage } from "./spot-fame";
+import { descriptionsFor, type SpotDescription } from "./spot-description";
+import { curationStatusOf, markCurationDue, type CurationStatus } from "./curation-job";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 
 type Db = typeof dbDefault;
@@ -109,6 +112,12 @@ export interface StoredLeg {
    */
   awaitingRegion: boolean;
   /**
+   * Where the local model's order of this stay's pool stands (stage 3):
+   * `pending` or `running` is "wird noch sortiert", null when it was
+   * never asked (a journey, a pool too small to order).
+   */
+  curation?: CurationStatus | null;
+  /**
    * The quarters travel along (§21.3, migration 0223): a port day on a
    * cruise. Its departure is "Alle an Bord" with an hour in hand; a
    * tender port adds the boat ride back on top.
@@ -143,6 +152,14 @@ export interface StoredLeg {
 export interface StoredCandidate extends ScoredCandidate {
   /** search | manual — found by the planner, or brought in by a person. */
   origin: string;
+  /**
+   * The picture on the card (ranking plan, stage 2). Read from the
+   * per-place cache on the way out, like the notes, because a re-plan
+   * rewrites the rows and the picture belongs to the place.
+   */
+  image?: SpotImage | null;
+  /** What the place is, with its source (stage 4); null where nothing was found. */
+  description?: SpotDescription | null;
   /** Why it was saved, in the words of whoever saved it (§9.2). */
   note: string | null;
   /** Where it came from, kept as provenance (§9.2). */
@@ -252,6 +269,10 @@ export interface StoredStop extends CurrentStop {
   rowId: number;
   /** What the group calls it, when they have renamed it (§10.4). */
   title?: string | null;
+  /** The picture on the card (ranking plan, stage 2), from `trip_spot_fame`. */
+  image?: SpotImage | null;
+  /** What the place is, with its source (stage 4); null where nothing was found. */
+  description?: SpotDescription | null;
 }
 
 /**
@@ -439,8 +460,10 @@ export async function insertLeg(
         dwell_minutes: c.dwellMinutes,
         score: c.score,
         reasons: c.reasons,
+        ...curationColumns(c),
       })),
     );
+    await markCurationDue(leg.id, db);
   }
   return leg.id;
 }
@@ -1152,6 +1175,14 @@ export async function loadPlan(
   const legByBlock = new Map(blockRows.map((b) => [b.id, legByDay.get(b.day_id)!]));
   const modeByLeg = new Map(legRows.map((l) => [l.id, l.mode as TransportMode]));
 
+  // The pictures, per place and on the way out (stage 2): one query
+  // for every spot of the plan, planned or in a pool.
+  const images = await imagesFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
+  // What each place is, with its source (stage 4).
+  const descriptions = await descriptionsFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
+  // Whether the local model is still ordering a stay (stage 3).
+  const curation = await curationStatusOf(legRows.map((l) => l.id), db);
+
   const stopsByBlock = new Map<number, StoredStop[]>();
   for (const row of stopRows) {
     const legId = legByBlock.get(row.block_id)!;
@@ -1189,6 +1220,8 @@ export async function loadPlan(
       note: written?.note ?? row.note,
       sourceUrl: written?.url ?? row.source_url,
       title: written?.title ?? null,
+      image: images.get(row.osm_ref) ?? null,
+      description: descriptions.get(row.osm_ref) ?? null,
     });
     stopsByBlock.set(row.block_id, list);
   }
@@ -1285,6 +1318,8 @@ export async function loadPlan(
       sourceUrl: written?.url ?? row.source_url,
       title: written?.title ?? null,
       unmatched: row.unmatched,
+      image: images.get(row.osm_ref) ?? null,
+      description: descriptions.get(row.osm_ref) ?? null,
     });
     poolByLeg.set(row.leg_id, list);
   }
@@ -1314,6 +1349,7 @@ export async function loadPlan(
       arriveMinutes: l.arrive_minutes,
       regionDb: l.region_db,
       awaitingRegion: l.awaiting_region,
+      curation: curation.get(l.id) ?? null,
       quartersAboard: l.quarters_aboard,
       tenderPort: l.tender_port,
       startDate: l.start_date,
@@ -1455,6 +1491,7 @@ async function rewriteDay(
           // reasons through the redistribution, and one that does not
           // keeps what the pool row said before.
           reasons: c.reasons ?? ((known?.reasons ?? []) as string[]),
+          ...curationColumns(c, known),
           // Provenance survives the rewrite, because it is not the
           // redistribution's to decide (§9.2).
           origin: known?.origin ?? c.origin ?? "search",
@@ -1465,6 +1502,7 @@ async function rewriteDay(
       }),
     );
   }
+  await markCurationDue(legId, db);
 
   await db.update(tripPlans).set({ updated_at: new Date().toISOString() }).where(eq(tripPlans.id, planId));
 }
@@ -1525,10 +1563,37 @@ export async function replanPlan(
           dwell_minutes: c.dwellMinutes,
           score: c.score,
           reasons: c.reasons,
+          ...curationColumns(c),
         })),
       );
     }
+    await markCurationDue(leg.legId, db);
   }
+}
+
+/**
+ * What a pool row remembers for the local model's order (stage 3): the
+ * scoring's own score, and where the model put it. A candidate that
+ * did not come out of the scoring (a stop sent back, an entry carried
+ * through a redistribution) keeps what its row said before.
+ */
+function curationColumns(
+  candidate: object,
+  known?: { search_score: number | null; curated_score: number | null; curated_reason: string | null },
+): { search_score: number | null; curated_score: number | null; curated_reason: string | null } {
+  const c = candidate as Partial<Pick<ScoredCandidate, "searchScore" | "curatedScore" | "curatedReason">>;
+  if (c.searchScore !== undefined) {
+    return {
+      search_score: c.searchScore,
+      curated_score: c.curatedScore ?? null,
+      curated_reason: c.curatedReason ?? null,
+    };
+  }
+  return {
+    search_score: known?.search_score ?? null,
+    curated_score: known?.curated_score ?? null,
+    curated_reason: known?.curated_reason ?? null,
+  };
 }
 
 /**

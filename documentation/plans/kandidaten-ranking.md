@@ -1,6 +1,6 @@
 # Candidates: ranked, pictured, explained — and one list instead of two
 
-Status: planned (2026-11-06). Nothing built yet.
+Status: in progress (2026-11-06). All stages built; see "As built" under each stage.
 
 ## The problem
 
@@ -91,6 +91,13 @@ Backend only, no migration.
 Tests: `add-find.test.ts` (a find enters at 10 with its reason),
 `ideas-trip.test.ts` (unchanged outcome, no second update).
 
+As built (2026-11-06): `MANUAL_SCORE` and `MANUAL_REASON` in
+`candidates.ts`; `addFind` enters at it, `mergeIntoPoolEntry`
+(`find-store.ts`) raises a merged search candidate to it and puts the
+reason first; migration `0291_trip_pool_manual_top_pick` raises the
+manual rows already in a pool and replaces the old "selbst hinzugefügt"
+reason.
+
 ## Stage 1 — prominence from open data
 
 A graded "Bekanntheit" replaces the three half-points. Every signal is
@@ -127,6 +134,33 @@ Tests: pure scoring from raw numbers (`prominence.test.ts`), the
 Wikivoyage listing parser on a fixture page with invented places, the
 pageviews parser.
 
+As built (2026-11-06), with three deliberate changes to the above:
+
+- **Asked when the pool is built, not afterwards.** The days are
+  planned out of the pool in the same request, so a job that re-sorted
+  the pool later would re-sort a list whose best entries were already
+  chosen by the old tag sum. `prominenceAround` (`spot-fame.ts`) runs
+  in the pool build, answers from the cache first and gives Wikimedia
+  `LOOKUP_BUDGET_MS` (8 s) for the rest; what does not answer in time
+  is ranked the old way once, stored as waiting, and filled by the
+  local cron job `trip-planner-spot-fame` (every 30 minutes) for the
+  next build.
+- **Keyed by the OSM reference**, in `trip_spot_fame`
+  (migration `0292_trip_spot_fame`), with the Wikidata id and article
+  it was looked up under beside it: every pool entry, stop and idea
+  has an OSM reference, not all have an item.
+- **No `prominence` column on the pool row.** The result travels as
+  the score and the reasons, which the pool row and the offline bundle
+  already carry; the raw numbers stay in the cache.
+
+The Wikivoyage article is the nearest one to the stay's anchor by
+Wikivoyage's own geosearch (German first, then English), not found
+through the settlement's Wikidata item. Tiers are quartiles of
+`fameValue` within the pool and add `TIER_POINTS` (0.5–2.5) to the
+base score of 1 in place of the Wikidata and Wikipedia points; the
+`tourism=*` half point stays. The test suite runs with a silent client
+(`TRIP_SPOT_FAME=0` in `vitest.config.ts`).
+
 ## Stage 2 — a picture on the card
 
 - The pool row (and the stop) gets `image` (jsonb: Commons file title,
@@ -147,6 +181,18 @@ pageviews parser.
 - iOS: `TripCandidate` and `TripStop` get `image`; the row in
   `TripPoolView`, the pin sheet and `TripSpotDetailView` draw it. A
   missing image shows the category symbol, not a placeholder frame.
+
+As built (2026-11-06): the picture is looked up with the prominence
+(`picturesFor` in `spot-fame.ts`) and stored in `trip_spot_fame.image`
+(migration `0293_trip_spot_fame_image`), read onto pool entries and
+stops in `loadPlan` like the notes. Thumbnails are Commons' 640 px
+(`THUMB_WIDTH`), not 320, so the large picture on the detail screen
+is sharp. The gallery is `GET /trip-planner/spots/gallery`
+(`spot-gallery.ts`) over the place's Commons category, shown on the
+detail screen (`TripSpotPictures`); the article view keeps its own
+pictures. A find is looked up in the background after it is saved.
+Offline, `TripOfflineThumbnails` loads every card's thumbnail into
+the URL cache when the plan is downloaded.
 
 ## Stage 3 — curation by the local model
 
@@ -176,6 +222,38 @@ This stage builds what was measured, and nothing beyond it.
   case per request from that measurement, with invented places, so a
   model change shows its effect before it ships.
 
+As built (2026-11-06), with two deliberate changes to the above:
+
+- **The order is kept per stay, not on the pool row.** The pool is
+  rewritten on every re-plan, so `trip_leg_curation` (migration 0294)
+  holds the gated answer per leg, with a signature of the pool and the
+  interests it was asked for. `toCandidates` reads it on a re-plan
+  (option `curated`), so the days are built out of the model's order.
+- **A rank is a score band, not a separate key.** Everything in the
+  planner orders by `score`, the solver included, so the rank becomes
+  `curatedScore(rank, of)`: from `CURATED_TOP` (9) for the first to
+  `CURATED_FLOOR` (5) for the last, above anything open data can reach
+  and below `MANUAL_SCORE`. A pool row keeps the scoring's own score
+  (`search_score`) and the band's (`curated_score`); the votes are
+  `score − base`, so a curation that lands between two re-plans moves
+  the row without losing what the votes added (`applyCuration`). A
+  manual entry keeps its score and only gets the sentence.
+
+Pieces: prompt, gate and "ask again?" in `trip-planner/curation.ts`
+(`gateCuration` drops unknown refs, collapses duplicates and replaces a
+sentence with a number or an opening-hours/price word the input did not
+contain by the first open-data reason); the job in `curation-job.ts`
+(`markCurationDue` on every pool write, the cron
+`trip-planner-curation` every 5 minutes asks up to three stays one at a
+time, a model that is away puts the stay back uncounted, a failed stay
+is tried again after an hour, at most three times). Only reasons from
+open data go to the model, never the vote reasons, which carry names.
+Wikipedia intros come through `FameClient.leads`. The leg carries
+`curation` (`pending`/`running`/`done`/`failed`), and the pool list
+shows "wird noch sortiert" while it is pending or running. The
+benchmark has a `planner` track that sends the shipped prompt through
+the shipped gate (`run-curation.ts --track=planner`).
+
 ## Stage 4 — text where Wikipedia is thin
 
 A `description` per place, with its source said on screen:
@@ -194,6 +272,24 @@ Blogs and travel reports keep coming in the way §9.3 built: shared from
 the phone, where the page is already open. A search for them is a
 separate decision (see below), not a stage of this plan.
 
+As built (2026-11-06): kept per place in `trip_spot_fame` (migration
+0295: the map's `website`, `description` as text, source and URL, and
+`described_at`). A Wikivoyage line is read straight from the lookup and
+never copied. The rest is looked for in the background
+(`describeSpots` in `trip-planner/spot-description.ts`, cron
+`trip-planner-spot-descriptions` every 30 minutes) for places in a pool
+or on a day: the Wikipedia lead through `FameClient.leads` when it has
+at least `MIN_LEAD_CHARS`, else the website through `fetchSharedPage`,
+cut to `MAX_SITE_CHARS` and summarised by the local model, kept only
+when its quote is on the page (`quoteAppearsIn`) and the summary names
+no number or opening-hours or price word the page did not
+(`namesUnknownFact` from stage 3). At most five websites per tick; a
+failed check stores nothing and waits 90 days like a found one. The
+curation (stage 3) reads the stored description too. Pool entries and
+stops carry `description` from `loadPlan`; iOS shows it with its
+source as a link in the detail view and the pin sheet
+(`TripSpotDescriptionSection`).
+
 ## Stage 5 — one list
 
 "Wünsche" merges into "Kandidaten":
@@ -211,6 +307,19 @@ separate decision (see below), not a stage of this plan.
 - `TripBallotView` goes; the wishes map becomes the map presentation of
   this screen. The stage sheet (`TripLegSheet`) offers one entry,
   "Kandidaten (n)". The handbook and §6.1/§25.3 of the concept say so.
+
+As built (2026-11-06): `TripBallotView` is gone; its model types live in
+`TripVotes.swift`. `TripPoolView` loads the ballot and the fairness
+account with the plan and shows, while not opened to fill one block:
+the head sections (`stayHead`), a ring per row (`voteRing`, a menu of
+`voteActions`) with the voters' names beneath and only the first
+reason on the row, and a section „Schon eingeplant" for ballot entries
+already on a day — the ballot covered them, and a "lieber nicht" for
+something planned is still worth saying. The vote actions join
+`candidateActions` in a new group `.vote`, so the pin sheet and the
+detail screen vote too. The pool map draws the vote as `ringTint`
+around the find-kind pin. `TripPoolFilter.matches` searches voter
+names. The stage sheet has the one entry „Kandidaten (n)".
 
 ## Open, deliberately
 

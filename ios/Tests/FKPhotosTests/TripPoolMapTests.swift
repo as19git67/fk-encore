@@ -86,6 +86,15 @@ final class TripPoolMapTests: XCTestCase {
                        ["node:1"])
     }
 
+    func testTheSearchFindsWhoVotedForASpot() {
+        // „Was will eigentlich Alex?" — since the wishes went into the
+        // candidate list, it answers that (§6.1).
+        let pool = [candidate("node:1", name: "Burg"), candidate("node:2", name: "Zoo")]
+        XCTAssertEqual(TripPoolFilter.matches(in: pool, query: "alex",
+                                              voices: ["node:2": ["Alex", "Beispielkind"]]).map(\.osmRef),
+                       ["node:2"])
+    }
+
     func testTheSearchReadsTheCategoryAndIgnoresCaseAndPadding() {
         let pool = [candidate("node:1", name: "Beispielhaus", category: "museum"),
                     candidate("node:2", name: "Burg", category: "castle")]

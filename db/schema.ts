@@ -3962,9 +3962,48 @@ export const tripPlanPool = pgTable(
     kind: text("kind"),
     /** See `trip_plan_stops.extent`. */
     extent: jsonb("extent").$type<SpotExtentColumn>(),
+    /**
+     * What the scoring gave this entry before any vote and any curation
+     * (candidate ranking plan, stage 3). Null for a manual entry and for
+     * rows written before migration 0294. Kept so the curation can move
+     * an entry without knowing what the votes added: the votes are
+     * `score` minus the base (`curated_score ?? search_score`).
+     */
+    search_score: real("search_score"),
+    /** The score the local model's order gave it; null while it has none. */
+    curated_score: real("curated_score"),
+    /** The model's one sentence about it, after the gate (`curation.ts`). */
+    curated_reason: text("curated_reason"),
   },
   (table) => [uniqueIndex("trip_plan_pool_leg_ref_key").on(table.leg_id, table.osm_ref)]
 );
+
+/**
+ * The local model's order of one stay's pool (candidate ranking plan,
+ * stage 3).
+ *
+ * Per leg, not per pool row: the pool is rewritten on every re-plan,
+ * and the order has to survive that to be used by it. `picks` is the
+ * answer after the gate, best first; `signature` is what the pool and
+ * the interests looked like when it was asked, so a pool that changed
+ * by more than a handful of entries is asked again.
+ */
+export const tripLegCuration = pgTable("trip_leg_curation", {
+  leg_id: integer("leg_id")
+    .primaryKey()
+    .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
+  /** pending | running | done | failed */
+  status: text("status").notNull().default("pending"),
+  /** Sorted pool refs and interests at the time of asking. */
+  signature: jsonb("signature").$type<{ refs: string[]; interests: string[] }>(),
+  /** [{ osmRef, reason }], best first. */
+  picks: jsonb("picks").$type<Array<{ osmRef: string; reason: string | null }>>(),
+  attempts: integer("attempts").notNull().default(0),
+  error: text("error"),
+  requested_at: timestamp("requested_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  started_at: timestamp("started_at", { mode: "string", withTimezone: true }),
+  finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
+});
 
 /**
  * What a person has to say about one spot (§9.2, §10.4).
@@ -4104,6 +4143,53 @@ export const tripWikiArticles = pgTable(
   },
   (table) => [uniqueIndex("trip_wiki_articles_key").on(table.lang, table.title)]
 );
+
+/**
+ * What open data says about one place, for ranking and the card
+ * (candidate ranking plan, stages 1–2): page views, language editions,
+ * Commons pictures, a Wikivoyage listing.
+ *
+ * Per place, not per trip — the same cathedral is in every trip to its
+ * city, and asking Wikimedia again for each would be rude and slow.
+ * Keyed by the OSM reference, which every pool entry, stop and idea
+ * has; the Wikidata id and article it was looked up under are kept
+ * alongside. Valid for 90 days (`FAME_VALID_DAYS`). A row with no
+ * `fetched_at` is waiting for the background refill.
+ */
+export const tripSpotFame = pgTable("trip_spot_fame", {
+  osm_ref: text("osm_ref").primaryKey(),
+  name: text("name"),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  wikidata_qid: text("wikidata_qid"),
+  /** The map's `wikipedia` tag: "it:Duomo di Esempio". */
+  wikipedia: text("wikipedia"),
+  pageviews: integer("pageviews"),
+  languages: integer("languages"),
+  commons_category: text("commons_category"),
+  commons_files: integer("commons_files"),
+  /** The listing's one-line description, CC BY-SA, with the page it came from. */
+  wikivoyage: text("wikivoyage"),
+  wikivoyage_page: text("wikivoyage_page"),
+  /**
+   * The picture for the card (stage 2): Wikipedia's main image, else
+   * Wikidata's chosen image (P18), else a photograph taken within 60 m.
+   * `SpotImage` in `trip-planner/spot-fame.ts`; null when there is none.
+   */
+  image: jsonb("image"),
+  /** The map's `website` tag, for a description where Wikipedia is thin (stage 4). */
+  website: text("website"),
+  /**
+   * What the card says the place is, with its source (stage 4):
+   * `SpotDescription` in `trip-planner/spot-description.ts`. Null while
+   * none was found; a Wikivoyage line needs none, it is read directly.
+   */
+  description: jsonb("description"),
+  /** When a description was last looked for, found or not. */
+  described_at: timestamp("described_at", { mode: "string", withTimezone: true }),
+  fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true }),
+  requested_at: timestamp("requested_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * The pool without a trip (§20).

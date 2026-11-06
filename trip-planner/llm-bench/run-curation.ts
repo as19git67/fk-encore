@@ -12,6 +12,10 @@
  *     church.
  *   - **local** — the same prompt to the model in the house.
  *   - **claude** — the same prompt to the Claude API.
+ *   - **planner** — what the app ships (ranking plan, stage 3): the
+ *     prompt of `curation.ts` over the pool the planner keeps, through
+ *     the same gate, to the local model; the top of its order is the
+ *     selection. Run this before a model change ships.
  *
  * Usage:
  *
@@ -32,10 +36,12 @@ import { toCandidates } from "../candidates";
 import { askClaudeForJson, BENCH_MODEL } from "../claude-client";
 import { askForJson } from "../llm-client";
 import { buildCuratePrompt, parseCuration } from "./curate";
+import { buildCurationPrompt, gateCuration, type CurationContext, type CurationEntry } from "../curation";
+import { interestLabel } from "../interests";
 import { CURATION_CASES, CURATION_POOL, type CurationCase } from "./curation-cases";
 import { faultsOf, scoreCuration, type CurationPick, type CurationScore } from "./curation-score";
 
-type Track = "scoring" | "local" | "claude";
+type Track = "scoring" | "local" | "claude" | "planner";
 
 interface Attempt {
   track: Track;
@@ -96,6 +102,27 @@ function tieDepth(benchCase: CurationCase): { tied: number; atScore: number } {
   };
 }
 
+/** The request the app would send for this case: the pool it keeps, the group abstractly. */
+function plannerRequest(benchCase: CurationCase): { entries: CurationEntry[]; context: CurationContext } {
+  const pool = toCandidates(spots, { requireProminence: true, interests: benchCase.interests })
+    .sort((a, b) => b.score - a.score);
+  return {
+    entries: pool.map((candidate) => ({
+      osmRef: candidate.osmRef,
+      name: candidate.name,
+      category: candidate.category,
+      reasons: candidate.reasons,
+      text: null,
+    })),
+    context: {
+      town: benchCase.town,
+      days: benchCase.days,
+      interests: benchCase.interests.map(interestLabel),
+      group: benchCase.withChildren ? "2 Erwachsene, 1 Kind (7)" : "2 Erwachsene",
+    },
+  };
+}
+
 function contextOf(benchCase: CurationCase) {
   return { wants: benchCase.wants, withChildren: benchCase.withChildren };
 }
@@ -112,6 +139,29 @@ async function run(track: Track, benchCase: CurationCase): Promise<Attempt> {
       millis: Date.now() - started,
       error: null,
     };
+  }
+
+  if (track === "planner") {
+    try {
+      const { entries, context } = plannerRequest(benchCase);
+      const gated = gateCuration(await askForJson(buildCurationPrompt(entries, context), 10 * 60_000, { maxTokens: 4096 }),
+        entries, context);
+      const picks = gated.picks.slice(0, benchCase.pick).map((pick) => ({ osmRef: pick.osmRef, why: pick.reason ?? undefined }));
+      return {
+        track,
+        caseId: benchCase.id,
+        picks,
+        score: scoreCuration(CURATION_POOL, picks, contextOf(benchCase)),
+        millis: Date.now() - started,
+        error: null,
+        unusable: gated.invented,
+      };
+    } catch (err) {
+      return {
+        track, caseId: benchCase.id, picks: [], score: null,
+        millis: Date.now() - started, error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   const prompt = buildCuratePrompt(spots, benchCase);
@@ -258,8 +308,8 @@ function summary(attempt: Attempt): string {
 
 function trackArg(args: readonly string[]): Track[] {
   const value = valueArg(args, "--track");
-  if (value === "scoring" || value === "local" || value === "claude") return [value];
-  return ["scoring", "local", "claude"];
+  if (value === "scoring" || value === "local" || value === "claude" || value === "planner") return [value];
+  return ["scoring", "local", "claude", "planner"];
 }
 
 function valueArg(args: readonly string[], name: string): string | null {

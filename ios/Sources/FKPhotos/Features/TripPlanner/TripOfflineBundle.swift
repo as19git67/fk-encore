@@ -23,6 +23,17 @@ struct TripOfflineBundle: Codable, Sendable {
     /// What the server knowingly left out — "weather", "map" (§14).
     let omits: [String]
 
+    /// Every card's picture (candidate ranking, stage 2): the pool's and
+    /// the days'. Kept with the bundle so a card does not go blank at
+    /// sea; the galleries are not, they are a thing to browse online.
+    var thumbnailURLs: [URL] {
+        let pictures = plan.legs.flatMap { leg in
+            leg.pool.compactMap(\.image)
+                + leg.days.flatMap { $0.blocks.flatMap { $0.stops.compactMap(\.image) } }
+        }
+        return Array(Set(pictures.compactMap { URL(string: $0.thumbUrl) }))
+    }
+
     /// The light of one day, or nil when the bundle has none for it —
     /// an undated trip, or a day still at trip resolution (§4.3).
     func lightOfDay(legIndex: Int, dayIndex: Int) -> TripDayLight? {
@@ -170,5 +181,24 @@ enum TripOfflineWording {
         formatter.allowedUnits = [.useKB, .useMB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: Int64(bytes))
+    }
+}
+
+/// Loads the bundle's thumbnails into the shared URL cache, which is
+/// where `AsyncImage` looks first — so the pictures are there without
+/// a network (candidate ranking, stage 2). Quietly: a picture that does
+/// not come is a card with its symbol, not an error over a plan that
+/// is otherwise stored.
+enum TripOfflineThumbnails {
+    static func prefetch(_ urls: [URL]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for url in urls.prefix(400) {
+                group.addTask {
+                    var request = URLRequest(url: url)
+                    request.cachePolicy = .returnCacheDataElseLoad
+                    _ = try? await URLSession.shared.data(for: request)
+                }
+            }
+        }
     }
 }

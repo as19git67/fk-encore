@@ -29,6 +29,7 @@ import "./explore";
 import "./article-read";
 import "./shares";
 import "./pool";
+import "./spot-gallery";
 import "./spot-notes";
 import "./daylight";
 import "./forecast";
@@ -63,6 +64,9 @@ import "./live-activity";
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
 import { tickLiveActivities } from "./live-activity";
+import { refillSpotFame } from "./spot-fame";
+import { tickCuration } from "./curation-job";
+import { describeSpots } from "./spot-description";
 
 // A trip planned for a place with no imported region is saved framed
 // and empty, and the import that follows takes hours (§4.3). This is
@@ -91,6 +95,47 @@ schedule({
   nextFire: everyMs(5 * 60_000),
   run: async () => {
     await tickLiveActivities();
+  },
+});
+
+// What a pool build could not look up within its budget (ranking plan,
+// stage 1): page views and the rest, for the next build of that city.
+schedule({
+  name: "trip-planner-spot-fame",
+  description: "Look up page views, language editions, Commons and Wikivoyage for pool places still waiting.",
+  service: "trip-planner",
+  scheduleLabel: "every 30m",
+  nextFire: everyMs(30 * 60_000),
+  run: async () => {
+    await refillSpotFame();
+  },
+});
+
+// The local model's order of a stay's pool (ranking plan, stage 3):
+// one stay at a time, never on a request path. A pool write marks the
+// stay as due; this asks the model and moves the pool into the answer.
+schedule({
+  name: "trip-planner-curation",
+  description: "Let the local model order the candidates of stays whose pool changed.",
+  service: "trip-planner",
+  scheduleLabel: "every 5m",
+  nextFire: everyMs(5 * 60_000),
+  run: async () => {
+    await tickCuration();
+  },
+});
+
+// Text for a card where Wikipedia is thin (ranking plan, stage 4): the
+// Wikipedia lead, else the place's own website summarised with a quote
+// check. Wikivoyage lines need nothing; they come with the lookup.
+schedule({
+  name: "trip-planner-spot-descriptions",
+  description: "Find a description for pool places: Wikipedia lead, else their own website.",
+  service: "trip-planner",
+  scheduleLabel: "every 30m",
+  nextFire: everyMs(30 * 60_000),
+  run: async () => {
+    await describeSpots();
   },
 });
 

@@ -54,6 +54,8 @@ enum TripSpotActionGroup: Int, CaseIterable, Comparable {
     case status
     /// Getting there, seeing it on a map.
     case navigate
+    /// What I want of it: will ich, egal, lieber nicht, Herzenswunsch (§6.1).
+    case vote
     /// Where it sits in the trip: another block, pinned, the pool.
     case plan
     /// Taking it out of the trip altogether.
@@ -173,6 +175,17 @@ struct TripPinDetailSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if let image = detail.image {
+                    Section {
+                        TripSpotThumbnail(image: image, height: 160)
+                            .listRowInsets(EdgeInsets())
+                    } footer: {
+                        Text(image.credit)
+                    }
+                }
+                if let description = detail.description {
+                    TripSpotDescriptionSection(description: description)
+                }
                 if let planned = detail.planned {
                     Section {
                         LabeledContent("Wann") {

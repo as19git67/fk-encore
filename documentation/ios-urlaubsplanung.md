@@ -1533,8 +1533,20 @@ alone they are mine, with five they are everyone's, and the sentence “noch
 nichts gesagt haben: …” (haven't said anything yet: …) beneath it reads just as
 right. The word is also already on the screen — the heart wish is its strongest
 vote. Internally everything keeps its name: the mechanic *is* a vote
-(`votes.ts`, `TripBallotView`), it is just that nobody who uses it needs to
+(`votes.ts`, `TripVotes.swift`), it is just that nobody who uses it needs to
 know.
+
+**Since 2026-11-06 the wishes have no screen of their own** (candidate
+ranking plan, stage 5): „Kandidaten" and „Wünsche" were two screens over the
+same pool, one to manage it and one to vote on it. Now the candidate list of a
+stay carries the vote on every row — a ring in the colours of the wishes map,
+tapped for „Will ich" / „Egal" / „Lieber nicht" / heart's desire — with the
+names of who said what beneath; „Damit neu planen", the fairness sentence and
+„noch nichts gesagt haben" stand at the head of the list and step back while
+somebody searches, and the search finds voters' names. Spots already on a day
+follow in a section „Schon eingeplant", still with their vote. The word
+„Wünsche" stays where it is said: in the heart wish and in „Wünsche ändern den
+Plan nicht von selbst".
 
 Two things that deliberately do *not* happen here: Voting does **not** replan
 (thirty swipes would otherwise be thirty different trips — the screen has a
@@ -5832,7 +5844,7 @@ The distribution of the former menu items:
 | Städte | Trip | „Etappen" at the end of the stage bar |
 | Einstellungen, Planen mit, Reisegruppe | Trip | Menu „Reise" |
 | Dokumente, Änderungen, Reisebereit?, Danach, Unterwegs ohne Netz | Trip | Menu „Reise" (and as before the trip list) |
-| Kandidaten, Wünsche, Tagesausflug | Stage | Stage sheet, „Vorrat" |
+| Kandidaten (with the wishes since 2026-11-06), Tagesausflug | Stage | Stage sheet, „Vorrat" |
 | Ort suchen, Strecke anlegen, Strecken in der Nähe, Aus den Ideen übernehmen | Stage | Stage sheet, „Hinzufügen" |
 | Abendlicht | Day | Frame of the day |
 
@@ -5878,6 +5890,11 @@ The sheet behind a pin shows the voting row and **below it the place itself** �
 map section, name on site and in OpenStreetMap, route, „Warum hier?", the
 Wikipedia link and „Alle Details" (All details) — instead of hiding the details
 behind a second tap on the i (§3.8: whoever votes on a word votes on a word).
+
+Since 2026-11-06 this is the map presentation of the candidate list (§6.1,
+candidate ranking plan, stage 5): the pins keep the colour of what kind of
+find they are, the ring says your answer, and the pin sheet offers the vote
+among the spot's actions.
 
 The **map section** of a spot (`TripSpotMapSnippet`, in the sheet and in the
 detail view) is no longer an image: it zooms in place (zoom only, no panning —
