@@ -1,6 +1,6 @@
 # Candidates: ranked, pictured, explained — and one list instead of two
 
-Status: in progress (2026-11-06). Stages 0 to 4 built; see "As built" under each stage.
+Status: in progress (2026-11-06). All stages built; see "As built" under each stage.
 
 ## The problem
 
@@ -307,6 +307,19 @@ source as a link in the detail view and the pin sheet
 - `TripBallotView` goes; the wishes map becomes the map presentation of
   this screen. The stage sheet (`TripLegSheet`) offers one entry,
   "Kandidaten (n)". The handbook and §6.1/§25.3 of the concept say so.
+
+As built (2026-11-06): `TripBallotView` is gone; its model types live in
+`TripVotes.swift`. `TripPoolView` loads the ballot and the fairness
+account with the plan and shows, while not opened to fill one block:
+the head sections (`stayHead`), a ring per row (`voteRing`, a menu of
+`voteActions`) with the voters' names beneath and only the first
+reason on the row, and a section „Schon eingeplant" for ballot entries
+already on a day — the ballot covered them, and a "lieber nicht" for
+something planned is still worth saying. The vote actions join
+`candidateActions` in a new group `.vote`, so the pin sheet and the
+detail screen vote too. The pool map draws the vote as `ringTint`
+around the find-kind pin. `TripPoolFilter.matches` searches voter
+names. The stage sheet has the one entry „Kandidaten (n)".
 
 ## Open, deliberately
 

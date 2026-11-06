@@ -54,6 +54,8 @@ enum TripSpotActionGroup: Int, CaseIterable, Comparable {
     case status
     /// Getting there, seeing it on a map.
     case navigate
+    /// What I want of it: will ich, egal, lieber nicht, Herzenswunsch (§6.1).
+    case vote
     /// Where it sits in the trip: another block, pinned, the pool.
     case plan
     /// Taking it out of the trip altogether.

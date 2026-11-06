@@ -48,7 +48,7 @@ struct TripLegSheet: View {
             }
 
             // Every way in tells the plan to reload once something went
-            // in: the count below, the pool and the ballot read the plan
+            // in: the count below and the candidate list read the plan
             // in memory, and a spot that is only on the server is a spot
             // nobody sees until the next pull.
             Section {
@@ -94,19 +94,13 @@ struct TripLegSheet: View {
             }
 
             Section {
-                // Everything this leg could do, and why (§5).
+                // Everything this leg could do, and why (§5) — and
+                // what everybody wants of it (§6.1): one list since the
+                // candidate ranking's stage 5, the vote a ring per row.
                 NavigationLink {
                     TripPoolView(viewModel: viewModel, legIndex: leg.position)
                 } label: {
                     Label("Kandidaten (\(leg.pool.count))", systemImage: "tray.full")
-                }
-                // Everybody rates, nobody is averaged away (§6.1).
-                NavigationLink {
-                    TripBallotView(planId: viewModel.planId, legIndex: leg.position, leg: leg) {
-                        Task { await viewModel.load() }
-                    }
-                } label: {
-                    Label("Wünsche", systemImage: "heart")
                 }
                 if !leg.isTransit {
                     // „Vier Tage in San Gimignano" — and the city an hour

@@ -9,6 +9,14 @@ import SwiftUI
 /// each of them is a gesture somebody reaches for immediately —
 /// *where is that*, *not this one*, and *put it in Tuesday morning*.
 ///
+/// Since the candidate ranking's stage 5 it is also where the group
+/// says what it wants (§6.1): "Kandidaten" and "Wünsche" were two
+/// screens over the same pool, one to manage it and one to vote on it.
+/// Now every row carries the vote as a ring — tap it to answer — with
+/// the names of who said what beneath, and the sections about the stay
+/// as a whole (who has not said anything, fairness, "Damit neu planen")
+/// stand at the head of the list.
+///
 /// The placement deliberately goes through a picker rather than a drag.
 /// Dragging out of one screen into a day that is not on screen is not a
 /// gesture iOS has; a picker also says out loud which day and which
@@ -41,6 +49,47 @@ struct TripPoolView: View {
     /// preference the app could simply have kept.
     @AppStorage("trip.pool.presentation") private var presentation = TripPoolPresentation.list
     @Environment(\.dismiss) private var dismiss
+
+    /// The vote over this stay's spots (§6.1), loaded with the list.
+    @State private var ballot: TripBallot?
+    @State private var fairness: TripFairness?
+    /// The spot a vote is on its way for.
+    @State private var votingRef: String?
+    @State private var isApplying = false
+
+    /// Somebody is looking for one spot rather than working through the
+    /// whole list; the sections about the stay as a whole step back.
+    private var isSearching: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Voting belongs to the list as such. Opened to fill one block,
+    /// the screen has one question — which spot goes here — and the
+    /// rings would only be in the way.
+    private var votes: Bool { placeInto == nil }
+
+    private func ballotEntry(_ osmRef: String) -> TripBallotEntry? {
+        guard votes else { return nil }
+        return ballot?.entries.first { $0.osmRef == osmRef }
+    }
+
+    /// Who said anything about each spot, for the search.
+    private var voterNames: [String: [String]] {
+        guard let ballot, votes else { return [:] }
+        return Dictionary(ballot.entries.map { entry in
+            (entry.osmRef, entry.hearts + entry.wants + entry.ratherNots)
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Spots of this stay that are already on a day: still up for a
+    /// vote — a "lieber nicht" for something planned is worth saying —
+    /// but not candidates any more, so they come after the list.
+    private func plannedEntries(in leg: TripLeg) -> [TripBallotEntry] {
+        guard let ballot, votes else { return [] }
+        let inPool = Set(leg.pool.map(\.osmRef))
+        let planned = ballot.entries.filter { !inPool.contains($0.osmRef) }
+        return TripBallotSearch.filter(planned, query: query) { TripBallotDetails.of($0.osmRef, in: leg) }
+    }
 
     private var leg: TripLeg? {
         viewModel.plan?.legs.first { $0.position == legIndex }
@@ -75,6 +124,11 @@ struct TripPoolView: View {
             }
         }
         .task { await viewModel.loadHiddenSpots() }
+        .task { await loadBallot() }
+        .refreshable {
+            await viewModel.load()
+            await loadBallot()
+        }
         // A pool of a hundred and fifty candidates is what the planner
         // routinely produces; scrolling it to find the one somebody
         // mentioned at breakfast is not a plan. Always on the screen
@@ -82,7 +136,7 @@ struct TripPoolView: View {
         // have to know about to pull down is a search field most people
         // never find (§5.2).
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Kandidaten durchsuchen")
+                    prompt: placeInto == nil ? "Kandidaten, Orte und Namen durchsuchen" : "Kandidaten durchsuchen")
         .sheet(item: $inspecting, onDismiss: runAfterSheet) { candidate in
             if let leg {
                 TripPinDetailSheet(
@@ -150,6 +204,9 @@ struct TripPoolView: View {
                     }
                 }
             }
+            if leg != nil, let ballot, votes, !isSearching {
+                stayHead(ballot)
+            }
             if let leg {
                 if leg.pool.isEmpty {
                     ContentUnavailableView(
@@ -176,8 +233,19 @@ struct TripPoolView: View {
                             }
                         }
                     } footer: {
-                        Text("Der Planer wählt aus den Kandidaten, was in einen Block passt. "
-                             + "Was hier liegt, ist nicht verplant — es steht bereit.")
+                        Text(poolFooter)
+                    }
+                }
+                let planned = plannedEntries(in: leg)
+                if !planned.isEmpty {
+                    Section {
+                        ForEach(planned) { entry in
+                            plannedRow(entry, in: leg)
+                        }
+                    } header: {
+                        Text("Schon eingeplant")
+                    } footer: {
+                        Text("Auch was schon auf einem Tag steht, kann noch einen Wunsch bekommen.")
                     }
                 }
             } else {
@@ -247,6 +315,9 @@ struct TripPoolView: View {
             title: candidate.displayName,
             symbolName: kind.symbolName,
             tint: kind.colour,
+            // What I said, as a ring around what it is (§6.1) — the
+            // wishes map's language, now on the one map of the stay.
+            ringTint: ballotEntry(candidate.osmRef).map(TripBallotPinKind.of).flatMap { $0 == .open ? nil : $0.colour },
             extentEnd: candidate.extent?.end,
             course: candidate.extent?.via ?? [],
         )
@@ -276,6 +347,11 @@ struct TripPoolView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            if votes, ballot != nil {
+                Text("Ein Ring sagt, was du dir gewünscht hast. Antippen: abstimmen und Details lesen.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
@@ -323,6 +399,11 @@ struct TripPoolView: View {
                 await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
             },
         ]
+        // What I want of it (§6.1): the same answers as the ring on the
+        // row, so the map's sheet and the detail screen can vote too.
+        if let entry = ballotEntry(candidate.osmRef) {
+            actions.append(contentsOf: voteActions(entry))
+        }
         if candidate.isManual {
             // A find somebody brought in themselves is theirs to
             // delete: it exists because a person added it, and nothing
@@ -383,7 +464,7 @@ struct TripPoolView: View {
         let kind = placeInto.flatMap { target in
             leg.days.first { $0.dayIndex == target.dayIndex }?.blocks.first { $0.id == target.blockId }?.kind
         }
-        return TripPoolFilter.matches(in: leg.pool, query: query).filter { candidate in
+        return TripPoolFilter.matches(in: leg.pool, query: query, voices: voterNames).filter { candidate in
             kind.map { TripBlockTargets.fits(category: candidate.category, blockKind: $0) } ?? true
         }
     }
@@ -490,6 +571,7 @@ struct TripPoolView: View {
                 Text(TripClock.duration(candidate.dwellMinutes))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                voteRing(candidate.osmRef)
             }
             if let extent = candidate.extent {
                 Text(extent.summary).font(.caption).foregroundStyle(.secondary)
@@ -521,14 +603,202 @@ struct TripPoolView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // "Warum hier?" — a suggestion carries its reasons (§3.8, §8.3).
-            ForEach(candidate.reasons, id: \.self) { reason in
-                Text("· \(reason)")
+            // "Warum hier?" — the first reason, which is the strongest:
+            // the model's sentence, "von euch hinzugefügt", or what the
+            // open data says (§3.8, §8.3). The rest is in the details.
+            if let reason = candidate.reasons.first {
+                Text(reason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // Who said what, in names rather than a number (§6.1).
+            if let voices = ballotEntry(candidate.osmRef)?.voices {
+                Text(voices).font(.footnote).foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    // MARK: - The vote (§6.1)
+
+    /// What everybody can see before the list: re-planning with the
+    /// wishes, the fairness account, who has not said anything yet.
+    @ViewBuilder
+    private func stayHead(_ ballot: TripBallot) -> some View {
+        Section {
+            Button {
+                Task { await apply() }
+            } label: {
+                HStack {
+                    Label("Damit neu planen", systemImage: "arrow.triangle.2.circlepath")
+                    Spacer()
+                    if isApplying { ProgressView() }
+                }
+            }
+            .disabled(isApplying)
+        } footer: {
+            Text("Wünsche ändern den Plan nicht von selbst — sonst wäre er nach jedem Antippen ein anderer.")
+        }
+        if let sentence = fairness?.sentence {
+            Section {
+                Text(sentence).font(.footnote)
+            } header: {
+                Text("Fairness")
+            }
+        }
+        if !ballot.silent.isEmpty {
+            Section {
+                Text("Noch nichts gesagt haben: \(ballot.silent.joined(separator: ", "))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var poolFooter: String {
+        var text = "Der Planer wählt aus den Kandidaten, was in einen Block passt. "
+            + "Was hier liegt, ist nicht verplant — es steht bereit."
+        if votes, let ballot {
+            text += " Ein Herzenswunsch kommt in den Plan, solange er zeitlich möglich ist — "
+                + "unabhängig von der Mehrheit. Noch \(ballot.heartsLeft) von \(ballot.heartQuota) frei."
+        }
+        return text
+    }
+
+    /// The vote as a ring: its colour and symbol say what I answered,
+    /// a tap offers the answers (§6.1). The same ring the map draws.
+    @ViewBuilder
+    private func voteRing(_ osmRef: String) -> some View {
+        if let entry = ballotEntry(osmRef) {
+            Menu {
+                TripSpotActionMenuItems(actions: voteActions(entry))
+            } label: {
+                ZStack {
+                    Circle()
+                        .stroke(TripBallotPinKind.of(entry).colour, lineWidth: 2.5)
+                        .frame(width: 30, height: 30)
+                    if votingRef == osmRef {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: TripBallotPinKind.of(entry).symbolName)
+                            .font(.caption)
+                            .foregroundStyle(TripBallotPinKind.of(entry).colour)
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(votingRef != nil)
+            .accessibilityLabel("Dein Wunsch: \(TripBallotPinKind.of(entry).label)")
+        }
+    }
+
+    /// Will ich, egal, lieber nicht, and the heart — one list for the
+    /// ring, the map's sheet and the detail screen.
+    private func voteActions(_ entry: TripBallotEntry) -> [TripPinSheetAction] {
+        var actions = TripVote.allCases.map { vote in
+            TripPinSheetAction(
+                id: "vote-\(vote.rawValue)",
+                title: vote.label,
+                systemImage: entry.myVote == vote.rawValue && !entry.myHeart ? "checkmark" : vote.symbolName,
+                closes: false,
+                group: .vote,
+            ) {
+                await cast(entry.osmRef, vote, heart: false)
+            }
+        }
+        let heartsLeft = ballot?.heartsLeft ?? 0
+        if entry.myHeart || heartsLeft > 0 {
+            actions.append(TripPinSheetAction(
+                id: "heart",
+                title: entry.myHeart ? "Kein Herzenswunsch mehr" : "Zum Herzenswunsch machen",
+                systemImage: entry.myHeart ? "heart.slash" : "heart",
+                footer: entry.myHeart ? nil : "Noch \(heartsLeft) frei. Ein Herzenswunsch kommt in den Plan, "
+                    + "solange er zeitlich möglich ist.",
+                closes: false,
+                group: .vote,
+            ) {
+                await cast(entry.osmRef, .want, heart: !entry.myHeart)
+            })
+        }
+        return actions
+    }
+
+    /// A spot that is already on a day, with its vote.
+    private func plannedRow(_ entry: TripBallotEntry, in leg: TripLeg) -> some View {
+        let details = TripBallotDetails.of(entry.osmRef, in: leg)
+        return NavigationLink {
+            if let spot = details.spot {
+                TripSpotDetailView(spot: spot, mode: leg.transportMode, onSave: nil) { _ in EmptyView() }
+            }
+        } label: {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.label)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !details.line.isEmpty {
+                        Label(details.line, systemImage: TripCategory.symbol(entry.category))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let voices = entry.voices {
+                        Text(voices).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                voteRing(entry.osmRef)
+            }
+        }
+        .disabled(details.spot == nil)
+    }
+
+    private func loadBallot() async {
+        guard votes else { return }
+        do {
+            try await loadVotes()
+            fairness = try await APIClient.shared.get("/trip-planner/plans/\(viewModel.planId)/fairness")
+        } catch {
+            viewModel.errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// The ballot alone: after a vote only this changes.
+    private func loadVotes() async throws {
+        ballot = try await APIClient.shared.get(
+            "/trip-planner/plans/\(viewModel.planId)/votes",
+            query: ["legIndex": String(legIndex)],
+        )
+    }
+
+    private func cast(_ osmRef: String, _ vote: TripVote, heart: Bool) async {
+        votingRef = osmRef
+        defer { votingRef = nil }
+        do {
+            let _: TripCastVoteResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(viewModel.planId)/votes",
+                body: TripCastVoteRequest(legIndex: legIndex, osmRef: osmRef, value: vote.rawValue, heart: heart),
+            )
+            try await loadVotes()
+        } catch {
+            viewModel.errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// "Damit neu planen": once, when somebody asks — voting itself
+    /// never re-plans (§6.1).
+    private func apply() async {
+        isApplying = true
+        defer { isApplying = false }
+        do {
+            let _: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(viewModel.planId)/votes/apply", body: TripEmptyBody())
+            await viewModel.load()
+            await loadBallot()
+        } catch {
+            viewModel.errorMessage = TripErrorText.describe(error)
+        }
     }
 }
 
