@@ -1,6 +1,6 @@
 # Candidates: ranked, pictured, explained — and one list instead of two
 
-Status: in progress (2026-11-06). Stages 0, 1 and 2 built; see "As built" under each stage.
+Status: in progress (2026-11-06). Stages 0 to 3 built; see "As built" under each stage.
 
 ## The problem
 
@@ -221,6 +221,38 @@ This stage builds what was measured, and nothing beyond it.
 - Measured, not assumed: the benchmark of §11.0 (`trip-planner/llm-bench/`) gets a
   case per request from that measurement, with invented places, so a
   model change shows its effect before it ships.
+
+As built (2026-11-06), with two deliberate changes to the above:
+
+- **The order is kept per stay, not on the pool row.** The pool is
+  rewritten on every re-plan, so `trip_leg_curation` (migration 0294)
+  holds the gated answer per leg, with a signature of the pool and the
+  interests it was asked for. `toCandidates` reads it on a re-plan
+  (option `curated`), so the days are built out of the model's order.
+- **A rank is a score band, not a separate key.** Everything in the
+  planner orders by `score`, the solver included, so the rank becomes
+  `curatedScore(rank, of)`: from `CURATED_TOP` (9) for the first to
+  `CURATED_FLOOR` (5) for the last, above anything open data can reach
+  and below `MANUAL_SCORE`. A pool row keeps the scoring's own score
+  (`search_score`) and the band's (`curated_score`); the votes are
+  `score − base`, so a curation that lands between two re-plans moves
+  the row without losing what the votes added (`applyCuration`). A
+  manual entry keeps its score and only gets the sentence.
+
+Pieces: prompt, gate and "ask again?" in `trip-planner/curation.ts`
+(`gateCuration` drops unknown refs, collapses duplicates and replaces a
+sentence with a number or an opening-hours/price word the input did not
+contain by the first open-data reason); the job in `curation-job.ts`
+(`markCurationDue` on every pool write, the cron
+`trip-planner-curation` every 5 minutes asks up to three stays one at a
+time, a model that is away puts the stay back uncounted, a failed stay
+is tried again after an hour, at most three times). Only reasons from
+open data go to the model, never the vote reasons, which carry names.
+Wikipedia intros come through `FameClient.leads`. The leg carries
+`curation` (`pending`/`running`/`done`/`failed`), and the pool list
+shows "wird noch sortiert" while it is pending or running. The
+benchmark has a `planner` track that sends the shipped prompt through
+the shipped gate (`run-curation.ts --track=planner`).
 
 ## Stage 4 — text where Wikipedia is thin
 

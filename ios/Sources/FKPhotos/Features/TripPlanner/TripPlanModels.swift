@@ -103,6 +103,11 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// OpenStreetMap region is still being imported (§4.3). Optional so
     /// a response from an older server still decodes.
     let awaitingRegion: Bool?
+    /// Where the local model's order of this stay's pool stands:
+    /// "pending", "running", "done" or "failed" (ranking plan, stage 3).
+    /// Optional so an older server still decodes; `var` with a default
+    /// so the memberwise initialisers of the tests need not name it.
+    var curation: String? = nil
     /// "YYYY-MM-DD", or nil when the trip has no dates yet.
     let startDate: String?
     let days: [TripDay]
@@ -229,6 +234,10 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// Is this leg waiting for its maps? Absent means no — an older
     /// server that never had the flag never had a waiting leg either.
     var isAwaitingRegion: Bool { awaitingRegion == true }
+
+    /// Is the local model still putting this stay's candidates in order?
+    /// The list is usable meanwhile; it re-sorts when the order lands.
+    var isBeingSorted: Bool { curation == "pending" || curation == "running" }
 
     /// What to call this stay. Never invents a name for a leg nobody
     /// named (§15.3) — it says which one it is instead.

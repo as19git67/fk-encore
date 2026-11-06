@@ -166,7 +166,15 @@ struct TripPoolView: View {
                             row(candidate, leg: leg)
                         }
                     } header: {
-                        Text(countLabel(leg))
+                        HStack(spacing: 6) {
+                            Text(countLabel(leg))
+                            if leg.isBeingSorted {
+                                Spacer()
+                                Label("wird noch sortiert", systemImage: "arrow.up.arrow.down")
+                                    .labelStyle(.titleAndIcon)
+                                    .textCase(nil)
+                            }
+                        }
                     } footer: {
                         Text("Der Planer wählt aus den Kandidaten, was in einen Block passt. "
                              + "Was hier liegt, ist nicht verplant — es steht bereit.")

@@ -42,6 +42,7 @@ import type { ScoredCandidate } from "./candidates";
 import { travelClassFor, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
 import { imagesFor, type SpotImage } from "./spot-fame";
+import { curationStatusOf, markCurationDue, type CurationStatus } from "./curation-job";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 
 type Db = typeof dbDefault;
@@ -109,6 +110,12 @@ export interface StoredLeg {
    * once the import lands reads exactly this — see migration 0168.
    */
   awaitingRegion: boolean;
+  /**
+   * Where the local model's order of this stay's pool stands (stage 3):
+   * `pending` or `running` is "wird noch sortiert", null when it was
+   * never asked (a journey, a pool too small to order).
+   */
+  curation?: CurationStatus | null;
   /**
    * The quarters travel along (§21.3, migration 0223): a port day on a
    * cruise. Its departure is "Alle an Bord" with an hour in hand; a
@@ -448,8 +455,10 @@ export async function insertLeg(
         dwell_minutes: c.dwellMinutes,
         score: c.score,
         reasons: c.reasons,
+        ...curationColumns(c),
       })),
     );
+    await markCurationDue(leg.id, db);
   }
   return leg.id;
 }
@@ -1164,6 +1173,8 @@ export async function loadPlan(
   // The pictures, per place and on the way out (stage 2): one query
   // for every spot of the plan, planned or in a pool.
   const images = await imagesFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
+  // Whether the local model is still ordering a stay (stage 3).
+  const curation = await curationStatusOf(legRows.map((l) => l.id), db);
 
   const stopsByBlock = new Map<number, StoredStop[]>();
   for (const row of stopRows) {
@@ -1329,6 +1340,7 @@ export async function loadPlan(
       arriveMinutes: l.arrive_minutes,
       regionDb: l.region_db,
       awaitingRegion: l.awaiting_region,
+      curation: curation.get(l.id) ?? null,
       quartersAboard: l.quarters_aboard,
       tenderPort: l.tender_port,
       startDate: l.start_date,
@@ -1470,6 +1482,7 @@ async function rewriteDay(
           // reasons through the redistribution, and one that does not
           // keeps what the pool row said before.
           reasons: c.reasons ?? ((known?.reasons ?? []) as string[]),
+          ...curationColumns(c, known),
           // Provenance survives the rewrite, because it is not the
           // redistribution's to decide (§9.2).
           origin: known?.origin ?? c.origin ?? "search",
@@ -1480,6 +1493,7 @@ async function rewriteDay(
       }),
     );
   }
+  await markCurationDue(legId, db);
 
   await db.update(tripPlans).set({ updated_at: new Date().toISOString() }).where(eq(tripPlans.id, planId));
 }
@@ -1540,10 +1554,37 @@ export async function replanPlan(
           dwell_minutes: c.dwellMinutes,
           score: c.score,
           reasons: c.reasons,
+          ...curationColumns(c),
         })),
       );
     }
+    await markCurationDue(leg.legId, db);
   }
+}
+
+/**
+ * What a pool row remembers for the local model's order (stage 3): the
+ * scoring's own score, and where the model put it. A candidate that
+ * did not come out of the scoring (a stop sent back, an entry carried
+ * through a redistribution) keeps what its row said before.
+ */
+function curationColumns(
+  candidate: object,
+  known?: { search_score: number | null; curated_score: number | null; curated_reason: string | null },
+): { search_score: number | null; curated_score: number | null; curated_reason: string | null } {
+  const c = candidate as Partial<Pick<ScoredCandidate, "searchScore" | "curatedScore" | "curatedReason">>;
+  if (c.searchScore !== undefined) {
+    return {
+      search_score: c.searchScore,
+      curated_score: c.curatedScore ?? null,
+      curated_reason: c.curatedReason ?? null,
+    };
+  }
+  return {
+    search_score: known?.search_score ?? null,
+    curated_score: known?.curated_score ?? null,
+    curated_reason: known?.curated_reason ?? null,
+  };
 }
 
 /**

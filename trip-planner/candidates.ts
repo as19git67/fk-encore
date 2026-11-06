@@ -68,6 +68,41 @@ export const MANUAL_REASON = "von euch hinzugefügt";
 export interface ScoredCandidate extends Candidate {
   /** Human-readable contributions to `score`, for "why here?" (§8.3). */
   reasons: string[];
+  /**
+   * What the scoring gave it before the local model's order and before
+   * any vote (stage 3). Stored, so a curation that lands later can move
+   * the entry without re-planning.
+   */
+  searchScore?: number;
+  /** The score from the model's order, where it ranked this place. */
+  curatedScore?: number;
+  /** The model's sentence about it, after the gate. */
+  curatedReason?: string | null;
+}
+
+/**
+ * Where the local model's order puts a place: between everything the
+ * open data can say (at most about 4.75 with a tourism tag and a
+ * golden-light bonus) and a place the family brought (`MANUAL_SCORE`).
+ * Rank 0 gets the top of the band, the last pick its floor, evenly
+ * between — so within the band the model's order is the order, and no
+ * page-view count can reach into it (plan `kandidaten-ranking.md`,
+ * "The sorting rule").
+ */
+export const CURATED_FLOOR = 5;
+export const CURATED_TOP = 9;
+
+export function curatedScore(rank: number, of: number): number {
+  if (of <= 1) return CURATED_TOP;
+  const share = (of - 1 - Math.min(Math.max(rank, 0), of - 1)) / (of - 1);
+  return Math.round((CURATED_FLOOR + (CURATED_TOP - CURATED_FLOOR) * share) * 1000) / 1000;
+}
+
+/** One place in the model's order. */
+export interface CuratedPlace {
+  rank: number;
+  of: number;
+  reason: string | null;
 }
 
 export interface ScoringOptions {
@@ -93,6 +128,12 @@ export interface ScoringOptions {
    * halfway is not upended.
    */
   prominence?: ReadonlyMap<string, Prominence>;
+  /**
+   * The local model's order of this stay's pool (`curation.ts`, stage
+   * 3). A place it ranked takes its score from the rank; the open-data
+   * reasons stay on the card below the model's sentence.
+   */
+  curated?: ReadonlyMap<string, CuratedPlace>;
 }
 
 export interface LightScoringOptions {
@@ -258,6 +299,11 @@ export function toCandidates(
     // spot's own tags.
     const names = readableName(spot);
 
+    const searchScore = score;
+    const curated = opts.curated?.get(spot.osmRef);
+    const fromRank = curated ? curatedScore(curated.rank, curated.of) : undefined;
+    if (curated?.reason) reasons.unshift(curated.reason);
+
     candidates.push({
       osmRef: spot.osmRef,
       name: names.display,
@@ -273,8 +319,10 @@ export function toCandidates(
       lon: spot.lon,
       category,
       dwellMinutes: dwellFor(category, opts.dwellMinutes),
-      score,
+      score: fromRank ?? searchScore,
       reasons,
+      searchScore,
+      ...(fromRank !== undefined ? { curatedScore: fromRank, curatedReason: curated?.reason ?? null } : {}),
     });
   }
 

@@ -41,6 +41,8 @@ export interface FameClient {
   pageImages(lang: string, titles: readonly string[]): Promise<Map<string, string>>;
   /** Thumbnail, author and licence of these files, photographs only (Commons). */
   photos(titles: readonly string[]): Promise<CommonsPhoto[]>;
+  /** The first two sentences of each article, plain text, by title (stage 3). */
+  leads(lang: string, titles: readonly string[]): Promise<Map<string, string>>;
   /** Photographs taken within `radiusM` of a point (Commons geosearch). */
   photosNear(point: { lat: number; lon: number }, radiusM: number): Promise<CommonsPhoto[]>;
   /** The sight listings of the Wikivoyage city article nearest to a point. */
@@ -104,6 +106,26 @@ export class HttpFameClient implements FameClient {
       url.searchParams.set("piprop", "name");
       url.searchParams.set("titles", wanted.slice(i, i + 50).join("|"));
       for (const [title, file] of parsePageImages(await getJson(url))) out.set(title, file);
+    }
+    return out;
+  }
+
+  async leads(lang: string, titles: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const wanted = [...new Set(titles)];
+    // `extracts` answers at most 20 intros per request.
+    for (let i = 0; i < wanted.length; i += 20) {
+      const url = new URL(`https://${lang}.wikipedia.org/w/api.php`);
+      url.searchParams.set("action", "query");
+      url.searchParams.set("format", "json");
+      url.searchParams.set("formatversion", "2");
+      url.searchParams.set("prop", "extracts");
+      url.searchParams.set("exintro", "1");
+      url.searchParams.set("explaintext", "1");
+      url.searchParams.set("exsentences", "2");
+      url.searchParams.set("exlimit", "20");
+      url.searchParams.set("titles", wanted.slice(i, i + 20).join("|"));
+      for (const [title, text] of parseLeads(await getJson(url))) out.set(title, text);
     }
     return out;
   }
@@ -241,6 +263,24 @@ export function parsePageImages(body: unknown): Map<string, string> {
   return out;
 }
 
+/** Article intros by title, under the title asked for as well as the normalized one. */
+export function parseLeads(body: unknown): Map<string, string> {
+  const query = (body as { query?: { normalized?: Array<{ from?: string; to?: string }>; pages?: unknown[] } } | null)?.query;
+  const asked = new Map<string, string>();
+  for (const n of query?.normalized ?? []) if (n.from && n.to) asked.set(n.to, n.from);
+  const out = new Map<string, string>();
+  for (const raw of query?.pages ?? []) {
+    const page = raw as { title?: string; extract?: unknown };
+    if (!page.title || typeof page.extract !== "string") continue;
+    const text = page.extract.replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    out.set(page.title, text);
+    const original = asked.get(page.title);
+    if (original) out.set(original, text);
+  }
+  return out;
+}
+
 export function parseGeosearchTitles(body: unknown): string[] {
   const hits = (body as { query?: { geosearch?: Array<{ title?: unknown }> } } | null)?.query?.geosearch ?? [];
   return hits.map((h) => h.title).filter((t): t is string => typeof t === "string");
@@ -260,6 +300,7 @@ export class SilentFameClient implements FameClient {
   async categorySizes() { return new Map<string, number>(); }
   async pageImages() { return new Map<string, string>(); }
   async photos() { return []; }
+  async leads() { return new Map<string, string>(); }
   async photosNear() { return []; }
   async voyageListings() { return null; }
 }

@@ -51,6 +51,7 @@ class FakeFame implements FameClient {
   async photos(titles: readonly string[]) { return titles.map(photo); }
   near: CommonsPhoto[] = [];
   async photosNear() { return this.near; }
+  async leads() { return new Map<string, string>(); }
   async pageviews(_lang: string, title: string) { return this.views.get(title) ?? 0; }
   async categorySizes() { return new Map<string, number>(); }
   async voyageListings() {

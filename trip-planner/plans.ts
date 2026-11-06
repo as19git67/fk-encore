@@ -26,7 +26,7 @@ import { requestRegionFor } from "./region-request";
 import { waterDetourBetween } from "./water-detour";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
-import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
+import { scoreForLight, toCandidates, type CuratedPlace, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
 import { dayEnds, travelPaidByRoute, type LocatedFixpoint } from "./day-ends";
 import { dayWalkOf, dayWalkOfStored } from "./day-walk";
@@ -55,6 +55,7 @@ import { storedHorizon } from "./horizon-store";
 import { fairnessOfPlan, votesOfLeg } from "./vote-store";
 import { orderBlocksForLight } from "./light-replan";
 import { prominenceAround } from "./spot-fame";
+import { curatedOfLeg } from "./curation-job";
 import { applyVotes, markWanted, tally, type Tally } from "./votes";
 import { requireOrganiser } from "./plan-access";
 import {
@@ -601,6 +602,9 @@ async function replanFromStoredSettings(
           detailDays: leg.days.filter((d) => d.detailed).length,
           hidden,
           votes: tally(await votesOfLeg(leg.id), fairness),
+          // The local model's order of this stay, where it gave one
+          // (stage 3): the days are built out of it.
+          curated: await curatedOfLeg(leg.id),
           bufferDay: (await climateForLeg(
             { anchor: leg.anchor, startDate: leg.startDate, days: leg.days.length },
           )).bufferDay,
@@ -1535,6 +1539,8 @@ async function planLeg(
     categories?: string[];
     interests?: string[];
     dwellMinutes?: Record<string, number>;
+    /** The local model's order of this stay's pool, on a re-plan (stage 3). */
+    curated?: ReadonlyMap<string, CuratedPlace>;
     /** When day 0 begins, when a transfer pushed it back. */
     firstDayStartMinutes?: number | null;
     /** How many of this leg's days to plan down to spots (§4.3). */
@@ -1613,6 +1619,7 @@ async function planLeg(
     // stage 1): asked here because the days below are planned out of
     // this order.
     prominence: await prominenceAround(spots, anchor),
+    curated: trip.curated,
     // This pool is what a day gets built out of, so it holds only what
     // is worth a block. A lookup ("what is near me") asks its own
     // question and keeps the ordinary.

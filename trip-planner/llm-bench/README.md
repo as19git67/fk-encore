@@ -137,14 +137,15 @@ entlang der Achsen, an denen §11.1 einen Unterschied erwartet:
 npx tsx trip-planner/llm-bench/run-curation.ts
 ```
 
-Dieselben Voraussetzungen, **drei** Spuren statt zwei — denn hier ist der
-Amtsinhaber kein Modell:
+Dieselben Voraussetzungen, **vier** Spuren — denn hier ist der
+Amtsinhaber kein Modell, und was die App ausliefert, wird mitgemessen:
 
 | Spur | was sie ist |
 | --- | --- |
 | `scoring` | was der Planer heute tut: gewichtete Summe über OSM-Tags (`candidates.ts`), oben abgeschnitten — **mit** den Interessen des Falls, sonst wäre es eine Strohpuppe |
 | `local` | dasselbe Prompt an das Modell im Haus |
 | `claude` | dasselbe Prompt an die Claude API |
+| `planner` | was die App ausliefert (Kandidaten-Ranking, Etappe 3): das Prompt aus `curation.ts` über den Vorrat, den der Planer behält, durch dasselbe Tor (`gateCuration`), an das Modell im Haus; die Spitze der Reihenfolge ist die Auswahl. Vor jedem Modellwechsel laufen lassen (`--track=planner`). |
 
 **Drei Anfragen über einen Vorrat** von 34 erfundenen Orten — 10, 8 und 5
 sollen gewählt werden. Ein Vorrat und drei Sätze statt drei Vorräte ist das
