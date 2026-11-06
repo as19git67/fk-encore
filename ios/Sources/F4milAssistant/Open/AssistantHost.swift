@@ -16,12 +16,19 @@ public struct AssistantHost: Sendable {
     /// Whether the signed-in user holds a permission (`finance.view`, …);
     /// the empty chat suggests a first question per module they have.
     public var hasPermission: @Sendable (String) -> Bool
+    /// A proposal card ran (stage 4): the action changed data on the server
+    /// that the app may hold in a list of its own (albums, favourites). The
+    /// app drops or reloads what `tool` may have touched; the web does the
+    /// same in `proposalEffects.ts`.
+    public var didExecuteProposal: @MainActor @Sendable (_ tool: String) -> Void
 
     public init(
         hasPermission: @escaping @Sendable (String) -> Bool = { _ in true },
+        didExecuteProposal: @escaping @MainActor @Sendable (_ tool: String) -> Void = { _ in },
         openRoute: @escaping @MainActor @Sendable (_ route: String, _ webURL: URL) -> Bool
     ) {
         self.hasPermission = hasPermission
+        self.didExecuteProposal = didExecuteProposal
         self.openRoute = openRoute
     }
 

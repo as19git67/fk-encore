@@ -248,3 +248,213 @@ public struct ModelGate: Codable, Hashable, Sendable {
     /// `blocked` is the one state in which `ask` refuses.
     public var acceptsQuestions: Bool { state != "blocked" }
 }
+
+// MARK: - Proposals (#1529, stage 4 of assistent-ios.md)
+
+/// A write action the assistant proposed (`ProposalRow` in
+/// assistant/proposals.ts). Nothing has happened yet: "Ausführen" runs it as
+/// the user through the same endpoints the app's own buttons use,
+/// "Verwerfen" drops it. Afterwards the row says what became of it.
+public struct Proposal: Codable, Hashable, Sendable, Identifiable {
+    public let proposal_id: Int
+    public let tool: String
+    public let summary: String
+    public let count: Int?
+    /// `pending`, `executing`, `executed` or `discarded`.
+    public let status: String
+    public let result_summary: String?
+    /// The web path of what the action created, once it ran.
+    public let result_route: String?
+    /// An API path the result (a PDF) downloads from with the user's token.
+    public let result_download: String?
+    public let error: String?
+    /// Set for a letter: what the card shows; editing is the web's (stage 4 leaves it there).
+    public let letter: LetterDraft?
+    /// Set for a text document: what will be filed.
+    public let text_document: TextDocumentPreview?
+    /// Set for a collage: what will be rendered, afterwards the photo it became.
+    public let collage: CollagePreview?
+    /// What the assistant goes on with once the card ran; the chat asks it to right after "Ausführen".
+    public let continuation: String?
+
+    public var id: Int { proposal_id }
+
+    public init(proposal_id: Int, tool: String, summary: String, count: Int? = nil, status: String,
+                result_summary: String? = nil, result_route: String? = nil, result_download: String? = nil,
+                error: String? = nil, letter: LetterDraft? = nil, text_document: TextDocumentPreview? = nil,
+                collage: CollagePreview? = nil, continuation: String? = nil) {
+        self.proposal_id = proposal_id
+        self.tool = tool
+        self.summary = summary
+        self.count = count
+        self.status = status
+        self.result_summary = result_summary
+        self.result_route = result_route
+        self.result_download = result_download
+        self.error = error
+        self.letter = letter
+        self.text_document = text_document
+        self.collage = collage
+        self.continuation = continuation
+    }
+
+    public var isPending: Bool { status == "pending" }
+    public var isExecuted: Bool { status == "executed" }
+    public var isDiscarded: Bool { status == "discarded" }
+
+    /// The status as the web's tag reads it.
+    public var statusLabel: String {
+        switch status {
+        case "pending": return "Wartet auf Bestätigung"
+        case "executing": return "Läuft"
+        case "executed": return "Ausgeführt"
+        case "discarded": return "Verworfen"
+        default: return status
+        }
+    }
+
+    /// The gaps left in a letter (`[[Zahlungsdatum]]`); "Ausführen" waits while there are any.
+    public var letterGaps: [String] {
+        guard let letter else { return [] }
+        return LetterGaps.gaps(in: letter.sender, letter.recipient, letter.subject, letter.body)
+    }
+
+    /// A proposal read from a row of a `proposal` block.
+    public init?(row: ResultRow) {
+        guard let data = try? JSONEncoder().encode(JSONValue.object(row.fields)),
+              let proposal = try? JSONDecoder().decode(Proposal.self, from: data) else { return nil }
+        self = proposal
+    }
+}
+
+public struct LetterAttachment: Codable, Hashable, Sendable {
+    public let id: Int
+    public let title: String
+
+    public init(id: Int, title: String) {
+        self.id = id
+        self.title = title
+    }
+}
+
+/// A letter as the card shows it (`LetterDraft` in assistant/proposals.ts).
+public struct LetterDraft: Codable, Hashable, Sendable {
+    public let sender: String
+    public let recipient: String
+    public let subject: String
+    public let body: String
+    public let attachments: [LetterAttachment]
+    /// Photos printed after the letter, one per page; absent on older rows.
+    public let photos: [LetterAttachment]?
+    /// `document`, `collection`.
+    public let destinations: [String]
+    public let gaps: [String]?
+
+    public init(sender: String, recipient: String, subject: String, body: String,
+                attachments: [LetterAttachment] = [], photos: [LetterAttachment]? = nil,
+                destinations: [String] = ["document"], gaps: [String]? = nil) {
+        self.sender = sender
+        self.recipient = recipient
+        self.subject = subject
+        self.body = body
+        self.attachments = attachments
+        self.photos = photos
+        self.destinations = destinations
+        self.gaps = gaps
+    }
+}
+
+public struct TextDocumentPreview: Codable, Hashable, Sendable {
+    public let title: String
+    public let markdown: String
+
+    public init(title: String, markdown: String) {
+        self.title = title
+        self.markdown = markdown
+    }
+}
+
+/// A collage before it is rendered, and the photo it became (`CollagePreview`).
+public struct CollagePreview: Codable, Hashable, Sendable {
+    public struct Photo: Codable, Hashable, Sendable {
+        public let id: Int
+        public let filename: String
+
+        public init(id: Int, filename: String) {
+            self.id = id
+            self.filename = filename
+        }
+
+        public var thumbnail: DisplayThumbnail { DisplayThumbnail(kind: "photo", id: id, filename: filename) }
+    }
+
+    public struct Result: Codable, Hashable, Sendable {
+        public let photo_id: Int
+        public let filename: String
+
+        public init(photo_id: Int, filename: String) {
+            self.photo_id = photo_id
+            self.filename = filename
+        }
+
+        public var thumbnail: DisplayThumbnail { DisplayThumbnail(kind: "photo", id: photo_id, filename: filename) }
+    }
+
+    /// In cell order.
+    public let photos: [Photo]
+    public let layout: String
+    public let text: String
+    public let text_position: String
+    public let text_size: String
+    public let album_name: String?
+    public let result: Result?
+
+    public init(photos: [Photo], layout: String, text: String = "", text_position: String = "center",
+                text_size: String = "medium", album_name: String? = nil, result: Result? = nil) {
+        self.photos = photos
+        self.layout = layout
+        self.text = text
+        self.text_position = text_position
+        self.text_size = text_size
+        self.album_name = album_name
+        self.result = result
+    }
+}
+
+extension ResultBlock {
+    /// The proposals of a `proposal` block; empty for any other kind.
+    public var proposals: [Proposal] {
+        kind == "proposal" ? rows.compactMap(Proposal.init(row:)) : []
+    }
+}
+
+/// A gap the assistant left in a letter for the user to fill in, written
+/// `[[Zahlungsdatum]]` in the text (`letterGaps` on the web, #1534).
+public enum LetterGaps {
+    private static let pattern = try! NSRegularExpression(pattern: #"\[\[([^\]\n]{1,120})\]\]"#)
+
+    /// The distinct gaps in the texts, in order of appearance.
+    public static func gaps(in texts: String...) -> [String] {
+        var out: [String] = []
+        for text in texts {
+            let range = NSRange(text.startIndex..., in: text)
+            for match in pattern.matches(in: text, range: range) {
+                guard let r = Range(match.range(at: 1), in: text) else { continue }
+                let gap = text[r].trimmingCharacters(in: .whitespaces)
+                if !out.contains(gap) { out.append(gap) }
+            }
+        }
+        return out
+    }
+}
+
+/// What happens around a card once it ran (`proposalEffects.ts` on the web).
+public enum ProposalEffects {
+    /// The question the chat asks for the assistant once a card ran: the rest
+    /// of the question that needed its result.
+    public static func continuationQuestion(summary: String, continuation: String) -> String {
+        var trimmed = summary
+        while let last = trimmed.last, last == "." || last.isWhitespace { trimmed.removeLast() }
+        return "Die Karte ist ausgeführt: \(trimmed). Mach jetzt weiter: \(continuation)"
+    }
+}

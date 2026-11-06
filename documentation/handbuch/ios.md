@@ -319,8 +319,8 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 - Verbindung weg: die Antwort läuft auf dem Server weiter; die App
   verbindet sich bis zu sechsmal neu, danach „Die Verbindung zur laufenden
   Antwort ist abgerissen …“, und die Antwort steht nach dem Neuladen da.
-- Vorschläge (Album anlegen, Tags …) erscheinen als Zeilen „Vorschlag“;
-  Ausführen geht noch nur in der Web-App.
+- Vorschläge (Album anlegen, Tags …) erscheinen als Karten „Vorschlag“,
+  siehe IOS-ASS-04.
 - **Test:** –
 
 ### IOS-ASS-02 Assistent zu Fotos fragen
@@ -343,6 +343,31 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   auch ohne Mitteilung.
 - Abschaltbar im Web unter Profil › Benachrichtigungen › „Assistent“.
   Voraussetzung: Mitteilungen in der App eingeschaltet (IOS-SET-03).
+- **Test:** –
+
+### IOS-ASS-04 Vorschlag ausführen
+
+- Schlägt der Assistent eine Änderung vor (Album anlegen, Fotos ins Album,
+  Favoriten, Tags, Sammelmappe, Bericht, Brief, Collage, Fotobuch …), steht
+  sie als Karte „Vorschlag“ mit Status „Wartet auf Bestätigung“ in der
+  Antwort — auch schon, während die Antwort noch läuft. Nichts ist
+  passiert, bis man „Ausführen“ antippt; „Verwerfen“ legt den Vorschlag ab
+  (durchgestrichen). Schlägt das Ausführen fehl, bleibt die Karte offen mit
+  dem Fehler und „Erneut ausführen“.
+- Die Karte zeigt vorher, was sie tun wird: ein Brief mit Absender,
+  Empfänger, Betreff, Text und Anlagen (Lücken `[[…]]` orange), ein
+  Textdokument mit seinem Text, eine Collage mit ihren Fotos und der
+  Bildunterschrift.
+- Ein Brief oder eine Collage wird auf dem Telefon nicht bearbeitet. Bleibt
+  im Brief eine Lücke, ist „Ausführen“ aus, die Karte sagt es, und „Im Web“
+  öffnet die Unterhaltung angemeldet in der Web-Ansicht zum Ausfüllen.
+- Nach dem Ausführen: Ergebniszeile mit Haken, „Ansehen“ öffnet das
+  Ergebnis (Album in der App, sonst Web-Ansicht), „PDF ansehen“ zeigt
+  Bericht oder Brief als Vorschau mit Teilen, ein Brief zusätzlich „Als
+  E-Mail-Entwurf“. Steht auf der Karte „Nach dem Ausführen mache ich
+  weiter: …“, stellt der Chat diese Frage von selbst (wartet, bis eine
+  laufende Antwort fertig ist). Die Albenliste lädt sich neu, wenn ein
+  Album entstanden ist.
 - **Test:** –
 
 ## SHR: Share-Extension
@@ -390,6 +415,7 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 | IOS-ASS-01 | Fragen stellen | – |
 | IOS-ASS-02 | Assistent zu Fotos fragen | – |
 | IOS-ASS-03 | Antwort als Mitteilung | – |
+| IOS-ASS-04 | Vorschlag ausführen | – |
 | IOS-SET-01 | Profil und Server | – |
 | IOS-SET-02 | Foto-Synchronisierung | – |
 | IOS-SET-03 | Benachrichtigungen und Spotlight | – |

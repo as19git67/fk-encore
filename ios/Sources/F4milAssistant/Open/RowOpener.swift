@@ -31,7 +31,7 @@ final class RowOpener {
         if host.openRoute(route, url) { return }
         switch RouteResolver.target(for: route) {
         case .documentPDF(let id):
-            pdf = PDFItem(documentId: id)
+            pdf = .document(id: id)
         case .web:
             // Signed in as the app's user through a one-time handover token
             // (assistent-ios.md, stage 5); the plain page, which asks for a
@@ -39,11 +39,46 @@ final class RowOpener {
             web = WebItem(url: await WebHandover.signedInURL(for: route, client: api.client) ?? url)
         }
     }
+
+    /// A card ran and left a PDF behind (`result_download`): show it, with the share sheet.
+    func openDownload(path: String, title: String) {
+        pdf = .file(path: path, title: title)
+    }
 }
 
-struct PDFItem: Identifiable, Hashable {
-    let documentId: Int
-    var id: Int { documentId }
+/// What the PDF preview shows: a document by id, or a file the API serves
+/// at a path (a card's result).
+enum PDFItem: Identifiable, Hashable {
+    case document(id: Int)
+    case file(path: String, title: String)
+
+    var id: String {
+        switch self {
+        case .document(let id): return "document:\(id)"
+        case .file(let path, _): return "file:\(path)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .document: return "Dokument"
+        case .file(_, let title): return title
+        }
+    }
+
+    func load(with api: AssistantAPI) async throws -> Data {
+        switch self {
+        case .document(let id): return try await api.documentFile(id: id)
+        case .file(let path, _): return try await api.file(at: path)
+        }
+    }
+
+    var fileStem: String {
+        switch self {
+        case .document(let id): return "assistant-document-\(id)"
+        case .file: return "assistant-result"
+        }
+    }
 }
 
 struct WebItem: Identifiable, Hashable {

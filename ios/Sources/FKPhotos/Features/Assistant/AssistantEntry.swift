@@ -98,6 +98,12 @@ enum PhotosAssistantHost {
     static func make(auth: AuthManager) -> AssistantHost {
         AssistantHost(
             hasPermission: { auth.hasPermission($0) },
+            // A card ran (stage 4): an album the assistant created or filled
+            // is on the server, but the album list of this tab was loaded
+            // when the tab opened. Say so; the list reloads itself.
+            didExecuteProposal: { tool in
+                NotificationCenter.default.post(name: .assistantProposalExecuted, object: nil, userInfo: ["tool": tool])
+            },
             openRoute: { _, webURL in
                 let router = AppDeepLinkRouter.shared
                 guard let link = AppDeepLink.parse(webURL, serverURL: router.serverURL) else { return false }
@@ -108,4 +114,10 @@ enum PhotosAssistantHost {
             }
         )
     }
+}
+
+extension Notification.Name {
+    /// A proposal card of the assistant ran; `userInfo["tool"]` names the
+    /// tool. Lists the app keeps for a tab's life reload on it.
+    static let assistantProposalExecuted = Notification.Name("F4milAssistant.proposalExecuted")
 }

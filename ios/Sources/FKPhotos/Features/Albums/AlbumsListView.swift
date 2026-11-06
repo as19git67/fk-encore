@@ -304,6 +304,13 @@ struct AlbumsListView: View {
             await viewModel.loadAlbums()
         }
         .task {
+            // An album the assistant created or filled through a card (stage 4
+            // of assistent-ios.md) shows without leaving the tab.
+            for await _ in NotificationCenter.default.notifications(named: .assistantProposalExecuted) {
+                await viewModel.loadAlbums()
+            }
+        }
+        .task {
             await reviewCount.refresh()
         }
         .alert("Neues Album", isPresented: $showCreateSheet) {
