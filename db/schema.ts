@@ -4106,6 +4106,37 @@ export const tripWikiArticles = pgTable(
 );
 
 /**
+ * What open data says about one place, for ranking and the card
+ * (candidate ranking plan, stages 1–2): page views, language editions,
+ * Commons pictures, a Wikivoyage listing.
+ *
+ * Per place, not per trip — the same cathedral is in every trip to its
+ * city, and asking Wikimedia again for each would be rude and slow.
+ * Keyed by the OSM reference, which every pool entry, stop and idea
+ * has; the Wikidata id and article it was looked up under are kept
+ * alongside. Valid for 90 days (`FAME_VALID_DAYS`). A row with no
+ * `fetched_at` is waiting for the background refill.
+ */
+export const tripSpotFame = pgTable("trip_spot_fame", {
+  osm_ref: text("osm_ref").primaryKey(),
+  name: text("name"),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  wikidata_qid: text("wikidata_qid"),
+  /** The map's `wikipedia` tag: "it:Duomo di Esempio". */
+  wikipedia: text("wikipedia"),
+  pageviews: integer("pageviews"),
+  languages: integer("languages"),
+  commons_category: text("commons_category"),
+  commons_files: integer("commons_files"),
+  /** The listing's one-line description, CC BY-SA, with the page it came from. */
+  wikivoyage: text("wikivoyage"),
+  wikivoyage_page: text("wikivoyage_page"),
+  fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true }),
+  requested_at: timestamp("requested_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * The pool without a trip (§20).
  *
  * Everything else in the planner needs a trip. This is the list people

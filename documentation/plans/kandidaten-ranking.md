@@ -1,6 +1,6 @@
 # Candidates: ranked, pictured, explained — and one list instead of two
 
-Status: planned (2026-11-06). Nothing built yet.
+Status: in progress (2026-11-06). Stages 0 and 1 built; see "As built" under each stage.
 
 ## The problem
 
@@ -91,6 +91,13 @@ Backend only, no migration.
 Tests: `add-find.test.ts` (a find enters at 10 with its reason),
 `ideas-trip.test.ts` (unchanged outcome, no second update).
 
+As built (2026-11-06): `MANUAL_SCORE` and `MANUAL_REASON` in
+`candidates.ts`; `addFind` enters at it, `mergeIntoPoolEntry`
+(`find-store.ts`) raises a merged search candidate to it and puts the
+reason first; migration `0291_trip_pool_manual_top_pick` raises the
+manual rows already in a pool and replaces the old "selbst hinzugefügt"
+reason.
+
 ## Stage 1 — prominence from open data
 
 A graded "Bekanntheit" replaces the three half-points. Every signal is
@@ -126,6 +133,33 @@ open, keyless, cacheable and offline-able:
 Tests: pure scoring from raw numbers (`prominence.test.ts`), the
 Wikivoyage listing parser on a fixture page with invented places, the
 pageviews parser.
+
+As built (2026-11-06), with three deliberate changes to the above:
+
+- **Asked when the pool is built, not afterwards.** The days are
+  planned out of the pool in the same request, so a job that re-sorted
+  the pool later would re-sort a list whose best entries were already
+  chosen by the old tag sum. `prominenceAround` (`spot-fame.ts`) runs
+  in the pool build, answers from the cache first and gives Wikimedia
+  `LOOKUP_BUDGET_MS` (8 s) for the rest; what does not answer in time
+  is ranked the old way once, stored as waiting, and filled by the
+  local cron job `trip-planner-spot-fame` (every 30 minutes) for the
+  next build.
+- **Keyed by the OSM reference**, in `trip_spot_fame`
+  (migration `0292_trip_spot_fame`), with the Wikidata id and article
+  it was looked up under beside it: every pool entry, stop and idea
+  has an OSM reference, not all have an item.
+- **No `prominence` column on the pool row.** The result travels as
+  the score and the reasons, which the pool row and the offline bundle
+  already carry; the raw numbers stay in the cache.
+
+The Wikivoyage article is the nearest one to the stay's anchor by
+Wikivoyage's own geosearch (German first, then English), not found
+through the settlement's Wikidata item. Tiers are quartiles of
+`fameValue` within the pool and add `TIER_POINTS` (0.5–2.5) to the
+base score of 1 in place of the Wikidata and Wikipedia points; the
+`tourism=*` half point stays. The test suite runs with a silent client
+(`TRIP_SPOT_FAME=0` in `vitest.config.ts`).
 
 ## Stage 2 — a picture on the card
 

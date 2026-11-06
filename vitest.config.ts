@@ -19,6 +19,9 @@ export default defineConfig({
       // after an answer; a scripted test counts its rounds, so it is off here
       // and switched on by the tests that cover it.
       ASSISTANT_VERIFY: "0",
+      // A plan built in a test must not reach Wikimedia for its ranking
+      // (trip-planner/fame-client.ts); the tests that cover it set a fake.
+      TRIP_SPOT_FAME: "0",
       DB_TYPE: "postgres",
       // Postgres connection details fall back to a local instance but must
       // stay overridable from the real environment. `test.env` applies ONLY

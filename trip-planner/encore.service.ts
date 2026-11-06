@@ -63,6 +63,7 @@ import "./live-activity";
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
 import { tickLiveActivities } from "./live-activity";
+import { refillSpotFame } from "./spot-fame";
 
 // A trip planned for a place with no imported region is saved framed
 // and empty, and the import that follows takes hours (§4.3). This is
@@ -91,6 +92,19 @@ schedule({
   nextFire: everyMs(5 * 60_000),
   run: async () => {
     await tickLiveActivities();
+  },
+});
+
+// What a pool build could not look up within its budget (ranking plan,
+// stage 1): page views and the rest, for the next build of that city.
+schedule({
+  name: "trip-planner-spot-fame",
+  description: "Look up page views, language editions, Commons and Wikivoyage for pool places still waiting.",
+  service: "trip-planner",
+  scheduleLabel: "every 30m",
+  nextFire: everyMs(30 * 60_000),
+  run: async () => {
+    await refillSpotFame();
   },
 });
 

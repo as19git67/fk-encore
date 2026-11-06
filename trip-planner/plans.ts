@@ -54,6 +54,7 @@ import {
 import { storedHorizon } from "./horizon-store";
 import { fairnessOfPlan, votesOfLeg } from "./vote-store";
 import { orderBlocksForLight } from "./light-replan";
+import { prominenceAround } from "./spot-fame";
 import { applyVotes, markWanted, tally, type Tally } from "./votes";
 import { requireOrganiser } from "./plan-access";
 import {
@@ -1608,6 +1609,10 @@ async function planLeg(
   const scored = toCandidates(spots, {
     interests: trip.interests,
     dwellMinutes: trip.dwellMinutes,
+    // How well known each place is, from open data (ranking plan,
+    // stage 1): asked here because the days below are planned out of
+    // this order.
+    prominence: await prominenceAround(spots, anchor),
     // This pool is what a day gets built out of, so it holds only what
     // is worth a block. A lookup ("what is near me") asks its own
     // question and keeps the ordinary.
@@ -2272,6 +2277,7 @@ async function dayTripPool(
   const pool = toCandidates(spots, {
     interests: trip.interests,
     dwellMinutes: trip.dwellMinutes,
+    prominence: await prominenceAround(spots, dayTrip.at),
     requireProminence: true,
   }).filter((candidate) => !trip.hidden?.has(candidate.osmRef));
   cache.set(key, pool);

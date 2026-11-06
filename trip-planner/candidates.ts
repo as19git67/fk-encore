@@ -18,6 +18,7 @@ import { keepsSelection, matchedInterests, selectionOf } from "./interests";
 import { lightWindows } from "./sun";
 import type { Coordinate } from "./travel";
 import { spotLight } from "./light";
+import type { Prominence } from "./prominence";
 
 /**
  * How long people typically stay, per category, in minutes. Rough by
@@ -85,6 +86,13 @@ export interface ScoringOptions {
   interests?: readonly string[];
   /** Per-category overrides for the dwell defaults. */
   dwellMinutes?: Readonly<Record<string, number>>;
+  /**
+   * How well known each place is, from open data (`prominence.ts`).
+   * Where a place has an answer it replaces the Wikidata and Wikipedia
+   * points; where it has none, those still count, so a pool looked up
+   * halfway is not upended.
+   */
+  prominence?: ReadonlyMap<string, Prominence>;
 }
 
 export interface LightScoringOptions {
@@ -189,15 +197,26 @@ export function toCandidates(
     // did, and both ended up in a morning.
     let prominence = 0;
 
-    if (spot.wikidataQid) {
-      score += 1;
-      prominence += 1;
-      reasons.push("in Wikidata verzeichnet");
-    }
-    if (spot.wikipedia) {
-      score += 1;
-      prominence += 1;
-      reasons.push("hat einen Wikipedia-Artikel");
+    const known = opts.prominence?.get(spot.osmRef);
+    if (spot.wikidataQid) prominence += 1;
+    if (spot.wikipedia) prominence += 1;
+    // A travel guide naming it is a judgement too, like the mapper's tag.
+    if (known?.reasons.includes("in Wikivoyage genannt")) prominence += 1;
+    if (known) {
+      // What people read, in how many languages, what a travel guide
+      // lists — instead of "has an item, has an article", which in a
+      // city every candidate has (stage 1 of the ranking plan).
+      score += known.points;
+      reasons.push(...known.reasons);
+    } else {
+      if (spot.wikidataQid) {
+        score += 1;
+        reasons.push("in Wikidata verzeichnet");
+      }
+      if (spot.wikipedia) {
+        score += 1;
+        reasons.push("hat einen Wikipedia-Artikel");
+      }
     }
     // Somebody tagged it as a thing to see, which is a judgement a
     // mapper made on the ground.
