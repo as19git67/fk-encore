@@ -476,6 +476,87 @@ export function holdingsSection(text: string, limit = 16_000): string | null {
   return [...lines.slice(0, 15), "…", ...lines.slice(Math.max(15, start - 3))].join("\n");
 }
 
+// ----------------------------------------------------------------------
+// Quantity and name first, identifier last
+// ----------------------------------------------------------------------
+//
+// Some statements print a position as a block that opens with the
+// quantity and the name and closes with the identifier:
+//
+//   Stück   12,500   ALPHA FONDS ANTEILE
+//   INHABER-ANTEILE
+//   DE0000000000 (AAA111)
+//
+// with price and value in a column of their own, which OCR may put
+// anywhere on the page ("98,10 EUR   1.226,25"). A "Stück" in the lines
+// below an identifier then opens the next position, never closes this one.
+
+const LEAD_LINE_RE = new RegExp(
+  String.raw`^\s*(?:St(?:ü|ii|u)ck|Stk\.?|Nominale?|Anteile)[ \t:]+${AMOUNT}[ \t]+([A-Za-zÄÖÜäöüß][^\n]*)$`,
+  "i",
+);
+const FIGURE_LINE_RE = new RegExp(String.raw`^\s*${AMOUNT}\s*(EUR|USD|CHF|GBP)\s+${AMOUNT}\s*$`);
+
+interface LeadLine {
+  quantity: number;
+  name: string | null;
+}
+
+/**
+ * The lead line of each identifier, in that layout: exactly one between
+ * the previous identifier and its own, none after the last. Null when the
+ * paper is not laid out like that — then the labels near the identifier
+ * say what it holds.
+ */
+function leadLinesFor(lines: string[], hits: IdentifierHit[]): LeadLine[] | null {
+  if (hits.length === 0) return null;
+  const leadAt = new Map<number, LeadLine>();
+  lines.forEach((line, i) => {
+    const m = LEAD_LINE_RE.exec(line);
+    if (!m) return;
+    const quantity = parseGermanNumber(m[1]!);
+    if (quantity === null || quantity === 0) return;
+    leadAt.set(i, { quantity: Math.abs(quantity), name: cleanSecurityName(m[2]!.trim()) });
+  });
+  if (leadAt.size !== hits.length) return null;
+  const order = hits.map((h, i) => ({ line: h.line, i })).sort((a, b) => a.line - b.line);
+  const out: LeadLine[] = new Array(hits.length);
+  let previous = -1;
+  for (const { line, i } of order) {
+    const between = [...leadAt.keys()].filter((l) => l > previous && l < line);
+    if (between.length !== 1) return null;
+    out[i] = leadAt.get(between[0]!)!;
+    previous = line;
+  }
+  return out;
+}
+
+/**
+ * Price and value from the lines that print only those two ("98,10 EUR
+ * 1.226,25"), wherever OCR put them: a line belongs to the one position
+ * whose quantity × price gives its value, and to no other.
+ */
+function fillFiguresByArithmetic(lines: string[], positions: StatementPosition[]): void {
+  const figures = lines
+    .map((l) => FIGURE_LINE_RE.exec(l))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => ({ price: parseGermanNumber(m[1]!), currency: m[2]!, value: parseGermanNumber(m[3]!) }))
+    .filter((f): f is { price: number; currency: string; value: number } => f.price !== null && f.value !== null);
+  const used = new Set<number>();
+  for (const p of positions) {
+    if (p.quantity === null || p.price !== null || p.value !== null) continue;
+    const fits = figures
+      .map((f, k) => ({ f, k }))
+      .filter(({ f, k }) => !used.has(k) && positionAddsUp({ quantity: p.quantity, price: f.price, value: f.value }));
+    if (fits.length !== 1) continue;
+    const { f, k } = fits[0]!;
+    used.add(k);
+    p.price = Math.abs(f.price);
+    p.value = Math.abs(f.value);
+    p.currency = f.currency;
+  }
+}
+
 /**
  * The rules' reading of a statement. `positions` has one entry per
  * identifier found; the figures are those labelled near it, null where no
@@ -493,24 +574,27 @@ export function inspectDepotStatement(raw: string | null | undefined): Statement
   const hits = rows.length > 0 ? [] : identifierHits(lines);
   const identifierLines = [...hits.map((h) => h.line), ...rows.map((r) => r.line)];
   const tablePositions: StatementPosition[] = rows.map(({ line: _line, ...p }) => p);
-  const labelledPositions: StatementPosition[] = hits.map((hit) => {
+  const leads = leadLinesFor(lines, hits);
+  const labelledPositions: StatementPosition[] = hits.map((hit, i) => {
     const block = blockAround(lines, hit.line, identifierLines);
+    const lead = leads?.[i] ?? null;
     // "10,5 Anteile" before "Stück 25": a number right before its unit is the quantity for sure.
-    const quantity = amountBefore(block, QUANTITY_AFTER_LABELS) ?? amountAfter(block, QUANTITY_LABELS);
+    const quantity = lead ? lead.quantity : (amountBefore(block, QUANTITY_AFTER_LABELS) ?? amountAfter(block, QUANTITY_LABELS));
     const price = amountAfter(block, PRICE_LABELS);
     const value = amountAfter(block, VALUE_LABELS);
     const acquisitionPrice = amountAfter(block, ACQUISITION_LABELS);
     return {
       isin: hit.isin,
       wkn: hit.wkn,
-      name: nameNear(lines, hit.line, hit.isin, hit.wkn),
+      name: lead?.name ?? nameNear(lines, hit.line, hit.isin, hit.wkn),
       quantity,
       price,
       value,
-      currency: currencyOf(block),
+      currency: lead ? null : currencyOf(block),
       acquisitionPrice,
     };
   });
+  if (leads) fillFiguresByArithmetic(lines, labelledPositions);
   return {
     statement,
     asOf: statementDate(text),
