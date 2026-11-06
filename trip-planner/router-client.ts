@@ -80,6 +80,7 @@ export function costingFor(mode: TransportMode): "auto" | "bicycle" | "pedestria
     case "foot": return "pedestrian";
     case "transit": return null;
     case "ship": return null;
+    case "plane": return null;
   }
 }
 

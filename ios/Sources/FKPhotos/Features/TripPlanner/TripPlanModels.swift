@@ -962,6 +962,10 @@ enum TripTransportMode: String, CaseIterable, Sendable {
     /// stay never gets about by ship, so the places' pickers leave it
     /// out — see `forPlaces`.
     case ship
+    /// A journey's mode only as well: the way to the first stay, or
+    /// between two far apart. The arrival by plane had no mode to
+    /// pick, and "zu Fuß" for a flight was the wrong word on the card.
+    case plane
 
     /// What a place may get about by. The journey screen offers all.
     static let forPlaces: [TripTransportMode] = [.foot, .bike, .transit, .car]
@@ -977,6 +981,7 @@ enum TripTransportMode: String, CaseIterable, Sendable {
         case .transit: return "tram"
         case .car:     return "car"
         case .ship:    return "ferry"
+        case .plane:   return "airplane"
         }
     }
 
@@ -991,6 +996,7 @@ enum TripTransportMode: String, CaseIterable, Sendable {
         case .transit: return "ÖPNV & zu Fuß"
         case .car:     return "mit dem Auto"
         case .ship:    return "mit dem Schiff"
+        case .plane:   return "mit dem Flugzeug"
         }
     }
 
@@ -1003,6 +1009,7 @@ enum TripTransportMode: String, CaseIterable, Sendable {
         case .transit: return "Kurze Wege laufen, lange fahren"
         case .car:     return "Mit Parken gerechnet"
         case .ship:    return "An Bord – nichts wird hineingeplant"
+        case .plane:   return "Flug – nichts wird hineingeplant"
         }
     }
 }

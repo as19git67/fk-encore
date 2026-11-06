@@ -41,6 +41,14 @@ describe("the frame of a journey", () => {
     expect(days.map((d) => d.reason)).toEqual(["An Bord", "An Bord"]);
   });
 
+  it("plans nothing into a flight", () => {
+    const [day] = transitFrame({
+      origin, destination, dayCount: 1, departMinutes: 600, endMinutes: 840, mode: "plane",
+    });
+    expect(day.plannable).toBe(false);
+    expect(day.reason).toBe("Unterwegs mit dem Flugzeug");
+  });
+
   it("spans several days with the departure on the first and the arrival on the last", () => {
     const days = transitFrame({
       origin, destination, dayCount: 3, departMinutes: 1200, endMinutes: 480, mode: "car",

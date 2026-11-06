@@ -197,3 +197,16 @@ itinerary.
 - A change in the itinerary may shorten planned days; undo exists
   (`…/ops/undo`).
 - The level is called Aufenthalt in the UI.
+
+## Usage notes (2026-11-06, round 4)
+
+- The leg strip of the day page draws the chain: stays as chips, a
+  journey with nights as its mode's symbol on the line between them,
+  its length beneath. "An Bord nach …" as a chip was twice the width
+  of the port it led to and the row said nothing about order.
+- The day header is always the stay. On a day trip it read "Ausflug:
+  …", so a tap on the outing's name opened the stay's sheet, titled
+  after the city, with the itinerary behind it. The outing has one
+  row, first in the day's frame, and that row opens the outing.
+- A journey can go by `plane`: a journey's mode only, like `ship`;
+  nothing is planned into it. Arriving by plane had no mode to pick.

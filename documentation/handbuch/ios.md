@@ -239,6 +239,11 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   „Erledigt“ unterwegs, „Zurück zu den Kandidaten“.
 - Dieselben Aktionen in Liste, Detail („Alle Details“), Pin-Sheet und
   Karte.
+- Die Etappenleiste oben zeigt die Reise als Kette: Aufenthalte als
+  Chips, eine Weiterreise mit Nächten als Symbol ihres Verkehrsmittels
+  auf der Linie dazwischen. Der Kopf darunter ist immer der Aufenthalt
+  (Unterkunft, Fortbewegung) und öffnet dessen Sheet; der Ausflug eines
+  Tages steht als erste Zeile im Rahmen des Tages und öffnet den Ausflug.
 - **Test:** –
 
 ### IOS-PLN-03 Gemeinsam planen

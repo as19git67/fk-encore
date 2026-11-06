@@ -62,6 +62,8 @@ enum TripRouteMode: Sendable {
         case .car:     self = .driving
         // No maps app routes a cruise; transit is where ferries live.
         case .ship:    self = .transit
+        // Nor a flight; the way to the airport is public transport.
+        case .plane:   self = .transit
         }
     }
 

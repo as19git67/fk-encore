@@ -110,7 +110,7 @@ const MAX_DAYS = 14;
  * between them are legs too and are bounded by the stays.
  */
 const MAX_STAYS = 20;
-const TRANSPORT_MODES: readonly TransportMode[] = ["foot", "bike", "transit", "car", "ship"];
+const TRANSPORT_MODES: readonly TransportMode[] = ["foot", "bike", "transit", "car", "ship", "plane"];
 const FIXPOINT_KINDS: readonly FixpointKind[] = ["appointment", "departure"];
 /**
  * How many days of the trip are planned down to spots straight away
