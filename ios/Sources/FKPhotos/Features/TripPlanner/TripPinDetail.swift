@@ -61,6 +61,8 @@ struct TripPinDetail: Equatable {
     var extentText: String? = nil
     /// The place's picture (candidate ranking, stage 2), nil where it has none.
     var image: TripRoutePhoto? = nil
+    /// What the place is, with its source (candidate ranking, stage 4).
+    var description: TripSpotDescription? = nil
 
     /// Everything the map knows about one stop, gathered once.
     ///
@@ -91,7 +93,8 @@ struct TripPinDetail: Equatable {
                 isPinned: stop.pinned,
             ),
             extentText: stop.extent?.summary,
-            image: stop.image
+            image: stop.image,
+            description: stop.description
         )
     }
 
@@ -115,7 +118,8 @@ struct TripPinDetail: Equatable {
             coordinate: candidate.coordinate,
             planned: nil,
             extentText: candidate.extent?.summary,
-            image: candidate.image
+            image: candidate.image,
+            description: candidate.description
         )
     }
 

@@ -181,6 +181,9 @@ struct TripPinDetailSheet: View {
                         Text(image.credit)
                     }
                 }
+                if let description = detail.description {
+                    TripSpotDescriptionSection(description: description)
+                }
                 if let planned = detail.planned {
                     Section {
                         LabeledContent("Wann") {

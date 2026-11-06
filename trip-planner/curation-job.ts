@@ -350,6 +350,7 @@ async function entriesOf(legId: number, db: Db): Promise<{
       reasons: tripPlanPool.reasons,
       wikipediaUrl: tripPlanPool.wikipedia_url,
       wikivoyage: tripSpotFame.wikivoyage,
+      description: tripSpotFame.description,
     })
     .from(tripPlanPool)
     .leftJoin(tripSpotFame, eq(tripSpotFame.osm_ref, tripPlanPool.osm_ref))
@@ -360,7 +361,9 @@ async function entriesOf(legId: number, db: Db): Promise<{
   const chosen = [...rows]
     .sort((a, b) => b.score - a.score || a.osmRef.localeCompare(b.osmRef))
     .slice(0, MAX_CURATION_ENTRIES);
-  const leads = await leadsFor(chosen.filter((r) => !r.wikivoyage).map((r) => r.wikipediaUrl));
+  const described = (row: (typeof chosen)[number]) =>
+    row.wikivoyage || ((row.description as { text?: string } | null)?.text ?? null);
+  const leads = await leadsFor(chosen.filter((r) => !described(r)).map((r) => r.wikipediaUrl));
 
   const entries: CurationEntry[] = chosen.map((row) => {
     const article = row.wikipediaUrl ? parseArticleUrl(row.wikipediaUrl) : null;
@@ -369,7 +372,7 @@ async function entriesOf(legId: number, db: Db): Promise<{
       name: row.name,
       category: row.category,
       reasons: ((row.reasons ?? []) as string[]).filter((r) => SHAREABLE_REASON.test(r)),
-      text: row.wikivoyage || (article ? leads.get(`${article.lang}:${article.title}`) ?? null : null),
+      text: described(row) || (article ? leads.get(`${article.lang}:${article.title}`) ?? null : null),
       manual: row.origin !== "search",
     };
   });

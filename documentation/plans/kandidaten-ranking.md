@@ -1,6 +1,6 @@
 # Candidates: ranked, pictured, explained — and one list instead of two
 
-Status: in progress (2026-11-06). Stages 0 to 3 built; see "As built" under each stage.
+Status: in progress (2026-11-06). Stages 0 to 4 built; see "As built" under each stage.
 
 ## The problem
 
@@ -271,6 +271,24 @@ A `description` per place, with its source said on screen:
 Blogs and travel reports keep coming in the way §9.3 built: shared from
 the phone, where the page is already open. A search for them is a
 separate decision (see below), not a stage of this plan.
+
+As built (2026-11-06): kept per place in `trip_spot_fame` (migration
+0295: the map's `website`, `description` as text, source and URL, and
+`described_at`). A Wikivoyage line is read straight from the lookup and
+never copied. The rest is looked for in the background
+(`describeSpots` in `trip-planner/spot-description.ts`, cron
+`trip-planner-spot-descriptions` every 30 minutes) for places in a pool
+or on a day: the Wikipedia lead through `FameClient.leads` when it has
+at least `MIN_LEAD_CHARS`, else the website through `fetchSharedPage`,
+cut to `MAX_SITE_CHARS` and summarised by the local model, kept only
+when its quote is on the page (`quoteAppearsIn`) and the summary names
+no number or opening-hours or price word the page did not
+(`namesUnknownFact` from stage 3). At most five websites per tick; a
+failed check stores nothing and waits 90 days like a found one. The
+curation (stage 3) reads the stored description too. Pool entries and
+stops carry `description` from `loadPlan`; iOS shows it with its
+source as a link in the detail view and the pin sheet
+(`TripSpotDescriptionSection`).
 
 ## Stage 5 — one list
 

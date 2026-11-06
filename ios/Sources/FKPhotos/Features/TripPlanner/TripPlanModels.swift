@@ -526,6 +526,8 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// main image, Wikidata's, or one taken close by. Nil where there is
     /// none, and from an older server.
     var image: TripRoutePhoto? = nil
+    /// What the place is, with its source (candidate ranking, stage 4).
+    var description: TripSpotDescription? = nil
     /// What this stop walks past on its way (§4.7): spots that lie on a
     /// route and are therefore seen without being planned. Nil or empty
     /// for every ordinary stop.
@@ -650,6 +652,8 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     var extent: TripSpotExtent? = nil
     /// See `TripStop.image`.
     var image: TripRoutePhoto? = nil
+    /// What the place is, with its source (candidate ranking, stage 4).
+    var description: TripSpotDescription? = nil
 
     var id: String { osmRef }
     var isPhotoStop: Bool { photoStop == true }

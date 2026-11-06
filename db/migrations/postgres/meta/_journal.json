@@ -2059,6 +2059,13 @@
       "when": 1790348000000,
       "tag": "0294_trip_pool_curation",
       "breakpoints": true
+    },
+    {
+      "idx": 295,
+      "version": "7",
+      "when": 1790349000000,
+      "tag": "0295_trip_spot_description",
+      "breakpoints": true
     }
   ]
 }

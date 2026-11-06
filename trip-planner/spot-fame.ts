@@ -50,7 +50,8 @@ export interface SpotImage {
   license: string | null;
 }
 
-export type FameSpot = Pick<GeoPoiSearchSpot, "osmRef" | "name" | "lat" | "lon" | "wikidataQid" | "wikipedia">;
+export type FameSpot = Pick<GeoPoiSearchSpot, "osmRef" | "name" | "lat" | "lon" | "wikidataQid" | "wikipedia">
+  & { website?: string | null };
 
 /**
  * The prominence of the places around a stay that could be a
@@ -136,7 +137,7 @@ export async function refillSpotFame(opts: { client?: FameClient; now?: Date } =
     const list = cells.get(key) ?? [];
     list.push({
       osmRef: row.osm_ref, name: row.name, lat: row.lat, lon: row.lon,
-      wikidataQid: row.wikidata_qid, wikipedia: row.wikipedia,
+      wikidataQid: row.wikidata_qid, wikipedia: row.wikipedia, website: row.website,
     });
     cells.set(key, list);
   }
@@ -351,6 +352,7 @@ async function store(spots: readonly FameSpot[], looked: ReadonlyMap<string, Loo
       lon: spot.lon,
       wikidata_qid: spot.wikidataQid,
       wikipedia: spot.wikipedia,
+      website: spot.website ?? null,
       pageviews: fame?.pageviews ?? null,
       languages: fame?.languages ?? null,
       commons_category: fame?.commonsCategory ?? null,
@@ -369,6 +371,7 @@ async function store(spots: readonly FameSpot[], looked: ReadonlyMap<string, Loo
       lon: sql`excluded.lon`,
       wikidata_qid: sql`excluded.wikidata_qid`,
       wikipedia: sql`excluded.wikipedia`,
+      website: sql`COALESCE(excluded.website, ${tripSpotFame.website})`,
       // An answer that did not come this time leaves the last one in
       // place; only a fresh answer replaces the numbers.
       pageviews: sql`CASE WHEN excluded.fetched_at IS NULL THEN ${tripSpotFame.pageviews} ELSE excluded.pageviews END`,

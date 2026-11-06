@@ -4177,6 +4177,16 @@ export const tripSpotFame = pgTable("trip_spot_fame", {
    * `SpotImage` in `trip-planner/spot-fame.ts`; null when there is none.
    */
   image: jsonb("image"),
+  /** The map's `website` tag, for a description where Wikipedia is thin (stage 4). */
+  website: text("website"),
+  /**
+   * What the card says the place is, with its source (stage 4):
+   * `SpotDescription` in `trip-planner/spot-description.ts`. Null while
+   * none was found; a Wikivoyage line needs none, it is read directly.
+   */
+  description: jsonb("description"),
+  /** When a description was last looked for, found or not. */
+  described_at: timestamp("described_at", { mode: "string", withTimezone: true }),
   fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true }),
   requested_at: timestamp("requested_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });

@@ -218,6 +218,7 @@ export const addFind = api(
       lon: entry.lon,
       wikidataQid: match?.wikidataQid ?? null,
       wikipedia: match?.wikipedia ?? null,
+      website: match?.website ?? null,
     }], position).catch(() => undefined);
 
     return {

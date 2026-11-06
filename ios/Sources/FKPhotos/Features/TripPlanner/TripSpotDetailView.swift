@@ -70,6 +70,11 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
             }
 
+            // What the place is, where Wikipedia is thin too (stage 4).
+            if let description = spot.description {
+                TripSpotDescriptionSection(description: description)
+            }
+
             // Why it was saved beats what it is called, when you are
             // deciding what to do with an afternoon (§9.2).
             if let note = spot.note, !note.isEmpty {
@@ -364,6 +369,8 @@ struct TripSpotDetail: Identifiable, Sendable {
     var extent: TripSpotExtent? = nil
     /// Its picture, where it has one (candidate ranking, stage 2).
     var image: TripRoutePhoto? = nil
+    /// What the place is, with its source (candidate ranking, stage 4).
+    var description: TripSpotDescription? = nil
 
     var id: String { osmRef }
     /// A title the group gave it wins over the map's name: they chose
@@ -392,6 +399,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         supportsPhotoStop = true
         extent = candidate.extent
         image = candidate.image
+        description = candidate.description
     }
 
     /// A place the browse turned up (§9.2, case 4 widened).
@@ -464,6 +472,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         supportsPhotoStop = true
         extent = stop.extent
         image = stop.image
+        description = stop.description
     }
 }
 

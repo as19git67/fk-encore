@@ -66,6 +66,7 @@ import { tickFillPending } from "./fill-pending";
 import { tickLiveActivities } from "./live-activity";
 import { refillSpotFame } from "./spot-fame";
 import { tickCuration } from "./curation-job";
+import { describeSpots } from "./spot-description";
 
 // A trip planned for a place with no imported region is saved framed
 // and empty, and the import that follows takes hours (§4.3). This is
@@ -121,6 +122,20 @@ schedule({
   nextFire: everyMs(5 * 60_000),
   run: async () => {
     await tickCuration();
+  },
+});
+
+// Text for a card where Wikipedia is thin (ranking plan, stage 4): the
+// Wikipedia lead, else the place's own website summarised with a quote
+// check. Wikivoyage lines need nothing; they come with the lookup.
+schedule({
+  name: "trip-planner-spot-descriptions",
+  description: "Find a description for pool places: Wikipedia lead, else their own website.",
+  service: "trip-planner",
+  scheduleLabel: "every 30m",
+  nextFire: everyMs(30 * 60_000),
+  run: async () => {
+    await describeSpots();
   },
 });
 
