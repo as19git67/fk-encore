@@ -326,6 +326,30 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "best-per-person-and-year-distinct",
+    title: "Je Person und Jahr die besten, nicht zu ähnlich, ins Album",
+    question: "Mach eine Schleife über Lena und Max und über die Jahre und nimm jeweils die 5 besten Bilder, die sich nicht zu ähnlich sind, und lege sie ins Album \"Lieblingsbilder\".",
+    expect: [
+      { tool: "list_persons" },
+      { tool: "list_photos", args: { person_ids: { $contains: "41" }, rank_by: "quality", direction: "desc", group_by: "person", then_by: "year", per_group: 5, distinct: true }, anyOf: [{ person_ids: { $contains: "41" }, rank_by: "quality", direction: "desc", group_by: "year", then_by: "person", per_group: 5, distinct: true }] },
+      { tool: "add_photos_to_album", args: { album_id: 8, from_previous_result: true } },
+    ],
+    results: {
+      list_persons: { rows: [{ id: 41, name: "Max", faces: 318 }, { id: 42, name: "Lena", faces: 402 }], total: 2 },
+      list_albums: { rows: [{ id: 8, name: "Lieblingsbilder", photos: 0 }], total: 1 },
+      list_photos: {
+        rows: [
+          { group: "person 42 · 2024", id: 931, taken: "2024-05-02", quality: "88%" },
+          { group: "person 42 · 2023", id: 902, taken: "2023-08-11", quality: "84%" },
+          { group: "person 41 · 2024", id: 911, taken: "2024-07-02", quality: "91%" },
+        ],
+        total: 3,
+        note: "ordered by quality descending, the first 5 rows of each person and year (3 groups), look-alikes left out. from_previous_result takes these 3 picked photos.",
+      },
+      add_photos_to_album: { proposal: "3 Fotos zum Album „Lieblingsbilder“ hinzufügen", status: "proposed" },
+    },
+  },
+  {
     id: "fewest-comments-per-year",
     title: "Je Jahr das Foto mit den wenigsten Kommentaren",
     question: "Welches Foto mit Max hat in jedem Jahr die wenigsten Kommentare?",

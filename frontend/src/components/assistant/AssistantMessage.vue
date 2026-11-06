@@ -167,6 +167,15 @@ const shownBlocks = computed(() => {
   return blocks.filter((b) => !LINKED_KIND[b.kind] || picksOf(b).length > 0)
 })
 
+// An answer that proposes a change has its result in the card (the album,
+// the folder); the lists it read on the way are the road there. They fold
+// away under the card instead of filling the screen above it.
+const proposalBlocks = computed(() => shownBlocks.value.filter((b) => b.kind === 'proposal'))
+const roadBlocks = computed(() => (proposalBlocks.value.length && !props.pending
+  ? shownBlocks.value.filter((b) => b.kind !== 'proposal')
+  : []))
+const openBlocks = computed(() => (roadBlocks.value.length ? proposalBlocks.value : shownBlocks.value))
+
 // Between two rounds nothing runs and nothing is written yet, but the model
 // is still at work: say so, or the answer looks finished.
 const thinking = computed(() => props.pending && !props.content && props.steps.every((s) => s.done))
@@ -319,7 +328,7 @@ const thinking = computed(() => props.pending && !props.content && props.steps.e
     </p>
 
     <div v-if="shownBlocks.length" class="blocks">
-      <template v-for="(b, i) in shownBlocks" :key="`${b.tool}-${i}`">
+      <template v-for="(b, i) in openBlocks" :key="`${b.tool}-${i}`">
         <ProposalCard v-for="p in b.kind === 'proposal' ? b.rows : []" :key="String(p.proposal_id)" :proposal="(p as unknown as Proposal)" />
         <AssistantBlock
           v-if="b.kind !== 'proposal'"
@@ -328,6 +337,18 @@ const thinking = computed(() => props.pending && !props.content && props.steps.e
           :anchor-scope="messageId !== undefined ? `m${messageId}-${i}` : undefined"
         />
       </template>
+      <details v-if="roadBlocks.length" class="blocks-folded">
+        <summary>{{ roadBlocks.length === 1 ? 'Zwischenergebnis' : `${roadBlocks.length} Zwischenergebnisse` }}</summary>
+        <div class="blocks">
+          <AssistantBlock
+            v-for="(b, i) in roadBlocks"
+            :key="`${b.tool}-road-${i}`"
+            :block="b"
+            :picked="picksOf(b)"
+            :anchor-scope="messageId !== undefined ? `m${messageId}-r${i}` : undefined"
+          />
+        </div>
+      </details>
     </div>
   </article>
 </template>
@@ -522,6 +543,23 @@ const thinking = computed(() => props.pending && !props.content && props.steps.e
 .drafts-folded summary:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+.blocks-folded summary {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  width: fit-content;
+  border-radius: 0.25em;
+}
+
+.blocks-folded summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.blocks-folded > .blocks {
+  margin-top: var(--space-2);
 }
 
 .drafts-folded .drafts {

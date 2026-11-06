@@ -8,7 +8,7 @@ import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { taxWorksheet } from "./tax";
 import { findInDocuments } from "./text-boxes";
-import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { compositeKey, dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
@@ -222,7 +222,7 @@ export const searchDocuments: ToolSpec = {
     }
     const advice = rows.length ? undefined : await emptyDocumentsHint({ ...common, q, mode }, str(args.correspondent));
     const hint = advice?.hint;
-    const groups = grouping ? groupRows(rows, (d) => groupKey(d, grouping.by), grouping.perGroup) : undefined;
+    const groups = grouping ? groupRows(rows, (d) => compositeKey(grouping, (by) => groupKey(d, by)), grouping.perGroup) : undefined;
     const shown = groups ? groups.flatMap((g) => g.rows.map((d) => ({ ...d, group: g.key }))) : rows.map((d) => ({ ...d, group: undefined as string | undefined }));
     const rowCap = groups ? Math.min(shown.length, limit * grouping!.perGroup) : limit;
     const sizeColumn = ranking.field === "size_bytes";

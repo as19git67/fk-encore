@@ -238,14 +238,17 @@ export interface SimilarPair {
 
 export type SimilarPairsLoader = (windows: number[][]) => Promise<SimilarPair[]>;
 
-function takenMs(p: BookPhoto): number | null {
+/** What the look-alike cut reads of a photo; a book photo is one, so is an assistant row. */
+export type SimilarCandidate = Pick<BookPhoto, "id" | "takenAt" | "score">;
+
+function takenMs(p: Pick<BookPhoto, "takenAt">): number | null {
   if (!p.takenAt) return null;
   const t = Date.parse(p.takenAt.replace(" ", "T"));
   return Number.isFinite(t) ? t : null;
 }
 
 /** Runs of photos close in time, in capture order; photos without a date form their own runs. */
-export function similarityWindows(list: BookPhoto[]): number[][] {
+export function similarityWindows(list: Array<Pick<BookPhoto, "id" | "takenAt">>): number[][] {
   const dated = list.filter((p) => takenMs(p) != null).sort((a, b) => takenMs(a)! - takenMs(b)!);
   const undated = list.filter((p) => takenMs(p) == null);
   const out: number[][] = [];
@@ -266,7 +269,7 @@ export function similarityWindows(list: BookPhoto[]): number[][] {
 }
 
 /** The best photo of each look-alike set stays: by score, a photo goes when it is too similar to one kept. */
-export function thinSimilar<T extends BookPhoto>(list: T[], pairs: SimilarPair[]): T[] {
+export function thinSimilar<T extends SimilarCandidate>(list: T[], pairs: SimilarPair[]): T[] {
   if (!pairs.length) return list;
   const like = new Map<number, Set<number>>();
   for (const { a, b } of pairs) {
@@ -314,8 +317,13 @@ export function setSimilarPairsLoader(next: SimilarPairsLoader | null): void {
   similarLoader = next ?? similarPairsFromService;
 }
 
+/** The look-alike pairs among `list`, compared within runs close in time. */
+export async function similarPairs(list: Array<Pick<BookPhoto, "id" | "takenAt">>): Promise<SimilarPair[]> {
+  return list.length < 2 ? [] : similarLoader(similarityWindows(list));
+}
+
 /** `list` without photos that look like a better one taken around the same time. */
-export async function dropSimilarPhotos<T extends BookPhoto>(list: T[]): Promise<T[]> {
+export async function dropSimilarPhotos<T extends SimilarCandidate>(list: T[]): Promise<T[]> {
   if (list.length < 2) return list;
   return thinSimilar(list, await similarLoader(similarityWindows(list)));
 }

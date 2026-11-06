@@ -4,6 +4,7 @@ import PrimeVue from 'primevue/config'
 import AssistantMessage from './AssistantMessage.vue'
 import type { ResultBlock } from '../../api/assistant'
 
+vi.mock('./ProposalCard.vue', () => ({ default: defineComponent({ render: () => h('div', { class: 'proposal-stub' }) }) }))
 vi.mock('../DocumentThumbnail.vue', () => ({ default: defineComponent({ render: () => h('span') }) }))
 vi.mock('../../api/gallery', () => ({ getThumbUrl: (name: string) => `/thumb/${name}` }))
 const getPhotoDetailsBatch = vi.hoisted(() => vi.fn())
@@ -49,6 +50,25 @@ beforeEach(() => {
 })
 
 describe('AssistantMessage', () => {
+  it('folds the lists read on the way under a proposal card: the card holds the result', () => {
+    const proposal = {
+      kind: 'proposal', tool: 'add_photos_to_album',
+      rows: [{ proposal_id: 1, tool: 'add_photos_to_album', summary: '3 Fotos zum Album „Beispielalbum“ hinzufügen', status: 'proposed', arguments: {} }],
+    } as unknown as ResultBlock
+    const el = mount([docs('search_documents', [1, 2]), proposal])
+    const folded = el.querySelector<HTMLDetailsElement>('details.blocks-folded')
+    expect(folded).not.toBeNull()
+    expect(folded!.open).toBe(false)
+    expect(folded!.querySelector('summary')?.textContent).toBe('Zwischenergebnis')
+    expect(folded!.textContent).toContain('Dokumente')
+    expect(el.querySelector('.proposal-stub')?.closest('details')).toBeNull()
+  })
+
+  it('keeps the lists open when nothing is proposed', () => {
+    const el = mount([docs('search_documents', [1, 2])])
+    expect(el.querySelector('details.blocks-folded')).toBeNull()
+  })
+
   it('links an item the answer names by id to its page', () => {
     const el = mount([], undefined, 'Aus dem Dokument mit der ID 123, siehe auch **Buchung 4711**.')
     const links = [...el.querySelectorAll<HTMLAnchorElement>('.text--rich a.entity-link')]

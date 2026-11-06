@@ -251,6 +251,61 @@ describe("list_photos", () => {
     expect(out.text).toContain("2024-03 | 1 |");
   });
 
+  it("hands a follow-up the picks of a ranking, not everything that matched ('die 5 besten' put 2000 photos in an album)", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: Array.from({ length: 30 }, (_, i) => ({ id: i + 1, taken_at: "2017-01-22T10:00:00Z", ai_quality_score: 90 - i })) });
+    const out = await tool("list_photos").run({ person_ids: [41], rank_by: "quality", direction: "desc", limit: 5 }, ctx());
+    expect(out.ref?.ids).toEqual([1, 2, 3, 4, 5]);
+    expect(out.block?.rows.map((r) => r.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(out.text).toContain("from_previous_result takes these 5 picked photos");
+  });
+
+  it("hands a follow-up every match of a plain filter, and marks a set cut at the read cap", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: Array.from({ length: 2001 }, (_, i) => ({ id: i + 1, taken_at: "2017-01-22T10:00:00Z" })) });
+    const out = await tool("list_photos").run({ person_ids: [41] }, ctx());
+    expect(out.ref?.ids).toHaveLength(2000);
+    expect(out.ref?.truncated).toBe(true);
+    expect(out.text).toContain("from_previous_result would take only the first 2000");
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 1, taken_at: "2017-01-22T10:00:00Z" }, { id: 2, taken_at: "2017-01-23T10:00:00Z" }] });
+    const small = await tool("list_photos").run({ person_ids: [41] }, ctx());
+    expect(small.ref).toEqual({ type: "photo", ids: [1, 2] });
+  });
+
+  it("groups per person and year in one call, leaving out look-alikes ('die 5 besten je Person und Jahr, nicht zu ähnlich')", async () => {
+    const { setSimilarPairsLoader } = await import("../photo/photo-book-subjects");
+    // 11 and 12 are the same scene minutes apart; 12 goes, 13 moves up.
+    setSimilarPairsLoader(async () => [{ a: 11, b: 12 }]);
+    try {
+      clients.photo.listPhotos.mockImplementation(async (req: { personIds?: string }) => ({
+        photos: req.personIds === "41"
+          ? [
+            { id: 11, taken_at: "2017-01-22T10:00:00Z" },
+            { id: 12, taken_at: "2017-01-22T10:05:00Z" },
+            { id: 13, taken_at: "2017-06-01T10:00:00Z" },
+            { id: 14, taken_at: "2016-06-01T10:00:00Z" },
+          ]
+          : [{ id: 11, taken_at: "2017-01-22T10:00:00Z" }, { id: 21, taken_at: "2018-03-01T10:00:00Z" }],
+      }));
+      const out = await tool("list_photos").run(
+        { person_ids: [41, 42], rank_by: "quality", direction: "desc", group_by: "person", then_by: "year", per_group: 2, distinct: true },
+        ctx(),
+      );
+      expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ personIds: "41", limit: 5001 }));
+      expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ personIds: "42" }));
+      expect(out.text).toContain("person 41 · 2017 | 11 |");
+      expect(out.text).toContain("person 41 · 2017 | 13 |");
+      expect(out.text).not.toContain("| 12 |");
+      expect(out.text).toContain("person 42 · 2017 | 11 |");
+      expect(out.text).toContain("of each person and year (4 groups)");
+      expect(out.ref?.ids).toEqual([11, 13, 14, 21]);
+    } finally {
+      setSimilarPairsLoader(null);
+    }
+  });
+
+  it("refuses group_by person without person_ids", async () => {
+    await expect(tool("list_photos").run({ group_by: "person" }, ctx())).rejects.toThrow("person_ids");
+  });
+
   it("rates a person's face only with person_ids", async () => {
     await expect(tool("list_photos").run({ rank_by: "person_face", direction: "desc" }, ctx())).rejects.toThrow("person_ids");
     clients.photo.listPhotos.mockResolvedValue({ photos: [] });

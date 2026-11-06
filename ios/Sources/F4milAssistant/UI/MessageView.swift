@@ -20,9 +20,7 @@ struct MessageView: View {
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 MarkdownText(message.content)
-                ForEach(Array(message.blocks.enumerated()), id: \.offset) { _, block in
-                    BlockOrCards(block: block, store: store, opener: opener)
-                }
+                AnswerBlocks(blocks: message.blocks, store: store, opener: opener)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -75,6 +73,38 @@ struct LiveTurnView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The blocks under a finished answer. When the answer proposes a change,
+/// the card holds the result (the album, the folder) and the lists read on
+/// the way there fold away below it, as on the web.
+struct AnswerBlocks: View {
+    let blocks: [ResultBlock]
+    let store: ConversationStore
+    let opener: RowOpener
+    @State private var showsRoad = false
+
+    var body: some View {
+        let proposals = blocks.filter { $0.kind == "proposal" }
+        let road = proposals.isEmpty ? [] : blocks.filter { $0.kind != "proposal" }
+        ForEach(Array((road.isEmpty ? blocks : proposals).enumerated()), id: \.offset) { _, block in
+            BlockOrCards(block: block, store: store, opener: opener)
+        }
+        if !road.isEmpty {
+            DisclosureGroup(isExpanded: $showsRoad) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(road.enumerated()), id: \.offset) { _, block in
+                        BlockView(block: block, opener: opener)
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                Text(road.count == 1 ? "Zwischenergebnis" : "\(road.count) Zwischenergebnisse")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

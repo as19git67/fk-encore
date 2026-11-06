@@ -23,8 +23,12 @@ import { CRITERIA_PROPERTIES, GROUP_PROPERTIES, criteriaFromArgs, groupByFromArg
 import type { TransactionCriteria } from "../../finance/transaction-conditions";
 import type { TotalsGroupBy, TransactionTotals } from "../../finance/transaction-totals";
 
-/** More than this many objects in one proposal is refused; the user narrows first. */
-const MAX_PHOTOS = 2000;
+/**
+ * More than this many objects in one proposal is refused; the user narrows
+ * first. Photos stay below the 5000 the photo endpoint returns, so the read
+ * of MAX_PHOTOS + 1 still tells "more than" apart.
+ */
+const MAX_PHOTOS = 4000;
 const MAX_FAVORITES = 200;
 const MAX_TRANSACTIONS = 500;
 const MAX_DOCUMENTS = 200;
@@ -84,6 +88,11 @@ async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): P
     // for "nur die aus München". Narrowing is list_photos's job.
     if (args.photos && typeof args.photos === "object" && Object.keys(args.photos).length) {
       throw new Error("from_previous_result cannot be combined with a photos filter: call list_photos with from_previous_result and the filter first, then create_album with from_previous_result");
+    }
+    // A list cut at its read cap is not "all of them": the album would get
+    // the first 2000 of 2400 and the card would read as if that were all.
+    if (ctx.previousTruncated?.("photo")) {
+      throw new Error("the previous photo result was cut at its read cap, so it does not hold every match: pass the same filter as photos (favorite, date range, person_ids) instead of from_previous_result");
     }
     return idsOrPrevious(args, "photo_ids", "photo", ctx);
   }

@@ -6,7 +6,7 @@
 import { finance } from "~encore/clients";
 import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
-import { dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { compositeKey, dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe } from "./hints";
 import { parseAmountBound, parseDirection, type TransactionCriteria } from "../../finance/transaction-conditions";
 import { parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
@@ -193,7 +193,7 @@ export const listTransactions: ToolSpec = {
     const res = await (finance.listTransactions(params)) as unknown as { items: TransactionView[]; total: number };
     const advice = res.items.length ? undefined : await emptyBookingsHint(params);
     const hint = advice?.hint;
-    const groups = grouping ? groupRows(res.items, (t) => groupKey(t, grouping.by), grouping.perGroup) : undefined;
+    const groups = grouping ? groupRows(res.items, (t) => compositeKey(grouping, (by) => groupKey(t, by)), grouping.perGroup) : undefined;
     const rows = groups ? groups.flatMap((g) => g.rows.map((t) => ({ ...t, group: g.key }))) : res.items.map((t) => ({ ...t, group: undefined as string | undefined }));
     const rowCap = groups ? Math.min(rows.length, limit * grouping!.perGroup) : limit;
     const total = groups ? rows.length : res.total;
