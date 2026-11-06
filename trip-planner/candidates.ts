@@ -49,6 +49,21 @@ export const DEFAULT_DWELL_MINUTES: Readonly<Record<string, number>> = {
 
 const FALLBACK_DWELL_MINUTES = 30;
 
+/**
+ * What a place somebody brought in is worth: more than anything the
+ * region search can score, less than one heart wish (`HEART_WEIGHT`).
+ *
+ * Whoever adds a place wants to see it, whichever way it came in — from
+ * the idea collection, the place search, a shared link or a web page
+ * (plan `kandidaten-ranking.md`, stage 0). It used to be 10 only for an
+ * idea taken out of the collection and 1 for the same place added in
+ * the trip, which planned it after every museum of the city.
+ */
+export const MANUAL_SCORE = 10;
+
+/** The reason a manual entry carries, so the order can be argued with. */
+export const MANUAL_REASON = "von euch hinzugefügt";
+
 export interface ScoredCandidate extends Candidate {
   /** Human-readable contributions to `score`, for "why here?" (§8.3). */
   reasons: string[];

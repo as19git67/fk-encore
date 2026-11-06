@@ -26,7 +26,7 @@ import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { loadPlan } from "./plan-store";
 import { addPoolEntry, mergeIntoPoolEntry, type StoredPoolEntry } from "./find-store";
-import { DEFAULT_DWELL_MINUTES } from "./candidates";
+import { DEFAULT_DWELL_MINUTES, MANUAL_REASON, MANUAL_SCORE } from "./candidates";
 import { chooseLeg, findDuplicate, manualRef } from "./finds";
 import { extentOf, type SpotExtent } from "./extent";
 
@@ -189,9 +189,11 @@ export const addFind = api(
       // is what we know, and the solver can see it is not a real one.
       category: category ?? "unknown",
       dwellMinutes,
-      // 2. A suggestion, not an appointment. It enters at the score a
-      // plain candidate would get, and earns its place from there.
-      score: 1,
+      // 2. A suggestion, not an appointment: it goes into the pool and
+      // nothing plans it into a day. But a top pick of the pool —
+      // whoever adds a place wants to see it (stage 0 of the ranking
+      // plan); only a heart wish outranks it.
+      score: MANUAL_SCORE,
       reasons: reasonsFor(note, req.sourceUrl),
       origin: "manual",
       note,
@@ -291,7 +293,7 @@ function resolveDwell(stated: number | undefined, category: string | null): numb
  * says. Where it came from is part of the answer.
  */
 function reasonsFor(note: string | null, sourceUrl: string | undefined): string[] {
-  const reasons = ["selbst hinzugefügt"];
+  const reasons = [MANUAL_REASON];
   if (note) reasons.push(note);
   if (sourceUrl) {
     const host = hostnameOf(sourceUrl);

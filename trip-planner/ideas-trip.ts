@@ -23,10 +23,10 @@
  */
 
 import { api, APIError } from "encore.dev/api";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
-import { ideaPool, ideaPoolShares, tripPlanPool, users } from "../db/schema";
+import { ideaPool, ideaPoolShares, users } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { addFind } from "./add-find";
 import { accessibleOwnerIds, foldAcrossCollections } from "./ideas";
@@ -36,13 +36,6 @@ import { haversineMeters, type TransportMode } from "./travel";
 
 /** How close to a leg's anchor an idea has to be to be worth offering. */
 const NEAR_LEG_RADIUS_M = 30_000;
-/**
- * What an idea taken into a trip is worth against the region's own
- * suggestions: enough to be planned first, in the ordering §7.2 sets
- * out — what the family collected before what the map offers.
- */
-const COLLECTED_SCORE = 10;
-
 export interface AcceptOutingRequest {
   /** Where the day starts and ends. */
   lat: number;
@@ -350,8 +343,9 @@ export const keepForNextTime = api(
  *
  * §20.3 asks for exactly this route rather than a private one: the leg
  * is chosen by location, duplicates merge, and the provenance survives.
- * What it adds is the score: a spot the family collected is planned
- * before what the region search offers (§7.2).
+ * The score comes with it: every find enters as a top pick
+ * (`MANUAL_SCORE`), so a spot the family collected is planned before
+ * what the region search offers (§7.2) without a second write here.
  *
  * Returns the OSM reference it landed under, or null when the trip
  * already had it planned — which the caller reports rather than treats
@@ -371,10 +365,6 @@ async function takeIntoPlan(
       sourceUrl: idea.source_url ?? undefined,
       dwellMinutes: idea.dwell_minutes,
     });
-    await db
-      .update(tripPlanPool)
-      .set({ score: sql`greatest(${tripPlanPool.score}, ${COLLECTED_SCORE})` })
-      .where(eq(tripPlanPool.id, entry.id));
     return entry.osmRef;
   } catch (err) {
     // "Already planned for this leg" is an answer, not a fault: the

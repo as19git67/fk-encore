@@ -18,6 +18,8 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
 import { addFind } from "./add-find";
+import { MANUAL_REASON, MANUAL_SCORE } from "./candidates";
+import { HEART_WEIGHT } from "./votes";
 
 const WEST = { lat: 48.37, lon: 10.9 };
 const EAST = { lat: 48.14, lon: 11.58 };
@@ -218,6 +220,29 @@ describe("POST /trip-planner/plans/:planId/finds", () => {
     );
     expect(planned).not.toContain(res.entry.osmRef);
     expect(poolOf(after, 0).map((c) => c.osmRef)).toContain(res.entry.osmRef);
+  });
+
+  it("enters as a top pick, with the reason on the card", async () => {
+    // Whoever adds a place wants to see it (ranking plan, stage 0):
+    // above anything the region search scores, below one heart wish.
+    const plan = await twoLegPlan();
+    const res = await addFind({ planId: plan.id, ...WEST, name: "Ein Fund", dwellMinutes: 30 });
+
+    expect(res.entry.score).toBe(MANUAL_SCORE);
+    expect(MANUAL_SCORE).toBeLessThan(HEART_WEIGHT);
+    expect(res.entry.reasons[0]).toBe(MANUAL_REASON);
+  });
+
+  it("keeps the top score and says it once when a find merges", async () => {
+    const plan = await twoLegPlan();
+    await addFind({ planId: plan.id, ...WEST, name: "Pastelaria Beispiel", dwellMinutes: 20 });
+    const res = await addFind({
+      planId: plan.id, lat: WEST.lat + 0.0005, lon: WEST.lon, name: "Pastelaria Beispiel", dwellMinutes: 20,
+    });
+
+    expect(res.merged).toBe(true);
+    expect(res.entry.score).toBe(MANUAL_SCORE);
+    expect(res.entry.reasons.filter((r) => r === MANUAL_REASON)).toHaveLength(1);
   });
 
   it("merges a duplicate instead of adding a second entry", async () => {

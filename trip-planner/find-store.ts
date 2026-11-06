@@ -10,6 +10,7 @@ import { and, eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { tripPlanPool } from "../db/schema";
 import { storedExtent, type SpotExtent } from "./extent";
+import { MANUAL_REASON, MANUAL_SCORE } from "./candidates";
 
 type Db = typeof dbDefault;
 
@@ -113,6 +114,7 @@ export async function mergeIntoPoolEntry(
   if (!existing) return null;
 
   const reasons = [...((existing.reasons ?? []) as string[])];
+  if (!reasons.includes(MANUAL_REASON)) reasons.unshift(MANUAL_REASON);
   if (input.note && !reasons.includes(input.note)) reasons.push(input.note);
   const sourceLine = input.sourceUrl ? `Quelle: ${input.sourceUrl}` : null;
   if (sourceLine && !reasons.includes(sourceLine)) reasons.push(sourceLine);
@@ -126,6 +128,9 @@ export async function mergeIntoPoolEntry(
       // A candidate the search produced becomes a find once a person
       // vouches for it: somebody wanted this one.
       origin: "manual",
+      // And a top pick from now on, like any place a person brought
+      // in; a score the votes already raised further stays.
+      score: Math.max(existing.score, MANUAL_SCORE),
       added_by: existing.added_by ?? input.addedBy,
     })
     .where(eq(tripPlanPool.id, existing.id))
