@@ -42,15 +42,21 @@ public struct TurnFollower: Sendable {
     /// starts the turn), then yields the turn's events until it ends. The
     /// stream finishes after `done`; it throws a `Failure` otherwise, or the
     /// error `start` threw.
+    ///
+    /// `resuming`: the turn was started earlier and this picks its stream up
+    /// again (the app came back to the foreground). `start` is not called;
+    /// the server replays the whole turn, and every replayed event is
+    /// yielded, so the caller starts from an empty turn.
     public func events(
         turnId: String,
-        start: @escaping @Sendable () async throws -> Void
+        resuming: Bool = false,
+        start: @escaping @Sendable () async throws -> Void = {}
     ) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 var cursor = ReplayCursor()
                 var attempt = 0
-                var started = false
+                var started = resuming
                 do {
                     while true {
                         let request = await api.streamRequest(turnId: turnId, resume: started)

@@ -12,7 +12,7 @@
  * pages, which would bounce a signed-in user back to a login form.
  */
 
-const AUTH_PATH_PREFIXES = ['/login', '/register', '/forgot-password']
+const AUTH_PATH_PREFIXES = ['/login', '/register', '/forgot-password', '/handover']
 
 export function safeLoginRedirect(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
@@ -20,7 +20,7 @@ export function safeLoginRedirect(raw: unknown): string | null {
   // Backslashes are treated like slashes by some URL parsers ("/\evil.test"),
   // so a path containing one is not trusted.
   if (raw.includes('\\')) return null
-  if (AUTH_PATH_PREFIXES.some((p) => raw === p || raw.startsWith(`${p}/`) || raw.startsWith(`${p}?`))) {
+  if (AUTH_PATH_PREFIXES.some((p) => raw === p || raw.startsWith(`${p}/`) || raw.startsWith(`${p}?`) || raw.startsWith(`${p}#`))) {
     return null
   }
   return raw

@@ -325,6 +325,7 @@ const NOTIFICATION_TYPES: NotificationTypeConfig[] = [
   { kind: 'album_left', label: 'Freigabe verlassen', description: 'Jemand hat eine Albumfreigabe verlassen' },
   { kind: 'document_low_confidence', label: 'Dokumentklassifikation unsicher', description: 'Ein Dokument wurde mit niedriger Konfidenz klassifiziert und sollte geprüft werden' },
   { kind: 'document_failed', label: 'Dokumentverarbeitung fehlgeschlagen', description: 'Ein Dokument konnte nicht automatisch verarbeitet werden' },
+  { kind: 'assistant_answer', label: 'Assistent', description: 'Der Assistent hat eine Frage beantwortet, während niemand zugeschaut hat' },
 ]
 
 const notifPrefs = ref<NotificationPrefs>({})

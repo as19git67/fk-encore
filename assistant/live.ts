@@ -68,17 +68,26 @@ function isLast(event: TurnEvent): boolean {
   return event.type === "done" || event.type === "error" || event.type === "cancelled";
 }
 
-/** The emitter a running turn reports through. */
-export function openTurn(turnId: string, userId: string): (event: TurnEvent) => void {
+/**
+ * The emitter a running turn reports through. Returns how many watchers took
+ * the event: a listener that throws (its socket is gone) is dropped and not
+ * counted. Zero on the `done` means nobody saw the answer arrive — the
+ * endpoint then sends a push (stage 6 of assistent-ios.md).
+ */
+export type TurnEmitter = (event: TurnEvent) => number;
+
+export function openTurn(turnId: string, userId: string): TurnEmitter {
   const turn = turnFor(turnId, userId);
   if (turn.finished || turn.events.length) throw new Error("turn id already used");
   if (turn.expiry) clearTimeout(turn.expiry);
   return (event) => {
-    if (turn.finished) return;
+    if (turn.finished) return 0;
     turn.events.push(event);
+    let delivered = 0;
     for (const listener of turn.listeners) {
       try {
         listener(event);
+        delivered += 1;
       } catch {
         turn.listeners.delete(listener);
       }
@@ -87,12 +96,15 @@ export function openTurn(turnId: string, userId: string): (event: TurnEvent) => 
       turn.finished = true;
       expireIn(turnId, turn, KEEP_FINISHED_MS);
     }
+    return delivered;
   };
 }
 
 /**
  * Replays what happened so far, then follows the turn. Resolves once the turn
- * is finished, or after `KEEP_PENDING_MS` if it was never posted.
+ * is finished, after `KEEP_PENDING_MS` if it was never posted, or as soon as
+ * the listener throws — the socket behind it is gone, so the turn stops
+ * counting it as a watcher and the handler can close.
  */
 export function followTurn(turnId: string, userId: string, listener: Listener): Promise<void> {
   const turn = turnFor(turnId, userId);
@@ -110,7 +122,14 @@ export function followTurn(turnId: string, userId: string, listener: Listener): 
     giveUp?.unref?.();
     const wrapped: Listener = (event) => {
       if (giveUp) clearTimeout(giveUp);
-      listener(event);
+      try {
+        listener(event);
+      } catch (err) {
+        turn.listeners.delete(wrapped);
+        resolve();
+        // Rethrown so the emitter does not count this watcher.
+        throw err;
+      }
       if (isLast(event)) {
         turn.listeners.delete(wrapped);
         resolve();
@@ -118,6 +137,12 @@ export function followTurn(turnId: string, userId: string, listener: Listener): 
     };
     turn.listeners.add(wrapped);
   });
+}
+
+/** Whether a watcher is attached to this user's turn right now. */
+export function hasWatchers(turnId: string, userId: string): boolean {
+  const turn = turns.get(turnId);
+  return !!turn && turn.userId === userId && turn.listeners.size > 0;
 }
 
 /** Whether this user's turn is known here, running or finished. */

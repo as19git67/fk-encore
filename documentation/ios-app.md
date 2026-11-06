@@ -46,7 +46,11 @@ device.
   view). The Photos app adds only `Features/Assistant/AssistantEntry.swift`:
   the feed-toolbar button for users with `module.assistant`, and an
   `AssistantHost` that routes photo, album, person and recap rows through
-  `AppDeepLinkRouter`.
+  `AppDeepLinkRouter`; `AssistantAskButton` („Assistent fragen" over a
+  selection or an album, stage 6) and the push for a finished answer, which
+  opens its conversation through `AppDeepLink.assistant`. Web pages the
+  assistant opens are signed in through `WebHandover` in `F4milCore`
+  (stage 5: a one-time token in the URL fragment of `/handover`).
 - **Storage/cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`.
 - **App targets:** main app, **share extension** (code in `F4milShare/`, its
   `Info.plist` in `App/ShareExtension/`) for uploading from other apps.

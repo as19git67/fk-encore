@@ -10,6 +10,8 @@ console.log("[boot] user/encore.service.ts: begin");
 import "./scheduled-jobs";
 // Side-effect: registers /admin/llm-configs and /admin/llm-models.
 import "./llm-models";
+// Side-effect: registers /auth/handover (session handover to the web app).
+import "./handover";
 
 console.log("[boot] user/encore.service.ts: registering Service");
 export default new Service("user", {

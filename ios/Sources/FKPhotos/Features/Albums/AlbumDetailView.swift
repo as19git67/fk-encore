@@ -317,6 +317,7 @@ struct AlbumDetailView: View {
                     }
                     .disabled(!canStartSlideshow)
                     CollageToolbarButton(selectedCount: selectedIds.count) { showCollage = true }
+                    AssistantAskButton(photoIds: selectionOrder.filter { selectedIds.contains($0) })
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -373,6 +374,10 @@ struct AlbumDetailView: View {
                                     Label("Gruppen-Review", systemImage: "checklist")
                                 }
                             }
+                            // The album's photos as the assistant's working
+                            // set (stage 6). Only as many as fit one: a
+                            // bigger album is asked about via a selection.
+                            AssistantAskButton(photoIds: displayedPhotos.map(\.id))
                             if canStartSlideshow || canShowMap || canReviewGroups {
                                 if canShareAlbum || canEditAlbum || canDeleteAlbum {
                                     Divider()

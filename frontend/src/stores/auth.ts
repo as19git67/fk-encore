@@ -105,6 +105,16 @@ export const useAuthStore = defineStore('auth', () => {
     setSession(response.token, response.refreshToken, response.user)
   }
 
+  /**
+   * Sign in with a handover token from the iOS app (stage 5 of
+   * assistent-ios.md). Replaces whatever session this browser held: the app's
+   * user is who opened the page.
+   */
+  async function loginWithHandover(handoverToken: string) {
+    const response = await usersApi.redeemHandover(handoverToken)
+    setSession(response.token, response.refreshToken, response.user)
+  }
+
   async function loginWithPasskey() {
     const { challengeId, options } = await passkeyAuthOptions()
     const credential = await startAuthentication({ optionsJSON: options })
@@ -147,5 +157,5 @@ export const useAuthStore = defineStore('auth', () => {
     return (Array.isArray(permission) ? permission : [permission]).every((p) => granted.includes(p))
   }
 
-  return { user, token, isAuthenticated, hasPermission, loadFromStorage, refreshUser, login, loginWithPasskey, register, logout }
+  return { user, token, isAuthenticated, hasPermission, loadFromStorage, refreshUser, login, loginWithHandover, loginWithPasskey, register, logout }
 })

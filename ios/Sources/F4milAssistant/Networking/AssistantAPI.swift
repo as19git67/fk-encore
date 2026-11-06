@@ -24,8 +24,16 @@ public struct AssistantAPI: Sendable {
         return reply.conversations
     }
 
-    public func createConversation() async throws -> ConversationSummary {
-        try await client.post("/assistant/conversations", body: EmptyBody())
+    /// A new conversation, with the objects it is about as its working set
+    /// (a selection of photos, the documents a reply is for).
+    public func createConversation(context: [ContextRef] = []) async throws -> ConversationSummary {
+        if context.isEmpty {
+            return try await client.post("/assistant/conversations", body: EmptyBody())
+        }
+        return try await client.post(
+            "/assistant/conversations",
+            body: CreateConversationBody(context: Array(context.prefix(ContextRef.maxItems)))
+        )
     }
 
     public func conversation(_ id: Int) async throws -> ConversationDetail {
@@ -95,6 +103,7 @@ public struct AssistantAPI: Sendable {
     private struct Cancelled: Decodable { let cancelled: Bool }
     private struct TurnStarted: Decodable { let turnId: String }
     private struct StartTurnBody: Encodable { let message: String; let turnId: String }
+    private struct CreateConversationBody: Encodable { let context: [ContextRef] }
     struct EmptyBody: Encodable {}
 }
 

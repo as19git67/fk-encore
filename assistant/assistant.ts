@@ -10,6 +10,7 @@
 
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
+import { push } from "~encore/clients";
 import log from "encore.dev/log";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import db from "../db/database";
@@ -23,7 +24,7 @@ import { renderLetterPdf } from "./letter-pdf";
 import { letterPhotoPages, mayEnclosePhotos } from "./letter-photos";
 import { catalogFor } from "./catalog";
 import { chat, ContextTooLargeError, knownContextWindow, LlmServiceUnavailableError } from "./llm-client";
-import { cancelTurn, followTurn, isKnownTurn, openTurn, TURN_ID_RE, turnSignal } from "./live";
+import { cancelTurn, followTurn, isKnownTurn, openTurn, TURN_ID_RE, turnSignal, type TurnEmitter } from "./live";
 import {
   discardProposal,
   executeProposal,
@@ -398,7 +399,7 @@ interface PreparedQuestion {
   auth: ReturnType<typeof assistantUser>;
   question: string;
   conversation: typeof assistantConversation.$inferSelect;
-  emit: (event: TurnEvent) => void;
+  emit: TurnEmitter;
   signal?: AbortSignal;
 }
 
@@ -419,7 +420,7 @@ async function prepareQuestion(req: AskRequest): Promise<PreparedQuestion> {
   const gate = await modelGate();
   if (gate.state === "blocked") throw APIError.failedPrecondition(gateMessage(gate)!);
 
-  let emit: (event: TurnEvent) => void = () => {};
+  let emit: TurnEmitter = () => 0;
   let signal: AbortSignal | undefined;
   if (req.turnId) {
     try {
@@ -445,12 +446,25 @@ function turnError(err: unknown, conversationId: number): APIError {
   return APIError.internal("the assistant could not answer");
 }
 
+interface AnswerOptions {
+  /**
+   * The turn runs in the background (`startAssistantTurn`): when its `done`
+   * reaches no watcher — the app was left, the tab closed — the user gets a
+   * push with the answer's first line (stage 6 of assistent-ios.md). A turn
+   * asked with `ask` has its caller waiting on the request and needs none.
+   */
+  notifyUnwatched?: boolean;
+}
+
 /**
  * Runs the turn and stores it. The turn's `done` goes out only after the
  * answer is stored, with its message id, so a client that only watches the
  * stream (a turn started with `startAssistantTurn`) has all `ask` returns.
  */
-async function answerQuestion({ auth, question, conversation, emit, signal }: PreparedQuestion): Promise<AskResponse> {
+async function answerQuestion(
+  { auth, question, conversation, emit, signal }: PreparedQuestion,
+  options: AnswerOptions = {},
+): Promise<AskResponse> {
   const user = { userID: auth.userID, permissions: auth.permissions };
   const turnEmit = (event: TurnEvent) => {
     if (event.type !== "done") emit(event);
@@ -510,7 +524,10 @@ async function answerQuestion({ auth, question, conversation, emit, signal }: Pr
       kept_turns: contextUsage.keptTurns,
       earlier_turns: earlierTurns,
     });
-    emit({ type: "done", answer: result.answer, blocks: result.blocks, messageId, rounds: result.rounds, contextUsage });
+    const watchers = emit({ type: "done", answer: result.answer, blocks: result.blocks, messageId, rounds: result.rounds, contextUsage });
+    if (options.notifyUnwatched && watchers === 0) {
+      notifyAnswer(Number(auth.userID), conversation.id, conversation.title ?? fallback, result.answer);
+    }
     return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds, context_usage: contextUsage };
   } catch (err) {
     if (signal?.aborted) {
@@ -563,6 +580,16 @@ export interface StartTurnResponse {
   turnId: string;
 }
 
+/**
+ * Nobody watched the answer arrive: a push, so the user finds it (the tap
+ * opens the conversation). Best effort — the answer is stored either way.
+ */
+function notifyAnswer(userId: number, conversationId: number, title: string, answer: string): void {
+  void push
+    .notifyAssistantAnswer({ userId, conversationId, title, answer })
+    .catch((err: unknown) => log.warn("assistant answer push failed", { conversation_id: conversationId, error: String(err) }));
+}
+
 const runningTurns = new Set<Promise<unknown>>();
 
 /**
@@ -577,7 +604,7 @@ export const startAssistantTurn = api(
   async (req: StartTurnRequest): Promise<StartTurnResponse> => {
     if (!req.turnId) throw APIError.invalidArgument("turnId is required");
     const prepared = await prepareQuestion(req);
-    const job = answerQuestion(prepared)
+    const job = answerQuestion(prepared, { notifyUnwatched: true })
       // Already reported through the turn's events and logged by turnError.
       .catch(() => undefined)
       .finally(() => runningTurns.delete(job));
@@ -871,12 +898,16 @@ export const watchTurn = api.streamOut<WatchHandshake, StreamEvent>(
     }, PING_MS);
     ping.unref?.();
     try {
+      // A send that fails ends the watching: the listener throws, live.ts
+      // drops it and resolves, and the turn no longer counts this socket as
+      // a watcher — which is what decides whether the answer is pushed.
       await followTurn(turnId, auth.userID, (event) => {
-        if (!open) return;
+        if (!open) throw new Error("socket closed");
         try {
           stream.send(toStreamEvent(event));
-        } catch {
+        } catch (err) {
           open = false;
+          throw err;
         }
       });
     } catch (err) {

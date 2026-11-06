@@ -259,6 +259,8 @@ struct AlbumsListView: View {
         .navigationDestination(for: PhotoMonthRef.self) { ref in
             PhotoMonthGridView(year: ref.year, month: ref.month)
         }
+        // „Assistent fragen" from a selection or an album on this stack.
+        .assistantDestinations()
         .sheet(isPresented: $filterSort.isMenuPresented) {
             AlbumFilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])

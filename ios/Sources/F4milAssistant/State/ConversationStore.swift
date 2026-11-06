@@ -41,7 +41,14 @@ public final class ConversationListStore {
 /// A turn is started and then watched; the answer arrives on the stream and
 /// is appended as a message once `done` comes with the stored message's id.
 /// The conversation itself is created on the first question, so an empty
-/// chat left without one leaves nothing behind on the server.
+/// chat left without one leaves nothing behind on the server — unless it was
+/// opened over a working set (a selection of photos), which is created at
+/// once so the server can describe it, as the web does.
+///
+/// Leaving the app closes the socket on purpose (`suspendWatching`): the
+/// server sends a push for an answer that reached no watcher (stage 6), and a
+/// socket a suspended app still holds would count as one. Coming back
+/// reopens the stream with the turn replayed (`resumeWatching`).
 @MainActor
 @Observable
 public final class ConversationStore {
@@ -60,11 +67,22 @@ public final class ConversationStore {
     let follower: TurnFollower
     private var turnId: String?
     private var streamTask: Task<Void, Never>?
+    /// The working set a new conversation is to be created with.
+    private var pendingContext: [ContextRef]
+    /// The app is in the background: the socket is closed, the turn runs on.
+    private(set) var watchingSuspended = false
 
-    /// `conversationId` nil: a new conversation, created with the first question.
-    public init(conversationId: Int?, api: AssistantAPI = AssistantAPI(), follower: TurnFollower? = nil) {
+    /// `conversationId` nil: a new conversation, created with the first
+    /// question — or at once, when `context` names what it is about.
+    public init(
+        conversationId: Int?,
+        context: [ContextRef] = [],
+        api: AssistantAPI = AssistantAPI(),
+        follower: TurnFollower? = nil
+    ) {
         self.api = api
         self.follower = follower ?? TurnFollower(api: api)
+        self.pendingContext = conversationId == nil ? context : []
         if let conversationId {
             summary = ConversationSummary(id: conversationId, title: nil, created_at: "", updated_at: "")
         }
@@ -72,7 +90,22 @@ public final class ConversationStore {
 
     public var isAnswering: Bool { live.map { !$0.finished } ?? false }
 
+    /// The kinds in the working set, for the first questions to suggest.
+    public var contextTypes: Set<String> {
+        Set(context.map(\.type)).union(pendingContext.map(\.type))
+    }
+
     public func load() async {
+        if summary == nil, !pendingContext.isEmpty {
+            isLoading = true
+            do {
+                summary = try await api.createConversation(context: pendingContext)
+                pendingContext = []
+            } catch {
+                loadError = error.localizedDescription
+            }
+            isLoading = false
+        }
         if let id = summary?.id {
             isLoading = true
             do {
@@ -97,7 +130,10 @@ public final class ConversationStore {
         guard !text.isEmpty, !isAnswering else { return }
         turnError = nil
         do {
-            if summary == nil { summary = try await api.createConversation() }
+            if summary == nil {
+                summary = try await api.createConversation(context: pendingContext)
+                pendingContext = []
+            }
         } catch {
             turnError = error.localizedDescription
             return
@@ -105,6 +141,7 @@ public final class ConversationStore {
         guard let conversationId = summary?.id else { return }
         let turnId = TurnID.make()
         self.turnId = turnId
+        watchingSuspended = false
         // Shown at once, under a provisional id; the server's copy comes with the reload.
         messages.append(ConversationMessage(id: -messages.count - 1, role: "user", content: text, blocks: [], created_at: Self.now()))
         live = LiveTurn()
@@ -112,6 +149,11 @@ public final class ConversationStore {
         let stream = follower.events(turnId: turnId) {
             try await api.startTurn(conversation: conversationId, message: text, turnId: turnId)
         }
+        await follow(stream)
+    }
+
+    /// Applies the stream's events to the running turn until it ends.
+    private func follow(_ stream: AsyncThrowingStream<StreamEvent, Error>) async {
         let task = Task { @MainActor [weak self] in
             do {
                 for try await event in stream {
@@ -120,12 +162,13 @@ public final class ConversationStore {
                 }
                 self?.finishTurn()
             } catch {
-                await self?.failTurn(error)
+                guard let self, !self.watchingSuspended else { return }
+                await self.failTurn(error)
             }
         }
         streamTask = task
         await task.value
-        streamTask = nil
+        if streamTask == task { streamTask = nil }
     }
 
     /// "Abbrechen" under a running answer: the server stops the turn at its
@@ -133,6 +176,27 @@ public final class ConversationStore {
     public func cancel() async {
         guard let turnId, isAnswering else { return }
         _ = try? await api.cancelTurn(turnId)
+    }
+
+    /// The app leaves the foreground while an answer runs: close the socket,
+    /// keep what was shown. The server then counts nobody watching and sends
+    /// a push when the answer is done.
+    public func suspendWatching() {
+        guard isAnswering, let task = streamTask else { return }
+        watchingSuspended = true
+        task.cancel()
+        streamTask = nil
+    }
+
+    /// Back in the foreground: watch the turn again. The server replays it
+    /// from its first event, so the turn is rebuilt from an empty one; a turn
+    /// the server has forgotten (finished more than ten minutes ago) ends as
+    /// lost, and the reload shows the stored answer.
+    public func resumeWatching() async {
+        guard watchingSuspended, let turnId else { return }
+        watchingSuspended = false
+        live = LiveTurn()
+        await follow(follower.events(turnId: turnId, resuming: true))
     }
 
     private func finishTurn() {

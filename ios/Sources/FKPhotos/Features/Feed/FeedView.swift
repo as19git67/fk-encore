@@ -102,6 +102,11 @@ struct FeedView: View {
         .navigationDestination(for: AssistantRef.self) { _ in
             AssistantScreen()
         }
+        .assistantDestinations()
+        // The push for a finished answer opens its conversation (stage 6).
+        .navigationDestination(item: $router.assistantToOpen) { target in
+            AssistantScreen(conversationId: target.conversationId)
+        }
         // A shared album's card opens the album.
         .navigationDestination(for: FeedAlbumOpen.self) { ref in
             AlbumDetailView(albumId: ref.id)

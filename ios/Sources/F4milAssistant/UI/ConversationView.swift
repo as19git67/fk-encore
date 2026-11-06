@@ -11,11 +11,14 @@ struct ConversationView: View {
     @State private var thumbnails: ThumbnailStore
     @State private var draft = ""
     @FocusState private var composing: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
-    init(conversationId: Int?, host: AssistantHost, api: AssistantAPI) {
+    /// `context`: what a new conversation is about (a selection of photos);
+    /// ignored for an existing one.
+    init(conversationId: Int?, context: [ContextRef] = [], host: AssistantHost, api: AssistantAPI) {
         self.host = host
         self.api = api
-        _store = State(initialValue: ConversationStore(conversationId: conversationId, api: api))
+        _store = State(initialValue: ConversationStore(conversationId: conversationId, context: context, api: api))
         _opener = State(initialValue: RowOpener(host: host, api: api))
         _thumbnails = State(initialValue: ThumbnailStore(api: api))
     }
@@ -30,8 +33,11 @@ struct ConversationView: View {
                     if let error = store.loadError {
                         Text(error).font(.footnote).foregroundStyle(.secondary)
                     }
+                    if !store.context.isEmpty {
+                        ContextStrip(items: store.context)
+                    }
                     if store.messages.isEmpty, store.live == nil, !store.isLoading {
-                        EmptyConversation(host: host) { question in
+                        EmptyConversation(host: host, contextTypes: store.contextTypes) { question in
                             Task { await store.ask(question) }
                         }
                     }
@@ -80,6 +86,15 @@ struct ConversationView: View {
         .navigationTitle(store.summary?.displayTitle ?? "Neue Unterhaltung")
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.load() }
+        // Away: the socket is closed so the server pushes the finished answer;
+        // back: the turn is watched again (stage 6 of assistent-ios.md).
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: store.suspendWatching()
+            case .active: Task { await store.resumeWatching() }
+            default: break
+            }
+        }
         .sheet(item: $opener.pdf) { item in
             PDFPreviewSheet(item: item, api: api)
         }
@@ -113,19 +128,67 @@ private struct GateNotice: View {
     }
 }
 
-/// First questions, one per module the user has, as on the web.
+/// The working set a conversation was opened over (#1534): one chip per
+/// object, as the web shows them above the chat. Dimmed when the object is
+/// no longer visible to the user.
+private struct ContextStrip: View {
+    let items: [ContextItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Kontext")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(items, id: \.self) { item in
+                        Label(item.label, systemImage: Self.icon(for: item.type))
+                            .font(.footnote)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.quaternary.opacity(0.5), in: Capsule())
+                            .opacity(item.visible ? 1 : 0.5)
+                    }
+                }
+            }
+        }
+        .accessibilityLabel("Arbeitskontext: \(items.count) Objekte")
+    }
+
+    static func icon(for type: String) -> String {
+        switch type {
+        case "photo": return "photo"
+        case "document": return "doc.text"
+        case "transaction": return "eurosign.circle"
+        default: return "circle"
+        }
+    }
+}
+
+/// First questions, one per module the user has, as on the web — or, over a
+/// working set, questions about what is in it.
 private struct EmptyConversation: View {
     let host: AssistantHost
+    var contextTypes: Set<String> = []
     let ask: (String) -> Void
+
+    private var questions: [String] {
+        contextTypes.isEmpty
+            ? SuggestedQuestions.questions(has: host.hasPermission)
+            : SuggestedQuestions.questions(aboutContext: contextTypes)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Was möchtest du wissen?")
+            Text(contextTypes.isEmpty ? "Was möchtest du wissen?" : "Was möchtest du dazu wissen?")
                 .font(.headline)
-            Text("Der Assistent kennt deine Fotos, Dokumente, Finanzen, Zähler und Reisen und antwortet aus dem, was du auch sonst siehst.")
+            Text(contextTypes.isEmpty
+                 ? "Der Assistent kennt deine Fotos, Dokumente, Finanzen, Zähler und Reisen und antwortet aus dem, was du auch sonst siehst."
+                 : "Der Assistent hat die ausgewählten Objekte vor sich und antwortet aus dem, was du auch sonst siehst.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            ForEach(SuggestedQuestions.questions(has: host.hasPermission), id: \.self) { question in
+            ForEach(questions, id: \.self) { question in
                 Button {
                     ask(question)
                 } label: {
