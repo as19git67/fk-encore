@@ -123,6 +123,23 @@ function sharePhotoLink() {
   if (to) void shareLink(to, 'Foto')
 }
 
+// "Foto teilen" or "Link teilen" (#1048): both behind one button.
+const shareMenu = ref<{ toggle: (e: Event) => void } | null>(null)
+const shareButtonLabel = computed(() => {
+  if (linkCopied.value) return 'Link kopiert'
+  if (props.canShare && props.linkTo) return 'Teilen'
+  return props.canShare ? 'Foto teilen' : 'Link teilen'
+})
+const shareMenuItems = computed(() => [
+  { label: 'Foto teilen', icon: 'pi pi-image', command: () => emit('share', props.photo.id) },
+  { label: 'Link teilen', icon: 'pi pi-link', command: sharePhotoLink },
+])
+function onShareClick(event: Event) {
+  if (props.canShare && props.linkTo) shareMenu.value?.toggle(event)
+  else if (props.canShare) emit('share', props.photo.id)
+  else sharePhotoLink()
+}
+
 /** Label of the side the `R` button switches to. */
 const variantLabel = computed(() => {
   const o = props.variantPhoto?.orientation
@@ -1365,25 +1382,26 @@ onUnmounted(() => {
               @click="emit('toggle-variant')"
               v-tooltip.top="variantLabel + ' (R)'"
             />
+            <!-- One share button (#1048): with both a file share and an
+                 internal link it asks which one — "Foto" hands over the
+                 image file, "Link" the app's URL for another signed-in
+                 user. With only one of them it does that one directly. -->
             <Button
-              v-if="canShare"
-              icon="pi pi-share-alt"
+              v-if="canShare || props.linkTo"
+              :icon="linkCopied ? 'pi pi-check' : 'pi pi-share-alt'"
               rounded text
               severity="secondary"
               :loading="props.sharing"
-              @click="emit('share', photo.id)"
-              v-tooltip.top="'Foto teilen'"
+              :aria-label="shareButtonLabel"
+              aria-haspopup="menu"
+              @click="onShareClick"
+              v-tooltip.top="shareButtonLabel"
             />
-            <!-- Internal link to this photo for another user of the app —
-                 unlike "Foto teilen", which hands over the image file. -->
-            <Button
-              v-if="props.linkTo"
-              :icon="linkCopied ? 'pi pi-check' : 'pi pi-send'"
-              rounded text
-              severity="secondary"
-              :aria-label="linkCopied ? 'Link kopiert' : 'Link teilen'"
-              @click="sharePhotoLink"
-              v-tooltip.top="linkCopied ? 'Link kopiert' : 'Link teilen'"
+            <Menu
+              v-if="canShare && props.linkTo"
+              ref="shareMenu"
+              :model="shareMenuItems"
+              :popup="true"
             />
             <!-- Text mode (#1029): only offered when the photo has recognised
                  text, so the button never promises a layer that is empty. -->

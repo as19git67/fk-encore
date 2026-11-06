@@ -62,6 +62,19 @@ export const EinzelbildFavorit: Story = {
   },
 }
 
+// Both a file share and an internal link: one share button that asks
+// "Foto teilen" or "Link teilen" (#1048).
+export const TeilenMitAuswahl: Story = {
+  name: 'Teilen: Foto oder Link',
+  args: {
+    photo: MOCK_PHOTOS[0]!,
+    prevPhoto: null,
+    nextPhoto: MOCK_PHOTOS[1]!,
+    canShare: true,
+    linkTo: (id: number) => ({ path: '/fotos', query: { photoId: String(id) } }),
+  },
+}
+
 export const AusgeblendetesFoto: Story = {
   name: 'Ausgeblendetes Foto',
   args: {
