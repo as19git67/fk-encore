@@ -76,11 +76,31 @@ public struct AssistantAPI: Sendable {
         try await client.get("/assistant/model-gate")
     }
 
+    // MARK: - Proposals (stage 4)
+
+    /// Runs a proposed action as the user. A failure of the action itself
+    /// comes back as the proposal with `error` set and still pending; the
+    /// body is an empty object because the endpoint reads `edits` from it
+    /// and Encore parses the body on every call.
+    public func executeProposal(_ id: Int) async throws -> Proposal {
+        try await client.post("/assistant/proposals/\(id)/execute", body: EmptyBody())
+    }
+
+    public func discardProposal(_ id: Int) async throws -> Proposal {
+        try await client.post("/assistant/proposals/\(id)/discard", body: EmptyBody())
+    }
+
     // MARK: - Files behind the rows
 
     /// The PDF of a document, for the preview.
     public func documentFile(id: Int) async throws -> Data {
         try await client.downloadData("/documents/\(id)/file")
+    }
+
+    /// A file the API serves behind the user's token at an arbitrary path,
+    /// e.g. a card's `result_download` (a report's or a letter's PDF).
+    public func file(at path: String) async throws -> Data {
+        try await client.downloadData(path)
     }
 
     /// The small image for a row: a photo scaled to `width`, a document's first page.

@@ -50,7 +50,12 @@ device.
   selection or an album, stage 6) and the push for a finished answer, which
   opens its conversation through `AppDeepLink.assistant`. Web pages the
   assistant opens are signed in through `WebHandover` in `F4milCore`
-  (stage 5: a one-time token in the URL fragment of `/handover`).
+  (stage 5: a one-time token in the URL fragment of `/handover`). Proposal
+  cards (stage 4, `ProposalCardView`) execute or discard a proposed write
+  action, show a letter, text document or collage before it runs, open the
+  result afterwards (screen, PDF preview with share sheet, mail draft) and
+  tell the app through `AssistantHost.didExecuteProposal`, on which the
+  album list reloads.
 - **Storage/cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`.
 - **App targets:** main app, **share extension** (code in `F4milShare/`, its
   `Info.plist` in `App/ShareExtension/`) for uploading from other apps.

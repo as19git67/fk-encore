@@ -71,6 +71,10 @@ public final class ConversationStore {
     private var pendingContext: [ContextRef]
     /// The app is in the background: the socket is closed, the turn runs on.
     private(set) var watchingSuspended = false
+    /// The rest of a question that waited on a card, asked once the running turn ends.
+    private var queuedQuestion: String?
+    /// Told when a card ran, with the tool's name (`AssistantHost.didExecuteProposal`).
+    public var onProposalExecuted: (@MainActor (String) -> Void)?
 
     /// `conversationId` nil: a new conversation, created with the first
     /// question — or at once, when `context` names what it is about.
@@ -199,6 +203,45 @@ public final class ConversationStore {
         await follow(follower.events(turnId: turnId, resuming: true))
     }
 
+    // MARK: - Proposal cards (stage 4)
+
+    /// "Ausführen" on a card: runs the action as the user. The card that comes
+    /// back says what became of it; an action that failed is still pending
+    /// with `error` set. Once it ran, the app is told, and when the assistant
+    /// said it goes on after the card, the chat asks it to.
+    public func execute(_ proposal: Proposal) async throws -> Proposal {
+        let next = try await api.executeProposal(proposal.proposal_id)
+        if next.isExecuted {
+            onProposalExecuted?(next.tool)
+            if let continuation = next.continuation, !continuation.isEmpty {
+                continueWith(ProposalEffects.continuationQuestion(
+                    summary: next.result_summary ?? next.summary,
+                    continuation: continuation
+                ))
+            }
+        }
+        return next
+    }
+
+    public func discard(_ proposal: Proposal) async throws -> Proposal {
+        try await api.discardProposal(proposal.proposal_id)
+    }
+
+    /// Asks the question now, or once the running answer has ended.
+    private func continueWith(_ question: String) {
+        if isAnswering {
+            if queuedQuestion == nil { queuedQuestion = question }
+            return
+        }
+        Task { await ask(question) }
+    }
+
+    private func askQueued() {
+        guard let question = queuedQuestion else { return }
+        queuedQuestion = nil
+        Task { await ask(question) }
+    }
+
     private func finishTurn() {
         guard let turn = live else { return }
         let answer = turn.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -213,6 +256,7 @@ public final class ConversationStore {
         // The title is written in the background after the first answer; a
         // reload picks it up, together with the server's ids.
         Task { await self.reload() }
+        askQueued()
     }
 
     private func failTurn(_ error: Error) async {
@@ -239,6 +283,7 @@ public final class ConversationStore {
         default:
             turnError = error.localizedDescription
         }
+        askQueued()
     }
 
     private func reload() async {

@@ -4,6 +4,7 @@ import SwiftUI
 /// its result blocks on the left.
 struct MessageView: View {
     let message: ConversationMessage
+    let store: ConversationStore
     let opener: RowOpener
 
     var body: some View {
@@ -20,7 +21,7 @@ struct MessageView: View {
             VStack(alignment: .leading, spacing: 12) {
                 MarkdownText(message.content)
                 ForEach(Array(message.blocks.enumerated()), id: \.offset) { _, block in
-                    BlockView(block: block, opener: opener)
+                    BlockOrCards(block: block, store: store, opener: opener)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -32,6 +33,7 @@ struct MessageView: View {
 /// the blocks the tools brought.
 struct LiveTurnView: View {
     let turn: LiveTurn
+    let store: ConversationStore
     let opener: RowOpener
     let cancel: () -> Void
 
@@ -64,7 +66,7 @@ struct LiveTurnView: View {
                 }
             }
             ForEach(Array(turn.blocks.enumerated()), id: \.offset) { _, block in
-                BlockView(block: block, opener: opener)
+                BlockOrCards(block: block, store: store, opener: opener)
             }
             if !turn.finished {
                 Button("Abbrechen", systemImage: "stop.circle", action: cancel)
@@ -73,6 +75,24 @@ struct LiveTurnView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A `proposal` block is one card per row (stage 4); every other block is
+/// the generic list.
+struct BlockOrCards: View {
+    let block: ResultBlock
+    let store: ConversationStore
+    let opener: RowOpener
+
+    var body: some View {
+        if block.kind == "proposal" {
+            ForEach(block.proposals) { proposal in
+                ProposalCardView(proposal: proposal, store: store, opener: opener, conversationId: store.summary?.id)
+            }
+        } else {
+            BlockView(block: block, opener: opener)
+        }
     }
 }
 

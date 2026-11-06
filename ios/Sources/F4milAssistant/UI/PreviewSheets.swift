@@ -2,9 +2,10 @@ import QuickLook
 import SafariServices
 import SwiftUI
 
-/// A document's PDF in a QuickLook preview: downloaded through the API
-/// client (the file needs the bearer token), written to a temporary file,
-/// shown, removed again.
+/// A PDF in a QuickLook preview — a document's file, or what a card left
+/// behind: downloaded through the API client (the file needs the bearer
+/// token), written to a temporary file, shown with the share sheet, removed
+/// again.
 struct PDFPreviewSheet: View {
     let item: PDFItem
     let api: AssistantAPI
@@ -24,7 +25,7 @@ struct PDFPreviewSheet: View {
                     ProgressView("Dokument wird geladen …")
                 }
             }
-            .navigationTitle("Dokument")
+            .navigationTitle(item.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -39,9 +40,9 @@ struct PDFPreviewSheet: View {
         }
         .task {
             do {
-                let data = try await api.documentFile(id: item.documentId)
+                let data = try await item.load(with: api)
                 let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("assistant-document-\(item.documentId)-\(UUID().uuidString)")
+                    .appendingPathComponent("\(item.fileStem)-\(UUID().uuidString)")
                     .appendingPathExtension("pdf")
                 try data.write(to: url, options: .atomic)
                 fileURL = url

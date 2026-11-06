@@ -1,6 +1,6 @@
 # The assistant in the iOS app
 
-Status: **stages 1 (#1821), 2 (#1822), 3 (#1824), 5 and 6 done; stage 4 (proposal cards) and the optional stage 7 open.** Follows `ki-assistent.md` (what the
+Status: **stages 1 (#1821), 2 (#1822), 3 (#1824), 4, 5 and 6 (#1826) done; only the optional stage 7 is open.** Follows `ki-assistent.md` (what the
 assistant is) and `assistent-wegfindung.md` (how it finds its way). This plan
 is about bringing the same assistant to the iOS app, and about the shape the
 iOS code needs so that a Finance app and a Documents app can share it later.
@@ -135,10 +135,33 @@ What the web client holds and a native client would have to hold too:
    shows the button in the feed toolbar to whoever has `module.assistant`
    and takes the rows `AppDeepLink.parse` knows — photos, albums, persons,
    recaps — through `AppDeepLinkRouter`, the same way a notification tap
-   does. Proposal cards show as rows for now; stage 4 gives them buttons.
-4. **Proposal cards.** Execute, discard, the continuation after execute,
-   invalidating the app's caches (albums). The letter as PDF preview with
-   the share sheet; editing the letter on the phone is not in this stage.
+   does. Proposal cards showed as rows until stage 4 gave them buttons.
+4. **Proposal cards** — done. `Proposal` in the package reads a row of a
+   `proposal` block (`ProposalRow` in assistant/proposals.ts, with
+   `LetterDraft`, `TextDocumentPreview`, `CollagePreview`);
+   `ProposalCardView` is `ProposalCard.vue` on the phone: header with the
+   status, the summary (struck through once discarded), a letter as it will
+   go out with its gaps in orange, a text document's Markdown, a collage's
+   photos and caption and afterwards the photo it became, the line "Nach dem
+   Ausführen mache ich weiter: …", and "Verwerfen" / "Ausführen" (or "Erneut
+   ausführen" after a failure). `ConversationStore.execute` and `discard`
+   call `POST /assistant/proposals/:id/execute|discard`; once a card ran the
+   store tells the app (`AssistantHost.didExecuteProposal(tool)` — the
+   Photos app posts a notification on which its album list reloads, the
+   phone's `proposalEffects.ts`) and, when the card carries a
+   `continuation`, asks the assistant to go on with the same question the
+   web asks (`ProposalEffects.continuationQuestion`), queued until a running
+   answer has ended. An executed card opens its result: "Ansehen" through
+   the `RowOpener` (the app's screen, else the web view), "PDF ansehen" for
+   `result_download` in the QuickLook preview with the share sheet (`PDFItem`
+   now takes a document id or an API path), a letter also as a `mailto:`
+   draft. The letter is not edited on the phone: while a gap (`[[…]]`,
+   `LetterGaps`) is left, "Ausführen" waits and the foot says so, with "Im
+   Web" opening the conversation in the signed-in web view. The same goes
+   for a collage's layout and caption. Cards render in stored messages and
+   in the running turn alike (`BlockOrCards`), and the server's copy
+   replaces the card's state on a reload, so a card decided on the web
+   reads right here too. Tests in `ProposalTests`.
 5. **Session handover to the web view** — done. `POST /auth/handover`
    (`user/handover.ts`, full-scope session only, rate-limited) issues a
    random token good for a minute and usable once, stored in

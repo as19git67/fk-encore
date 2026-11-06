@@ -42,11 +42,11 @@ struct ConversationView: View {
                         }
                     }
                     ForEach(store.messages) { message in
-                        MessageView(message: message, opener: opener)
+                        MessageView(message: message, store: store, opener: opener)
                             .id(message.id)
                     }
                     if let live = store.live {
-                        LiveTurnView(turn: live, opener: opener) {
+                        LiveTurnView(turn: live, store: store, opener: opener) {
                             Task { await store.cancel() }
                         }
                         .id("live")
@@ -85,7 +85,11 @@ struct ConversationView: View {
         .environment(thumbnails)
         .navigationTitle(store.summary?.displayTitle ?? "Neue Unterhaltung")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await store.load() }
+        .task {
+            // A card that ran tells the app what it changed (stage 4).
+            store.onProposalExecuted = host.didExecuteProposal
+            await store.load()
+        }
         // Away: the socket is closed so the server pushes the finished answer;
         // back: the turn is watched again (stage 6 of assistent-ios.md).
         .onChange(of: scenePhase) { _, phase in
