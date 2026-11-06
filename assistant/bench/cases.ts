@@ -328,7 +328,7 @@ export const BENCH_CASES: BenchCase[] = [
   {
     id: "best-per-person-and-year-distinct",
     title: "Je Person und Jahr die besten, nicht zu ähnlich, ins Album",
-    question: "Mach eine Schleife über Lena und Max und über die Jahre und nimm jeweils die 5 besten Bilder, die sich nicht zu ähnlich sind, und lege sie ins Album \"Lieblingsbilder\".",
+    question: "Für Lena und Max je Jahr die 5 besten Bilder, nicht zu ähnlich, ins Album \"Lieblingsbilder\".",
     expect: [
       { tool: "list_persons" },
       { tool: "list_photos", args: { person_ids: { $contains: "41" }, rank_by: "quality", direction: "desc", group_by: "person", then_by: "year", per_group: 5, distinct: true }, anyOf: [{ person_ids: { $contains: "41" }, rank_by: "quality", direction: "desc", group_by: "year", then_by: "person", per_group: 5, distinct: true }] },

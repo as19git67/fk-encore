@@ -260,7 +260,7 @@ describe("write tools", () => {
     )).rejects.toThrow("list_photos with from_previous_result");
   });
 
-  it("refuses previous photos that were cut at the read cap: the album would get 2000 of 2400 and read as all", async () => {
+  it("refuses previous photos that were cut at the read cap: they do not hold every match", async () => {
     clients.photo.listAlbums.mockResolvedValue({ albums: [{ id: 1, name: "Beispielalbum" }] });
     await expect(tool("add_photos_to_album").run(
       { album_id: 1, from_previous_result: true },

@@ -90,7 +90,7 @@ async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): P
       throw new Error("from_previous_result cannot be combined with a photos filter: call list_photos with from_previous_result and the filter first, then create_album with from_previous_result");
     }
     // A list cut at its read cap is not "all of them": the album would get
-    // the first 2000 of 2400 and the card would read as if that were all.
+    // only the first rows, and the card would read as if that were all.
     if (ctx.previousTruncated?.("photo")) {
       throw new Error("the previous photo result was cut at its read cap, so it does not hold every match: pass the same filter as photos (favorite, date range, person_ids) instead of from_previous_result");
     }

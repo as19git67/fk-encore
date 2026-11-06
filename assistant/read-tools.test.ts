@@ -251,7 +251,7 @@ describe("list_photos", () => {
     expect(out.text).toContain("2024-03 | 1 |");
   });
 
-  it("hands a follow-up the picks of a ranking, not everything that matched ('die 5 besten' put 2000 photos in an album)", async () => {
+  it("hands a follow-up the picks of a ranking, not everything that matched", async () => {
     clients.photo.listPhotos.mockResolvedValue({ photos: Array.from({ length: 30 }, (_, i) => ({ id: i + 1, taken_at: "2017-01-22T10:00:00Z", ai_quality_score: 90 - i })) });
     const out = await tool("list_photos").run({ person_ids: [41], rank_by: "quality", direction: "desc", limit: 5 }, ctx());
     expect(out.ref?.ids).toEqual([1, 2, 3, 4, 5]);

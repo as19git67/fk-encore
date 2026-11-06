@@ -280,8 +280,8 @@ export const listPhotos: ToolSpec = {
     // A metric the service computes is read from the service even for an
     // earlier result: the rows of that result do not carry it.
     if (!previous || serverFilter || !RANK_FIELDS[ranking.field].own) {
-      // Grouped, every group needs its own best rows: the first 2000 of a
-      // ranking hold only some of the years ("die besten je Jahr" found four).
+      // Grouped, every group needs its own best rows: the top of one capped
+      // ranking holds only the groups that rank high overall.
       const cap = previous || grouping ? NARROW_CAP : PHOTO_COUNT_CAP;
       const read = async (persons: number[], period?: Period, limit = cap + 1) => (await (photo.listPhotos({
         ...filter,
