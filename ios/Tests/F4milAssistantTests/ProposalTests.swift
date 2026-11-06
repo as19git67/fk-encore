@@ -52,7 +52,7 @@ final class ProposalTests: XCTestCase {
     }
 
     func testACollageRowCarriesItsPhotosAndResult() throws {
-        let json = #"{"proposal_id":5,"tool":"create_photo_collage","summary":"Collage aus 2 Fotos","count":null,"status":"executed","result_summary":"Collage erstellt","result_route":"/fotos/galerie?photoId=99","result_download":null,"error":null,"letter":null,"text_document":null,"collage":{"photos":[{"id":1,"filename":"a.jpg","auto_crop":null},{"id":2,"filename":"b.jpg","auto_crop":{"x":0.5,"y":0.5}}],"layout":"grid-2","text":"Sommer","text_position":"bottom","text_size":"medium","text_color":"#ffffff","album_name":null,"result":{"photo_id":99,"filename":"c.jpg"}},"continuation":null}"#
+        let json = ##"{"proposal_id":5,"tool":"create_photo_collage","summary":"Collage aus 2 Fotos","count":null,"status":"executed","result_summary":"Collage erstellt","result_route":"/fotos/galerie?photoId=99","result_download":null,"error":null,"letter":null,"text_document":null,"collage":{"photos":[{"id":1,"filename":"a.jpg","auto_crop":null},{"id":2,"filename":"b.jpg","auto_crop":{"x":0.5,"y":0.5}}],"layout":"grid-2","text":"Sommer","text_position":"bottom","text_size":"medium","text_color":"##ffffff","album_name":null,"result":{"photo_id":99,"filename":"c.jpg"}},"continuation":null}"##
         let card = try JSONDecoder().decode(Proposal.self, from: Data(json.utf8))
         let collage = try XCTUnwrap(card.collage)
         XCTAssertEqual(collage.photos.map(\.filename), ["a.jpg", "b.jpg"])
