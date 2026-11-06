@@ -173,6 +173,14 @@ struct TripPinDetailSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if let image = detail.image {
+                    Section {
+                        TripSpotThumbnail(image: image, height: 160)
+                            .listRowInsets(EdgeInsets())
+                    } footer: {
+                        Text(image.credit)
+                    }
+                }
                 if let planned = detail.planned {
                     Section {
                         LabeledContent("Wann") {

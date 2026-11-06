@@ -59,6 +59,17 @@ struct TripSpotDetailView<Actions: View>: View {
 
     var body: some View {
         List {
+            // What it looks like, before anything else: a name and a
+            // category do not make anybody want to go (candidate
+            // ranking, stage 2). The place's own picture, and under it
+            // what its Commons category holds besides.
+            if spot.image != nil {
+                Section {
+                    TripSpotPictures(osmRef: spot.osmRef, image: spot.image)
+                        .listRowInsets(EdgeInsets())
+                }
+            }
+
             // Why it was saved beats what it is called, when you are
             // deciding what to do with an afternoon (§9.2).
             if let note = spot.note, !note.isEmpty {
@@ -351,6 +362,8 @@ struct TripSpotDetail: Identifiable, Sendable {
     let supportsPhotoStop: Bool
     /// Where it finishes, when the way is the point (§4.7).
     var extent: TripSpotExtent? = nil
+    /// Its picture, where it has one (candidate ranking, stage 2).
+    var image: TripRoutePhoto? = nil
 
     var id: String { osmRef }
     /// A title the group gave it wins over the map's name: they chose
@@ -378,6 +391,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         photoStop = candidate.isPhotoStop
         supportsPhotoStop = true
         extent = candidate.extent
+        image = candidate.image
     }
 
     /// A place the browse turned up (§9.2, case 4 widened).
@@ -449,6 +463,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         photoStop = stop.isPhotoStop
         supportsPhotoStop = true
         extent = stop.extent
+        image = stop.image
     }
 }
 

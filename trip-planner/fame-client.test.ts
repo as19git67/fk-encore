@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastTwelveMonths, parseCategorySizes, parseItems, parsePageviews, parseWikitext } from "./fame-client";
+import { lastTwelveMonths, parseCategorySizes, parseItems, parsePageImages, parsePageviews, parseWikitext } from "./fame-client";
 
 describe("fame client parsers", () => {
   it("counts Wikipedia editions only, and reads the Commons category and image", () => {
@@ -31,6 +31,15 @@ describe("fame client parsers", () => {
       { title: "Category:Gibt es nicht", missing: true },
     ] } });
     expect([...sizes]).toEqual([["Musterdom (Musterstadt)", 412]]);
+  });
+
+  it("keys a main image by the title that was asked", () => {
+    const images = parsePageImages({ query: {
+      normalized: [{ from: "Musterdom_(Musterstadt)", to: "Musterdom (Musterstadt)" }],
+      pages: [{ title: "Musterdom (Musterstadt)", pageimage: "Musterdom_aussen.jpg" }, { title: "Ohne Bild" }],
+    } });
+    expect(images.get("Musterdom_(Musterstadt)")).toBe("File:Musterdom aussen.jpg");
+    expect(images.has("Ohne Bild")).toBe(false);
   });
 
   it("reads a page's wikitext", () => {

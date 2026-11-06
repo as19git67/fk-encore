@@ -30,6 +30,25 @@ export const LOOKUP_BUDGET_MS = 8_000;
 const PAGEVIEW_CONCURRENCY = 8;
 /** Places one background tick looks up. */
 const REFILL_BATCH = 120;
+/** How close a photograph has to be taken to stand for a place with no picture of its own. */
+export const NEARBY_PHOTO_M = 60;
+
+/**
+ * The picture on a card (stage 2), with what a free licence asks for:
+ * the author and the licence, shown beside it. The phone loads the
+ * thumbnail straight from Wikimedia.
+ */
+export interface SpotImage {
+  /** "File:…" on Commons. */
+  title: string;
+  thumbUrl: string;
+  thumbWidth: number;
+  thumbHeight: number;
+  /** The file's page on Commons, with the full picture and licence. */
+  pageUrl: string;
+  author: string | null;
+  license: string | null;
+}
 
 export type FameSpot = Pick<GeoPoiSearchSpot, "osmRef" | "name" | "lat" | "lon" | "wikidataQid" | "wikipedia">;
 
@@ -148,6 +167,7 @@ function fameOfRow(row: typeof tripSpotFame.$inferSelect): SpotFame {
 interface Looked extends SpotFame {
   commonsCategory: string | null;
   wikivoyagePage: string | null;
+  image: SpotImage | null;
 }
 
 /**
@@ -192,6 +212,9 @@ async function lookUp(
   };
   await Promise.all(Array.from({ length: PAGEVIEW_CONCURRENCY }, worker));
 
+  const images = await picturesFor(spots, items, client, deadline);
+  if (images === undefined) return out;
+
   for (const spot of spots) {
     if (articleOf(spot.wikipedia) && !views.has(spot.osmRef)) continue;
     const item = spot.wikidataQid ? items.get(spot.wikidataQid) : undefined;
@@ -205,8 +228,89 @@ async function lookUp(
       // names it"; the empty string is that, without inventing a line.
       wikivoyage: listing ? listing.description ?? "" : null,
       wikivoyagePage: listing && voyage ? voyage.page : null,
+      image: images.get(spot.osmRef) ?? null,
     });
   }
+  return out;
+}
+
+/**
+ * One picture per place, in the order of how deliberately it was
+ * chosen (stage 2): the main image of the article somebody wrote about
+ * it, then the image Wikidata's editors picked (P18), then — for a
+ * place with neither, which is most places people add by hand — a
+ * photograph taken within `NEARBY_PHOTO_M`. Only photographs: Commons
+ * holds as many maps, coats of arms and floor plans as pictures, and
+ * none of those shows what a place looks like.
+ *
+ * Undefined when a source failed, so the place is retried rather than
+ * stored without the picture it has.
+ */
+async function picturesFor(
+  spots: readonly FameSpot[],
+  items: ReadonlyMap<string, { image: string | null }>,
+  client: FameClient,
+  deadline: number,
+): Promise<Map<string, SpotImage> | undefined> {
+  const chosen = new Map<string, string>();
+  const byLang = new Map<string, FameSpot[]>();
+  for (const spot of spots) {
+    const article = articleOf(spot.wikipedia);
+    if (!article) continue;
+    byLang.set(article.lang, [...(byLang.get(article.lang) ?? []), spot]);
+  }
+  for (const [lang, inLang] of byLang) {
+    const titles = inLang.map((s) => (articleOf(s.wikipedia) as { title: string }).title);
+    const files = await within(deadline, () => client.pageImages(lang, titles));
+    if (files === undefined) return undefined;
+    for (const spot of inLang) {
+      const file = files.get((articleOf(spot.wikipedia) as { title: string }).title);
+      if (file) chosen.set(spot.osmRef, file);
+    }
+  }
+  for (const spot of spots) {
+    const p18 = spot.wikidataQid ? items.get(spot.wikidataQid)?.image : null;
+    if (!chosen.has(spot.osmRef) && p18) chosen.set(spot.osmRef, p18);
+  }
+
+  const out = new Map<string, SpotImage>();
+  if (chosen.size > 0) {
+    const photos = await within(deadline, () => client.photos([...new Set(chosen.values())]));
+    if (photos === undefined) return undefined;
+    const norm = (t: string) => t.replace(/_/g, " ");
+    const byTitle = new Map(photos.map((p) => [norm(p.title), p]));
+    for (const [ref, file] of chosen) {
+      const photo = byTitle.get(norm(file));
+      if (photo) out.set(ref, photo);
+    }
+  }
+
+  // Nearby only where nothing else answered, and never for a pool's
+  // worth of places at once: one geosearch per place.
+  const bare = spots.filter((s) => !out.has(s.osmRef) && !chosen.has(s.osmRef));
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (next < bare.length && !failed) {
+      const spot = bare[next];
+      next += 1;
+      const near = await within(deadline, () => client.photosNear(spot, NEARBY_PHOTO_M));
+      if (near === undefined) { failed = true; return; }
+      if (near[0]) out.set(spot.osmRef, near[0]);
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  return failed ? undefined : out;
+}
+
+/** The pictures of these places, where they have one. */
+export async function imagesFor(osmRefs: readonly string[]): Promise<Map<string, SpotImage>> {
+  const out = new Map<string, SpotImage>();
+  if (osmRefs.length === 0) return out;
+  const rows = await db.select({ osmRef: tripSpotFame.osm_ref, image: tripSpotFame.image })
+    .from(tripSpotFame)
+    .where(inArray(tripSpotFame.osm_ref, [...new Set(osmRefs)]));
+  for (const row of rows) if (row.image) out.set(row.osmRef, row.image as SpotImage);
   return out;
 }
 
@@ -253,6 +357,7 @@ async function store(spots: readonly FameSpot[], looked: ReadonlyMap<string, Loo
       commons_files: fame?.commonsFiles ?? null,
       wikivoyage: fame?.wikivoyage ?? null,
       wikivoyage_page: fame?.wikivoyagePage ?? null,
+      image: fame?.image ?? null,
       fetched_at: fame ? at : null,
       requested_at: at,
     };
@@ -272,6 +377,7 @@ async function store(spots: readonly FameSpot[], looked: ReadonlyMap<string, Loo
       commons_files: sql`CASE WHEN excluded.fetched_at IS NULL THEN ${tripSpotFame.commons_files} ELSE excluded.commons_files END`,
       wikivoyage: sql`CASE WHEN excluded.fetched_at IS NULL THEN ${tripSpotFame.wikivoyage} ELSE excluded.wikivoyage END`,
       wikivoyage_page: sql`CASE WHEN excluded.fetched_at IS NULL THEN ${tripSpotFame.wikivoyage_page} ELSE excluded.wikivoyage_page END`,
+      image: sql`CASE WHEN excluded.fetched_at IS NULL THEN ${tripSpotFame.image} ELSE excluded.image END`,
       fetched_at: sql`COALESCE(excluded.fetched_at, ${tripSpotFame.fetched_at})`,
       requested_at: sql`excluded.requested_at`,
     },

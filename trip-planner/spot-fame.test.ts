@@ -14,7 +14,10 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan } from "./plans";
 import { resetFameClient, setFameClient, type FameClient, type ItemFacts } from "./fame-client";
-import { articleOf, fameFor, prominenceAround, refillSpotFame } from "./spot-fame";
+import { articleOf, fameFor, imagesFor, prominenceAround, refillSpotFame } from "./spot-fame";
+import type { CommonsPhoto } from "./commons-client";
+import { getTripPlan } from "./plans";
+import { galleryOf } from "./spot-gallery";
 import { toCandidates } from "./candidates";
 
 const CITY = { lat: 48.37, lon: 10.9 };
@@ -38,8 +41,16 @@ class FakeFame implements FameClient {
   async items(qids: readonly string[]) {
     this.calls += 1;
     if (this.broken) throw new Error("down");
-    return new Map<string, ItemFacts>(qids.map((q) => [q, { languages: 5, commonsCategory: null, image: null }]));
+    return new Map<string, ItemFacts>(qids.map((q) => [q, {
+      languages: 5, commonsCategory: null, image: q === "Q999002" ? "File:Rathaus von Norden.jpg" : null,
+    }]));
   }
+  async pageImages(_lang: string, titles: readonly string[]) {
+    return new Map(titles.filter((t) => t === "Musterdom").map((t) => [t, "File:Musterdom Westfassade.jpg"]));
+  }
+  async photos(titles: readonly string[]) { return titles.map(photo); }
+  near: CommonsPhoto[] = [];
+  async photosNear() { return this.near; }
   async pageviews(_lang: string, title: string) { return this.views.get(title) ?? 0; }
   async categorySizes() { return new Map<string, number>(); }
   async voyageListings() {
@@ -47,6 +58,13 @@ class FakeFame implements FameClient {
       { name: "Musterdom", qid: "Q999003", lat: null, lon: null, description: "Gotischer Dom." },
     ] };
   }
+}
+
+function photo(title: string): CommonsPhoto {
+  return {
+    title, thumbUrl: `https://upload.example.test/${encodeURIComponent(title)}`, thumbWidth: 640, thumbHeight: 480,
+    pageUrl: `https://commons.example.test/wiki/${encodeURIComponent(title)}`, author: "Beispiel Fotograf", license: "CC BY-SA 4.0",
+  };
 }
 
 let fake: FakeFame;
@@ -122,6 +140,33 @@ describe("ranking a pool by open data", () => {
     fake.broken = false;
     expect(await refillSpotFame()).toBe(1);
     expect((await fameFor(spots, CITY)).get("node:3")?.wikivoyage).toBe("Gotischer Dom.");
+  });
+});
+
+describe("a picture on the card", () => {
+  it("takes the article's main image first, then Wikidata's, then one taken close by", async () => {
+    const bare = { ...sight(4, 0.004, "Brunnen ohne Artikel"), wikidataQid: null, wikipedia: null };
+    fake.near = [photo("File:Brunnen 2025.jpg")];
+    await fameFor([sight(3, 0.003, "Musterdom"), sight(2, 0.002, "Rathaus Musterstadt"), bare], CITY);
+    const images = await imagesFor(["node:3", "node:2", "node:4"]);
+    expect(images.get("node:3")?.title).toBe("File:Musterdom Westfassade.jpg");
+    expect(images.get("node:2")?.title).toBe("File:Rathaus von Norden.jpg");
+    expect(images.get("node:4")?.title).toBe("File:Brunnen 2025.jpg");
+    expect(images.get("node:4")?.license).toBe("CC BY-SA 4.0");
+  });
+
+  it("comes with every pool entry and stop of a loaded plan", async () => {
+    const { plan } = await createTripPlan({ legs: [{ title: "Musterstadt", anchor: CITY, days: 1 }] });
+    const { plan: loaded } = await getTripPlan({ planId: plan.id });
+    const leg = loaded.legs[0];
+    const all = [...leg.pool, ...leg.days.flatMap((d) => d.blocks.flatMap((b) => b.stops))];
+    expect(all.find((s) => s.osmRef === "node:3")?.image?.title).toBe("File:Musterdom Westfassade.jpg");
+  });
+
+  it("puts the place's own picture first in the gallery, once", () => {
+    const own = photo("File:Musterdom Westfassade.jpg");
+    const gallery = galleryOf(own, [photo("File:Musterdom_Westfassade.jpg"), photo("File:Musterdom innen.jpg")]);
+    expect(gallery.map((p) => p.title)).toEqual(["File:Musterdom Westfassade.jpg", "File:Musterdom innen.jpg"]);
   });
 });
 

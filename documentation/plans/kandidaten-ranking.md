@@ -1,6 +1,6 @@
 # Candidates: ranked, pictured, explained — and one list instead of two
 
-Status: in progress (2026-11-06). Stages 0 and 1 built; see "As built" under each stage.
+Status: in progress (2026-11-06). Stages 0, 1 and 2 built; see "As built" under each stage.
 
 ## The problem
 
@@ -181,6 +181,18 @@ base score of 1 in place of the Wikidata and Wikipedia points; the
 - iOS: `TripCandidate` and `TripStop` get `image`; the row in
   `TripPoolView`, the pin sheet and `TripSpotDetailView` draw it. A
   missing image shows the category symbol, not a placeholder frame.
+
+As built (2026-11-06): the picture is looked up with the prominence
+(`picturesFor` in `spot-fame.ts`) and stored in `trip_spot_fame.image`
+(migration `0293_trip_spot_fame_image`), read onto pool entries and
+stops in `loadPlan` like the notes. Thumbnails are Commons' 640 px
+(`THUMB_WIDTH`), not 320, so the large picture on the detail screen
+is sharp. The gallery is `GET /trip-planner/spots/gallery`
+(`spot-gallery.ts`) over the place's Commons category, shown on the
+detail screen (`TripSpotPictures`); the article view keeps its own
+pictures. A find is looked up in the background after it is saved.
+Offline, `TripOfflineThumbnails` loads every card's thumbnail into
+the URL cache when the plan is downloaded.
 
 ## Stage 3 — curation by the local model
 

@@ -461,8 +461,16 @@ struct TripPoolView: View {
                     Text(TripSpotName.line(candidate.displayName, local: candidate.localName))
                         .font(.headline)
                 } icon: {
-                    Image(systemName: TripCategory.symbol(candidate.category))
-                        .foregroundStyle(.secondary)
+                    // The picture where the place has one (candidate
+                    // ranking, stage 2); the category's symbol where it
+                    // has none — never an empty frame.
+                    if let image = candidate.image {
+                        TripSpotThumbnail(image: image, height: 44, width: 44)
+                            .accessibilityHidden(true)
+                    } else {
+                        Image(systemName: TripCategory.symbol(candidate.category))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if candidate.isPhotoStop {
                     Image(systemName: "camera.fill")

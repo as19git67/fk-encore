@@ -160,6 +160,24 @@ final class TripSpotDetailTests: XCTestCase {
         XCTAssertFalse(TripSpotDetail(decoded).unmatched)
     }
 
+    func testACandidateBringsItsPictureToTheDetailScreen() throws {
+        // Candidate ranking, stage 2: the server hands the picture out
+        // with the pool entry, with what its licence asks to be said.
+        let json = """
+        {"osmRef":"node:1","name":"Musterdom","lat":48.37,"lon":10.9,"category":"worship",
+         "dwellMinutes":25,"score":3,"reasons":[],
+         "image":{"title":"File:Musterdom.jpg","thumbUrl":"https://upload.example.test/musterdom.jpg",
+                  "thumbWidth":640,"thumbHeight":480,"pageUrl":"https://commons.example.test/wiki/File:Musterdom.jpg",
+                  "author":"Beispiel Fotograf","license":"CC BY-SA 4.0"}}
+        """
+        let decoded = try JSONDecoder().decode(TripCandidate.self, from: Data(json.utf8))
+        let detail = TripSpotDetail(decoded)
+        XCTAssertEqual(detail.image?.thumbUrl, "https://upload.example.test/musterdom.jpg")
+        XCTAssertEqual(detail.image?.credit, "Foto: Beispiel Fotograf · CC BY-SA 4.0")
+        XCTAssertEqual(TripPinDetail.of(decoded).image?.pageUrl,
+                       "https://commons.example.test/wiki/File:Musterdom.jpg")
+    }
+
     func testAFindBroughtInByHandSaysSo() {
         XCTAssertTrue(candidate(note: "beste Pastéis laut Blog").isManual)
         XCTAssertFalse(candidate().isManual)

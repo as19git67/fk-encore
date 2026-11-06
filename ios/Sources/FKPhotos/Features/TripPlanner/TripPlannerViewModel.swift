@@ -279,6 +279,7 @@ final class TripPlannerViewModel {
             let bundle = try await fetchBundle()
             bundleStoredAt = try offlineStore.save(bundle, planId: planId)
             offlineBundle = bundle
+            await TripOfflineThumbnails.prefetch(bundle.thumbnailURLs)
             return true
         } catch {
             errorMessage = TripErrorText.describe(error)
@@ -296,6 +297,7 @@ final class TripPlannerViewModel {
         guard let bundle = try? await fetchBundle() else { return }
         bundleStoredAt = try? offlineStore.save(bundle, planId: planId)
         offlineBundle = bundle
+        await TripOfflineThumbnails.prefetch(bundle.thumbnailURLs)
     }
 
     private func fetchBundle() async throws -> TripOfflineBundle {

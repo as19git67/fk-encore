@@ -4132,6 +4132,12 @@ export const tripSpotFame = pgTable("trip_spot_fame", {
   /** The listing's one-line description, CC BY-SA, with the page it came from. */
   wikivoyage: text("wikivoyage"),
   wikivoyage_page: text("wikivoyage_page"),
+  /**
+   * The picture for the card (stage 2): Wikipedia's main image, else
+   * Wikidata's chosen image (P18), else a photograph taken within 60 m.
+   * `SpotImage` in `trip-planner/spot-fame.ts`; null when there is none.
+   */
+  image: jsonb("image"),
   fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true }),
   requested_at: timestamp("requested_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });

@@ -11,6 +11,7 @@
  */
 
 import { parseListings, type VoyageListing } from "./wikivoyage";
+import { getCommonsClient, type CommonsPhoto } from "./commons-client";
 import { monthlyAverage } from "./prominence";
 
 const WIKIDATA_API = "https://www.wikidata.org/w/api.php";
@@ -36,6 +37,12 @@ export interface FameClient {
   pageviews(lang: string, title: string): Promise<number | null>;
   /** Files per Commons category, for the categories that exist. */
   categorySizes(categories: readonly string[]): Promise<Map<string, number>>;
+  /** The main picture of each article, as "File:…" by title (Wikipedia's `pageimages`). */
+  pageImages(lang: string, titles: readonly string[]): Promise<Map<string, string>>;
+  /** Thumbnail, author and licence of these files, photographs only (Commons). */
+  photos(titles: readonly string[]): Promise<CommonsPhoto[]>;
+  /** Photographs taken within `radiusM` of a point (Commons geosearch). */
+  photosNear(point: { lat: number; lon: number }, radiusM: number): Promise<CommonsPhoto[]>;
   /** The sight listings of the Wikivoyage city article nearest to a point. */
   voyageListings(point: { lat: number; lon: number }): Promise<{ page: string; listings: VoyageListing[] } | null>;
 }
@@ -83,6 +90,32 @@ export class HttpFameClient implements FameClient {
       for (const [name, files] of parseCategorySizes(await getJson(url))) out.set(name, files);
     }
     return out;
+  }
+
+  async pageImages(lang: string, titles: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const wanted = [...new Set(titles)];
+    for (let i = 0; i < wanted.length; i += 50) {
+      const url = new URL(`https://${lang}.wikipedia.org/w/api.php`);
+      url.searchParams.set("action", "query");
+      url.searchParams.set("format", "json");
+      url.searchParams.set("formatversion", "2");
+      url.searchParams.set("prop", "pageimages");
+      url.searchParams.set("piprop", "name");
+      url.searchParams.set("titles", wanted.slice(i, i + 50).join("|"));
+      for (const [title, file] of parsePageImages(await getJson(url))) out.set(title, file);
+    }
+    return out;
+  }
+
+  async photos(titles: readonly string[]): Promise<CommonsPhoto[]> {
+    const out: CommonsPhoto[] = [];
+    for (let i = 0; i < titles.length; i += 50) out.push(...await getCommonsClient().files(titles.slice(i, i + 50)));
+    return out;
+  }
+
+  async photosNear(point: { lat: number; lon: number }, radiusM: number): Promise<CommonsPhoto[]> {
+    return getCommonsClient().nearby(point, radiusM, 5);
   }
 
   async voyageListings(point: { lat: number; lon: number }) {
@@ -187,6 +220,27 @@ export function parseCategorySizes(body: unknown): Map<string, number> {
   return out;
 }
 
+/**
+ * Title → "File:…" out of a `prop=pageimages` answer, keyed by the
+ * title as it was *asked*: the API answers under the normalised title
+ * ("Duomo_di_X" asked, "Duomo di X" answered) and says which was which.
+ */
+export function parsePageImages(body: unknown): Map<string, string> {
+  const query = (body as { query?: { normalized?: Array<{ from?: string; to?: string }>; pages?: unknown[] } } | null)?.query;
+  const asked = new Map<string, string>();
+  for (const n of query?.normalized ?? []) if (n.from && n.to) asked.set(n.to, n.from);
+  const out = new Map<string, string>();
+  for (const raw of query?.pages ?? []) {
+    const page = raw as { title?: string; pageimage?: unknown };
+    if (!page.title || typeof page.pageimage !== "string" || !page.pageimage) continue;
+    const file = `File:${page.pageimage.replace(/_/g, " ")}`;
+    out.set(page.title, file);
+    const original = asked.get(page.title);
+    if (original) out.set(original, file);
+  }
+  return out;
+}
+
 export function parseGeosearchTitles(body: unknown): string[] {
   const hits = (body as { query?: { geosearch?: Array<{ title?: unknown }> } } | null)?.query?.geosearch ?? [];
   return hits.map((h) => h.title).filter((t): t is string => typeof t === "string");
@@ -204,6 +258,9 @@ export class SilentFameClient implements FameClient {
   async items() { return new Map<string, ItemFacts>(); }
   async pageviews() { return null; }
   async categorySizes() { return new Map<string, number>(); }
+  async pageImages() { return new Map<string, string>(); }
+  async photos() { return []; }
+  async photosNear() { return []; }
   async voyageListings() { return null; }
 }
 

@@ -29,6 +29,7 @@ import "./explore";
 import "./article-read";
 import "./shares";
 import "./pool";
+import "./spot-gallery";
 import "./spot-notes";
 import "./daylight";
 import "./forecast";

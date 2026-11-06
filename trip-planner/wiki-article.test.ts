@@ -62,6 +62,7 @@ class FakeCommons implements CommonsClient {
     }));
   }
   async nearby(): Promise<CommonsPhoto[]> { return []; }
+  async category(): Promise<CommonsPhoto[]> { return []; }
 }
 
 function article(lang: string, title: string, lead: string): WikipediaArticle {

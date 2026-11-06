@@ -29,6 +29,7 @@ import { addPoolEntry, mergeIntoPoolEntry, type StoredPoolEntry } from "./find-s
 import { DEFAULT_DWELL_MINUTES, MANUAL_REASON, MANUAL_SCORE } from "./candidates";
 import { chooseLeg, findDuplicate, manualRef } from "./finds";
 import { extentOf, type SpotExtent } from "./extent";
+import { fameFor } from "./spot-fame";
 
 /** How far around a find to look for the OSM entry it might be. */
 const MATCH_RADIUS_M = 80;
@@ -204,6 +205,20 @@ export const addFind = api(
       unmatched: match === null && !extent && req.osmRef === undefined,
       extent: extent ?? undefined,
     });
+
+    // Its picture (ranking plan, stage 2), looked up after the answer
+    // rather than before it: a find is saved the moment it is shared,
+    // and the card fills in on the next load. Most places people add by
+    // hand have no article, so this is usually a photograph taken
+    // within a few metres.
+    void fameFor([{
+      osmRef: entry.osmRef,
+      name: entry.name,
+      lat: entry.lat,
+      lon: entry.lon,
+      wikidataQid: match?.wikidataQid ?? null,
+      wikipedia: match?.wikipedia ?? null,
+    }], position).catch(() => undefined);
 
     return {
       entry,

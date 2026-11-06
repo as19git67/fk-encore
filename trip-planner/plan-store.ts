@@ -41,6 +41,7 @@ import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
 import { travelClassFor, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
+import { imagesFor, type SpotImage } from "./spot-fame";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 
 type Db = typeof dbDefault;
@@ -143,6 +144,12 @@ export interface StoredLeg {
 export interface StoredCandidate extends ScoredCandidate {
   /** search | manual — found by the planner, or brought in by a person. */
   origin: string;
+  /**
+   * The picture on the card (ranking plan, stage 2). Read from the
+   * per-place cache on the way out, like the notes, because a re-plan
+   * rewrites the rows and the picture belongs to the place.
+   */
+  image?: SpotImage | null;
   /** Why it was saved, in the words of whoever saved it (§9.2). */
   note: string | null;
   /** Where it came from, kept as provenance (§9.2). */
@@ -252,6 +259,8 @@ export interface StoredStop extends CurrentStop {
   rowId: number;
   /** What the group calls it, when they have renamed it (§10.4). */
   title?: string | null;
+  /** The picture on the card (ranking plan, stage 2), from `trip_spot_fame`. */
+  image?: SpotImage | null;
 }
 
 /**
@@ -1152,6 +1161,10 @@ export async function loadPlan(
   const legByBlock = new Map(blockRows.map((b) => [b.id, legByDay.get(b.day_id)!]));
   const modeByLeg = new Map(legRows.map((l) => [l.id, l.mode as TransportMode]));
 
+  // The pictures, per place and on the way out (stage 2): one query
+  // for every spot of the plan, planned or in a pool.
+  const images = await imagesFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
+
   const stopsByBlock = new Map<number, StoredStop[]>();
   for (const row of stopRows) {
     const legId = legByBlock.get(row.block_id)!;
@@ -1189,6 +1202,7 @@ export async function loadPlan(
       note: written?.note ?? row.note,
       sourceUrl: written?.url ?? row.source_url,
       title: written?.title ?? null,
+      image: images.get(row.osm_ref) ?? null,
     });
     stopsByBlock.set(row.block_id, list);
   }
@@ -1285,6 +1299,7 @@ export async function loadPlan(
       sourceUrl: written?.url ?? row.source_url,
       title: written?.title ?? null,
       unmatched: row.unmatched,
+      image: images.get(row.osm_ref) ?? null,
     });
     poolByLeg.set(row.leg_id, list);
   }
