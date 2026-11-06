@@ -283,26 +283,38 @@ export const listPhotos: ToolSpec = {
       // Grouped, every group needs its own best rows: the first 2000 of a
       // ranking hold only some of the years ("die besten je Jahr" found four).
       const cap = previous || grouping ? NARROW_CAP : PHOTO_COUNT_CAP;
-      const read = async (persons: number[]) => (await (photo.listPhotos({
+      const read = async (persons: number[], period?: Period, limit = cap + 1) => (await (photo.listPhotos({
         ...filter,
+        ...(period ? { dateFrom: period.from, dateTo: period.to } : {}),
         personIds: persons.length ? persons.join(",") : undefined,
         hiddenMode: hidden,
-        sortBy: RANK_FIELDS[ranking.field].sortBy,
-        sortDir: ranking.direction,
-        limit: cap + 1,
+        sortBy: period?.edge ? "date" : RANK_FIELDS[ranking.field].sortBy,
+        sortDir: period?.edge ?? ranking.direction,
+        limit,
       })) as unknown as { photos: PhotoRow[] }).photos;
+      // Grouped, every group needs its own best rows: a read cut at the cap
+      // holds only the groups that rank high overall. Such a read is split by
+      // time until each part fits (readComplete), whatever the groups are.
+      const readGroup = async (persons: number[]) => {
+        if (!grouping || previous) {
+          const all = await read(persons);
+          return { rows: all.slice(0, cap), capped: all.length > cap, split: false };
+        }
+        return readComplete((period) => read(persons, period), (edge) => read(persons, { from: dateFrom, to: dateTo, edge }, 1), cap, { from: dateFrom, to: dateTo });
+      };
+      const rankOf = (p: PhotoRow) => ownValue(p, ranking.field);
       if (perPerson) {
         // One read per person: a photo of both is in both groups.
         rows = [];
         for (const id of personIds) {
-          const own = await read([id]);
-          capped ||= own.length > cap;
-          rows.push(...own.slice(0, cap).map((p) => ({ ...p, person_id: id })));
+          const own = await readGroup([id]);
+          capped ||= own.capped;
+          rows.push(...(own.split ? rankedMerge(own.rows, rankOf, ranking.direction) : own.rows).map((p) => ({ ...p, person_id: id })));
         }
       } else {
-        const all = await read(personIds);
-        capped = all.length > cap;
-        rows = all.slice(0, cap);
+        const all = await readGroup(personIds);
+        capped = all.capped;
+        rows = all.split ? rankedMerge(all.rows, rankOf, ranking.direction) : all.rows;
       }
       if (previous) {
         const keep = new Set(previous);
@@ -396,6 +408,75 @@ export const listPhotos: ToolSpec = {
     };
   },
 };
+
+/** A stretch of time to read, as the photo filter takes it; `edge` reads its first or last photo by date. */
+interface Period { from?: string; to?: string; edge?: "asc" | "desc" }
+
+/** Photos one grouped read takes in all, over every part; past this it says "more than". */
+const GROUPED_READ_MAX = 60_000;
+
+/**
+ * Every row of a read that the cap would cut, read in parts of time: the
+ * whole range, else year by year, else month by month. A month that alone
+ * exceeds the cap stays cut and says so. Generic over the grouping: whether
+ * the groups are years, months, places or persons, none of them loses its
+ * rows because others rank higher overall.
+ */
+async function readComplete(
+  read: (period?: Period) => Promise<PhotoRow[]>,
+  edge: (dir: "asc" | "desc") => Promise<PhotoRow[]>,
+  cap: number,
+  range: Period,
+): Promise<{ rows: PhotoRow[]; capped: boolean; split: boolean }> {
+  const whole = await read(range.from || range.to ? range : undefined);
+  if (whole.length <= cap) return { rows: whole, capped: false, split: false };
+  const day = (p: PhotoRow | undefined) => (p?.taken_at ?? p?.created_at ?? "").slice(0, 10) || undefined;
+  const from = range.from ?? day((await edge("asc"))[0]);
+  const to = range.to ?? day((await edge("desc"))[0]);
+  if (!from || !to) return { rows: whole.slice(0, cap), capped: true, split: false };
+  const out: PhotoRow[] = [];
+  let capped = false;
+  const visit = async (period: Required<Pick<Period, "from" | "to">>): Promise<void> => {
+    if (out.length >= GROUPED_READ_MAX) { capped = true; return; }
+    const rows = await read(period);
+    if (rows.length <= cap) { out.push(...rows); return; }
+    const parts = splitPeriod(period.from, period.to);
+    if (!parts) { out.push(...rows.slice(0, cap)); capped = true; return; }
+    for (const part of parts) await visit(part);
+  };
+  for (const part of splitPeriod(from, to) ?? [{ from, to }]) await visit(part);
+  return { rows: out, capped, split: true };
+}
+
+/** The years of a range, or its months when it lies in one year; null for a single month. */
+export function splitPeriod(from: string, to: string): Array<{ from: string; to: string }> | null {
+  const [fy, fm] = [Number(from.slice(0, 4)), Number(from.slice(5, 7))];
+  const [ty, tm] = [Number(to.slice(0, 4)), Number(to.slice(5, 7))];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const clamp = (a: string, b: string) => ({ from: a < from ? from : a, to: b > to ? to : b });
+  if (fy !== ty) {
+    return Array.from({ length: ty - fy + 1 }, (_, i) => clamp(`${fy + i}-01-01`, `${fy + i}-12-31`));
+  }
+  if (fm !== tm) {
+    const last = (m: number) => new Date(Date.UTC(fy, m, 0)).getUTCDate();
+    return Array.from({ length: tm - fm + 1 }, (_, i) => clamp(`${fy}-${pad(fm + i)}-01`, `${fy}-${pad(fm + i)}-${pad(last(fm + i))}`));
+  }
+  return null;
+}
+
+/** Rows read in parts, back in one ranking; rows without a value last, ties in read order. */
+function rankedMerge(rows: PhotoRow[], valueOf: (p: PhotoRow) => number | undefined, direction: "asc" | "desc"): PhotoRow[] {
+  const sign = direction === "asc" ? 1 : -1;
+  return rows
+    .map((p, i) => ({ p, i, v: valueOf(p) }))
+    .sort((a, b) => {
+      if (a.v === undefined && b.v === undefined) return a.i - b.i;
+      if (a.v === undefined) return 1;
+      if (b.v === undefined) return -1;
+      return sign * (a.v - b.v) || a.i - b.i;
+    })
+    .map((x) => x.p);
+}
 
 /** What `from_previous_result` will take from this list, in the model's words. */
 function followUpNote(n: number, picks: boolean, truncated: boolean): string {

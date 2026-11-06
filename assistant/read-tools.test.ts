@@ -302,6 +302,37 @@ describe("list_photos", () => {
     }
   });
 
+  it("splits a grouped read that hits the cap by time, so every month gets its own best photos", async () => {
+    // 6000 photos in 2016 rank above every photo of 2017: one capped read would hold no 2017 at all.
+    const y2016 = Array.from({ length: 6000 }, (_, i) => ({ id: i + 1, taken_at: `2016-0${(i % 6) + 1}-10T10:00:00Z`, ai_quality_score: 90 }));
+    const y2017 = [{ id: 9001, taken_at: "2017-03-01T10:00:00Z", ai_quality_score: 40 }, { id: 9002, taken_at: "2017-08-01T10:00:00Z", ai_quality_score: 50 }];
+    const all = [...y2016, ...y2017];
+    clients.photo.listPhotos.mockImplementation(async (req: { dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit: number }) => {
+      let rows = all.filter((p) => (!req.dateFrom || p.taken_at.slice(0, 10) >= req.dateFrom) && (!req.dateTo || p.taken_at.slice(0, 10) <= req.dateTo));
+      if (req.sortBy === "date") rows = [...rows].sort((a, b) => (req.sortDir === "asc" ? 1 : -1) * a.taken_at.localeCompare(b.taken_at));
+      return { photos: rows.slice(0, req.limit) };
+    });
+    const out = await tool("list_photos").run({ rank_by: "quality", direction: "desc", group_by: "month" }, ctx());
+    // 2016 alone exceeds the cap and is read month by month; 2017 fits in one read.
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ dateFrom: "2016-02-01", dateTo: "2016-02-29" }));
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ dateFrom: "2017-01-01", dateTo: "2017-08-01" }));
+    expect(out.text).toContain("2017-03 | 9001 |");
+    expect(out.text).toContain("2017-08 | 9002 |");
+    expect(out.ref?.ids).toHaveLength(8);
+    expect(out.text).not.toContain("more than");
+  });
+
+  it("splits a range into years, then months, and stops at a single month", async () => {
+    const { splitPeriod } = await import("./tools/photos");
+    expect(splitPeriod("2015-06-03", "2017-02-01")).toEqual([
+      { from: "2015-06-03", to: "2015-12-31" }, { from: "2016-01-01", to: "2016-12-31" }, { from: "2017-01-01", to: "2017-02-01" },
+    ]);
+    expect(splitPeriod("2023-01-15", "2023-03-31")).toEqual([
+      { from: "2023-01-15", to: "2023-01-31" }, { from: "2023-02-01", to: "2023-02-28" }, { from: "2023-03-01", to: "2023-03-31" },
+    ]);
+    expect(splitPeriod("2023-04-01", "2023-04-30")).toBeNull();
+  });
+
   it("refuses group_by person without person_ids", async () => {
     await expect(tool("list_photos").run({ group_by: "person" }, ctx())).rejects.toThrow("person_ids");
   });
