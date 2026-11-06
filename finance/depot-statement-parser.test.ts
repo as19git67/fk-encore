@@ -82,6 +82,72 @@ Beta Global Fonds ISIN ${ISIN_B}
   });
 });
 
+const ISIN_C = "FR000000CCC6";
+
+// A statement that opens each position with quantity and name and closes it
+// with the identifier; OCR put the price/value column wherever it liked.
+const LEAD_LINE_TEXT = `Beispielbank AG · Beispielstraße 1 · 12345 Musterstadt
+Max Mustermann
+Depotauszug per 31.12.2025
+Nominale   Wertpapierinformationen
+Aktienfonds
+Stück   12,500   ALPHA FONDS ANTEILE
+Seite 1 von 1
+Depotnummer   9900000002
+Kurs in Währung pro Stück / %   Kurswert in EUR
+98,10 EUR   1.226,25
+INHABER-ANTEILE
+${ISIN_A} (AAA111)
+Stück   4,000   BETA INVEST FCP
+ACT.AU PORT. EUR ACC O.N.
+${ISIN_C} (CCC333)
+Wertpapierrechnung Beispielland
+Sonstige Fonds
+Stück   200,000   GAMMA SELECT OPPORTUNITIES
+250,00 EUR   1.000,00
+10,50 EUR   2.100,00
+INHABER-ANTEILE O.N
+${ISIN_B} (BBB222)
+3 Posten   Summe Kurswerte   4.326,25`;
+
+describe("positions that open with quantity and name", () => {
+  it("gives each identifier the quantity above it, not the next position's", () => {
+    const r = inspectDepotStatement(LEAD_LINE_TEXT)!;
+    expect(r.asOf).toBe("2025-12-31");
+    expect(r.positions).toHaveLength(3);
+    const byIsin = new Map(r.positions.map((p) => [p.isin, p]));
+    expect(byIsin.get(ISIN_A)).toMatchObject({ name: "ALPHA FONDS ANTEILE", quantity: 12.5, price: 98.1, value: 1226.25, currency: "EUR" });
+    expect(byIsin.get(ISIN_C)).toMatchObject({ name: "BETA INVEST FCP", quantity: 4, price: 250, value: 1000 });
+    expect(byIsin.get(ISIN_B)).toMatchObject({ name: "GAMMA SELECT OPPORTUNITIES", quantity: 200, price: 10.5, value: 2100 });
+  });
+
+  it("lets these figures stand against a model that paired them wrongly", () => {
+    const rules = inspectDepotStatement(LEAD_LINE_TEXT)!;
+    const llm = {
+      asOf: "2025-12-31",
+      depotNumber: null,
+      positions: [
+        { isin: ISIN_C, wkn: null, name: null, quantity: 200, price: 250, value: 1000, currency: "EUR", acquisitionPrice: null },
+        { isin: ISIN_B, wkn: null, name: null, quantity: null, price: null, value: null, currency: null, acquisitionPrice: null },
+      ],
+    };
+    const merged = mergeStatement(rules, llm);
+    const byIsin = new Map(merged.positions.map((p) => [p.isin, p]));
+    expect(byIsin.get(ISIN_C)).toMatchObject({ quantity: 4, source: "rules" });
+    expect(byIsin.get(ISIN_B)).toMatchObject({ quantity: 200, source: "rules" });
+  });
+
+  it("keeps to the labels near the identifier when the lead lines do not pair up", () => {
+    const text = `Depotauszug per 31.12.2025
+Stück   12,500   ALPHA FONDS ANTEILE
+Stück   4,000   BETA INVEST FCP
+${ISIN_A}
+${ISIN_C}`;
+    const r = inspectDepotStatement(text)!;
+    expect(r.positions.map((p) => p.name)).not.toContain("BETA INVEST FCP");
+  });
+});
+
 // A bank's periodic report: the holdings table runs over pages, with the
 // usual OCR slips — "7" for "/", an O in a WKN, amounts split after a separator.
 const REPORT_TEXT = `Finanzreport Nr. 9 per 01.04.2026 - Seite 7
