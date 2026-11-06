@@ -155,6 +155,7 @@ struct PhotoMonthGridView: View {
                     }
                     .disabled(!canStartSlideshow)
                     CollageToolbarButton(selectedCount: selectedIds.count) { showCollage = true }
+                    AssistantAskButton(photoIds: selectionOrder.filter { selectedIds.contains($0) })
                 }
             } else {
                 ToolbarItem(placement: .primaryAction) {

@@ -374,6 +374,46 @@ describe("watching a turn", () => {
     expect(sent.filter((e) => e.type === "done")).toHaveLength(1);
   });
 
+  it("a started turn nobody watches at the end pushes its answer; a watched one does not", async () => {
+    vi.mocked(chat).mockImplementation(async (req) => {
+      if (isRouterRequest(req) || isSummaryRequest(req)) return text("");
+      return text("**Drei** Zähler.");
+    });
+    const conv = await createConversation({ title: "Zähler" });
+
+    // Watched to the end: the stream took the done, no push.
+    const watched = fakeStream();
+    const watching = watch({ turnId: "turn-0016" }, watched.stream);
+    await startAssistantTurn({ id: conv.id, message: "Wie viele Zähler?", turnId: "turn-0016" });
+    await watching;
+    await __settleTurnsForTests();
+    expect(watched.sent.at(-1)).toMatchObject({ type: "done" });
+    expect(clients.push.notifyAssistantAnswer).not.toHaveBeenCalled();
+
+    // Watched, then gone: the socket's send fails before the answer, so the
+    // done reaches nobody and the push goes out with the answer's first words.
+    let open = true;
+    const sent: StreamEvent[] = [];
+    const dropping = { send: (e: StreamEvent) => { if (!open) throw new Error("socket closed"); sent.push(e); }, close: vi.fn(async () => {}) };
+    const dropped = watch({ turnId: "turn-0017" }, dropping);
+    open = false;
+    await startAssistantTurn({ id: conv.id, message: "Und jetzt?", turnId: "turn-0017" });
+    await dropped;
+    await __settleTurnsForTests();
+    expect(clients.push.notifyAssistantAnswer).toHaveBeenCalledTimes(1);
+    expect(clients.push.notifyAssistantAnswer).toHaveBeenCalledWith({
+      userId: 701,
+      conversationId: conv.id,
+      title: "Zähler",
+      answer: "**Drei** Zähler.",
+    });
+
+    // Never watched at all: pushed as well.
+    await startAssistantTurn({ id: conv.id, message: "Noch einmal", turnId: "turn-0018" });
+    await __settleTurnsForTests();
+    expect(clients.push.notifyAssistantAnswer).toHaveBeenCalledTimes(2);
+  });
+
   it("a started turn's failure goes to the stream with its code", async () => {
     vi.mocked(chat).mockRejectedValue(new LlmServiceUnavailableError("down"));
     const conv = await createConversation({});

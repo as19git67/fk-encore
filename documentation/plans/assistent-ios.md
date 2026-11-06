@@ -1,6 +1,6 @@
 # The assistant in the iOS app
 
-Status: **stage 1 done (#1821), stage 2 in progress.** Follows `ki-assistent.md` (what the
+Status: **stages 1 (#1821), 2 (#1822), 3 (#1824), 5 and 6 done; stage 4 (proposal cards) and the optional stage 7 open.** Follows `ki-assistent.md` (what the
 assistant is) and `assistent-wegfindung.md` (how it finds its way). This plan
 is about bringing the same assistant to the iOS app, and about the shape the
 iOS code needs so that a Finance app and a Documents app can share it later.
@@ -89,7 +89,7 @@ What the web client holds and a native client would have to hold too:
    with `presentBlock` (one rule per kind, mirroring `AssistantBlock.vue`),
    applied in the agent loop when a block arrives and when a conversation is
    read, so stored blocks carry it too. Nothing in the web app changes.
-2. **Packages** — in progress. `ios/Package.swift` gets a second library
+2. **Packages** — done (#1822). `ios/Package.swift` gets a second library
    target, `F4milCore` (`Sources/F4milCore`): `APIClient`,
    `AuthInterceptor`, `AuthManager`, `KeychainHelper`, `PasskeyManager`,
    `SharedSession`, `SharedStorage`, `AppDeepLink` and the session's wire
@@ -108,30 +108,98 @@ What the web client holds and a native client would have to hold too:
    renamed; `FKPhotosLib` stays the Photos app's module. CI builds the
    package, its tests and both extensions on macOS (`ios-tests.yml`), which
    is the proof — the server-side sandbox has no Swift toolchain.
-3. **Read-only assistant.** Package `F4milAssistant`: conversation list,
-   chat screen, `URLSessionWebSocketTask` stream with ping, resume and
-   cancel, Markdown answers, tool steps, generic rows from `display`,
-   photos and albums native, documents as PDF preview, everything else in
-   the web view (login once). Entry: a toolbar button in the Photos app.
+3. **Read-only assistant** — done (#1824). Package `F4milAssistant`
+   (`Sources/F4milAssistant`, on `F4milCore` only): the wire types of
+   `/assistant` as the server writes them (`Models/`), `AssistantAPI` over
+   `APIClient`, and `TurnFollower`, a `URLSessionWebSocketTask` that opens
+   the stream with the bearer token as a header (`APIClient.webSocketRequest`,
+   full scope, no `?token=`), posts the turn once the socket is up, treats
+   60 s of silence as a dead socket (the server pings every 25 s), reopens
+   with `resume=true` on the web's schedule (1, 2, 4, 8, 15, 30 s) and skips
+   the replayed events it has shown (`ReplayCursor`). `LiveTurn` is the
+   reducer of `assistantTurn.ts` ported one to one — drafts before a tool
+   call, withdrawn answers, steps, blocks — so web and phone read a turn the
+   same way, with a test per event. The screens: `AssistantRootView`
+   (conversations, swipe to delete, "Neue Unterhaltung"), `ConversationView`
+   (messages, the running turn with its steps and "Abbrechen", the model
+   gate's notice, the question field; the conversation is created on the
+   first question), `BlockView` and `ResultRowView` (title, "n von total",
+   "Liste", one generic row from `display`: date, thumbnail through the API
+   client, title, subtitle, figure coloured by `tone`; folded after eight
+   rows), `MarkdownText` (paragraphs, headings, lists; inline Markdown via
+   `AttributedString`). Opening a row (`RowOpener`): the host app first
+   (`AssistantHost.openRoute`, given the route and its web URL), else
+   `/dokumente/<id>` as a QuickLook preview of `/documents/:id/file`, else
+   the web page under `/app` in `SFSafariViewController` (login once until
+   stage 5). The Photos app (`Features/Assistant/AssistantEntry.swift`)
+   shows the button in the feed toolbar to whoever has `module.assistant`
+   and takes the rows `AppDeepLink.parse` knows — photos, albums, persons,
+   recaps — through `AppDeepLinkRouter`, the same way a notification tap
+   does. Proposal cards show as rows for now; stage 4 gives them buttons.
 4. **Proposal cards.** Execute, discard, the continuation after execute,
    invalidating the app's caches (albums). The letter as PDF preview with
    the share sheet; editing the letter on the phone is not in this stage.
-5. **Session handover to the web view** — the one-time token endpoint, so a
-   finance row opens signed in.
-6. **Context and entry points.** "Assistent fragen" from a photo selection
-   and from an album (the context the web passes as `?context=`); a push
-   when an answer finishes unwatched.
+5. **Session handover to the web view** — done. `POST /auth/handover`
+   (`user/handover.ts`, full-scope session only, rate-limited) issues a
+   random token good for a minute and usable once, stored in
+   `auth_handover_tokens`; `POST /auth/handover/redeem` deletes it in the
+   same statement that reads it and answers with a session like a login's
+   (a spent or unknown token is a 400, because the web client reads a 401
+   as its own session dying). The web app has the public page `/handover`
+   (`HandoverView.vue`): token and target ride in the URL *fragment*
+   (`#token=…&redirect=…`, `utils/handover.ts`), which never reaches the
+   server's access log; the page signs in (`auth.loginWithHandover`) and
+   replaces itself with the target, validated like the login's
+   `?redirect=`, so Back never returns to a spent token. On the phone
+   `WebHandover` in `F4milCore` (every app's web views, not only the
+   assistant's) asks for the token and builds the URL; `RowOpener` opens
+   the web view with it and falls back to the plain page when the server
+   would not issue one. `SFSafariViewController` keeps its storage per
+   app, so the web session stays for the next row.
+6. **Context and entry points** — done. `ContextRef` in the package,
+   `AssistantAPI.createConversation(context:)`, and `AssistantChatView` as
+   the public screen for a conversation by id or a new one over a working
+   set (created at once, as the web does, so the server describes it; the
+   chat shows the objects as chips and suggests questions about them). The
+   Photos app pushes `AssistantAsk` from the selection toolbars (timeline,
+   month grid, album; the photos in the order picked) and from the album
+   menu (the album's shown photos), only for `module.assistant` and only
+   up to `MAX_CONTEXT` photos — a bigger album is asked about via a
+   selection; `assistantDestinations()` registers the screen once per
+   tab stack. The push: `openTurn`'s emitter (`assistant/live.ts`) returns
+   how many watchers took an event, a watcher whose send fails throws and
+   is dropped, and a turn started in the background whose `done` reached
+   nobody sends `push.notifyAssistantAnswer` (kind `assistant_answer`,
+   switchable in the profile; title = the conversation's, body = the
+   answer's first words without Markdown, URL `/app/assistent?c=<id>`,
+   collapsed per conversation). For that to be true on a phone the app
+   closes its socket when it goes to the background
+   (`ConversationStore.suspendWatching`) — a socket a suspended app still
+   holds would count as a watcher — and reopens it with `resume=true` when
+   it comes back, rebuilding the turn from the replay. The tap opens the
+   conversation: `AppDeepLink.assistant(conversationId:)`
+   (`f4milphotos://assistant/12`, `/app/assistent?c=12`), routed to the
+   feed stack through `AppDeepLinkRouter.assistantToOpen`.
 7. **Optional.** App Intents / Siri for a question; the share sheet as
    context.
 
 ## Risks
 
-- Stage 2 is written without a Swift toolchain at hand; the iOS workflow on
-  macOS is what proves it, and a red run there is worked from its log.
+- Stages 2 and 3 are written without a Swift toolchain at hand; the iOS
+  workflow on macOS is what proves it, and a red run there is worked from
+  its log. Stage 2's one red run was a test reading a moved file by its old
+  path, not the Swift.
 - Two renderers, web and iOS, would drift; `display` from the server is the
   answer, and a new block kind gets its rule in `present.ts` first.
 - A finance row without the handover token ends on a login page in the
-  web view; stage 5 removes that, stage 3 ships with it.
+  web view; stage 5 removed that. The handover token is single-use and
+  short-lived, and travels only in the fragment — a URL copied out of the
+  web view afterwards is worthless.
+- "Unwatched" is decided by the sockets the server can see. A phone that
+  is suspended without the app having closed its socket looks like a
+  watcher until the next ping fails; the app therefore closes the socket
+  itself on leaving. The web keeps its socket while the tab is open, hidden
+  or not, and gets no push for a tab it still has.
 - The stream on a phone network drops more often than in a browser; the
   resume path exists but is exercised rarely on the web and needs a test on
   the device.

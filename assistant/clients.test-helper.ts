@@ -88,6 +88,9 @@ export const clients = {
   realtime: { publishEvent: vi.fn(async () => {}) },
   user: { getLlmStatus: vi.fn(), lendLlmGpu: vi.fn(), returnLlmGpu: vi.fn(), getLlmGpuLease: vi.fn() },
   assistant: { launchSyntheticRun: vi.fn() },
+  push: {
+    notifyAssistantAnswer: vi.fn(async () => ({ sent: 0, pruned: 0 })),
+  },
 };
 
 /** Forget scripted answers and recorded calls of the service endpoints. */
@@ -95,6 +98,8 @@ export function resetClients(): void {
   for (const service of [clients.finance, clients.documents, clients.photo, clients.meter, clients.feed, clients.collections]) {
     for (const fn of Object.values(service)) fn.mockReset();
   }
+  clients.push.notifyAssistantAnswer.mockReset();
+  clients.push.notifyAssistantAnswer.mockResolvedValue({ sent: 0, pruned: 0 });
 }
 
 /** Every service endpoint call, as `service.endpoint`, in order. */

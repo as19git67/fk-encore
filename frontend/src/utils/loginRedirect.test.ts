@@ -24,6 +24,8 @@ describe('safeLoginRedirect', () => {
     expect(safeLoginRedirect('/login?redirect=%2Ffotos')).toBeNull()
     expect(safeLoginRedirect('/register/x')).toBeNull()
     expect(safeLoginRedirect('/forgot-password')).toBeNull()
+    // The handover page with a fragment (assistent-ios.md, stage 5) would loop too.
+    expect(safeLoginRedirect('/handover#token=x')).toBeNull()
     // Not an auth page, only shares the prefix letters.
     expect(safeLoginRedirect('/loginauswertung')).toBe('/loginauswertung')
   })

@@ -28,6 +28,7 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 | `SUC` | Tab Suche | Suche |
 | `TRP` | Tab Trip | Trip, Trip starten, Trip & Reise |
 | `PLN` | Reiseplaner | Neue Reise, Reiseverlauf, Kandidaten, Tagesablauf, Karte, Ideen, Wünsche, Reisegruppe, Planen mit, Dokumente, Reisebereit?, Danach, Unterwegs ohne Netz, … |
+| `ASS` | Assistent (aus der Feed-Toolbar) | Assistent, Neue Unterhaltung, Dokument |
 | `SET` | Tab Einstellungen | Profil, Server, Foto-Synchronisierung, Upload-Warteschlange, iPhone-Mediathek, Benachrichtigungen, Suche auf dem iPhone, Trip & Reise, Karten-App, Benutzer, Rollen, Quellen & Lizenzen |
 | `SHR` | Share-Extension | Gefunden, Fund übernehmen |
 
@@ -294,6 +295,56 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 
 ---
 
+## ASS: Assistent
+
+### IOS-ASS-01 Fragen stellen
+
+- Einstieg: Sprechblasen-Symbol in der Feed-Toolbar, nur mit dem Recht
+  `module.assistant`. Liste der Unterhaltungen (neueste oben, wischen
+  löscht), oben rechts „Neue Unterhaltung“.
+- Chat: eigene Frage rechts, Antwort links mit den Ergebnisblöcken des
+  Servers (Titel, „n von gesamt“, „Liste“ öffnet die Listenseite). Während
+  der Antwort stehen die Werkzeugschritte („Buchungen durchsuchen“ …) mit
+  Haken, darunter „Abbrechen“. Ein Satz vor einem Werkzeugaufruf bleibt grau
+  stehen, eine zurückgenommene Antwort trägt „Zurückgenommen und erneut
+  geprüft“.
+- Leere Unterhaltung: eine Beispielfrage je Modul, das der Nutzer hat.
+  Hinweis über dem Feld, wenn das Modell langsam, ungetestet oder gesperrt
+  ist (gesperrt: Feld aus).
+- Zeile antippen: Foto, Album, Person oder Rückblick öffnen in der App;
+  ein Dokument als PDF-Vorschau mit Teilen; alles andere (Buchungen, Konten,
+  Zähler, …) als Webseite im In-App-Browser, angemeldet als der Nutzer der
+  App (einmaliger Übergabe-Code, eine Minute gültig; schlägt die Übergabe
+  fehl, fragt die Seite einmal nach der Anmeldung).
+- Verbindung weg: die Antwort läuft auf dem Server weiter; die App
+  verbindet sich bis zu sechsmal neu, danach „Die Verbindung zur laufenden
+  Antwort ist abgerissen …“, und die Antwort steht nach dem Neuladen da.
+- Vorschläge (Album anlegen, Tags …) erscheinen als Zeilen „Vorschlag“;
+  Ausführen geht noch nur in der Web-App.
+- **Test:** –
+
+### IOS-ASS-02 Assistent zu Fotos fragen
+
+- In der Auswahl (Zeitstrahl, Monatsraster, Album) „Assistent fragen“ in
+  der Toolbar, im Menü (⋯) eines Albums „Assistent fragen“ für die
+  gezeigten Fotos — nur mit dem Recht `module.assistant` und nur bis 25
+  Fotos; ein größeres Album über eine Auswahl fragen.
+- Öffnet eine neue Unterhaltung mit den Fotos als Kontext (Chips über dem
+  Chat, wie auf der Web-Seite `/assistent?context=`), Beispielfragen zu den
+  Fotos.
+- **Test:** –
+
+### IOS-ASS-03 Antwort als Mitteilung
+
+- Verlässt man die App, während eine Antwort läuft, läuft sie auf dem
+  Server weiter; ist sie fertig und niemand schaut zu, kommt eine Mitteilung
+  mit dem Titel der Unterhaltung und dem Anfang der Antwort. Antippen
+  öffnet die Unterhaltung. Zurück in der App zeigt der Chat die Antwort
+  auch ohne Mitteilung.
+- Abschaltbar im Web unter Profil › Benachrichtigungen › „Assistent“.
+  Voraussetzung: Mitteilungen in der App eingeschaltet (IOS-SET-03).
+- **Test:** –
+
 ## SHR: Share-Extension
 
 ### IOS-SHR-01 Fotos aus einer anderen App hochladen
@@ -336,6 +387,9 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 | IOS-PLN-02 | Tag planen | – |
 | IOS-PLN-03 | Gemeinsam planen | – |
 | IOS-PLN-04 | Unterwegs | – |
+| IOS-ASS-01 | Fragen stellen | – |
+| IOS-ASS-02 | Assistent zu Fotos fragen | – |
+| IOS-ASS-03 | Antwort als Mitteilung | – |
 | IOS-SET-01 | Profil und Server | – |
 | IOS-SET-02 | Foto-Synchronisierung | – |
 | IOS-SET-03 | Benachrichtigungen und Spotlight | – |

@@ -64,6 +64,9 @@ public final class AppDeepLinkRouter {
     /// A trip plan to open on its running day — from a Live Activity or
     /// a widget tap (#768 §1).
     var tripPlanToOpen: TripPlanOpen?
+    /// A conversation with the assistant — from the push for a finished
+    /// answer (assistent-ios.md, stage 6); without an id, the list.
+    var assistantToOpen: AssistantOpen?
 
     /// A query waiting for the search tab (an App Intent, #766). The tab
     /// takes it when it appears; a flag rather than a call because the tab
@@ -151,6 +154,9 @@ public final class AppDeepLinkRouter {
         case .tripDay(let id):
             tripPlanToOpen = TripPlanOpen(id: id)
             return .trip
+        case .assistant(let conversationId):
+            assistantToOpen = AssistantOpen(conversationId: conversationId)
+            return .feed
         }
     }
 
@@ -211,4 +217,9 @@ struct RecapsOpen: Identifiable, Hashable {
 
 struct TripPlanOpen: Identifiable, Hashable {
     let id: Int
+}
+
+struct AssistantOpen: Identifiable, Hashable {
+    let conversationId: Int?
+    var id: Int { conversationId ?? 0 }
 }

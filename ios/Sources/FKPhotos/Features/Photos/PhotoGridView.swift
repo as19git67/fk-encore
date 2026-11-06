@@ -162,6 +162,7 @@ struct PhotoGridView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
+                    AssistantAskButton(photoIds: viewModel.photos.map(\.id).filter { selectedIds.contains($0) })
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {

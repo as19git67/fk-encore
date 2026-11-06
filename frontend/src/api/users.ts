@@ -90,6 +90,19 @@ export function login(email: string, password: string) {
   })
 }
 
+/**
+ * Redeem a one-time handover token the iOS app put into `/handover#token=…`
+ * (documentation/plans/assistent-ios.md, stage 5): the response is a session
+ * like a login's. Spent, expired and unknown tokens are a 400, not a 401, so
+ * `apiFetch` does not treat them as this browser's session dying.
+ */
+export function redeemHandover(token: string) {
+  return apiFetch<LoginResponse>('/auth/handover/redeem', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
+}
+
 export function logout(refreshToken?: string) {
   return apiFetch<{ success: boolean; message: string }>('/auth/logout', {
     method: 'POST',

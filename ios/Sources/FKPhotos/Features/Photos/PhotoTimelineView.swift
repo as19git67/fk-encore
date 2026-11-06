@@ -87,6 +87,7 @@ struct PhotoTimelineView: View {
                     }
                     .disabled(!canStartSlideshow)
                     CollageToolbarButton(selectedCount: selection.count) { showCollage = true }
+                    AssistantAskButton(photoIds: selectionOrder.filter { selection.contains($0) })
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {

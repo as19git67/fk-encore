@@ -368,6 +368,21 @@ public actor APIClient {
         return CachedResponse(etag: etag, body: data)
     }
 
+    /// The request that opens a WebSocket under the API, with the bearer
+    /// token as a header. A browser has to put the token into the query, and
+    /// the gateway downgrades such a socket to the media scope
+    /// (`user/auth-handler.ts`); a native client sends the header and keeps
+    /// its full scope. The token is refreshed first when it is about to run
+    /// out, so a socket that lives for minutes starts fresh.
+    public func webSocketRequest(path: String, query: [String: String]? = nil) async -> URLRequest {
+        await ensureFreshToken()
+        var components = URLComponents(url: buildURL(path: path, query: query), resolvingAgainstBaseURL: false)!
+        components.scheme = components.scheme?.lowercased() == "https" ? "wss" : "ws"
+        var request = URLRequest(url: components.url!)
+        applyAuth(&request)
+        return request
+    }
+
     public func downloadData(_ path: String, query: [String: String]? = nil) async throws -> Data {
         let url = buildURL(path: path, query: query)
         var request = URLRequest(url: url)

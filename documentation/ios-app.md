@@ -36,6 +36,21 @@ device.
   over the record the server returns, and what the app does around a
   sign-out (push, widgets, Spotlight) it hands in as closures
   (`AuthManager.forPhotosApp()`).
+- **Assistant package `F4milAssistant`** (`Sources/F4milAssistant/`, plan
+  `documentation/plans/assistent-ios.md`, stage 3): the KI-Assistent as a
+  package on `F4milCore` alone — `Models/` (the `/assistant` wire types),
+  `Networking/` (`AssistantAPI`, `TurnFollower` for the turn's WebSocket
+  with resume), `State/` (`LiveTurn`, the stores), `UI/` (conversations,
+  chat, one generic row from the server's `display`), `Open/`
+  (`AssistantHost`, `RowOpener`: the app first, then PDF preview, then web
+  view). The Photos app adds only `Features/Assistant/AssistantEntry.swift`:
+  the feed-toolbar button for users with `module.assistant`, and an
+  `AssistantHost` that routes photo, album, person and recap rows through
+  `AppDeepLinkRouter`; `AssistantAskButton` („Assistent fragen" over a
+  selection or an album, stage 6) and the push for a finished answer, which
+  opens its conversation through `AppDeepLink.assistant`. Web pages the
+  assistant opens are signed in through `WebHandover` in `F4milCore`
+  (stage 5: a one-time token in the URL fragment of `/handover`).
 - **Storage/cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`.
 - **App targets:** main app, **share extension** (code in `F4milShare/`, its
   `Info.plist` in `App/ShareExtension/`) for uploading from other apps.

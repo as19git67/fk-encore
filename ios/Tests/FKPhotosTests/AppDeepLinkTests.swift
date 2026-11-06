@@ -25,6 +25,27 @@ final class AppDeepLinkTests: XCTestCase {
         XCTAssertEqual(AppDeepLink.parse(url), .reviewQueue)
     }
 
+    func testTheAssistantParsesWithAndWithoutAConversation() {
+        XCTAssertEqual(AppDeepLink.parse(URL(string: "f4milphotos://assistant")!), .assistant(conversationId: nil))
+        XCTAssertEqual(AppDeepLink.parse(URL(string: "f4milphotos://assistant/12")!), .assistant(conversationId: 12))
+        XCTAssertNil(AppDeepLink.parse(URL(string: "f4milphotos://assistant/zwölf")!))
+        XCTAssertEqual(
+            AppDeepLink.parse(URL(string: "https://photos.example.test/app/assistent?c=12")!, serverURL: server),
+            .assistant(conversationId: 12)
+        )
+        XCTAssertEqual(
+            AppDeepLink.parse(URL(string: "https://photos.example.test/app/assistent")!, serverURL: server),
+            .assistant(conversationId: nil)
+        )
+        // Round trips, both ways.
+        XCTAssertEqual(AppDeepLink.parse(AppDeepLink.url(for: .assistant(conversationId: 7))), .assistant(conversationId: 7))
+        XCTAssertEqual(AppDeepLink.parse(AppDeepLink.url(for: .assistant(conversationId: nil))), .assistant(conversationId: nil))
+        XCTAssertEqual(
+            AppDeepLink.webURL(for: .assistant(conversationId: 7), serverURL: server)?.absoluteString,
+            "https://photos.example.test/app/assistent?c=7"
+        )
+    }
+
     func testAnUnknownHostUnderTheRightSchemeIsRejected() {
         let url = URL(string: "f4milphotos://something-else")!
         XCTAssertNil(AppDeepLink.parse(url))

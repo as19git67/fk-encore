@@ -41,6 +41,11 @@ public enum AppDeepLink: Equatable, Sendable {
     /// `f4milphotos://search?q=…` — the search tab with the query submitted.
     /// App scheme only: the web has no URL for a search.
     case search(query: String)
+    /// `f4milphotos://assistant/12` · `/app/assistent?c=12` — a conversation
+    /// with the KI-Assistent; without an id (`f4milphotos://assistant`,
+    /// `/app/assistent`) the list of conversations. What the push for a
+    /// finished answer carries (assistent-ios.md, stage 6).
+    case assistant(conversationId: Int?)
     /// `f4milphotos://trip-day/12` — the trip planner's day screen,
     /// opened on whichever day of plan 12 is running today (the day
     /// view model already defaults there). App scheme only: what a
@@ -73,6 +78,7 @@ public enum AppDeepLink: Equatable, Sendable {
         case .recaps: hostAndPath = "recaps"
         case .feed: hostAndPath = "feed"
         case .tripDay(let id): hostAndPath = "trip-day/\(id)"
+        case .assistant(let id): hostAndPath = id.map { "assistant/\($0)" } ?? "assistant"
         case .search(let query):
             var components = URLComponents()
             components.scheme = scheme
@@ -100,6 +106,7 @@ public enum AppDeepLink: Equatable, Sendable {
         case .recap(let id): path = "/fotos/rueckblicke?recapId=\(id)"
         case .recaps: path = "/fotos/rueckblicke"
         case .feed: path = "/fotos/feed"
+        case .assistant(let id): path = id.map { "/assistent?c=\($0)" } ?? "/assistent"
         case .search, .tripDay: return nil
         }
         return URL(string: "\(origin)\(appBasePath)\(path)")
@@ -147,6 +154,8 @@ public enum AppDeepLink: Equatable, Sendable {
         case ("review-queue", nil): return .reviewQueue
         case ("recaps", nil): return .recaps
         case ("feed", nil): return .feed
+        case ("assistant", nil): return .assistant(conversationId: nil)
+        case ("assistant", let id?): return Int(id).map { .assistant(conversationId: $0) }
         case ("search", nil):
             var components = URLComponents()
             components.percentEncodedQuery = queryString.map(String.init)
@@ -190,6 +199,10 @@ public enum AppDeepLink: Equatable, Sendable {
 
         switch lower.count {
         case 1:
+            // The assistant's page: `?c=` names a conversation.
+            if first == "assistent" {
+                return .assistant(conversationId: intQuery("c"))
+            }
             // `/app/photos?photoId=` (legacy) and `/app/fotos?photoId=`: a bare
             // gallery link has no in-app target of its own; only a photo deep
             // link is worth leaving Safari for.

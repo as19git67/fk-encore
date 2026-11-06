@@ -2024,6 +2024,13 @@
       "when": 1790343000000,
       "tag": "0289_prune_stale_category_suggestions",
       "breakpoints": true
+    },
+    {
+      "idx": 290,
+      "version": "7",
+      "when": 1790344000000,
+      "tag": "0290_auth_handover_tokens",
+      "breakpoints": true
     }
   ]
 }
