@@ -14,8 +14,16 @@ const PHOTOS = ["module.photos", "photos.view"];
 
 /** Photos counted per call; past this the answer says "more than". */
 const PHOTO_COUNT_CAP = 2000;
-/** Photos read to narrow a previous result or to group; the most the endpoint returns. */
-const NARROW_CAP = 5000;
+/** The most rows photo.listPhotos returns, whatever limit it is asked for. */
+const LIST_ENDPOINT_MAX = 5000;
+/**
+ * Photos read to narrow a previous result or to group. One below the
+ * endpoint's maximum: a read asks for one more than the cap to tell "more
+ * than" apart, and a cap at the maximum got exactly the maximum back from a
+ * longer list, which read as complete — a grouped read then held only the
+ * best-ranked 5000 photos and lost every month they did not reach.
+ */
+const NARROW_CAP = LIST_ENDPOINT_MAX - 1;
 /** With `distinct`, this many candidates per pick are compared before the picks are taken. */
 const DISTINCT_POOL = 4;
 
