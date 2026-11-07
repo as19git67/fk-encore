@@ -3,7 +3,7 @@
  *
  * A watch is one hotel, fixed dates and guests, a limit per night and the
  * conditions a rate must meet (free cancellation, breakfast). The travel
- * job checks every active watch every few hours and writes the history:
+ * job checks every active watch once a day and writes the history:
  * one `travel_hotel_check` row per check with the summary, and every rate
  * it saw as `travel_hotel_offer`.
  *
@@ -14,12 +14,15 @@
  * Searches cost money beyond SerpApi's free plan, so the job counts what
  * this calendar month used across all users (one key for the deployment)
  * and stops at `monthlySearchBudget()`.
+ *
+ * A price below the limit is reported by push and mail (`hotel-alerts.ts`).
  */
 
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
-import { travelHotelChecks, travelHotelOffers, travelHotelWatches } from "../db/schema";
+import { travelHotelChecks, travelHotelOffers, travelHotelWatches, users } from "../db/schema";
+import { alertDecision, alertSender, type PriceAlert } from "./hotel-alerts";
 import { isHotelDetail, offersOf, pickProperty, summarize, type HotelOffer } from "./hotel-offers";
 import { HotelSearchError, monthlySearchBudget, type HotelSearchClient } from "./serpapi-client";
 
@@ -54,6 +57,8 @@ export interface WatchInput {
   breakfast_required?: boolean;
   end_date: string;
   paused?: boolean;
+  notify_push?: boolean;
+  notify_email?: boolean;
 }
 
 export interface HotelWatch {
@@ -71,6 +76,10 @@ export interface HotelWatch {
   breakfast_required: boolean;
   end_date: string;
   paused: boolean;
+  notify_push: boolean;
+  notify_email: boolean;
+  /** The price last reported; null when nothing below the limit is pending. */
+  notified_per_night: number | null;
   status: WatchStatus;
   last_checked_at: string | null;
   last_error: string | null;
@@ -100,10 +109,12 @@ export interface HotelOfferEntry {
   room: string;
   per_night: number;
   total: number | null;
-  free_cancellation: boolean;
+  /** Null: Google names no cancellation terms for this provider. */
+  free_cancellation: boolean | null;
   cancel_until: string | null;
   breakfast: boolean;
   guests: number | null;
+  link: string | null;
 }
 
 export interface HotelWatchDetail {
@@ -200,6 +211,8 @@ export function normalizeWatchInput(input: WatchInput, today: string): Normalize
     breakfast_required: input.breakfast_required ?? false,
     end_date: input.end_date,
     paused: input.paused ?? false,
+    notify_push: input.notify_push ?? true,
+    notify_email: input.notify_email ?? true,
   };
 }
 
@@ -237,6 +250,9 @@ function toWatch(w: WatchRow, today: string, latest: CheckRow | null, best: numb
     breakfast_required: w.breakfast_required,
     end_date: w.end_date,
     paused: w.paused,
+    notify_push: w.notify_push,
+    notify_email: w.notify_email,
+    notified_per_night: w.notified_per_night,
     status: watchStatus(w, today),
     last_checked_at: w.last_checked_at,
     last_error: w.last_error,
@@ -316,6 +332,7 @@ export async function getWatchDetail(userId: number, id: number, now: Date = new
       cancel_until: o.cancel_until,
       breakfast: o.breakfast,
       guests: o.guests,
+      link: o.link,
     })),
   };
 }
@@ -334,12 +351,24 @@ export async function updateWatch(userId: number, id: number, input: WatchInput,
   const values = normalizeWatchInput(input, todayIso(now));
   // A different hotel is a different search; dates and guests are not.
   const sameHotel = values.query === before.query;
+  // Different criteria make the last report stale: the next price below the limit is news.
+  const sameCriteria =
+    sameHotel &&
+    values.check_in === before.check_in &&
+    values.check_out === before.check_out &&
+    values.adults === before.adults &&
+    JSON.stringify(values.children_ages) === JSON.stringify(before.children_ages ?? []) &&
+    values.currency === before.currency &&
+    values.limit_per_night === before.limit_per_night &&
+    values.free_cancellation_only === before.free_cancellation_only &&
+    values.breakfast_required === before.breakfast_required;
   await db
     .update(travelHotelWatches)
     .set({
       ...values,
       hotel_name: sameHotel ? before.hotel_name : null,
       property_token: sameHotel ? before.property_token : null,
+      ...(sameCriteria ? {} : { notified_per_night: null, notified_at: null }),
       last_error: null,
       updated_at: now.toISOString(),
     })
@@ -376,7 +405,12 @@ export class SearchBudgetExhausted extends Error {
  * hit of the result list), write the check and its rates, update the watch.
  * A failed search is a check too — with its error and the searches it cost.
  */
-export async function checkWatch(watch: WatchRow, client: HotelSearchClient, now: Date = new Date()): Promise<HotelCheck> {
+export async function checkWatch(
+  watch: WatchRow,
+  client: HotelSearchClient,
+  now: Date = new Date(),
+  options: { alert?: boolean } = {},
+): Promise<HotelCheck> {
   const used = await searchesThisMonth(now);
   const budget = monthlySearchBudget();
   if (used >= budget) throw new SearchBudgetExhausted(used, budget);
@@ -451,6 +485,7 @@ export async function checkWatch(watch: WatchRow, client: HotelSearchClient, now
           cancel_until: o.cancelUntil,
           breakfast: o.breakfast,
           guests: o.guests,
+          link: o.link,
         })),
       );
     }
@@ -464,7 +499,60 @@ export async function checkWatch(watch: WatchRow, client: HotelSearchClient, now
       .where(eq(travelHotelWatches.id, watch.id));
     return c;
   });
+  if (options.alert && error === null) {
+    await reportPrice({ ...watch, hotel_name: hotelName }, matching, now);
+  }
   return toCheck(check);
+}
+
+/**
+ * Report the check's matching price if `alertDecision` says so, and keep
+ * `notified_per_night` in step. The report counts as made once it is tried:
+ * a mail server that is down must not turn into a mail every morning.
+ */
+async function reportPrice(watch: WatchRow, matching: HotelOffer | null, now: Date): Promise<void> {
+  const decision = alertDecision(watch.limit_per_night, matching?.perNight ?? null, watch.notified_per_night);
+  if (decision.kind === "none") return;
+  if (decision.kind === "reset") {
+    await db
+      .update(travelHotelWatches)
+      .set({ notified_per_night: null, notified_at: null })
+      .where(eq(travelHotelWatches.id, watch.id));
+    return;
+  }
+  const offer = matching!;
+  await db
+    .update(travelHotelWatches)
+    .set({ notified_per_night: offer.perNight, notified_at: now.toISOString() })
+    .where(eq(travelHotelWatches.id, watch.id));
+  if (!watch.notify_push && !watch.notify_email) return;
+
+  const alert: PriceAlert = {
+    userId: watch.user_id,
+    watchId: watch.id,
+    hotel: watch.hotel_name ?? watch.query,
+    checkIn: watch.check_in,
+    checkOut: watch.check_out,
+    nights: nightsBetween(watch.check_in, watch.check_out),
+    currency: watch.currency,
+    perNight: offer.perNight,
+    limit: watch.limit_per_night!,
+    source: offer.source,
+    room: offer.room,
+    freeCancellation: offer.freeCancellation,
+    cancelUntil: offer.cancelUntil,
+    breakfast: offer.breakfast,
+    link: offer.link,
+    newLow: decision.newLow,
+  };
+  const sender = alertSender();
+  const failed = (channel: string) => (err: unknown) =>
+    console.warn(`[travel.hotel-watch] ${channel} for watch ${watch.id} failed: ${err instanceof Error ? err.message : err}`);
+  if (watch.notify_push) await sender.push(alert).catch(failed("push"));
+  if (watch.notify_email) {
+    const [owner] = await db.select({ email: users.email }).from(users).where(eq(users.id, watch.user_id));
+    if (owner?.email) await sender.email(alert, owner.email).catch(failed("mail"));
+  }
 }
 
 /** "Check now" from the page: the user's own watch, if it is still running. */
@@ -509,7 +597,7 @@ export async function runDueChecks(client: HotelSearchClient, now: Date = new Da
   const result: CheckRunResult = { due: rows.length, checked: 0, failed: 0, skippedBudget: 0 };
   for (const [i, watch] of rows.entries()) {
     try {
-      const check = await checkWatch(watch, client, now);
+      const check = await checkWatch(watch, client, now, { alert: true });
       result.checked++;
       if (check.error) result.failed++;
     } catch (err) {

@@ -416,3 +416,48 @@ export async function sendCollectionExportEmail(params: CollectionExportMailPara
 export function appUrl(): string {
   return APP_URL;
 }
+
+export interface HotelPriceAlertMailParams {
+  to: string;
+  subject: string;
+  /** One line: price, provider, limit, dates, terms. */
+  text: string;
+  /** The provider's offer, when Google Hotels links it. */
+  offerLink: string | null;
+  offerSource: string;
+  /** The watch in the app. */
+  watchUrl: string;
+}
+
+/** A hotel price watch found a price below its limit (travel/hotel-alerts.ts). */
+export async function sendHotelPriceAlertEmail(params: HotelPriceAlertMailParams): Promise<void> {
+  if (!mailConfigured()) throw new Error("SMTP_NOT_CONFIGURED");
+  const lines = [
+    params.text,
+    "",
+    ...(params.offerLink ? [`Zum Angebot bei ${params.offerSource}: ${params.offerLink}`] : []),
+    `Wächter in ${APP_NAME}: ${params.watchUrl}`,
+    "",
+    "Die Preise stammen von Google Hotels und können sich bis zur Buchung ändern.",
+  ];
+  const button = (href: string, label: string) =>
+    `<a href="${escapeHtml(href)}" style="display: inline-block; margin: 0 0.5em 0.5em 0; padding: 0.75em 1.5em; background: #4f46e5; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">${escapeHtml(label)}</a>`;
+  const html = `
+    <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">
+      <p><strong>${escapeHtml(params.subject)}</strong></p>
+      <p>${escapeHtml(params.text)}</p>
+      <p style="margin: 1.5em 0;">
+        ${params.offerLink ? button(params.offerLink, `Zum Angebot bei ${params.offerSource}`) : ""}
+        ${button(params.watchUrl, "Wächter öffnen")}
+      </p>
+      <p style="font-size: 0.85em; color: #666;">Die Preise stammen von Google Hotels und können sich bis zur Buchung ändern.</p>
+    </div>
+  `;
+  await (testTransport ?? getTransporter()).sendMail({
+    from: SMTP_FROM,
+    to: params.to,
+    subject: params.subject,
+    text: lines.join("\n"),
+    html,
+  });
+}

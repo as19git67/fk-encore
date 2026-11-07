@@ -7,6 +7,7 @@ import { travelHotelChecks, travelHotelWatches, users } from "../db/schema";
 import { DETAIL } from "./hotel-offers.test";
 import { maxEndDate, normalizeWatchInput, runDueChecks, watchStatus, type WatchInput } from "./hotel-watch.service";
 import { setHotelSearchClient, type HotelSearchClient, type HotelSearchParams } from "./serpapi-client";
+import { setAlertSender, type PriceAlert } from "./hotel-alerts";
 import * as endpoints from "./hotel-watch";
 
 const NOW = new Date("2026-11-07T10:00:00Z");
@@ -61,6 +62,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.useRealTimers();
   setHotelSearchClient(undefined);
+  setAlertSender(null);
   for (const id of cleanup.splice(0)) await db.delete(users).where(eq(users.id, id));
   vi.restoreAllMocks();
 });
@@ -206,3 +208,97 @@ describe("job", () => {
     }
   });
 });
+
+describe("reports", () => {
+  /** DETAIL with the free-cancellation rate of Portal A at `price`. */
+  function priced(price: () => number): HotelSearchClient {
+    return {
+      async search(params) {
+        if (!params.property_token) {
+          return { properties: [{ name: "Hotel Beispiel Musterstadt", property_token: "tok-beispiel" }] };
+        }
+        const detail = structuredClone(DETAIL);
+        detail.featured_prices[0].rooms[0].rates[1].rate_per_night.extracted_lowest = price();
+        return detail;
+      },
+    };
+  }
+
+  function spy() {
+    const pushed: PriceAlert[] = [];
+    const mailed: Array<{ alert: PriceAlert; to: string }> = [];
+    setAlertSender({
+      async push(alert) {
+        pushed.push(alert);
+      },
+      async email(alert, to) {
+        mailed.push({ alert, to });
+      },
+    });
+    return { pushed, mailed };
+  }
+
+  const at = (hours: number) => new Date(NOW.getTime() + hours * 60 * 60_000);
+
+  it("report a price below the limit once, again for a new low, and again after it rose above", async () => {
+    const { pushed, mailed } = spy();
+    let price = 240;
+    const client = priced(() => price);
+    const { watch } = await endpoints.createHotelWatch(input({ limit_per_night: 250 }));
+
+    await runDueChecks(client, at(0));
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toMatchObject({ watchId: watch.id, perNight: 240, limit: 250, newLow: false, source: "Portal A" });
+    expect(pushed[0].link).toBe("https://portal-a.example/hotel");
+    expect(mailed).toHaveLength(1);
+    expect(mailed[0].to).toMatch(/@example\.com$/);
+
+    await runDueChecks(client, at(24)); // same price: nothing new
+    expect(pushed).toHaveLength(1);
+
+    price = 230;
+    await runDueChecks(client, at(48)); // new low
+    expect(pushed).toHaveLength(2);
+    expect(pushed[1]).toMatchObject({ perNight: 230, newLow: true });
+
+    price = 255; // the cheapest free rate is now above the limit
+    await runDueChecks(client, at(72));
+    const [row] = await db.select().from(travelHotelWatches).where(eq(travelHotelWatches.id, watch.id));
+    expect(row.notified_per_night).toBeNull();
+    expect(pushed).toHaveLength(2);
+
+    price = 245;
+    await runDueChecks(client, at(96));
+    expect(pushed).toHaveLength(3);
+    expect(pushed[2]).toMatchObject({ perNight: 245, newLow: false });
+  });
+
+  it("send only on the chosen ways, and nothing for check now", async () => {
+    const { pushed, mailed } = spy();
+    const client = priced(() => 240);
+    setHotelSearchClient(client);
+    const { watch } = await endpoints.createHotelWatch(input({ notify_push: false }));
+    expect(watch).toMatchObject({ notify_push: false, notify_email: true });
+
+    await endpoints.checkHotelWatch({ id: watch.id });
+    expect(pushed).toHaveLength(0);
+    expect(mailed).toHaveLength(0);
+
+    await runDueChecks(client, at(6));
+    expect(pushed).toHaveLength(0);
+    expect(mailed).toHaveLength(1);
+  });
+
+  it("report again once the criteria change", async () => {
+    const { pushed } = spy();
+    const client = priced(() => 240);
+    const { watch } = await endpoints.createHotelWatch(input());
+    await runDueChecks(client, at(0));
+    expect(pushed).toHaveLength(1);
+
+    await endpoints.updateHotelWatch({ id: watch.id, ...input({ limit_per_night: 245 }) });
+    await runDueChecks(client, at(24));
+    expect(pushed).toHaveLength(2);
+  });
+});
+

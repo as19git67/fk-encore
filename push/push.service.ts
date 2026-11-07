@@ -509,6 +509,25 @@ export function buildAssistantAnswerNotification(input: {
   };
 }
 
+/**
+ * A hotel price watch found a price below its limit (travel/hotel-alerts.ts).
+ * The tap opens the watch; a newer report of the same watch replaces an
+ * unread older one.
+ */
+export function buildHotelPriceNotification(input: {
+  watchId: number;
+  title: string;
+  body: string;
+}): PushPayload {
+  return {
+    title: input.title,
+    body: input.body,
+    url: `/app/reise/hotelpreise?watch=${input.watchId}`,
+    tag: `hotel-price:${input.watchId}`,
+    data: { kind: "hotel_price", watchId: input.watchId },
+  };
+}
+
 export type NotificationKind =
   | "photo_added"
   | "album_shared"
@@ -520,7 +539,8 @@ export type NotificationKind =
   | "document_follow_up"
   | "receipt_booked"
   | "receipt_incomplete"
-  | "assistant_answer";
+  | "assistant_answer"
+  | "hotel_price";
 
 export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>;
 

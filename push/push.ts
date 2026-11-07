@@ -373,3 +373,25 @@ export const notifyAssistantAnswer = api(
     return await svc.sendToUser(req.userId, notification);
   },
 );
+
+interface NotifyHotelPriceRequest {
+  userId: number;
+  watchId: number;
+  title: string;
+  body: string;
+}
+
+/** Called by `travel/hotel-alerts.ts` when a watch's price fell below its limit. */
+export const notifyHotelPrice = api(
+  { expose: false },
+  async (req: NotifyHotelPriceRequest): Promise<FanoutFeedResponse> => {
+    const prefs = await svc.getNotificationPrefs(req.userId);
+    if (!svc.isKindEnabled(prefs, "hotel_price")) {
+      return { sent: 0, pruned: 0 };
+    }
+    return await svc.sendToUser(
+      req.userId,
+      svc.buildHotelPriceNotification({ watchId: req.watchId, title: req.title, body: req.body }),
+    );
+  },
+);

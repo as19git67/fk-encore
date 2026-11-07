@@ -3,9 +3,10 @@
  *
  * Prices stand per provider → room → rate. Cancellation and breakfast stand
  * only on the rate, so every rate becomes one offer; a provider without a
- * room list (only in `prices`) comes in with its best price, counted as not
- * cancellable and without breakfast — a guess in the user's favour would
- * raise false alarms. Prices include taxes; a resort or destination fee the
+ * room list (only in `prices`) comes in with its best price, its
+ * cancellation terms unknown (`null`) and without breakfast. An unknown term
+ * never meets "free cancellation only" — a guess in the user's favour would
+ * raise false alarms — but the page shows the offer with its link. Prices include taxes; a resort or destination fee the
  * hotel charges on site is not in them.
  *
  * Plain functions without I/O, so the tests feed them a synthetic answer.
@@ -16,10 +17,12 @@ export interface HotelOffer {
   room: string;
   perNight: number;
   total: number | null;
-  freeCancellation: boolean;
+  /** Null when Google names no cancellation terms for the provider. */
+  freeCancellation: boolean | null;
   cancelUntil: string | null;
   breakfast: boolean;
   guests: number | null;
+  link: string | null;
 }
 
 export interface OfferConditions {
@@ -37,6 +40,11 @@ export interface OfferSummary {
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+/** Only http(s) links reach the page. */
+const url = (v: unknown): string | null => {
+  const s = str(v);
+  return s && /^https?:\/\//i.test(s) ? s : null;
+};
 
 /** Every rate of a hotel's detail answer, cheapest first, for at least `guests` people. */
 export function offersOf(detail: any, guests: number): HotelOffer[] {
@@ -59,6 +67,7 @@ export function offersOf(detail: any, guests: number): HotelOffer[] {
           cancelUntil: str(rate.free_cancellation_until_date),
           breakfast: rate.breakfast_included === true,
           guests: num(rate.num_guests ?? room.num_guests),
+          link: url(rate.link) ?? url(room.link) ?? url(fp.link),
         });
       }
     }
@@ -74,10 +83,11 @@ export function offersOf(detail: any, guests: number): HotelOffer[] {
       room: "(ohne Zimmerangabe)",
       perNight,
       total: num(p?.total_rate?.extracted_lowest),
-      freeCancellation: false,
+      freeCancellation: null,
       cancelUntil: null,
       breakfast: false,
       guests: num(p.num_guests),
+      link: url(p.link),
     });
   }
   return offers
@@ -86,7 +96,7 @@ export function offersOf(detail: any, guests: number): HotelOffer[] {
 }
 
 export function meetsConditions(offer: HotelOffer, conditions: OfferConditions): boolean {
-  if (conditions.freeCancellationOnly && !offer.freeCancellation) return false;
+  if (conditions.freeCancellationOnly && offer.freeCancellation !== true) return false;
   if (conditions.breakfastRequired && !offer.breakfast) return false;
   return true;
 }
@@ -95,8 +105,8 @@ export function meetsConditions(offer: HotelOffer, conditions: OfferConditions):
 export function summarize(offers: HotelOffer[], conditions: OfferConditions): OfferSummary {
   return {
     lowest: offers[0] ?? null,
-    lowestFree: offers.find((o) => o.freeCancellation) ?? null,
-    lowestFreeBreakfast: offers.find((o) => o.freeCancellation && o.breakfast) ?? null,
+    lowestFree: offers.find((o) => o.freeCancellation === true) ?? null,
+    lowestFreeBreakfast: offers.find((o) => o.freeCancellation === true && o.breakfast) ?? null,
     matching: offers.find((o) => meetsConditions(o, conditions)) ?? null,
   };
 }

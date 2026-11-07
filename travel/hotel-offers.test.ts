@@ -8,6 +8,7 @@ export const DETAIL = {
   featured_prices: [
     {
       source: "Portal A",
+      link: "https://portal-a.example/hotel",
       rooms: [
         {
           name: "Doppelzimmer, zwei Betten",
@@ -38,7 +39,12 @@ export const DETAIL = {
   ],
   prices: [
     { source: "Portal A", rate_per_night: { extracted_lowest: 200 } },
-    { source: "Portal B", rate_per_night: { extracted_lowest: 210 }, total_rate: { extracted_lowest: 420 } },
+    {
+      source: "Portal B",
+      link: "https://portal-b.example/angebot",
+      rate_per_night: { extracted_lowest: 210 },
+      total_rate: { extracted_lowest: 420 },
+    },
     { source: "Portal C" },
   ],
 };
@@ -56,9 +62,28 @@ describe("offersOf", () => {
     expect(offers[3]).toMatchObject({ freeCancellation: true, breakfast: true });
   });
 
-  it("counts a provider without rooms as not cancellable and without breakfast", () => {
+  it("leaves the cancellation of a provider without rooms unknown and keeps its link", () => {
     const b = offersOf(DETAIL, 2).find((o) => o.source === "Portal B")!;
-    expect(b).toMatchObject({ freeCancellation: false, breakfast: false, room: "(ohne Zimmerangabe)" });
+    expect(b).toMatchObject({
+      freeCancellation: null,
+      breakfast: false,
+      room: "(ohne Zimmerangabe)",
+      link: "https://portal-b.example/angebot",
+    });
+  });
+
+  it("takes the provider's link for its rates and drops links that are not http(s)", () => {
+    const offers = offersOf(DETAIL, 3);
+    expect(offers.find((o) => o.perNight === 240)?.link).toBe("https://portal-a.example/hotel");
+    const bad = { ...DETAIL, prices: [{ source: "Portal D", link: "javascript:alert(1)", rate_per_night: { extracted_lowest: 99 } }] };
+    expect(offersOf(bad, 3).find((o) => o.source === "Portal D")?.link).toBeNull();
+  });
+
+  it("never counts an unknown cancellation as free", () => {
+    const offers = offersOf(DETAIL, 3);
+    const s = summarize(offers, { freeCancellationOnly: true, breakfastRequired: false });
+    expect(s.matching?.source).toBe("Portal A");
+    expect(s.matching?.perNight).toBe(240);
   });
 
   it("returns nothing for an answer without prices", () => {

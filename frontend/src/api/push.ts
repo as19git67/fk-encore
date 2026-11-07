@@ -65,6 +65,7 @@ export type NotificationKind =
   | 'document_low_confidence'
   | 'document_failed'
   | 'assistant_answer'
+  | 'hotel_price'
 
 export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>
 
