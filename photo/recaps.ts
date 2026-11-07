@@ -11,7 +11,9 @@ import * as recapsService from "./recaps.service";
 import type { RecapSummary, RecapDetails } from "./recaps.service";
 import {
   listMusicTracks,
+  moodForKind,
   pickTrackForRecap,
+  type RecapMood,
   type MusicTrack,
 } from "./recaps-music.service";
 import { counterpartsByPhotoId } from "./orientation-variants";
@@ -41,6 +43,12 @@ interface GetRecapResponse {
    * folder holds no usable audio files.
    */
   music?: MusicTrack;
+  /**
+   * The mood the recap's kind stands for (`moodForKind`), sent even when the
+   * music folder is empty: the iOS app picks a matching Apple Music playlist
+   * from it when the user plays recaps with their own subscription.
+   */
+  mood: RecapMood;
   /**
    * For every recap photo that is one side of a portrait/landscape format
    * group (documentation/plans/orientierungs-varianten.md): the best-ranked photo
@@ -113,7 +121,12 @@ export const getRecap = api(
     const counterpartMap = await counterpartsByPhotoId(userId, recap.photo_ids);
     const counterparts: RecapCounterpart[] = [];
     for (const [photo_id, counterpart] of counterpartMap) counterparts.push({ photo_id, counterpart });
-    return { recap, counterparts, ...(music ? { music } : {}) };
+    return {
+      recap,
+      counterparts,
+      mood: moodForKind(recap.kind),
+      ...(music ? { music } : {}),
+    };
   }
 );
 

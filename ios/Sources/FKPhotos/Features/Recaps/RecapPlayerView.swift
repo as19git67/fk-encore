@@ -17,7 +17,10 @@ import SwiftUI
 /// player. While the current slide's image is still downloading, playback
 /// progress is held so the slide never loses its screen time to a spinner.
 /// If the server suggests a background track (self-hosted recap music), it
-/// loops behind the slides with a gentle fade and a mute toggle.
+/// loops behind the slides with a gentle fade and a mute toggle. With Apple
+/// Music switched on and a subscription, `RecapAppleMusic` plays instead
+/// (rules in `RecapAppleMusicPlan`), and the self-hosted track is the
+/// fallback.
 struct RecapPlayerView: View {
     let recapId: Int
     var onSeen: ((Int) -> Void)? = nil
@@ -51,6 +54,14 @@ struct RecapPlayerView: View {
     /// Background music; shared with the photo slideshow. The recap's own
     /// suggested track leads the cycle.
     @State private var music = SlideshowMusic()
+    /// Apple Music for users with a subscription; when it starts, the
+    /// self-hosted track gives way.
+    @State private var appleMusic = RecapAppleMusic()
+    @State private var showPlaylistPicker = false
+    /// What the Apple Music pick needs again when the user changes it.
+    @State private var musicMood: RecapMusicMood?
+    @State private var periodStart: String?
+    @State private var periodEnd: String?
 
     /// Trip map intro shown before the slideshow; nil once finished/skipped.
     @State private var mapIntro: RecapMapIntroData?
@@ -91,9 +102,28 @@ struct RecapPlayerView: View {
             ticker?.cancel()
             chromeHideTask?.cancel()
             music.stop()
+            appleMusic.stop()
         }
         .onChange(of: isPaused) { _, paused in
             music.setPaused(paused)
+            appleMusic.setPaused(paused)
+        }
+        .sheet(isPresented: $showPlaylistPicker, onDismiss: { isPaused = false }) {
+            RecapPlaylistPicker(
+                selectedId: AppleMusicPreferences.playlistId(forRecap: recapId),
+                load: { await appleMusic.libraryPlaylists() },
+                onPick: { id in
+                    Task {
+                        _ = await appleMusic.choose(
+                            playlistId: id,
+                            recapId: recapId,
+                            mood: musicMood,
+                            periodStart: periodStart,
+                            periodEnd: periodEnd
+                        )
+                    }
+                }
+            )
         }
     }
 
@@ -319,9 +349,40 @@ struct RecapPlayerView: View {
                             .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1)
                     }
+                    if let source = appleMusic.sourceLabel {
+                        Label(source, systemImage: "music.note")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
-                if music.isPlaying {
+                if appleMusic.isActive {
+                    Button { appleMusic.toggleMuted(); showChrome() } label: {
+                        Image(systemName: appleMusic.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel(appleMusic.isMuted ? "Musik einschalten" : "Musik stummschalten")
+                    Button { appleMusic.next(); showChrome() } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Anderer Titel")
+                    Button {
+                        isPaused = true
+                        showPlaylistPicker = true
+                    } label: {
+                        Image(systemName: "music.note.list")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Playlist wählen")
+                } else if music.isPlaying {
                     Button { music.toggleMuted(); showChrome() } label: {
                         Image(systemName: music.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                             .font(.headline)
@@ -330,7 +391,7 @@ struct RecapPlayerView: View {
                     }
                     .accessibilityLabel(music.isMuted ? "Musik einschalten" : "Musik stummschalten")
                 }
-                if music.canChangeTrack {
+                if !appleMusic.isActive && music.canChangeTrack {
                     Button { music.next(); showChrome() } label: {
                         Image(systemName: "forward.fill")
                             .font(.headline)
@@ -485,13 +546,39 @@ struct RecapPlayerView: View {
                 // With an intro (map or compare) the ticker starts once it
                 // finishes, so the first photo keeps its full screen time.
                 if mapIntro == nil && compareIntro == nil { startTicker() }
-                if let track = detail.music {
-                    Task { await music.start(suggestedId: track.id, fallback: track) }
-                }
+                musicMood = RecapMusicMood(raw: detail.mood ?? detail.music?.mood)
+                periodStart = detail.recap.period_start
+                periodEnd = detail.recap.period_end
+                startMusic(fallback: detail.music)
             }
         } catch {
             loadError = error.localizedDescription
             isLoading = false
+        }
+    }
+
+    /// Apple Music first, when the user switched it on and has a
+    /// subscription; otherwise, or when it finds nothing, the self-hosted
+    /// track the server suggested.
+    private func startMusic(fallback track: RecapMusicTrack?) {
+        guard RecapAppleMusic.isUsable else {
+            if let track {
+                Task { await music.start(suggestedId: track.id, fallback: track) }
+            }
+            return
+        }
+        Task {
+            let carried = await appleMusic.start(
+                recapId: recapId,
+                mood: musicMood,
+                periodStart: periodStart,
+                periodEnd: periodEnd
+            )
+            if carried {
+                if isPaused { appleMusic.setPaused(true) }
+            } else if let track {
+                await music.start(suggestedId: track.id, fallback: track)
+            }
         }
     }
 

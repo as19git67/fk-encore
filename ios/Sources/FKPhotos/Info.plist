@@ -64,6 +64,8 @@
 	<array>
 		<string>comgooglemaps</string>
 	</array>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Damit Rückblicke Musik aus deinem Apple-Music-Abo und deiner Mediathek abspielen können</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Zum direkten Aufnehmen von Fotos für den Upload</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

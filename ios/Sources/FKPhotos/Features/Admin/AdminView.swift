@@ -71,6 +71,12 @@ struct AdminView: View {
                     Label("Suche auf dem iPhone", systemImage: "magnifyingglass.circle")
                 }
 
+                NavigationLink {
+                    RecapMusicSettingsView()
+                } label: {
+                    Label("Musik in Rückblicken", systemImage: "music.note")
+                }
+
                 // Push (#765) and the local review notice (#968) share one
                 // screen: both answer "when does this app speak up?".
                 NavigationLink {

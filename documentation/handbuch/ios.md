@@ -159,6 +159,10 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 
 - Liste; Player mit Pause, Weiter, „Andere Musik“, Favorit, „Foto aus
   Rückblick entfernen“, „Schließen“.
+- Mit Apple Music (Profil › „Musik in Rückblicken“, „Apple Music
+  verwenden“) und Abo: Musik aus der Mediathek um die Zeit des Rückblicks,
+  sonst eine Playlist zur Stimmung; im Player „Anderer Titel“ und
+  „Playlist wählen“ („Automatisch“ oder eine eigene Playlist).
 - **Test:** –
 
 ---
@@ -301,6 +305,13 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   Quellen & Lizenzen (OpenStreetMap, Wikipedia, Wikimedia Commons,
   Wikivoyage, Wikidata, Open-Meteo, Apple Karten und die eingebaute
   Open-Source-Software mit Version, Lizenz- und NOTICE-Text).
+- **Test:** –
+
+### IOS-SET-06 Musik in Rückblicken
+
+- „Apple Music verwenden“ fragt einmal nach dem Zugriff auf Apple Music
+  und zeigt, ob ein Abo gefunden wurde; ohne Abo bleibt die lizenzfreie
+  Musik.
 - **Test:** –
 
 ---
