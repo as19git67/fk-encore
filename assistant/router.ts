@@ -71,16 +71,26 @@ export function looksLikeFollowUp(question: string): boolean {
   return words <= 4 || FOLLOW_UP_RE.test(question);
 }
 
-/** The areas of the tools the previous turn called. */
+/**
+ * The areas of the tools the latest turn with tools called. A turn that
+ * answered in words only ("wie kommst du darauf?") passes its subject on:
+ * the question after it is still about what the turn before it read.
+ */
 export function areasOfLastTurn(history: ChatMessage[]): AreaId[] {
-  let start = history.length - 1;
-  while (start >= 0 && history[start]!.role !== "user") start--;
-  if (start < 0) return [];
-  const names: string[] = [];
-  for (const m of history.slice(start)) {
-    if (m.role === "assistant") for (const c of m.tool_calls ?? []) names.push(c.function.name);
+  let end = history.length;
+  while (end > 0) {
+    let start = end - 1;
+    while (start >= 0 && history[start]!.role !== "user") start--;
+    if (start < 0) return [];
+    const names: string[] = [];
+    for (const m of history.slice(start, end)) {
+      if (m.role === "assistant") for (const c of m.tool_calls ?? []) names.push(c.function.name);
+    }
+    const areas = areasOfTools(names);
+    if (areas.length) return areas;
+    end = start;
   }
-  return areasOfTools(names);
+  return [];
 }
 
 const REF_AREAS: Record<RefType, AreaId> = { photo: "photos", document: "documents", transaction: "finance" };

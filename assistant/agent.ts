@@ -775,6 +775,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     refs.set(r.type, [...(refs.get(r.type) ?? []), r.id]);
   }
   const truncated = new Set<RefType>(input.previousTruncated ?? []);
+  /** Per type, the size of a selection a tool made in this turn, while it is the latest result. */
+  const picked = new Map<RefType, number>();
   const toolResults: TurnResult["toolResults"] = {};
   const ctx = {
     user: input.user,
@@ -782,6 +784,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     conversationId: input.conversationId,
     previous: (type: RefType) => refs.get(type),
     previousTruncated: (type: RefType) => truncated.has(type),
+    pickedThisTurn: (type: RefType) => picked.get(type),
     context: input.context?.refs ?? [],
     turnResults: () => turnResults(messages.slice(questionIndex), metaTools),
   };
@@ -1219,6 +1222,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           refs.set(outcome.ref.type, outcome.ref.ids);
           if (outcome.ref.truncated) truncated.add(outcome.ref.type);
           else truncated.delete(outcome.ref.type);
+          if (outcome.ref.picked) picked.set(outcome.ref.type, outcome.ref.ids.length);
+          else picked.delete(outcome.ref.type);
         }
         // Every row carries how it reads, so a client without a renderer per
         // kind (the iOS app) shows the same list as the web app.

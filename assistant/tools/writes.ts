@@ -99,6 +99,13 @@ async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): P
   const explicit = ids(args.photo_ids);
   if (explicit.length) return explicit.slice(0, MAX_PHOTOS + 1);
   const f = (args.photos && typeof args.photos === "object" ? args.photos : {}) as Record<string, unknown>;
+  // A filter takes every photo it matches. After list_photos picked some in
+  // this turn ("die 5 besten je Monat"), a filter here is the pick dropped on
+  // the floor: the album would get all of them, or the cap refuses.
+  const pickedNow = ctx.pickedThisTurn?.("photo");
+  if (pickedNow !== undefined && Object.keys(f).length) {
+    throw new Error(`list_photos already picked ${pickedNow} photos in this answer, and a photos filter would take every photo it matches instead of that pick: pass from_previous_result = true to use the picked photos`);
+  }
   const favorite = bool(f.favorite);
   const dateFrom = isoDate(f.date_from);
   const dateTo = isoDate(f.date_to);
@@ -121,7 +128,7 @@ async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): P
 
 function checkPhotoCount(photoIds: number[]): void {
   if (photoIds.length > MAX_PHOTOS) {
-    throw new Error(`more than ${MAX_PHOTOS} photos match; narrow the selection first`);
+    throw new Error(`more than ${MAX_PHOTOS} photos match; narrow the selection first. A filter takes every photo it matches: to keep only some (the best, a few per person, month or year, no look-alikes) call list_photos with rank_by, group_by, then_by, per_group and distinct first, then pass from_previous_result = true`);
   }
 }
 

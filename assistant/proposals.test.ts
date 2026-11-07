@@ -268,6 +268,22 @@ describe("write tools", () => {
     )).rejects.toThrow("cut at its read cap");
   });
 
+  it("refuses a photos filter after list_photos picked in the same answer: the filter would drop the pick", async () => {
+    clients.photo.listAlbums.mockResolvedValue({ albums: [] });
+    await expect(tool("create_album").run(
+      { name: "Beispielalbum", photos: { person_ids: [1, 2], date_from: "2010-01-01" } },
+      { ...ctx(), pickedThisTurn: (type) => (type === "photo" ? 120 : undefined) },
+    )).rejects.toThrow("pass from_previous_result = true");
+    expect(clients.photo.listPhotos).not.toHaveBeenCalled();
+  });
+
+  it("names the way to a selection when a filter matches more photos than an album takes", async () => {
+    clients.photo.listAlbums.mockResolvedValue({ albums: [] });
+    clients.photo.listPhotos.mockResolvedValue({ photos: Array.from({ length: 4001 }, (_, i) => ({ id: i + 1 })) });
+    await expect(tool("create_album").run({ name: "Beispielalbum", photos: { person_ids: [1] } }, ctx()))
+      .rejects.toThrow("group_by, then_by, per_group and distinct");
+  });
+
   it("refuses a follow-up in the past", async () => {
     await expect(tool("create_document_follow_up").run({ document_ids: [1], date: "2026-10-01" }, ctx()))
       .rejects.toThrow("past");
