@@ -144,6 +144,23 @@ played as a slideshow.
    (`frontend/src/utils/photoBookSlideshow.ts`, prop `plan` of
    `RecapPlayer.vue`), to the recaps' music. A video export is left open.
 
+## Edited photos
+
+A book refers to its photos, it holds no copies. Each photo appears as its
+owner edited it (`photo_transforms`: crop, rotation, colour) — in the PDF
+(`renderUserAndCache`), in the editor's preview (`/photos/:id/render?v=user`)
+and on the cover. Size and focal point follow the edit
+(`photo/photo-edit-geometry.ts`, crop first, then the turn, as the
+renderer does), so the dpi warning, the cut around the focal point and every
+new layout go by the photo as it prints.
+
+The layout does not move by itself. A page qualifies when one of its photos
+changed its shape and the rule's layout for the photos as they are now cuts
+clearly less (`editMisfit`, margin `EDIT_MISFIT_MARGIN`). The book's page
+then shows a notice with "Seiten anpassen" (`POST /photo-books/:id/fit-edits`),
+which lays those pages out again; a page whose layout the user chose keeps it
+and is only marked.
+
 ## Open questions
 
 - Whether print shops want the first inside page alone on the right

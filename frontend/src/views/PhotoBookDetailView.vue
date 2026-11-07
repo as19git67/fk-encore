@@ -14,6 +14,11 @@
  * Stage 6: "Diashow" plays the book in the recap player, page by page with
  * its chapter titles and captions (`utils/photoBookSlideshow.ts`), to the
  * recaps' music; another track is one tap away.
+ *
+ * Edited photos: the book shows and prints each photo as its owner edited it
+ * (crop, rotation). The layout follows only on request: when an edit leaves
+ * pages that would fit better laid out again, a notice offers "Seiten
+ * anpassen"; a page with a layout the user chose keeps it and only says so.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -41,12 +46,14 @@ import RecapPlayer from '../components/RecapPlayer.vue'
 import { getRecapMusicUrl, listRecapMusic, type MusicTrack } from '../api/recaps'
 import { photoBookSlideshow } from '../utils/photoBookSlideshow'
 import { useModuleBack } from '../composables/useModuleBack'
+import { useAuthStore } from '../stores/auth'
 import {
   PHOTO_BOOK_FORMATS,
   acceptPhotoBookChapterSuggestion,
   deletePhotoBook,
+  fitPhotoBookToEdits,
   getPhotoBook,
-  photoBookThumbUrl,
+  photoBookImageUrl,
   rebuildPhotoBook,
   removePhotoFromBookPage,
   setPhotoBookCaption,
@@ -64,6 +71,7 @@ const route = useRoute()
 const router = useRouter()
 const confirm = useConfirm()
 const { goBack } = useModuleBack('/fotos', 'fotos-photo-books')
+const auth = useAuthStore()
 
 const book = ref<PhotoBook | null>(null)
 const loading = ref(true)
@@ -137,6 +145,27 @@ async function apply(run: () => Promise<PhotoBook>) {
 
 watch(bookId, () => void load())
 onMounted(load)
+
+const coverUrl = computed(() => {
+  const b = book.value
+  if (!b?.cover_filename) return null
+  return photoBookImageUrl({ photoId: b.cover_photo_id, filename: b.cover_filename, editedAt: b.cover_edited_at }, auth.user?.id, 800)
+})
+
+const coverFocal = computed(() => {
+  const f = book.value?.cover_focal ?? book.value?.cover_auto_crop
+  return f ? `${f.x * 100}% ${f.y * 100}%` : '50% 50%'
+})
+
+function fitToEdits() {
+  void apply(() => fitPhotoBookToEdits(bookId.value))
+}
+
+function misfitHint(page: PhotoBookPage): string {
+  return page.edit_misfit === 'own_layout'
+    ? 'Ein bearbeitetes Foto passt nicht mehr gut in das Layout, das du gewählt hast. Ein anderes Layout schneidet weniger ab.'
+    : 'Ein bearbeitetes Foto passt nicht mehr gut auf diese Seite. „Seiten anpassen“ ordnet sie neu.'
+}
 
 const formatName = computed(() => PHOTO_BOOK_FORMATS.find((f) => f.id === book.value?.format)?.name ?? '')
 
@@ -360,16 +389,21 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
       <Message v-if="book.low_dpi_count" severity="warn" :closable="false" class="pbd-warn">
         {{ book.low_dpi_count === 1 ? 'Ein Foto ist' : `${book.low_dpi_count} Fotos sind` }} für seinen Platz zu klein und würde unter 200 dpi gedruckt (markiert mit <i class="pi pi-exclamation-triangle" aria-label="Warnsymbol" />).
       </Message>
+      <Message v-if="book.edit_misfit_count" severity="info" :closable="false" class="pbd-warn">
+        <div class="pbd-misfit">
+          <span>
+            {{ book.edit_misfit_count === 1 ? 'Eine Seite passt' : `${book.edit_misfit_count} Seiten passen` }}
+            nach deiner Bearbeitung von Fotos nicht mehr gut (markiert mit <i class="pi pi-exclamation-circle" aria-label="Hinweissymbol" />).
+            Seiten, deren Layout du selbst gewählt hast, bleiben, wie sie sind.
+          </span>
+          <Button label="Seiten anpassen" icon="pi pi-th-large" size="small" :loading="busy" @click="fitToEdits" />
+        </div>
+      </Message>
 
       <section class="pbd-section" aria-labelledby="pbd-cover">
         <h2 id="pbd-cover" class="pbd-heading">Titelseite</h2>
         <div class="pbd-cover" :style="{ aspectRatio: `${book.width_mm} / ${book.height_mm}` }">
-          <img
-            v-if="book.cover_filename"
-            :src="photoBookThumbUrl(book.cover_filename, 800)"
-            alt=""
-            :style="{ objectPosition: book.cover_auto_crop ? `${book.cover_auto_crop.x * 100}% ${book.cover_auto_crop.y * 100}%` : '50% 50%' }"
-          />
+          <img v-if="coverUrl" :src="coverUrl" alt="" :style="{ objectPosition: coverFocal }" />
           <div class="pbd-cover-band">
             <span class="pbd-cover-title">{{ book.title }}</span>
             <span v-if="book.subtitle" class="pbd-cover-sub">{{ book.subtitle }}</span>
@@ -426,6 +460,13 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
                 class="pi pi-sparkles pbd-page-ai"
                 tabindex="0"
                 :aria-label="`Layout von der KI gewählt${page.layout_reason ? `: ${page.layout_reason}` : ''}`"
+              />
+              <i
+                v-if="page.edit_misfit"
+                v-tooltip.top="misfitHint(page)"
+                class="pi pi-exclamation-circle pbd-page-misfit"
+                tabindex="0"
+                :aria-label="misfitHint(page)"
               />
               <Button
                 v-if="pageHasCaption(page)"
@@ -610,6 +651,17 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
   color: var(--p-primary-color);
   border-radius: 4px;
 }
+.pbd-page-misfit {
+  color: var(--p-text-muted-color);
+  border-radius: 4px;
+}
+.pbd-misfit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.pbd-page-misfit:focus-visible,
 .pbd-page-ai:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);

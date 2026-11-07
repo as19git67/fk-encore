@@ -24,6 +24,7 @@ import {
   photoBookPage,
   photoBookSlot,
   photoCuration,
+  photoTransforms,
   photos,
   type PhotoBookSettings,
   type PhotoBookSource,
@@ -32,6 +33,7 @@ import {
 } from "../db/schema";
 import { loadReadableCollection } from "../documents/collection-access";
 import { accessiblePhotoCondition, accessiblePhotoConditionFor } from "./photo-file-access";
+import { editedPoint, editedSize, type PhotoEdit } from "./photo-edit-geometry";
 import { aestheticScoreSql } from "./photo.filters";
 import {
   MIN_PRINT_DPI,
@@ -41,6 +43,7 @@ import {
   bookLayouts,
   buildChapterPages,
   buildChapters,
+  editMisfit,
   findBookLayout,
   isPhotoBookFormat,
   limitPhotos,
@@ -53,6 +56,7 @@ import {
   textRect,
   type BookLayout,
   type BookPhoto,
+  type EditedBookPhoto,
   type PageKind,
   type PhotoBookFormat,
   type RectMm,
@@ -102,7 +106,12 @@ export interface PhotoBookSlotView {
   slot: number;
   photo_id: number;
   filename: string;
+  /** The focal point of the original. */
   auto_crop: { x: number; y: number } | null;
+  /** The focal point in the photo as the owner edited it (`auto_crop` when unedited). */
+  focal: { x: number; y: number } | null;
+  /** When the owner last edited the photo; null when they never did. The book shows and prints the edit. */
+  edited_at: string | null;
   /** Where the photo goes (without its caption strip). */
   rect: PageRect;
   /** The dpi it prints at; null while the photo's size is unknown. */
@@ -138,6 +147,12 @@ export interface PhotoBookPageView {
   layout_source: PhotoBookTextSource;
   /** Why the model picked this layout (stage 3). */
   layout_reason: string | null;
+  /**
+   * The page no longer fits photos edited since it was laid out:
+   * "relayout" when "Seiten anpassen" lays it out again, "own_layout" when
+   * the user chose the layout, which stays.
+   */
+  edit_misfit: "relayout" | "own_layout" | null;
   slots: PhotoBookSlotView[];
 }
 
@@ -178,12 +193,16 @@ export interface PhotoBookView {
   cover_photo_id: number | null;
   cover_filename: string | null;
   cover_auto_crop: { x: number; y: number } | null;
+  cover_focal: { x: number; y: number } | null;
+  cover_edited_at: string | null;
   settings: PhotoBookSettingsView;
   source: PhotoBookSource;
   page_count: number;
   photo_count: number;
   spine_mm: number;
   low_dpi_count: number;
+  /** Pages "Seiten anpassen" would lay out again for edited photos. */
+  edit_misfit_count: number;
   chapters: PhotoBookChapterView[];
   pages: PhotoBookPageView[];
   created_at: string;
@@ -501,22 +520,38 @@ export async function rebuildPhotoBook(userId: number, bookId: number, narrowing
 
 // ── loading ─────────────────────────────────────────────────────────────
 
-interface SlotPhotoRow {
+export interface SlotPhotoRow {
   page_id: number;
   slot: number;
   photo_id: number;
   filename: string;
+  /** The size as the owner edited the photo (crop, rotation); the original's when unedited. */
   width: number | null;
   height: number | null;
+  original_width: number | null;
+  original_height: number | null;
+  /** The original's focal point. */
   auto_crop: { x: number; y: number } | null;
+  /** The focal point in the edited photo. */
+  focal: { x: number; y: number } | null;
+  edited_at: string | null;
   taken_at: string | null;
   quality: number | null;
   aesthetic: number | null;
   city: string | null;
 }
 
-function toBookPhoto(r: SlotPhotoRow): BookPhoto {
-  return { id: r.photo_id, takenAt: r.taken_at, width: r.width, height: r.height, score: photoScore(r.aesthetic, r.quality), city: r.city };
+function toBookPhoto(r: SlotPhotoRow): EditedBookPhoto {
+  return {
+    id: r.photo_id,
+    takenAt: r.taken_at,
+    width: r.width,
+    height: r.height,
+    originalWidth: r.original_width,
+    originalHeight: r.original_height,
+    score: photoScore(r.aesthetic, r.quality),
+    city: r.city,
+  };
 }
 
 function share(rect: RectMm, format: PhotoBookFormat): PageRect {
@@ -524,9 +559,30 @@ function share(rect: RectMm, format: PhotoBookFormat): PageRect {
   return { x: rect.x / f.width, y: rect.y / f.height, w: rect.w / f.width, h: rect.h / f.height };
 }
 
-/** The slots of every page, with only the photos the owner may still see. */
+/**
+ * The slots of every page, with only the photos the owner may still see.
+ * A photo the owner edited (crop, rotation) comes with the size and focal
+ * point of the edit: the PDF prints the edit, so the layout, the dpi and the
+ * preview go by it too.
+ */
 async function loadSlots(userId: number, bookId: number): Promise<SlotPhotoRow[]> {
-  return dbAll<SlotPhotoRow>(
+  const rows = await dbAll<{
+    page_id: number;
+    slot: number;
+    photo_id: number;
+    filename: string;
+    width: number | null;
+    height: number | null;
+    auto_crop: { x: number; y: number } | null;
+    edit_id: number | null;
+    edit_crop: PhotoEdit["crop"];
+    edit_rotation: number | null;
+    edited_at: string | null;
+    taken_at: string | null;
+    quality: number | null;
+    aesthetic: number | null;
+    city: string | null;
+  }>(
     db.select({
       page_id: photoBookSlot.page_id,
       slot: photoBookSlot.slot,
@@ -535,6 +591,10 @@ async function loadSlots(userId: number, bookId: number): Promise<SlotPhotoRow[]
       width: photos.width,
       height: photos.height,
       auto_crop: photos.auto_crop,
+      edit_id: photoTransforms.id,
+      edit_crop: photoTransforms.crop,
+      edit_rotation: photoTransforms.rotation,
+      edited_at: photoTransforms.updated_at,
       taken_at: photos.taken_at,
       quality: photos.ai_quality_score,
       aesthetic: aestheticScoreSql,
@@ -543,9 +603,23 @@ async function loadSlots(userId: number, bookId: number): Promise<SlotPhotoRow[]
       .from(photoBookSlot)
       .innerJoin(photoBookPage, eq(photoBookPage.id, photoBookSlot.page_id))
       .innerJoin(photos, eq(photos.id, photoBookSlot.photo_id))
+      .leftJoin(photoTransforms, and(eq(photoTransforms.photo_id, photoBookSlot.photo_id), eq(photoTransforms.user_id, userId)))
       .where(and(eq(photoBookPage.book_id, bookId), accessiblePhotoCondition(userId)))
       .orderBy(asc(photoBookSlot.page_id), asc(photoBookSlot.slot)),
   );
+  return rows.map(({ edit_id, edit_crop, edit_rotation, ...r }) => {
+    const edit: PhotoEdit | null = edit_id != null ? { crop: edit_crop ?? null, rotation: edit_rotation ?? 0 } : null;
+    const size = editedSize(r.width, r.height, edit);
+    return {
+      ...r,
+      width: size?.width ?? null,
+      height: size?.height ?? null,
+      original_width: r.width,
+      original_height: r.height,
+      focal: editedPoint(r.auto_crop, edit),
+      edited_at: edit ? r.edited_at : null,
+    };
+  });
 }
 
 /** Write a page's slots and layout from a draft; a photo page left empty goes. */
@@ -684,15 +758,40 @@ export async function loadPhotoBook(userId: number, bookId: number): Promise<Loa
   throw APIError.internal("photo book pages could not be repaired");
 }
 
+function pageEditMisfit(format: PhotoBookFormat, p: LoadedPage): "relayout" | "own_layout" | null {
+  return editMisfit(format, p.kind, p.layout, p.layout_source, p.photos.map(toBookPhoto));
+}
+
+/**
+ * "Seiten anpassen": every page whose layout the rule or the model chose and
+ * that photos edited since no longer fit is laid out again for the photos as
+ * they are now. Pages with a layout the user chose stay. Returns how many
+ * pages changed.
+ */
+export async function fitPhotoBookToEdits(userId: number, bookId: number): Promise<number> {
+  const loaded = await loadPhotoBook(userId, bookId);
+  let changed = 0;
+  for (const p of loaded.pages) {
+    if (pageEditMisfit(loaded.format, p) !== "relayout") continue;
+    await writePage(p.id, p.kind, loaded.format, p.photos.map(toBookPhoto));
+    changed += 1;
+  }
+  if (changed) await touch(bookId);
+  return changed;
+}
+
 export async function getPhotoBookView(userId: number, bookId: number): Promise<PhotoBookView> {
   const loaded = await loadPhotoBook(userId, bookId);
   const { book, format } = loaded;
   const f = PHOTO_BOOK_FORMATS[format];
   const settings = bookSettings(book.settings);
   let lowDpi = 0;
+  let misfits = 0;
   const photoIds = new Set<number>();
   const pages: PhotoBookPageView[] = loaded.pages.map((p) => {
     const tr = textRect(format, p.layout);
+    const misfit = pageEditMisfit(format, p);
+    if (misfit === "relayout") misfits += 1;
     const captioned = pageCaptioned(loaded, p);
     const repeats = repeatedCaptions(p.photos.map((s) => loaded.captions.get(s.photo_id)?.text));
     return {
@@ -708,6 +807,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
       captions_override: p.captions,
       layout_source: p.layout_source,
       layout_reason: p.layout_reason,
+      edit_misfit: misfit,
       slots: p.photos.map((s, i) => {
         const geo = slotGeometry(format, p.layout, p.layout.cells[i], captioned);
         const repeated = repeats[i]!;
@@ -722,6 +822,8 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
           photo_id: s.photo_id,
           filename: s.filename,
           auto_crop: s.auto_crop,
+          focal: s.focal,
+          edited_at: s.edited_at,
           rect: share(rect, format),
           dpi: dpi == null ? null : Math.round(dpi),
           low_dpi: low,
@@ -744,12 +846,15 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
     cover_photo_id: loaded.cover?.photo_id ?? null,
     cover_filename: loaded.cover?.filename ?? null,
     cover_auto_crop: loaded.cover?.auto_crop ?? null,
+    cover_focal: loaded.cover?.focal ?? null,
+    cover_edited_at: loaded.cover?.edited_at ?? null,
     settings,
     source: book.source,
     page_count: pages.length,
     photo_count: photoIds.size,
     spine_mm: spineWidthMm(pages.length + (pages.length % 2), settings.paper_mm),
     low_dpi_count: lowDpi,
+    edit_misfit_count: misfits,
     chapters: loaded.chapters,
     pages,
     created_at: book.created_at,

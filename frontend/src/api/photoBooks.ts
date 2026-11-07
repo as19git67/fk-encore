@@ -3,7 +3,7 @@
  * out the pages and sends each cell as a share of the page, so the editor
  * only draws what it gets.
  */
-import { API_BASE_URL, apiFetch, withPhotoAccessParams } from './client'
+import { API_BASE_URL, apiFetch, withAuthTokenParam, withPhotoAccessParams } from './client'
 
 export type PhotoBookFormat = 'a4-landscape' | 'a4-portrait' | 'square-21' | 'square-30'
 export type PhotoBookPageKind = 'opener' | 'photos'
@@ -23,7 +23,12 @@ export interface PhotoBookSlot {
   slot: number
   photo_id: number
   filename: string
+  /** The focal point of the original. */
   auto_crop: { x: number; y: number } | null
+  /** The focal point in the photo as the owner edited it. */
+  focal: { x: number; y: number } | null
+  /** When the owner last edited the photo; the book shows and prints the edit. */
+  edited_at: string | null
   /** Where the photo goes, without its caption strip. */
   rect: PageRect
   dpi: number | null
@@ -52,6 +57,12 @@ export interface PhotoBookPage {
   captions_override: boolean | null
   layout_source: PhotoBookTextSource
   layout_reason: string | null
+  /**
+   * The page no longer fits photos edited since it was laid out: "relayout"
+   * when "Seiten anpassen" lays it out again, "own_layout" when the user chose
+   * the layout, which stays.
+   */
+  edit_misfit: 'relayout' | 'own_layout' | null
   slots: PhotoBookSlot[]
 }
 
@@ -107,12 +118,16 @@ export interface PhotoBook {
   cover_photo_id: number | null
   cover_filename: string | null
   cover_auto_crop: { x: number; y: number } | null
+  cover_focal: { x: number; y: number } | null
+  cover_edited_at: string | null
   settings: PhotoBookSettings
   source: PhotoBookSource
   page_count: number
   photo_count: number
   spine_mm: number
   low_dpi_count: number
+  /** Pages "Seiten anpassen" would lay out again for edited photos. */
+  edit_misfit_count: number
   chapters: PhotoBookChapter[]
   pages: PhotoBookPage[]
   created_at: string
@@ -209,6 +224,11 @@ export function rebuildPhotoBook(id: number, narrowing?: PhotoBookNarrowing) {
   })
 }
 
+/** "Seiten anpassen": lays out again the pages that edited photos no longer fit. */
+export function fitPhotoBookToEdits(id: number) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/fit-edits`, { method: 'POST' })
+}
+
 export function deletePhotoBook(id: number) {
   return apiFetch<void>(`/photo-books/${id}`, { method: 'DELETE' })
 }
@@ -291,4 +311,21 @@ export function photoBookFileUrl(url: string): string {
 /** A photo of the book at preview size. */
 export function photoBookThumbUrl(filename: string, width = 480): string {
   return withPhotoAccessParams(`${API_BASE_URL}/photos/file/${filename}?w=${width}`)
+}
+
+/**
+ * A photo of the book at preview size as it prints: the owner's edit (crop,
+ * rotation, colour) when there is one, else the original. `edited_at` goes
+ * into the URL, so a new edit is not hidden behind the cached old one.
+ */
+export function photoBookImageUrl(
+  photo: { photoId: number | null; filename: string; editedAt: string | null },
+  userId: number | null | undefined,
+  width = 480,
+): string {
+  if (photo.editedAt && photo.photoId && userId) {
+    const params = new URLSearchParams({ v: 'user', user: String(userId), w: String(width), t: photo.editedAt })
+    return withAuthTokenParam(`${API_BASE_URL}/photos/${photo.photoId}/render?${params.toString()}`)
+  }
+  return photoBookThumbUrl(photo.filename, width)
 }
