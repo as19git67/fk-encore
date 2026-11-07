@@ -339,7 +339,7 @@ describe("list_photos", () => {
     expect(out.ref?.ids).toContain(9001);
   });
 
-  it("splits a range into years, then months, and stops at a single month", async () => {
+  it("splits a range into years, then months, then days, and stops at a single day", async () => {
     const { splitPeriod } = await import("./tools/photos");
     expect(splitPeriod("2015-06-03", "2017-02-01")).toEqual([
       { from: "2015-06-03", to: "2015-12-31" }, { from: "2016-01-01", to: "2016-12-31" }, { from: "2017-01-01", to: "2017-02-01" },
@@ -347,7 +347,24 @@ describe("list_photos", () => {
     expect(splitPeriod("2023-01-15", "2023-03-31")).toEqual([
       { from: "2023-01-15", to: "2023-01-31" }, { from: "2023-02-01", to: "2023-02-28" }, { from: "2023-03-01", to: "2023-03-31" },
     ]);
-    expect(splitPeriod("2023-04-01", "2023-04-30")).toBeNull();
+    expect(splitPeriod("2023-04-28", "2023-04-30")).toEqual([
+      { from: "2023-04-28", to: "2023-04-28" }, { from: "2023-04-29", to: "2023-04-29" }, { from: "2023-04-30", to: "2023-04-30" },
+    ]);
+    expect(splitPeriod("2023-04-30", "2023-04-30")).toBeNull();
+  });
+
+  it("groups per day ('von jedem Tag die 10 besten'), each day with its own best photos", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [
+      { id: 1, taken_at: "2025-05-02T21:00:00", ai_quality_score: 95 },
+      { id: 2, taken_at: "2025-05-02T09:00:00", ai_quality_score: 90 },
+      { id: 3, taken_at: "2025-05-02T12:00:00", ai_quality_score: 80 },
+      { id: 4, taken_at: "2025-05-03T10:00:00", ai_quality_score: 40 },
+    ] });
+    const out = await tool("list_photos").run({ place: "Musterstadt", rank_by: "quality", direction: "desc", group_by: "day", per_group: 2 }, ctx());
+    expect(out.text).toContain("2025-05-02 | 1 |");
+    expect(out.text).toContain("2025-05-02 | 2 |");
+    expect(out.text).toContain("2025-05-03 | 4 |");
+    expect(out.ref?.ids).toEqual([1, 2, 4]);
   });
 
   it("refuses group_by person without person_ids", async () => {

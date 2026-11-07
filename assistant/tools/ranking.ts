@@ -139,13 +139,32 @@ export function groupRows<T>(rows: T[], keyOf: (row: T) => string | undefined, p
   return [...groups.entries()].map(([key, rows]) => ({ key, rows }));
 }
 
-/** Group keys from a date: the year, the month, or the quarter. */
-export function dateKey(date: string | null | undefined, unit: "year" | "month" | "quarter"): string | undefined {
+/** The date units every list tool can group by. */
+export type DateUnit = "year" | "quarter" | "month" | "week" | "day";
+
+/** Group keys from a date: YYYY, YYYY-Qn, YYYY-MM, YYYY-Www (ISO week) or YYYY-MM-DD. */
+export function dateKey(date: string | null | undefined, unit: DateUnit): string | undefined {
   if (!date || date.length < 7) return undefined;
   if (unit === "year") return date.slice(0, 4);
   if (unit === "month") return date.slice(0, 7);
-  const month = Number(date.slice(5, 7));
-  return Number.isFinite(month) && month >= 1 ? `${date.slice(0, 4)}-Q${Math.ceil(month / 3)}` : undefined;
+  if (unit === "quarter") {
+    const month = Number(date.slice(5, 7));
+    return Number.isFinite(month) && month >= 1 ? `${date.slice(0, 4)}-Q${Math.ceil(month / 3)}` : undefined;
+  }
+  if (date.length < 10 || !/^\d{4}-\d{2}-\d{2}/.test(date)) return undefined;
+  if (unit === "day") return date.slice(0, 10);
+  // ISO week: the week with the year's first Thursday is week 1; the key carries the week's own year.
+  const d = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))));
+  const weekday = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - weekday);
+  const yearStart = Date.UTC(d.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((d.getTime() - yearStart) / 86_400_000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+const DATE_UNITS = new Set<string>(["year", "quarter", "month", "week", "day"]);
+export function isDateUnit(by: string): by is DateUnit {
+  return DATE_UNITS.has(by);
 }
 
 /** The sentence a table note carries about the order and the grouping. */

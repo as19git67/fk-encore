@@ -8,7 +8,7 @@ import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { taxWorksheet } from "./tax";
 import { findInDocuments } from "./text-boxes";
-import { compositeKey, dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { compositeKey, dateKey, groupProperties, isDateUnit, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
@@ -34,7 +34,10 @@ type DocumentRankField = keyof typeof RANK_FIELDS;
 
 const GROUPS = {
   year: "of the document date",
+  quarter: "YYYY-Qn",
   month: "YYYY-MM",
+  week: "ISO week",
+  day: "YYYY-MM-DD",
   correspondent: "sender",
   category: "slug",
 } as const;
@@ -45,7 +48,7 @@ const GROUPED_SEARCH_CAP = 100;
 const GROUPED_LIST_CAP = 200;
 
 function groupKey(d: DocumentSummary, by: DocumentGroup): string | undefined {
-  if (by === "year" || by === "month") return dateKey(d.doc_date, by);
+  if (isDateUnit(by)) return dateKey(d.doc_date, by);
   if (by === "correspondent") return d.correspondent_display ?? d.sender ?? undefined;
   return d.category_slug ?? undefined;
 }
