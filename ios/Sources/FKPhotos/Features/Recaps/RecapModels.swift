@@ -95,6 +95,10 @@ struct ListRecapsResponse: Codable, Sendable { let recaps: [RecapSummary] }
 struct GetRecapResponse: Codable, Sendable {
     let recap: RecapDetails
     let music: RecapMusicTrack?
+    /// The recap's mood (`upbeat`, `warm`, `nostalgic`, `calm`), sent even
+    /// without self-hosted music; picks the Apple Music playlist. Optional so
+    /// an older server still decodes.
+    var mood: String? = nil
     /// Per recap photo that is one side of a format group: the photo on the
     /// other side (documentation/plans/orientierungs-varianten.md). Optional so an
     /// older server still decodes.

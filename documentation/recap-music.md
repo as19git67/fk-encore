@@ -37,6 +37,27 @@ Just drop files in — nothing else to do:
 - The player (web and iOS) fades the music in and out smoothly, ties it to
   pause/resume, and has a mute button.
 
+## Apple Music (iOS, own subscription)
+
+The iOS app can play recaps with the user's own Apple Music subscription
+instead (Profil › Musik in Rückblicken, off by default; switching it on asks
+iOS for access once). `GET /recaps/:id` sends the recap's `mood` for this,
+also when the music folder is empty. The pick, first match wins
+(`RecapAppleMusicPlan` in `ios/Sources/FKPhotos/Features/Recaps/`):
+
+1. the library playlist the user chose for this recap in the player
+   („Playlist wählen“, kept per recap on the device);
+2. songs the user added to their library within 30 days around the recap's
+   period, if the period is at most half a year and there are at least eight;
+3. an Apple Music playlist for the mood, found by catalog search;
+4. otherwise the self-hosted track as above.
+
+Apple Music only plays live in the app (`ApplicationMusicPlayer`, the Music
+app's queue is untouched). Exported or shared videos keep the self-hosted,
+license-free music. MusicKit gives an app no volume control, so muting
+pauses and there is no fade. The app ID needs the MusicKit app service
+enabled in the Apple Developer portal.
+
 ## Where to Get Music (License!)
 
 Only use music whose license allows embedding it in your own application.
