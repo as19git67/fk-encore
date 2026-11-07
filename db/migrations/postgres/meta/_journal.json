@@ -2066,6 +2066,13 @@
       "when": 1790349000000,
       "tag": "0295_trip_spot_description",
       "breakpoints": true
+    },
+    {
+      "idx": 296,
+      "version": "7",
+      "when": 1790350000000,
+      "tag": "0296_travel_hotel_watch",
+      "breakpoints": true
     }
   ]
 }

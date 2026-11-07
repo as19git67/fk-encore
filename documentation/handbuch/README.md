@@ -22,6 +22,7 @@ Eine Datei je Modul, in der Reihenfolge des Hauptmenüs
 | `zaehler.md` | Zähler | **geschrieben**, E2E-Tests für alle 63 Aktionen |
 | `assistent.md` | Assistent | **geschrieben** |
 | `label.md` | Label | **geschrieben** |
+| `reise.md` | Reise (Hotelpreise) | **geschrieben** |
 | `sammelmappen.md` | Sammelmappen, Basket, Exporte, geteilte Links | **geschrieben** |
 | `admin.md` | Benutzer, Rollen, Jobs, Systemstatus | **geschrieben** |
 | `ios.md` | iOS-App (Bildschirm-Ebene; Reiseplaner braucht einen eigenen Durchgang) | **geschrieben** |

@@ -5431,3 +5431,87 @@ export const demoTruth = pgTable("demo_truth", {
   truth: jsonb("truth").$type<Record<string, unknown>>().notNull(),
   created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
+
+// ========== Reise (travel module) ==========
+
+// A hotel price watch (documentation/plans/reise-hotelpreise.md): one hotel,
+// fixed dates and guests, checked by the travel job until `end_date`, which
+// is never more than two years ahead (migration 0296).
+export const travelHotelWatches = pgTable(
+  "travel_hotel_watch",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** What the user searched for: a hotel name, optionally with the city. */
+    query: text("query").notNull(),
+    /** The hotel Google Hotels matched, filled by the first check. */
+    hotel_name: text("hotel_name"),
+    property_token: text("property_token"),
+    check_in: date("check_in", { mode: "string" }).notNull(),
+    check_out: date("check_out", { mode: "string" }).notNull(),
+    adults: integer("adults").notNull(),
+    children_ages: jsonb("children_ages").$type<number[]>().notNull().default([]),
+    currency: text("currency").notNull().default("EUR"),
+    /** Per night including taxes; null records the history without a limit. */
+    limit_per_night: doublePrecision("limit_per_night"),
+    free_cancellation_only: boolean("free_cancellation_only").notNull().default(true),
+    breakfast_required: boolean("breakfast_required").notNull().default(false),
+    /** Last day the job checks this watch. */
+    end_date: date("end_date", { mode: "string" }).notNull(),
+    paused: boolean("paused").notNull().default(false),
+    last_checked_at: timestamp("last_checked_at", { mode: "string", withTimezone: true }),
+    last_error: text("last_error"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("travel_hotel_watch_user_idx").on(table.user_id)],
+);
+
+/** One check of a watch: the summary the history chart reads. */
+export const travelHotelChecks = pgTable(
+  "travel_hotel_check",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    watch_id: integer("watch_id")
+      .notNull()
+      .references(() => travelHotelWatches.id, { onDelete: "cascade" }),
+    checked_at: timestamp("checked_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    /** SerpApi searches this check used; counted against the monthly budget. */
+    searches: integer("searches").notNull().default(0),
+    offer_count: integer("offer_count").notNull().default(0),
+    lowest_per_night: doublePrecision("lowest_per_night"),
+    lowest_free_per_night: doublePrecision("lowest_free_per_night"),
+    lowest_free_breakfast_per_night: doublePrecision("lowest_free_breakfast_per_night"),
+    /** The cheapest offer that meets the watch's conditions. */
+    matching_per_night: doublePrecision("matching_per_night"),
+    matching_source: text("matching_source"),
+    below_limit: boolean("below_limit").notNull().default(false),
+    error: text("error"),
+  },
+  (table) => [
+    index("travel_hotel_check_watch_idx").on(table.watch_id, table.checked_at),
+    index("travel_hotel_check_time_idx").on(table.checked_at),
+  ],
+);
+
+/** Every rate a check saw: provider, room, price, cancellation, breakfast. */
+export const travelHotelOffers = pgTable(
+  "travel_hotel_offer",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    check_id: bigint("check_id", { mode: "number" })
+      .notNull()
+      .references(() => travelHotelChecks.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    room: text("room").notNull(),
+    per_night: doublePrecision("per_night").notNull(),
+    total: doublePrecision("total"),
+    free_cancellation: boolean("free_cancellation").notNull().default(false),
+    cancel_until: text("cancel_until"),
+    breakfast: boolean("breakfast").notNull().default(false),
+    guests: integer("guests"),
+  },
+  (table) => [index("travel_hotel_offer_check_idx").on(table.check_id)],
+);
