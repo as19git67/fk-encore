@@ -31,7 +31,9 @@ gewählte Wächter steht in der Adresse (`?watch=<id>`).
   3. Optional eine Grenze pro Nacht inklusive Steuern; Währung (EUR).
   4. „Nur kostenlos stornierbare Tarife zählen“ (an) und „Nur Tarife mit
      Frühstück zählen“ (aus) festlegen.
-  5. Ende der Beobachtung prüfen: vorbelegt mit dem Tag vor der Anreise,
+  5. Unter „Melden, wenn der Preis unter die Grenze fällt“ Push und E-Mail
+     wählen (beide an; ohne Grenze gesperrt).
+  6. Ende der Beobachtung prüfen: vorbelegt mit dem Tag vor der Anreise,
      höchstens zwei Jahre ab heute. „Anlegen“.
 - **Ergebnis:** Der Wächter steht in der Liste und ist gewählt; die erste
   Prüfung macht der Job oder „Jetzt prüfen“.
@@ -68,7 +70,28 @@ gewählte Wächter steht in der Adresse (`?watch=<id>`).
 - **Ergebnis:** Kacheln „Passend“, „Günstigster Tarif“, „Stornierbar“,
   „Stornierbar mit Frühstück“, „Grenze“, „Bisher bester“; Tabelle der
   Tarife der letzten Prüfung; Tabelle „Verlauf“ mit jeder Prüfung. Ein
-  Preis unter der Grenze ist hervorgehoben.
+  Preis unter der Grenze ist hervorgehoben. Ein Anbieter, den Google nur
+  mit Preis nennt, steht mit Storno „unbekannt“; der Name des Anbieters
+  führt zum Angebot. Ein Tarif mit unbekanntem Storno zählt nie als
+  kostenlos stornierbar.
+- **Test:** –
+
+### REI-HPR-06 Meldung bei günstigem Preis
+
+- **Wo:** Push-Benachrichtigung und E-Mail; ein- und ausschalten im Dialog
+  des Wächters, Push zusätzlich unter Mein Profil › Benachrichtigungen
+  („Hotelpreise“)
+- **Recht:** `travel.view` (der Besitzer des Wächters)
+- **Ergebnis:** Fällt bei der Prüfung um 6 Uhr der passende Preis unter
+  die Grenze, kommt eine Meldung mit Preis, Anbieter, Daten und Storno,
+  aus der Mail ein Knopf zum Angebot und einer zum Wächter. Eine weitere
+  Meldung kommt nur bei einem neuen Tiefstpreis, oder nachdem der Preis
+  zwischendurch wieder über der Grenze lag. Die Seite nennt den zuletzt
+  gemeldeten Preis.
+- **Fehler und Grenzfälle:** „Jetzt prüfen“ meldet nichts. Ohne Grenze
+  gibt es keine Meldung. Wer die Kriterien ändert, bekommt den nächsten
+  Preis unter der Grenze wieder gemeldet. Ohne eingerichteten Mailserver
+  kommt nur der Push.
 - **Test:** –
 
 ### REI-HPR-05 Wächter löschen

@@ -38,23 +38,50 @@ user sees how the price moves and when it falls below a limit.
   every active watch not checked within the last 5 hours, so a "check
   now" shortly before does not cost a second search.
 
-## Data model (migration 0296)
+## Reports (stage 2)
+
+- **Rule** (`alertDecision` in `travel/hotel-alerts.ts`): the daily job
+  reports a watch when its matching price is below the limit and nothing
+  was reported since the price last stood at or above the limit, or the
+  price undercuts the last report (a new low). A price at or above the
+  limit, or no matching offer, clears `notified_per_night`, so the next
+  drop is reported again. Changing the hotel, dates, guests, currency,
+  limit or conditions clears it too. "Check now" never reports: the user
+  is looking at the result.
+- **Ways:** per watch `notify_push` and `notify_email`, both on by
+  default. Push goes through `push.notifyHotelPrice` (browser and iOS,
+  kind `hotel_price` in the user's notification settings); the mail
+  through the app's SMTP account to the user's address, with a button to
+  the offer and one to the watch. A report counts as made once it is
+  tried, so a mail server that is down does not become a mail every
+  morning.
+- **Unknown cancellation:** a provider that Google lists only with a
+  price (no rooms, no rates) gets `free_cancellation = null` and is shown
+  as "unbekannt" with its link. It never meets "free cancellation only";
+  migration 0297 moved the stored room-less offers from `false` to `null`.
+
+## Data model (migrations 0296, 0297)
 
 - `travel_hotel_watch`: owner, query, matched hotel name and token,
   check-in/out, adults, children's ages, currency, limit per night,
   `free_cancellation_only`, `breakfast_required`, `end_date`, `paused`,
+  `notify_push`, `notify_email`, `notified_per_night`/`notified_at`,
   last check and error.
 - `travel_hotel_check`: one row per check — searches used, number of
   rates, cheapest rate, cheapest cancellable, cancellable with breakfast,
   the cheapest that meets the watch's conditions and its provider,
   `below_limit`, error.
-- `travel_hotel_offer`: every rate a check saw.
+- `travel_hotel_offer`: every rate a check saw, with its booking link;
+  `free_cancellation` null when Google names no terms.
 
 ## Code
 
 - `travel/hotel-offers.ts` — reading SerpApi's answer (pure).
 - `travel/serpapi-client.ts` — the client, `setHotelSearchClient` for tests.
 - `travel/hotel-watch.service.ts` — criteria, CRUD, one check, the job.
+- `travel/hotel-alerts.ts` — when to report, the words, push and mail
+  (`setAlertSender` for tests); mail text in `user/mail.ts`
+  (`sendHotelPriceAlertEmail`).
 - `travel/hotel-watch.ts` — endpoints under `/travel/…` and the schedule.
 - Web: Reise › Hotelpreise (`TravelHotelWatchesView.vue`, dialog
   `components/travel/HotelWatchDialog.vue`), laid out like the history on
@@ -64,9 +91,7 @@ user sees how the price moves and when it falls below a limit.
 ## Stages
 
 1. **Watch one hotel, write the history** — done.
-2. **Notify** when a check falls below the limit for the first time, or
-   to a new low clearly below the last notice (push and mail, via
-   `push/`).
+2. **Notify** — done. See "Reports" below.
 3. **From the itinerary:** "watch this stay's hotel" on a stay of the
    trip planner, dates and guests taken over.
 4. **Area watches:** any hotel in an area with minimum stars and rating,

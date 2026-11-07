@@ -33,6 +33,10 @@ export interface HotelWatch {
   breakfast_required: boolean
   end_date: string
   paused: boolean
+  notify_push: boolean
+  notify_email: boolean
+  /** The price last reported; null when nothing below the limit is pending. */
+  notified_per_night: number | null
   status: HotelWatchStatus
   last_checked_at: string | null
   last_error: string | null
@@ -46,10 +50,12 @@ export interface HotelOfferEntry {
   room: string
   per_night: number
   total: number | null
-  free_cancellation: boolean
+  /** Null: Google names no cancellation terms for this provider. */
+  free_cancellation: boolean | null
   cancel_until: string | null
   breakfast: boolean
   guests: number | null
+  link: string | null
 }
 
 export interface HotelWatchDetail {
@@ -70,6 +76,8 @@ export interface HotelWatchInput {
   breakfast_required: boolean
   end_date: string
   paused: boolean
+  notify_push: boolean
+  notify_email: boolean
 }
 
 export interface HotelSearchStatus {

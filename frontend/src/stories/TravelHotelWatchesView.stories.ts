@@ -54,6 +54,9 @@ const CITY: HotelWatch = {
   breakfast_required: false,
   end_date: '2027-05-11',
   paused: false,
+  notify_push: true,
+  notify_email: true,
+  notified_per_night: 185,
   status: 'active',
   last_checked_at: '2026-11-07T06:00:00Z',
   last_error: null,
@@ -86,10 +89,10 @@ const DETAIL: HotelWatchDetail = {
   watch: CITY,
   checks: CHECKS,
   offers: [
-    { source: 'Portal A', room: 'Familienzimmer', per_night: 155, total: 310, free_cancellation: false, cancel_until: null, breakfast: false, guests: 3 },
-    { source: 'Portal A', room: 'Familienzimmer', per_night: 185, total: 370, free_cancellation: true, cancel_until: '10. Mai', breakfast: false, guests: 3 },
-    { source: 'Portal B', room: '(ohne Zimmerangabe)', per_night: 190, total: 380, free_cancellation: false, cancel_until: null, breakfast: false, guests: null },
-    { source: 'Portal A', room: 'Familienzimmer, Frühstück', per_night: 205, total: 410, free_cancellation: true, cancel_until: '10. Mai', breakfast: true, guests: 3 },
+    { source: 'Portal A', room: 'Familienzimmer', per_night: 155, total: 310, free_cancellation: false, cancel_until: null, breakfast: false, guests: 3, link: 'https://portal-a.example/hotel' },
+    { source: 'Portal A', room: 'Familienzimmer', per_night: 185, total: 370, free_cancellation: true, cancel_until: '10. Mai', breakfast: false, guests: 3, link: 'https://portal-a.example/hotel' },
+    { source: 'Portal B', room: '(ohne Zimmerangabe)', per_night: 190, total: 380, free_cancellation: null, cancel_until: null, breakfast: false, guests: null, link: 'https://portal-b.example/angebot' },
+    { source: 'Portal A', room: 'Familienzimmer, Frühstück', per_night: 205, total: 410, free_cancellation: true, cancel_until: '10. Mai', breakfast: true, guests: 3, link: 'https://portal-a.example/hotel' },
   ],
 }
 

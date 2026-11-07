@@ -2073,6 +2073,13 @@
       "when": 1790350000000,
       "tag": "0296_travel_hotel_watch",
       "breakpoints": true
+    },
+    {
+      "idx": 297,
+      "version": "7",
+      "when": 1790360000000,
+      "tag": "0297_travel_hotel_alerts",
+      "breakpoints": true
     }
   ]
 }

@@ -44,6 +44,8 @@ const freeCancellationOnly = ref(true)
 const breakfastRequired = ref(false)
 const endDate = ref<Date | null>(null)
 const paused = ref(false)
+const notifyPush = ref(true)
+const notifyEmail = ref(true)
 /** True once the user picked an end; until then it follows the check-in. */
 const endTouched = ref(false)
 
@@ -78,6 +80,8 @@ watch(
     breakfastRequired.value = w?.breakfast_required ?? false
     endDate.value = w ? parseLocalDate(w.end_date) : null
     paused.value = w?.paused ?? false
+    notifyPush.value = w?.notify_push ?? true
+    notifyEmail.value = w?.notify_email ?? true
     endTouched.value = !!w
   },
   { immediate: true },
@@ -131,6 +135,8 @@ function save() {
     breakfast_required: breakfastRequired.value,
     end_date: toLocalIsoDate(endDate.value),
     paused: paused.value,
+    notify_push: notifyPush.value,
+    notify_email: notifyEmail.value,
   })
 }
 </script>
@@ -188,6 +194,21 @@ function save() {
         <Checkbox v-model="breakfastRequired" input-id="hw-breakfast" binary />
         <label for="hw-breakfast">Nur Tarife mit Frühstück zählen</label>
       </div>
+
+      <fieldset class="field field-wide notify">
+        <legend>Melden, wenn der Preis unter die Grenze fällt</legend>
+        <div class="field-check">
+          <Checkbox v-model="notifyPush" input-id="hw-push" binary :disabled="limit === null" />
+          <label for="hw-push">Push-Benachrichtigung</label>
+        </div>
+        <div class="field-check">
+          <Checkbox v-model="notifyEmail" input-id="hw-mail" binary :disabled="limit === null" />
+          <label for="hw-mail">E-Mail</label>
+        </div>
+        <small class="muted">
+          {{ limit === null ? 'Ohne Grenze gibt es nichts zu melden.' : 'Einmal, und wieder bei einem neuen Tiefstpreis. Steigt der Preis über die Grenze, wird der nächste Fall wieder gemeldet.' }}
+        </small>
+      </fieldset>
 
       <div class="field">
         <label for="hw-end">Ende der Beobachtung</label>
@@ -256,6 +277,20 @@ function save() {
 }
 .field-check label {
   color: var(--p-text-color);
+}
+.notify {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.notify legend {
+  padding: 0;
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+  margin-bottom: var(--space-1);
+}
+.notify .field-check {
+  display: flex;
 }
 .field-end {
   align-self: end;

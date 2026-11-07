@@ -5461,6 +5461,12 @@ export const travelHotelWatches = pgTable(
     /** Last day the job checks this watch. */
     end_date: date("end_date", { mode: "string" }).notNull(),
     paused: boolean("paused").notNull().default(false),
+    /** Report a price below the limit as a push notification and/or a mail. */
+    notify_push: boolean("notify_push").notNull().default(true),
+    notify_email: boolean("notify_email").notNull().default(true),
+    /** The price last reported; cleared when the price rises above the limit again. */
+    notified_per_night: doublePrecision("notified_per_night"),
+    notified_at: timestamp("notified_at", { mode: "string", withTimezone: true }),
     last_checked_at: timestamp("last_checked_at", { mode: "string", withTimezone: true }),
     last_error: text("last_error"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
@@ -5508,10 +5514,13 @@ export const travelHotelOffers = pgTable(
     room: text("room").notNull(),
     per_night: doublePrecision("per_night").notNull(),
     total: doublePrecision("total"),
-    free_cancellation: boolean("free_cancellation").notNull().default(false),
+    /** Null: the provider stands only with a price, Google names no cancellation terms. */
+    free_cancellation: boolean("free_cancellation"),
     cancel_until: text("cancel_until"),
     breakfast: boolean("breakfast").notNull().default(false),
     guests: integer("guests"),
+    /** Where to book the offer, as Google Hotels links it. */
+    link: text("link"),
   },
   (table) => [index("travel_hotel_offer_check_idx").on(table.check_id)],
 );

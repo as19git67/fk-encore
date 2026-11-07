@@ -28,6 +28,7 @@ import {
   getHotelWatch,
   listHotelWatches,
   updateHotelWatch,
+  type HotelOfferEntry,
   type HotelSearchStatus,
   type HotelWatch,
   type HotelWatchDetail,
@@ -88,6 +89,17 @@ function when(iso: string | null): string {
 function guests(w: HotelWatch): string {
   const kids = w.children_ages.length
   return `${w.adults} Erw.` + (kids ? `, ${kids} ${kids === 1 ? 'Kind' : 'Kinder'}` : '')
+}
+
+function cancellation(o: HotelOfferEntry): string {
+  if (o.free_cancellation === null) return 'unbekannt'
+  return o.free_cancellation ? `kostenlos${o.cancel_until ? ' bis ' + o.cancel_until : ''}` : 'nein'
+}
+
+/** How the watch reports a price below its limit. */
+function reporting(w: HotelWatch): string {
+  const ways = [w.notify_push ? 'Push' : null, w.notify_email ? 'Mail' : null].filter(Boolean)
+  return ways.length ? `Meldung per ${ways.join(' und ')}` : 'ohne Meldung'
 }
 
 function conditions(w: HotelWatch): string {
@@ -340,6 +352,10 @@ const latest = computed(() => selected.value?.latest ?? null)
             <p class="muted">
               Stand {{ when(latest.checked_at) }}. Preise pro Nacht inklusive Steuern; eine Resort- oder
               Destination-Fee, die das Hotel vor Ort verlangt, ist nicht enthalten.
+              {{ selected.limit_per_night !== null ? reporting(selected) + ', sobald der Preis unter die Grenze fällt.' : '' }}
+              <template v-if="selected.notified_per_night !== null">
+                Zuletzt gemeldet: {{ money(selected.notified_per_night, selected.currency) }}.
+              </template>
             </p>
             <dl class="tiles">
               <div :class="['tile', { 'tile--hit': latest.below_limit }]">
@@ -371,11 +387,14 @@ const latest = computed(() => selected.value?.latest ?? null)
                 </thead>
                 <tbody>
                   <tr v-for="(o, i) in detail?.offers ?? []" :key="i">
-                    <td>{{ o.source }}</td>
+                    <td>
+                      <a v-if="o.link" :href="o.link" target="_blank" rel="noopener noreferrer">{{ o.source }}</a>
+                      <template v-else>{{ o.source }}</template>
+                    </td>
                     <td class="room">{{ o.room }}</td>
                     <td class="num">{{ money(o.per_night, selected.currency) }}</td>
                     <td class="num">{{ money(o.total, selected.currency) }}</td>
-                    <td>{{ o.free_cancellation ? `kostenlos${o.cancel_until ? ' bis ' + o.cancel_until : ''}` : 'nein' }}</td>
+                    <td :class="{ muted: o.free_cancellation === null }">{{ cancellation(o) }}</td>
                     <td>{{ o.breakfast ? 'ja' : '–' }}</td>
                   </tr>
                 </tbody>
