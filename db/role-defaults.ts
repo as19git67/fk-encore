@@ -13,6 +13,7 @@ export const defaultRoles = [
   { name: "Label User", description: "Access to the label printing module" },
   { name: "Zähler User", description: "Access to the utility meters module" },
   { name: "Assistent User", description: "Access to the assistant chat" },
+  { name: "Reise User", description: "Access to the travel module (hotel price watches)" },
 ];
 
 export const allPermissions = [
@@ -66,6 +67,10 @@ export const allPermissions = [
   { key: "meters.manage", description: "Create/edit/replace meters and manage API keys" },
   // --- Assistant (documentation/plans/ki-assistent.md, #1528) ---
   { key: "module.assistant", description: "Enable the assistant chat" },
+  // --- Travel module (documentation/plans/reise-hotelpreise.md) ---
+  { key: "module.travel", description: "Enable travel module" },
+  { key: "travel.view", description: "View own hotel price watches and their history" },
+  { key: "travel.manage", description: "Create, edit, delete and check own hotel price watches" },
 ];
 
 // Permissions that are NEVER auto-assigned to the Admin role.
@@ -115,4 +120,9 @@ export const rolePermissionsMap: Record<string, string[]> = {
   // brings it along, so an admin can give someone a module without the chat
   // or take the chat away without the module.
   "Assistent User": ["module.assistant"],
+  "Reise User": [
+    "module.travel",
+    "travel.view",
+    "travel.manage",
+  ],
 };

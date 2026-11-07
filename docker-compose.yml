@@ -295,6 +295,9 @@ services:
       FINANCE_EODHD_DAILY_CALLS: ${FINANCE_EODHD_DAILY_CALLS:-20}
       FINANCE_QUOTE_PROVIDER: ${FINANCE_QUOTE_PROVIDER:-onvista}
       FINANCE_YAHOO_NEWS: ${FINANCE_YAHOO_NEWS:-on}
+      # Hotel price watches of the travel module (documentation/plans/reise-hotelpreise.md).
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+      TRAVEL_SERPAPI_MONTHLY_SEARCHES: ${TRAVEL_SERPAPI_MONTHLY_SEARCHES:-250}
     # The app uses compose's `default` network to reach the geo service.
     # The legacy Docker socket mount + OSM bridge network attachment is
     # gone: geo replaces the runtime-spawned per-region Nominatim/Overpass

@@ -659,6 +659,28 @@ export const modules: ModuleConfig[] = [
     ],
   },
   {
+    id: 'reise',
+    label: 'Reise',
+    icon: 'pi pi-compass',
+    basePath: '/reise',
+    permission: 'module.travel',
+    routes: [
+      {
+        path: '',
+        redirect: { name: 'reise-hotelpreise' },
+      },
+      {
+        path: 'hotelpreise',
+        name: 'reise-hotelpreise',
+        component: () => import('../views/TravelHotelWatchesView.vue'),
+        meta: { permission: 'travel.view' },
+      },
+    ],
+    menuItems: [
+      { label: 'Hotelpreise', icon: 'pi pi-building', routeName: 'reise-hotelpreise', permission: 'travel.view' },
+    ],
+  },
+  {
     id: 'admin',
     label: 'Admin',
     icon: 'pi pi-cog',

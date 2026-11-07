@@ -18,6 +18,7 @@ const MODULE_ROLES: Record<string, string> = {
   'Finance User': 'finanzen',
   'Label User': 'label',
   'Zähler User': 'zaehler',
+  'Reise User': 'reise',
 }
 
 /** Every user holds the base role next to their module roles. */
