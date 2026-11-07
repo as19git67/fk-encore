@@ -33,9 +33,10 @@ user sees how the price moves and when it falls below a limit.
   `TRAVEL_SERPAPI_MONTHLY_SEARCHES` (default 250). A check costs one
   search once the hotel's `property_token` is known, two the first time
   (name search, then the hit).
-- **Cadence:** the job `travel-hotel-watches` runs every 6 hours and
-  checks every active watch not checked within the last 5 hours, so
-  "check now" does not cost a second search a moment later.
+- **Cadence:** the job `travel-hotel-watches` runs once a day at 06:00
+  German time (Europe/Berlin, following daylight saving time) and checks
+  every active watch not checked within the last 5 hours, so a "check
+  now" shortly before does not cost a second search.
 
 ## Data model (migration 0296)
 

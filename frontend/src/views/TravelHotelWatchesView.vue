@@ -240,7 +240,7 @@ const latest = computed(() => selected.value?.latest ?? null)
             <h2 id="hotels-list" class="card-title">Wächter</h2>
             <span v-if="status" class="muted">
               {{ status.searches_this_month }} / {{ status.monthly_budget }} Suchen in diesem Monat ·
-              Prüfung alle {{ status.check_interval_hours }} Stunden
+              Prüfung täglich um {{ status.check_time }} Uhr
             </span>
           </header>
           <EmptyState

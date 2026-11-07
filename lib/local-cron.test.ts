@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   _resetLocalCron,
+  dailyAt,
   dailyAtUtc,
   everyMs,
   inspectJobs,
@@ -24,6 +25,35 @@ describe("everyMs", () => {
     const after = new Date("2026-04-26T10:00:00Z");
     const next = everyMs(5 * 60_000)(after);
     expect(next?.toISOString()).toBe("2026-04-26T10:05:00.000Z");
+  });
+});
+
+describe("dailyAt", () => {
+  const sixInBerlin = dailyAt(6, 0, "Europe/Berlin");
+
+  it("fires at 06:00 CET in winter", () => {
+    expect(sixInBerlin(new Date("2026-11-07T03:00:00Z"))?.toISOString()).toBe("2026-11-07T05:00:00.000Z");
+  });
+
+  it("fires at 06:00 CEST in summer", () => {
+    expect(sixInBerlin(new Date("2026-07-01T02:00:00Z"))?.toISOString()).toBe("2026-07-01T04:00:00.000Z");
+  });
+
+  it("moves to the next day once the time has passed", () => {
+    expect(sixInBerlin(new Date("2026-11-07T05:00:00Z"))?.toISOString()).toBe("2026-11-08T05:00:00.000Z");
+  });
+
+  it("follows the switch to summer time", () => {
+    expect(sixInBerlin(new Date("2027-03-27T05:00:00Z"))?.toISOString()).toBe("2027-03-28T04:00:00.000Z");
+  });
+
+  it("follows the switch to winter time", () => {
+    expect(sixInBerlin(new Date("2026-10-24T04:00:00Z"))?.toISOString()).toBe("2026-10-25T05:00:00.000Z");
+  });
+
+  it("uses the local date late in the evening", () => {
+    // 23:30 UTC on 7 Nov is already 8 Nov in Berlin; 06:00 that day is still ahead.
+    expect(sixInBerlin(new Date("2026-11-07T23:30:00Z"))?.toISOString()).toBe("2026-11-08T05:00:00.000Z");
   });
 });
 

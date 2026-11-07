@@ -448,3 +448,46 @@ export function dailyAtUtc(
     return candidate;
   };
 }
+
+/** Minutes the zone is ahead of UTC at `at` (e.g. 60 for CET, 120 for CEST). */
+function zoneOffsetMinutes(at: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(at);
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? "0");
+  const asUtc = Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute"), n("second"));
+  return Math.round((asUtc - Math.floor(at.getTime() / 1000) * 1000) / 60_000);
+}
+
+/**
+ * Fire daily at the given wall-clock time in `timeZone` (e.g. 06:00
+ * Europe/Berlin), following daylight saving time. A time that falls into
+ * the spring-forward gap fires an hour later on that day.
+ */
+export function dailyAt(
+  hour: number,
+  minute: number,
+  timeZone: string,
+): ScheduledJob["nextFire"] {
+  const at = (y: number, m: number, d: number): Date => {
+    const wall = Date.UTC(y, m, d, hour, minute, 0, 0);
+    let utc = wall - zoneOffsetMinutes(new Date(wall), timeZone) * 60_000;
+    utc = wall - zoneOffsetMinutes(new Date(utc), timeZone) * 60_000;
+    return new Date(utc);
+  };
+  return (after) => {
+    const local = new Date(after.getTime() + zoneOffsetMinutes(after, timeZone) * 60_000);
+    const y = local.getUTCFullYear();
+    const m = local.getUTCMonth();
+    const d = local.getUTCDate();
+    const today = at(y, m, d);
+    return today.getTime() > after.getTime() ? today : at(y, m, d + 1);
+  };
+}
