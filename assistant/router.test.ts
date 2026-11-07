@@ -70,6 +70,15 @@ describe("the previous turn and the working set", () => {
     expect(areasOfLastTurn([{ role: "user", content: "Hallo" }, { role: "assistant", content: "Hallo!" }])).toEqual([]);
   });
 
+  it("skip a turn that answered in words only: its subject is the turn before it", () => {
+    const words: ChatMessage[] = [
+      ...HISTORY,
+      { role: "user", content: "Wie kommst du darauf?" },
+      { role: "assistant", content: "Das waren alle Favoriten des Jahres." },
+    ];
+    expect(areasOfLastTurn(words)).toEqual(["photos"]);
+  });
+
   it("read a follow-up by its words or its brevity", () => {
     expect(looksLikeFollowUp("Nur die aus München, und mach daraus ein Album.")).toBe(true);
     expect(looksLikeFollowUp("Ja.")).toBe(true);

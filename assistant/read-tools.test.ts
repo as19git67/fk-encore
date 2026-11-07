@@ -257,6 +257,7 @@ describe("list_photos", () => {
     expect(out.ref?.ids).toEqual([1, 2, 3, 4, 5]);
     expect(out.block?.rows.map((r) => r.id)).toEqual([1, 2, 3, 4, 5]);
     expect(out.text).toContain("from_previous_result takes these 5 picked photos");
+    expect(out.ref?.picked).toBe(true);
   });
 
   it("hands a follow-up every match of a plain filter, and marks a set cut at the read cap", async () => {

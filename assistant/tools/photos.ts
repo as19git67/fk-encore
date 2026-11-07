@@ -395,7 +395,7 @@ export const listPhotos: ToolSpec = {
       rowCount: groups ? shownRows.length : count,
       hint,
       loosen: advice?.loosen,
-      ref: { type: "photo", ids: resultIds, ...(truncated ? { truncated: true } : {}) },
+      ref: { type: "photo", ids: resultIds, ...(truncated ? { truncated: true } : {}), ...(picks ? { picked: true } : {}) },
       block: {
         kind: "photos",
         tool: "list_photos",

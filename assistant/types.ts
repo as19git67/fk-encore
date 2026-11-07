@@ -81,6 +81,11 @@ export interface ResultRef {
   ids: number[];
   /** The set was cut at the tool's read cap: a write must not take it as "all of them". */
   truncated?: boolean;
+  /**
+   * The set is a selection the tool made (a ranking, a limit, groups,
+   * look-alikes left out), not every match of its filter.
+   */
+  picked?: boolean;
 }
 
 /** What a tool hands back. */
@@ -113,6 +118,12 @@ export interface ToolContext {
   previous?: (type: RefType) => number[] | undefined;
   /** Whether that latest result was cut at the tool's read cap. */
   previousTruncated?: (type: RefType) => boolean;
+  /**
+   * How many objects of `type` a tool picked earlier in this turn (see
+   * `ResultRef.picked`), while that pick is still the latest result of its
+   * type; undefined otherwise.
+   */
+  pickedThisTurn?: (type: RefType) => number | undefined;
   /** The working set the user handed over for this conversation (#1534). */
   context?: Array<{ type: RefType; id: number }>;
   /** The tool results of this turn so far, with the call behind each: what a letter can be held against. */
