@@ -60,11 +60,27 @@ user sees how the price moves and when it falls below a limit.
   as "unbekannt" with its link. It never meets "free cancellation only";
   migration 0297 moved the stored room-less offers from `false` to `null`.
 
-## Data model (migrations 0296, 0297)
+## Double rooms
+
+Google Hotels has no parameter for the number of rooms: a search for four
+adults only lists rates for one room that holds four. A watch with
+`split_rooms` (only adults, an even number, at least four; `splitRoomCount`
+in `travel/hotel-offers.ts`) makes a second search per check for two adults
+with the hotel's token and books each rate `adults / 2` times (`asRooms`):
+room "2 × Doppelzimmer", `per_night` and `total` for all rooms together,
+`rooms = 2` on the offer. Both lists are merged, so the limit, the tiles
+and the report compare the cheaper way to house the party. The
+double-room search only adds offers: when it fails or the month's budget
+has no search left, the check stands with the rooms for everyone. Google
+shows the price of one room; whether that many are free is only seen at
+the provider. A watch with it costs about 60 searches a month instead of
+30.
+
+## Data model (migrations 0296–0298)
 
 - `travel_hotel_watch`: owner, query, matched hotel name and token,
   check-in/out, adults, children's ages, currency, limit per night,
-  `free_cancellation_only`, `breakfast_required`, `end_date`, `paused`,
+  `free_cancellation_only`, `breakfast_required`, `split_rooms`, `end_date`, `paused`,
   `notify_push`, `notify_email`, `notified_per_night`/`notified_at`,
   last check and error.
 - `travel_hotel_check`: one row per check — searches used, number of
@@ -72,7 +88,8 @@ user sees how the price moves and when it falls below a limit.
   the cheapest that meets the watch's conditions and its provider,
   `below_limit`, error.
 - `travel_hotel_offer`: every rate a check saw, with its booking link;
-  `free_cancellation` null when Google names no terms.
+  `free_cancellation` null when Google names no terms; `rooms` > 1 for a
+  double room booked several times, prices for all rooms.
 
 ## Code
 

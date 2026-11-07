@@ -31,6 +31,8 @@ export interface HotelWatch {
   limit_per_night: number | null
   free_cancellation_only: boolean
   breakfast_required: boolean
+  /** Also price the party in double rooms (two adults each). */
+  split_rooms: boolean
   end_date: string
   paused: boolean
   notify_push: boolean
@@ -56,6 +58,8 @@ export interface HotelOfferEntry {
   breakfast: boolean
   guests: number | null
   link: string | null
+  /** Rooms the offer books; prices are for all of them together. */
+  rooms: number
 }
 
 export interface HotelWatchDetail {
@@ -74,6 +78,7 @@ export interface HotelWatchInput {
   limit_per_night: number | null
   free_cancellation_only: boolean
   breakfast_required: boolean
+  split_rooms: boolean
   end_date: string
   paused: boolean
   notify_push: boolean

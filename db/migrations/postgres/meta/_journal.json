@@ -2080,6 +2080,13 @@
       "when": 1790360000000,
       "tag": "0297_travel_hotel_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 298,
+      "version": "7",
+      "when": 1790370000000,
+      "tag": "0298_travel_hotel_split_rooms",
+      "breakpoints": true
     }
   ]
 }

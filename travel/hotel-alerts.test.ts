@@ -40,6 +40,7 @@ describe("alertText", () => {
     cancelUntil: "10. Mai",
     breakfast: false,
     link: null,
+    rooms: 1,
     newLow: false,
   };
 
@@ -53,6 +54,10 @@ describe("alertText", () => {
     const t = alertText({ ...alert, newLow: true, freeCancellation: null, breakfast: true });
     expect(t.title).toMatch(/^Neuer Tiefstpreis/);
     expect(t.terms).toBe("Storno unbekannt, mit Frühstück");
+  });
+
+  it("names the rooms when the offer books several", () => {
+    expect(alertText({ ...alert, rooms: 2, perNight: 370, limit: 400 }).body).toMatch(/370\s€ pro Nacht für 2 Zimmer bei Portal A/);
   });
 
   it("links the watch in the web app", () => {
