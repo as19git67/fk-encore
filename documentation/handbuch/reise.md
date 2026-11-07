@@ -1,7 +1,7 @@
 # Reise
 
 Beobachtet Hotelpreise für feste Reisedaten. Ein Wächter prüft ein Hotel
-regelmäßig über Google Hotels und schreibt bei jeder Prüfung den Verlauf.
+einmal am Tag um 6 Uhr über Google Hotels und schreibt bei jeder Prüfung den Verlauf.
 
 **Modulrecht:** `module.travel`; die Seite braucht `travel.view`,
 Anlegen, Bearbeiten, Prüfen und Löschen `travel.manage`. Die Rolle

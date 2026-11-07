@@ -14,7 +14,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { everyMs, schedule } from "../lib/local-cron";
+import { dailyAt, schedule } from "../lib/local-cron";
 import {
   checkWatchNow,
   createWatch,
@@ -34,8 +34,8 @@ import {
 } from "./hotel-watch.service";
 import { hotelSearchClient, monthlySearchBudget } from "./serpapi-client";
 
-/** How often the job looks for due watches; each watch is checked at most every 5 h. */
-export const CHECK_INTERVAL_MS = 6 * 60 * 60_000;
+/** The job checks every active watch once a day at this time (German time). */
+export const CHECK_TIME = { hour: 6, minute: 0, timeZone: "Europe/Berlin" } as const;
 
 function requireUser(permission: string): number {
   const auth = getAuthData();
@@ -108,7 +108,8 @@ export interface HotelSearchStatus {
   configured: boolean;
   searches_this_month: number;
   monthly_budget: number;
-  check_interval_hours: number;
+  /** Wall-clock time of the daily check in Germany, "HH:MM". */
+  check_time: string;
   /** Today and the latest end date a new watch may have. */
   today: string;
   max_end_date: string;
@@ -123,7 +124,7 @@ export const getHotelSearchStatus = api(
       configured: hotelSearchClient() !== null,
       searches_this_month: await searchesThisMonth(),
       monthly_budget: monthlySearchBudget(),
-      check_interval_hours: CHECK_INTERVAL_MS / 3_600_000,
+      check_time: `${String(CHECK_TIME.hour).padStart(2, "0")}:${String(CHECK_TIME.minute).padStart(2, "0")}`,
       today,
       max_end_date: maxEndDate(today),
     };
@@ -147,7 +148,7 @@ schedule({
   name: "travel-hotel-watches",
   description: "Check the hotel price watches and write their price history (SerpApi Google Hotels)",
   service: "travel",
-  scheduleLabel: "every 6h",
-  nextFire: everyMs(CHECK_INTERVAL_MS),
+  scheduleLabel: "daily 06:00 Europe/Berlin",
+  nextFire: dailyAt(CHECK_TIME.hour, CHECK_TIME.minute, CHECK_TIME.timeZone),
   run: () => runHotelWatchJob(),
 });

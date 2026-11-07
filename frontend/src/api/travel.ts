@@ -76,7 +76,7 @@ export interface HotelSearchStatus {
   configured: boolean
   searches_this_month: number
   monthly_budget: number
-  check_interval_hours: number
+  check_time: string
   today: string
   max_end_date: string
 }

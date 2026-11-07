@@ -11,7 +11,7 @@ const STATUS: HotelSearchStatus = {
   configured: true,
   searches_this_month: 37,
   monthly_budget: 250,
-  check_interval_hours: 6,
+  check_time: '06:00',
   today: '2026-11-07',
   max_end_date: '2028-11-07',
 }
