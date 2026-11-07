@@ -290,7 +290,9 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 ### IOS-SET-05 Admin und Quellen
 
 - Benutzer (Liste), Rollen & Berechtigungen (nur mit Admin-Rechten);
-  Quellen & Lizenzen (OpenStreetMap, Wikipedia, Wikimedia Commons).
+  Quellen & Lizenzen (OpenStreetMap, Wikipedia, Wikimedia Commons,
+  Wikivoyage, Wikidata, Open-Meteo, Apple Karten und die eingebaute
+  Open-Source-Software mit Version, Lizenz- und NOTICE-Text).
 - **Test:** –
 
 ---
