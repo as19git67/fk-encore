@@ -15,6 +15,7 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import type { HotelWatch, HotelWatchInput } from '../../api/travel'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
+import { searchInputAttrs } from '../../utils/searchInputAttrs'
 
 const props = defineProps<{
   visible: boolean
@@ -145,7 +146,7 @@ function save() {
     <form class="hw-form" @submit.prevent="save">
       <div class="field field-wide">
         <label for="hw-query">Hotel</label>
-        <InputText id="hw-query" v-model="query" placeholder="Name des Hotels, gern mit Ort" autofocus />
+        <InputText id="hw-query" v-bind="searchInputAttrs" v-model="query" placeholder="Name des Hotels, gern mit Ort" autofocus />
         <small v-if="entry?.hotel_name && entry.hotel_name !== query" class="muted">
           Gefunden wurde zuletzt „{{ entry.hotel_name }}“.
         </small>
