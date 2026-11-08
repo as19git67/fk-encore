@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isBareYes, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, loosenGuard, openQuestion, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
+import { __resetCalibrationForTests, budgetForWindow, calibrateEstimate, buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, EMPTY_REPLY_NUDGE, EMPTY_RESULT_HINT, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, groupGuard, groupsAsked, isBareYes, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, loosenGuard, openQuestion, NO_ANSWER, OUT_OF_ROUNDS, parsePlan, planNudge, planStatus, planText, runTurn, timeGrounding, unbound, withHint, WRITE_PLAN_NAME, writePlanDefinition } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import { checkArguments } from "./arguments";
 import { MalformedReplyError, type ChatRequest, type ChatReply } from "./llm-client";
@@ -257,6 +257,7 @@ describe("the loop", () => {
   it("budgets against the model's window, learnt from the first reply, and forgets the oldest first", async () => {
     __resetCalibrationForTests();
     // Eight earlier turns, each with a whole result of ~1000 estimated tokens.
+    // The window leaves room for the fixed prompt (rules and every area's examples) plus a few whole results.
     const history: ChatMessage[] = [];
     const historyDigests: Record<string, string> = {};
     for (let i = 0; i < 8; i++) {
@@ -268,9 +269,9 @@ describe("the loop", () => {
       );
       historyDigests[`h${i}`] = `[earlier result of x: turn ${i}]`;
     }
-    const { fn, requests } = scripted([{ ...answer("Ja."), usage: { n_ctx: 8000, prompt_tokens: 3000, completion_tokens: 2 } }]);
+    const { fn, requests } = scripted([{ ...answer("Ja."), usage: { n_ctx: 8500, prompt_tokens: 3000, completion_tokens: 2 } }]);
     const res = await runTurn({
-      user: USER, history, historyDigests, question: "Und?", tools: [], chat: fn, now: NOW, contextWindow: 8000,
+      user: USER, history, historyDigests, question: "Und?", tools: [], chat: fn, now: NOW, contextWindow: 8500,
     });
     const sent = requests[0]!.messages;
     // Every question stays; the oldest results shrank to their digests, the newest are whole.
@@ -280,7 +281,7 @@ describe("the loop", () => {
     expect(results.at(-1)).toBe("zeile 7 ".repeat(400));
     expect(res.context.digested).toBeGreaterThan(0);
     expect(res.context.digested).toBeLessThan(8);
-    expect(res.context.window).toBe(8000);
+    expect(res.context.window).toBe(8500);
     expect(res.context.keptTurns).toBe(8);
     __resetCalibrationForTests();
   });
@@ -1389,5 +1390,56 @@ describe("a plan whose next step waits for a card", () => {
     }
     const read = HAND_TOOLS.find((x) => x.name === "list_photos")!;
     expect(checkArguments(read, { after_execute: "x" }).join(" ")).toContain("unknown argument after_execute");
+  });
+});
+
+describe("the group a question asks for", () => {
+  const listPhotos = {
+    name: "list_photos",
+    parameters: { type: "object", properties: { group_by: { type: "string", enum: ["year", "month", "day", "person", "city"] }, then_by: { type: "string" } } },
+  };
+
+  it("reads 'je', 'pro', 'von jedem', 'für jede' and a second unit after 'und'", () => {
+    expect(groupsAsked("Von jedem Tag der Reise die 10 besten Fotos")).toEqual(["day"]);
+    expect(groupsAsked("Für Lena und Max je Person und Jahr die 5 besten")).toEqual(["person", "year"]);
+    expect(groupsAsked("Was war in jedem Monat meine größte Ausgabe?")).toEqual(["month"]);
+    expect(groupsAsked("Zeig mir pro Woche ein Foto")).toEqual(["week"]);
+    expect(groupsAsked("Die 20 besten Fotos aus Beispielland")).toEqual([]);
+  });
+
+  it("refuses a call without the group the question names, and names the arguments to add", () => {
+    const err = groupGuard("Nimm von jedem Tag die 10 besten, nicht ähnlichen Bilder", listPhotos, { place: "Beispielstadt", rank_by: "quality", direction: "desc", distinct: true });
+    expect(err).toContain('group_by = "day"');
+    expect(err).toContain("per_group");
+  });
+
+  it("lets a call run that groups as asked, also with the units the other way round", () => {
+    expect(groupGuard("von jedem Tag die 10 besten", listPhotos, { group_by: "day", per_group: 10 })).toBeNull();
+    expect(groupGuard("je Person und Jahr", listPhotos, { group_by: "year", then_by: "person" })).toBeNull();
+  });
+
+  it("stays out of a tool that cannot group by that unit", () => {
+    expect(groupGuard("pro Woche", listPhotos, {})).toBeNull();
+    expect(groupGuard("je Tag", { name: "consumption_report", parameters: { type: "object", properties: {} } }, {})).toBeNull();
+  });
+});
+
+describe("the loop and 'je Tag'", () => {
+  it("refuses an ungrouped list once, then runs the grouped call", async () => {
+    const run = vi.fn(async () => ({ text: "rows", rowCount: 1 }));
+    const tool = {
+      name: "list_photos", kind: "read" as const, summary: "photos", permissions: [], source: "hand" as const,
+      parameters: { type: "object", properties: { place: { type: "string" }, group_by: { type: "string", enum: ["day", "month"] }, per_group: { type: "integer" } } },
+      run,
+    };
+    const { fn, requests } = scripted([
+      { content: null, tool_calls: [{ id: "a", type: "function", function: { name: "list_photos", arguments: JSON.stringify({ place: "Beispielstadt" }) } }] },
+      { content: null, tool_calls: [{ id: "b", type: "function", function: { name: "list_photos", arguments: JSON.stringify({ place: "Beispielstadt", group_by: "day", per_group: 10 }) } }] },
+      answer("Fertig."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "Von jedem Tag in Beispielstadt die 10 besten Fotos", tools: [tool as never], chat: fn, now: NOW });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]![0]).toMatchObject({ group_by: "day", per_group: 10 });
+    expect(String(requests[1]!.messages.at(-1)!.content)).toContain('group_by = "day"');
   });
 });

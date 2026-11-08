@@ -252,6 +252,11 @@ export interface LabelPrefs {
   templates?: LabelTemplate[];
   /** Template most recently applied by the user. */
   lastTemplateId?: string | null;
+  /** The number the next scanner-label sheet starts with (label/scanner.ts). */
+  scannerNextNumber?: number;
+  /** Shifts the scanner-label grid for a printer that prints off-centre, in mm. */
+  scannerOffsetXMm?: number;
+  scannerOffsetYMm?: number;
 }
 
 export interface LabelTemplate {

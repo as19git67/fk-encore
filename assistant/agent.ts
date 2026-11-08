@@ -292,6 +292,7 @@ Rules:
 - Never do arithmetic yourself. Sums, counts and periods come from tools (transaction_totals, upcoming_payments, consumption_report print them). If no tool computed a number, do not state it.
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
 - The tools below are those of the areas this question seems to need. When it needs another area, call ${SWITCH_AREA_NAME}(area) first: that adds the area's rules and tools for this turn. Combine tools from different areas when the question needs it.
+- "Je Tag", "pro Monat", "je Person" is group_by of the list tool: one call goes through them and picks in each. Never say you cannot go through them one by one.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
 - When ${WRITE_PLAN_NAME} is among the tools, the question needs several steps: the first call writes the plan, every later round follows it step by step, and the plan's own status after each result says what comes next.
@@ -706,6 +707,55 @@ export function loosenGuard(memory: LoosenMemory, args: Record<string, unknown>)
   return `error: you dropped ${droppedKept.join(", ")}, which the empty result above said to keep; it said to drop ${memory.label} (${memory.drop.join(", ")}). Call again with the earlier arguments, minus ${memory.drop.join(" and ")} only.`;
 }
 
+/** The words a question uses for one group of a list tool ("je Tag", "pro Monat", "für jede Person"). */
+const GROUP_WORDS: Record<string, RegExp> = {
+  day: /^(tag|tage|tages|day)$/,
+  week: /^(woche|wochen|week)$/,
+  month: /^(monat|monats|month)$/,
+  quarter: /^(quartal|quartals|quarter)$/,
+  year: /^(jahr|jahres|jahrs|year)$/,
+  person: /^(person|personen|person's)$/,
+  country: /^(land|landes|country)$/,
+  city: /^(stadt|ort|ortes|city)$/,
+  correspondent: /^(absender|sender)$/,
+  category: /^(kategorie|category)$/,
+  account: /^(konto|kontos|account)$/,
+};
+const PER_PHRASE = /\b(?:je|pro|jede[nmrs]?|für\s+jede[nmrs]?|von\s+jede[nmrs]?|an\s+jede[nmrs]?|in\s+jede[nmrs]?|each|every|per)\s+([a-zäöüß']+)(?:\s+(?:und|and)\s+([a-zäöüß']+))?/gi;
+
+/** The group units a question asks for, in the order it names them. */
+export function groupsAsked(question: string): string[] {
+  const units: string[] = [];
+  for (const m of question.matchAll(PER_PHRASE)) {
+    for (const word of [m[1], m[2]]) {
+      if (!word) continue;
+      const unit = Object.keys(GROUP_WORDS).find((u) => GROUP_WORDS[u]!.test(word.toLowerCase()));
+      if (unit && !units.includes(unit)) units.push(unit);
+    }
+  }
+  return units;
+}
+
+/**
+ * The guard behind "je Tag", "pro Monat", "für jede Person": the runs of
+ * 2026-11-08 answered "the 10 best of every day" with one pick over the
+ * whole trip although rule, example and summary named group_by = day. A call
+ * of a tool that groups, made without the group the question names, is
+ * refused once with the arguments to add. Null when the call may run.
+ */
+export function groupGuard(question: string, tool: Pick<ToolSpec, "name" | "parameters">, args: Record<string, unknown>): string | null {
+  const property = (tool.parameters as { properties?: Record<string, { enum?: unknown[] }> }).properties?.group_by;
+  const offered = Array.isArray(property?.enum) ? property!.enum.map(String) : [];
+  if (!offered.length) return null;
+  const asked = groupsAsked(question).filter((u) => offered.includes(u));
+  const given = [args.group_by, args.then_by].map((v) => (typeof v === "string" ? v : undefined));
+  const missing = asked.filter((u) => !given.includes(u));
+  if (!missing.length) return null;
+  const [first, second] = asked;
+  const call = `group_by = "${first}"${second ? `, then_by = "${second}"` : ""}, per_group = how many per ${first} the question asks for`;
+  return `error: the question asks for each ${missing.join(" and each ")}, and this call does not group by it. Call ${tool.name} again with the same filters plus ${call}: that one call goes through every ${first} and picks in each.`;
+}
+
 export function withHint(outcome: ToolOutcome, args: Record<string, unknown>): string {
   if (outcome.hint) return `${outcome.text}\n\n${outcome.hint}`;
   const filtered = Object.values(args).some((v) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length));
@@ -798,6 +848,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const seenCalls = new Set<string>();
   /** Per tool, the advice of its last empty result, until the tool runs again. */
   const loosenMemory = new Map<string, LoosenMemory>();
+  const groupNudged = new Set<string>();
   /** The ungrounded answer and the nudge, sent along until the model calls a tool or answers again. */
   let nudge: ChatMessage[] | null = null;
   /** One more request for words after an empty reply; never twice. */
@@ -1209,6 +1260,15 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         continue;
       }
       loosenMemory.delete(name);
+      // "Je Tag" without group_by = day, refused once per tool and turn.
+      const ungrouped = groupNudged.has(name) ? null : groupGuard(input.question, tool, args);
+      if (ungrouped) {
+        groupNudged.add(name);
+        result(ungrouped);
+        emit({ type: "tool_result", tool: name, rowCount: 0, error: ungrouped });
+        input.log?.({ tool: name, arguments: args, rows: 0, ms: 0, error: ungrouped });
+        continue;
+      }
       // Only a call that runs counts; a refused one may come again.
       seenCalls.add(key);
 

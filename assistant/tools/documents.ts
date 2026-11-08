@@ -8,7 +8,7 @@ import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { taxWorksheet } from "./tax";
 import { findInDocuments } from "./text-boxes";
-import { compositeKey, dateKey, groupProperties, isDateUnit, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { compositeKey, dateKey, groupProperties, groupSummary, isDateUnit, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
@@ -166,7 +166,7 @@ export const searchDocuments: ToolSpec = {
   name: "search_documents",
   kind: "read",
   refines: true,
-  summary: "Documents by what they are about (q), optionally narrowed to the sender organisation (correspondent), a category slug and a document date range; ranked by relevance, date or size (rank_by, direction), optionally the first of every year, month, sender or category (group_by). Without q it lists by the filters alone. Put the sender (an insurer, a bank, an authority) into correspondent, not into q.",
+  summary: `Documents by what they are about (q), optionally narrowed to the sender organisation (correspondent), a category slug and a document date range; ranked by relevance, date or size (rank_by, direction), ${groupSummary(GROUPS)}. Without q it lists by the filters alone. Put the sender (an insurer, a bank, an authority) into correspondent, not into q.`,
   permissions: DOCUMENTS,
   source: "hand",
   parameters: {

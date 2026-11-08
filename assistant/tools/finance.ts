@@ -6,7 +6,7 @@
 import { finance } from "~encore/clients";
 import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
-import { compositeKey, dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { compositeKey, dateKey, groupProperties, groupSummary, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe } from "./hints";
 import { parseAmountBound, parseDirection, type TransactionCriteria } from "../../finance/transaction-conditions";
 import { parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
@@ -150,7 +150,7 @@ async function emptyBookingsHint(params: ListParams): Promise<LoosenAdvice> {
 export const listTransactions: ToolSpec = {
   name: "list_transactions",
   kind: "read",
-  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first, or by amount (rank_by with order), optionally the first of every month, quarter, year, account or counterparty (group_by). For 'Ausgaben' (expenses, spending) set direction \"out\", for 'Einnahmen' (income) \"in\"; only 'Buchungen' without either word lists both. For sums use transaction_totals.",
+  summary: `Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first, or by amount (rank_by with order), ${groupSummary(GROUPS)}. For 'Ausgaben' (expenses, spending) set direction "out", for 'Einnahmen' (income) "in"; only 'Buchungen' without either word lists both. For sums use transaction_totals.`,
   permissions: FINANCE,
   source: "hand",
   parameters: {

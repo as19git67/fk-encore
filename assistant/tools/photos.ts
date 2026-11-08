@@ -7,7 +7,7 @@ import { feed, photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { similarPairs, thinSimilar } from "../../photo/photo-book-subjects";
-import { compositeKey, dateKey, groupProperties, isDateUnit, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { compositeKey, dateKey, groupProperties, groupSummary, isDateUnit, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const PHOTOS = ["module.photos", "photos.view"];
@@ -209,7 +209,7 @@ async function emptyPhotosHint(filter: PhotoFilter, hidden: HiddenChoice, previo
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: "Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), ranked by date, quality, aesthetics, a person's face, favourites of all users or comments (rank_by, direction), optionally the first of every year, month or place (group_by); or narrows the previous photo result. For what the image shows ('Strand', 'Hund') use search_photos instead.",
+  summary: `Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), ranked by date, quality, aesthetics, a person's face, favourites of all users or comments (rank_by, direction), ${groupSummary(GROUPS)}; or narrows the previous photo result. For what the image shows ('Strand', 'Hund') use search_photos instead.`,
   permissions: PHOTOS,
   source: "hand",
   parameters: {

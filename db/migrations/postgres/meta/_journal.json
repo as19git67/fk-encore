@@ -2092,7 +2092,14 @@
       "idx": 299,
       "version": "7",
       "when": 1790380000000,
-      "tag": "0299_photo_book_chapter_hours",
+      "tag": "0299_label_scanner_sheet",
+      "breakpoints": true
+    },
+    {
+      "idx": 300,
+      "version": "7",
+      "when": 1790390000000,
+      "tag": "0300_photo_book_chapter_hours",
       "breakpoints": true
     }
   ]
