@@ -24,7 +24,8 @@
  */
 
 import { APIError } from "encore.dev/api";
-import { DEFAULT_DAY, type BlockTemplate } from "./blocks";
+import { DEFAULT_DAY, IDEAS_DAY, type BlockTemplate } from "./blocks";
+import { isIdeasTrip } from "./ideas-mode";
 
 /** More than this is not a day, it is a timetable (§4.1). */
 export const MAX_BLOCKS = 8;
@@ -47,12 +48,21 @@ export interface BlockShapeInput {
  * created before they were ever changed.
  */
 export function dayShapeOf(constraints: Record<string, unknown>): readonly BlockTemplate[] {
+  const fallback = defaultDayOf(constraints);
   const stored = constraints.blocks;
-  if (!Array.isArray(stored) || stored.length === 0) return DEFAULT_DAY;
+  if (!Array.isArray(stored) || stored.length === 0) return fallback;
   const blocks = stored
     .map((entry) => toTemplate(entry))
     .filter((block): block is BlockTemplate => block !== null);
-  return blocks.length > 0 ? blocks : DEFAULT_DAY;
+  return blocks.length > 0 ? blocks : fallback;
+}
+
+/**
+ * The day a trip has when nobody drew one: the four parts for a trip
+ * from before, one window for a trip of ideas (ideas plan, stage 4).
+ */
+export function defaultDayOf(constraints: Record<string, unknown> | null | undefined): readonly BlockTemplate[] {
+  return isIdeasTrip(constraints) ? IDEAS_DAY : DEFAULT_DAY;
 }
 
 /**

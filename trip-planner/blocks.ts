@@ -28,6 +28,15 @@ export const DEFAULT_DAY: readonly BlockTemplate[] = [
   { id: "evening", label: "Abend", kind: "spots", baseBudgetMinutes: 120 },
 ] as const;
 
+/**
+ * The day of a trip of ideas (ideas plan, stage 4): one window, no
+ * drawers. Lunch is a break somebody puts in, not a block the day is
+ * cut into; fixpoints still cut the window where they fall.
+ */
+export const IDEAS_DAY: readonly BlockTemplate[] = [
+  { id: "day", label: "Tag", kind: "spots", baseBudgetMinutes: 600 },
+] as const;
+
 const PACE_FACTOR: Record<Pace, number> = {
   relaxed: 0.75,
   normal: 1,

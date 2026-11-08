@@ -78,6 +78,16 @@ struct TripPlanSettingsView: View {
             }
 
             Section {
+                Toggle("Abstimmen", isOn: $model.voting)
+            } header: {
+                Text("Planen mit")
+            } footer: {
+                Text("Mit Abstimmung zeigt die Liste je Ort einen Ring für Herzenswunsch, Gern und "
+                     + "Lieber nicht, dazu Fairness und „Damit neu planen“. Ohne sie entscheidet ihr "
+                     + "über die Priorität jeder Idee.")
+            }
+
+            Section {
                 Button {
                     editingDayShape = true
                 } label: {
@@ -172,6 +182,8 @@ final class TripPlanSettingsViewModel {
     /// leaving a date nobody meant.
     var isDated: Bool
     var startDate: Date
+    /// „Abstimmen“ under „Planen mit“ (ideas plan, stage 7).
+    var voting: Bool
 
     private(set) var isSaving = false
     /// Set when the server refused to re-plan because the trip has
@@ -225,6 +237,7 @@ final class TripPlanSettingsViewModel {
         // be worse than one that cannot show it.
         self.interests = Set(constraints?.interests ?? [])
         self.maxWalkMinutes = constraints?.maxWalkMinutes
+        self.voting = constraints?.isVoting ?? true
     }
 
     /// What to send for the dates: nothing, a date, or an explicit
@@ -273,12 +286,13 @@ final class TripPlanSettingsViewModel {
             /// alone, explicit null takes them off. `encodeIfPresent`
             /// tells the two apart; a plain optional could not.
             let startDate: String??
+            let voting: Bool
             let replan: Bool
             struct Group: Encodable { let withChildren: Bool; let limitedMobility: Bool }
 
             enum CodingKeys: String, CodingKey {
                 case title, pace, group, categories, interests, maxWalkMinutes
-                case startDate, replan
+                case startDate, voting, replan
             }
 
             func encode(to encoder: Encoder) throws {
@@ -290,6 +304,7 @@ final class TripPlanSettingsViewModel {
                 try c.encodeIfPresent(interests, forKey: .interests)
                 try c.encodeIfPresent(maxWalkMinutes, forKey: .maxWalkMinutes)
                 if let startDate { try c.encode(startDate, forKey: .startDate) }
+                try c.encode(voting, forKey: .voting)
                 try c.encode(replan, forKey: .replan)
             }
         }
@@ -305,6 +320,7 @@ final class TripPlanSettingsViewModel {
                     interests: Array(interests).sorted(),
                     maxWalkMinutes: maxWalkMinutes,
                     startDate: dateChange,
+                    voting: voting,
                     replan: replan,
                 ))
             errorMessage = nil

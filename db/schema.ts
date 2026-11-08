@@ -3721,6 +3721,10 @@ export const tripPlanDays = pgTable(
     // away from the day it describes.
     anchor_water_detour_m: integer("anchor_water_detour_m"),
     anchor_water_around: text("anchor_water_around"),
+    // Breaks on a day of ideas (migration 0303): label, minutes and
+    // where in the day's line they stand. No venue, no place on the map.
+    breaks: jsonb("breaks").$type<{ id: string; label: string; minutes: number; blockId: string; position: number }[]>()
+      .notNull().default([]),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );

@@ -42,8 +42,11 @@ export interface PlaceFromPoolRequest {
   legIndex?: number;
   /** Which day of that leg, counted from zero within the leg. */
   dayIndex: number;
-  /** Which block of that day. */
-  blockId: string;
+  /**
+   * Which block of that day. Absent means the day's first block for
+   * places — the only one a day of ideas has (stage 4).
+   */
+  blockId?: string;
   /** The candidate, by its OSM reference — its handle in the pool. */
   osmRef: string;
   /** Where in the block, from zero. Past the end, or omitted, means last. */
@@ -79,6 +82,9 @@ export const placeFromPool = api(
         "dieser Tag ist noch nicht ausgeplant — erst planen, dann Spots hineinsetzen",
       );
     }
+
+    const blockId = req.blockId ?? day.blocks.find((b) => b.kind === "spots")?.id;
+    if (!blockId) throw APIError.failedPrecondition("dieser Tag hat keinen Block für Orte");
 
     const candidate = await findInPool(leg.id, req.osmRef);
     if (!candidate) throw APIError.notFound("dieser Spot liegt nicht im Vorrat dieser Etappe");
@@ -132,7 +138,7 @@ export const placeFromPool = api(
           // every stop, and this is the moment it used to be lost.
           reasons: candidate.reasons,
         },
-        toBlockId: req.blockId,
+        toBlockId: blockId,
         toPosition: req.position,
         // The day's own two ends, not the leg's anchor: an outing is
         // walked around its destination (§4.5).

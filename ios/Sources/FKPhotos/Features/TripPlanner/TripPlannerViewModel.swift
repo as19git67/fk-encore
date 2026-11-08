@@ -87,6 +87,9 @@ final class TripPlannerViewModel {
     /// them.
     var legIndex: Int = 0
     var dayIndex: Int = 0
+    /// What the last "Reihenfolge vorschlagen" said about its day: how
+    /// far it runs over and which ideas would make it fit (stage 4).
+    var orderAdvice: TripOrderAdvice?
     /// Set by "Neue Reise" right before the plan opens, read once by the
     /// day screen: the trip was just made and its itinerary is the
     /// screen to land on, not a day of its only stay.
@@ -630,6 +633,70 @@ final class TripPlannerViewModel {
             let response: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/ideas/priority",
                 body: Body(legIndex: legIndex, osmRef: osmRef, priority: priority.rawValue),
+            )
+            plan = response.plan
+            errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// "Reihenfolge vorschlagen" (ideas plan, stage 4): the server orders
+    /// the ideas on the day on screen and writes the order. Nothing is
+    /// dropped; what would make an overfull day fit comes back in
+    /// `orderAdvice` for the day screen to mark.
+    func orderDay() async {
+        guard requireOnline() else { return }
+        struct Body: Encodable { let legIndex: Int }
+        struct Response: Decodable {
+            let plan: TripPlan
+            let overrunMinutes: Int
+            let toDrop: [String]
+        }
+        let day = dayIndex
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/days/\(day)/order",
+                body: Body(legIndex: legIndex),
+            )
+            plan = response.plan
+            orderAdvice = TripOrderAdvice(
+                legIndex: legIndex, dayIndex: day,
+                overrunMinutes: response.overrunMinutes, toDrop: response.toDrop,
+            )
+            errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// A break ("Mittag", "Kaffee") on the day on screen, at the end of its line.
+    func addBreak(label: String, minutes: Int) async {
+        guard requireOnline() else { return }
+        struct Body: Encodable {
+            let legIndex: Int
+            let label: String
+            let minutes: Int
+        }
+        struct Response: Decodable { let plan: TripPlan }
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/days/\(dayIndex)/breaks",
+                body: Body(legIndex: legIndex, label: label, minutes: minutes),
+            )
+            plan = response.plan
+            errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    func removeBreak(_ brk: TripDayBreak) async {
+        guard requireOnline() else { return }
+        struct Response: Decodable { let plan: TripPlan }
+        do {
+            let response: Response = try await APIClient.shared.delete(
+                "/trip-planner/plans/\(planId)/days/\(dayIndex)/breaks/\(brk.id)?legIndex=\(legIndex)",
             )
             plan = response.plan
             errorMessage = nil

@@ -41,6 +41,8 @@ expected, the rest is redistributed in seconds.
 
 ## 2. Four guiding decisions
 
+> **Note (2026-11-08):** guiding decision 1 is softened for trips of ideas (`plans/ideen-statt-pool.md`): the day is one window with estimated clock times („ca. 10:40“), cut only by fixpoints; breaks replace the lunch block.
+
 These four shape everything else and are therefore stated up front:
 
 1. **Coarse time blocks instead of clock times.** The plan says "morning: A, B, C",
@@ -312,6 +314,8 @@ deep link to Apple/Google Maps is deliberate.
 ## 4. Planning granularity: stage, day, block
 
 ### 4.1 The time block
+
+> **Note (2026-11-08):** a trip of ideas has one block „Tag“ per day (`IDEAS_DAY`), with estimated times from the order and the ways (`plans/ideen-statt-pool.md`, stage 4). Several blocks stay possible for arrival days and train bindings.
 
 A day consists of **blocks**, not of a timeline:
 
@@ -1474,6 +1478,8 @@ times drift apart on the road. That is not a boundary condition but shapes the
 data model and the mechanics.
 
 ### 6.1 The Pool Is Shared, the Rating Is Personal
+
+> **Note (2026-11-08):** on a trip of ideas the vote is optional and off by default (`constraints.voting`, „Planen mit“ in the trip settings; `plans/ideen-statt-pool.md`, stage 7). Each idea's priority (Muss, Will, Wenn Zeit) says what the vote used to. Trips from before keep voting until it is switched off.
 
 All participants feed **the same pool** (§5): via the automatic candidate
 search, via their own finds from map apps, articles and screenshots (§9.2), or
@@ -5877,6 +5883,8 @@ they are in the settings and there all of them are on at the start anyway
 (§8.1).
 
 ### 25.3 Stage B: wishes on the map
+
+> **Note (2026-11-08):** on a trip of ideas the vote is optional and off by default (`constraints.voting`, „Planen mit“ in the trip settings; `plans/ideen-statt-pool.md`, stage 7). Each idea's priority (Muss, Will, Wenn Zeit) says what the vote used to. Trips from before keep voting until it is switched off.
 
 The wishes map showed blue discs with a question mark: they said that nobody
 has voted yet, and nothing about what is in front of you. Now each pin carries

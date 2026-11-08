@@ -196,6 +196,8 @@ the URL cache when the plan is downloaded.
 
 ## Stage 3 — curation by the local model
 
+> **Superseded (2026-11-08)** for trips of ideas: they have no searched pool to curate; the same prompt and gate now order the highlights hit list (`plans/ideen-statt-pool.md`, stage 2). Trips from before keep the background curation.
+
 The measurement of §11.0 found that a model, the local one included,
 orders a pool better than any tag sum and never took a savings bank.
 This stage builds what was measured, and nothing beyond it.
@@ -291,6 +293,8 @@ source as a link in the detail view and the pin sheet
 (`TripSpotDescriptionSection`).
 
 ## Stage 5 — one list
+
+> **Superseded in part (2026-11-08):** the vote is optional, off by default on a trip of ideas (`plans/ideen-statt-pool.md`, stage 7).
 
 "Wünsche" merges into "Kandidaten":
 

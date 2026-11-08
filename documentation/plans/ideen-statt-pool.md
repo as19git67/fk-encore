@@ -1,6 +1,6 @@
 # Ideas instead of a pool: an empty list, your own picks, one day band
 
-Status: in progress. Decided with Anton on 2026-11-08. Stages 1 to 3 built.
+Status: built. Decided with Anton on 2026-11-08. All stages built.
 
 ## The problem
 
@@ -299,6 +299,51 @@ Built (2026-11-08). As built:
 
 ### Stage 4: ordering, and the day as one window
 
+Built (2026-11-08). As built:
+
+- `IDEAS_DAY` (`blocks.ts`): one spots block `day` "Tag", 600 minutes.
+  `DEFAULT_DAY` stays the four parts for trips from before;
+  `defaultDayOf(constraints)` in `day-shape.ts` picks the one for the
+  trip, and `createTripPlan` frames a trip of ideas with it. A stored
+  shape stays as it is.
+- `day-timing.ts` is the clock: way, then the wait at the door (a ticket
+  for later, a place that opens later), then the visit; an appointment
+  without a spot is time nothing else happens in. `day-order.ts`
+  (`orderDay`) searches the order with it: fewest missed tickets and
+  opening windows, then fewest minutes missed, then least overrun, then
+  least way, ties by ref. Exact up to `EXACT_ORDER_LIMIT` = 9 stops with
+  a pruned depth-first search, greedy plus pair swaps above.
+  `toDrop`: "Wenn Zeit" before "Will", one idea that is enough on its own
+  first (the shortest), else the one that saves most; never "Muss",
+  never a booked visit.
+- `POST /trip-planner/plans/:planId/days/:dayIndex/order`
+  (`day-order-api.ts`) orders each spots block of the day and writes the
+  order; done and skipped stops stay in front. The answer carries
+  `overrunMinutes` and `toDrop`.
+- Breaks are **not** stops: migration 0303 gives `trip_plan_days` a
+  `breaks` jsonb (`id`, `label`, `minutes`, `blockId`, `position` in the
+  block's line), so nothing that reads stops (the pool, the vote, the
+  geofence, the map) meets one. `POST …/days/:dayIndex/breaks` (5 to 240
+  minutes) and `DELETE …/days/:dayIndex/breaks/:breakId`; a re-plan
+  carries them (`carry-stops.ts`).
+- `trip_plan_stops.eta_minutes` is not built: `day-times.ts` computes on
+  read, for a trip of ideas only, each day's `window`, `plannedMinutes`
+  (ways, visits, breaks), `waitMinutes`, `freeMinutes`,
+  `overrunMinutes`, each stop's `etaMinutes`, `waitMinutes` and
+  `outsideHours`, and each break's `etaMinutes`. The window of a block is
+  its frame time plus what an appointment inside it took out.
+- `placeFromPool` takes the day's first spots block when `blockId` is
+  left out.
+- iOS: a card at the top of the day (`dayOrderCard` in
+  `TripPlanDayView`) with the sum („4 h 30 von 10 h verplant · 5 h 30
+  frei“ or „… zu viel“), „Reihenfolge vorschlagen“ and a „Pause“ menu;
+  stop rows say „ca. 10:40“ and the wait, „Um diese Zeit nicht
+  geöffnet“, and „Zurück zu den Ideen?“ for the ideas in `toDrop`.
+  Helpers in `TripDayOrder.swift`.
+- Not built here: light windows as a soft term (stage 5 shows them on the
+  band), and the late-running day re-ordering from "now" through
+  `redistribute.ts`; both keep the order as the travellers left it.
+
 - `DEFAULT_DAY` becomes one spots block over the day's window;
   `scheduleDay` (`fixpoints.ts`) keeps cutting it around fixpoints.
 - `POST /plans/:planId/days/:dayIndex/order` ("Reihenfolge vorschlagen"):
@@ -327,6 +372,26 @@ Built (2026-11-08). As built:
 
 ### Stage 5: the day band
 
+Built (2026-11-08). As built:
+
+- `TripDayBand.swift`: `TripDayBandModel(day:)` reads only what the
+  server computed (`window`, each stop's `etaMinutes` and `waitMinutes`,
+  each break's `etaMinutes`), so band and list cannot disagree. Ways
+  end where the wait begins, visits are filled, breaks dashed,
+  appointments with a duration orange, every fixpoint a pin, a visit
+  past the window's end red, „jetzt“ as a cursor on the running day.
+  Below it „3 h 15 von 10 h verplant, 30 min unterwegs“.
+- The band heads the day card of `dayOrderCard`; tapping a visit marks
+  its row in the list. The day chips of the stay carry a thin fill mark
+  (`TripDayFillMark`), so empty and full days show at a glance — that
+  is the overview card the plan asked for, in the place the stay's days
+  are already listed.
+- Tests: `TripDayBandTests` (positions, widths adding up to what is
+  planned, the sentence); an `#Preview` with a synthetic day.
+- Not built: dragging a stop in the list to re-order without the
+  server, and the light windows as a tint. Re-ordering by hand goes
+  through „In einen anderen Block“ and the order endpoint as before.
+
 - A new view `TripDayBand` (iOS) draws the day as one horizontal band
   from the day's start to its end: fixpoints as pins with their time,
   stops as filled segments with the picture of the place, the ways as
@@ -347,6 +412,25 @@ Built (2026-11-08). As built:
 
 ### Stage 6: food as its own pool
 
+Built (2026-11-08). As built:
+
+- `POST /trip-planner/food` takes `planId`: the trip's restaurants and
+  cafés (pool rows with category `food` or `cafe`, every stay) within
+  the radius come first, nearest first, with `idea: true` and their
+  note; the filters do not apply to them, somebody already chose them.
+  The map's list follows without them, as before.
+- "Reihenfolge vorschlagen" leaves food stops out (`MEAL_CATEGORIES`):
+  one placed by hand keeps its index in the line and the rest moves
+  round it.
+- iOS: the ideas list has a section „Essen & Trinken“ after the others
+  on a trip of ideas; a break on the day has „Jetzt aussuchen“, which
+  opens `TripFoodListView` at the stop before the break with the trip's
+  ideas first („eure Idee“). Choosing opens the map app; nothing is put
+  on the day.
+- Tests: `ideas-food-vote.test.ts`.
+- Not built: the list from the device's own location on the running
+  day; it starts at the stop before the break.
+
 - Ideas whose category is a restaurant or café (`MEAL_CATEGORIES` in
   `move.ts`) are listed under "Essen & Trinken" on the ideas screen and
   are never offered to "Reihenfolge vorschlagen"; they can still be
@@ -362,6 +446,23 @@ Built (2026-11-08). As built:
   marks ideas.
 
 ### Stage 7: the vote behind a switch
+
+Built (2026-11-08). As built:
+
+- `votingOn(constraints)` in `ideas-mode.ts`: `constraints.voting` when
+  set, otherwise off on a trip of ideas and on for a trip from before
+  (whose votes were already in use; switching them off there is the
+  travellers' call, not a migration's). When off, no re-plan applies
+  votes, `markWanted` sees no wishes, and `POST …/votes/apply` refuses.
+  Tables and endpoints stay.
+- `PATCH …/settings` takes `voting`; it does not re-plan by itself.
+- iOS: „Planen mit“ › „Abstimmen“ in the trip settings
+  (`TripPlanSettingsView`); `TripPlan.isVoting` gates the ring, the
+  fairness, „Damit neu planen“ and the voter names in `TripPoolView`.
+- Documentation: notes in §2, §4.1, §6.1 and §25.3 of
+  `ios-urlaubsplanung.md`, "Superseded" notes at stages 3 and 5 of
+  `kandidaten-ranking.md`; the handbook's trip chapter describes Ideen,
+  Treffer, Reihenfolge, Band, food and the switch.
 
 - `constraints.voting` (default off). When off: no vote ring, no
   fairness, no "Damit neu planen", no voter names, `applyVotes` is not
