@@ -105,6 +105,7 @@ function reporting(w: HotelWatch): string {
 function conditions(w: HotelWatch): string {
   const parts = [w.free_cancellation_only ? 'stornierbar' : 'jeder Tarif']
   if (w.breakfast_required) parts.push('mit Frühstück')
+  if (w.split_rooms) parts.push('auch Doppelzimmer')
   return parts.join(', ')
 }
 
@@ -352,6 +353,9 @@ const latest = computed(() => selected.value?.latest ?? null)
             <p class="muted">
               Stand {{ when(latest.checked_at) }}. Preise pro Nacht inklusive Steuern; eine Resort- oder
               Destination-Fee, die das Hotel vor Ort verlangt, ist nicht enthalten.
+              <template v-if="selected.split_rooms">
+                Doppelzimmer stehen mit dem Preis für alle Zimmer zusammen; ob so viele frei sind, zeigt erst der Anbieter.
+              </template>
               {{ selected.limit_per_night !== null ? reporting(selected) + ', sobald der Preis unter die Grenze fällt.' : '' }}
               <template v-if="selected.notified_per_night !== null">
                 Zuletzt gemeldet: {{ money(selected.notified_per_night, selected.currency) }}.
@@ -392,7 +396,12 @@ const latest = computed(() => selected.value?.latest ?? null)
                       <template v-else>{{ o.source }}</template>
                     </td>
                     <td class="room">{{ o.room }}</td>
-                    <td class="num">{{ money(o.per_night, selected.currency) }}</td>
+                    <td class="num">
+                      {{ money(o.per_night, selected.currency) }}
+                      <small v-if="o.rooms > 1" class="muted per-room">
+                        {{ o.rooms }} × {{ money(o.per_night / o.rooms, selected.currency) }}
+                      </small>
+                    </td>
                     <td class="num">{{ money(o.total, selected.currency) }}</td>
                     <td :class="{ muted: o.free_cancellation === null }">{{ cancellation(o) }}</td>
                     <td>{{ o.breakfast ? 'ja' : '–' }}</td>
@@ -561,6 +570,9 @@ const latest = computed(() => selected.value?.latest ?? null)
 }
 .room {
   min-width: 12rem;
+}
+.per-room {
+  display: block;
 }
 .row-selected {
   background: var(--p-content-hover-background);

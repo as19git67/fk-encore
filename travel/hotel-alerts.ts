@@ -31,6 +31,8 @@ export interface PriceAlert {
   cancelUntil: string | null;
   breakfast: boolean;
   link: string | null;
+  /** Rooms the offer books; `perNight` is for all of them. */
+  rooms: number;
   /** True when an earlier report of this watch is undercut. */
   newLow: boolean;
 }
@@ -86,7 +88,7 @@ export function alertText(a: PriceAlert): { title: string; body: string; terms: 
     .filter(Boolean)
     .join(", ");
   const body =
-    `${euro(a.perNight, a.currency)} pro Nacht bei ${a.source} (Grenze ${euro(a.limit, a.currency)}), ` +
+    `${euro(a.perNight, a.currency)} pro Nacht${a.rooms > 1 ? ` für ${a.rooms} Zimmer` : ""} bei ${a.source} (Grenze ${euro(a.limit, a.currency)}), ` +
     `${day(a.checkIn)}–${day(a.checkOut)}, ${terms}`;
   return { title, body, terms };
 }

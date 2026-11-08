@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHotelDetail, offersOf, pickProperty, summarize } from "./hotel-offers";
+import { asRooms, isHotelDetail, mergeOffers, offersOf, pickProperty, splitRoomCount, summarize } from "./hotel-offers";
 
 /** A synthetic Google Hotels detail answer in SerpApi's shape. */
 export const DETAIL = {
@@ -105,6 +105,28 @@ describe("summarize", () => {
   it("matches by the watch's conditions", () => {
     expect(summarize(offers, { freeCancellationOnly: false, breakfastRequired: false }).matching?.perNight).toBe(200);
     expect(summarize(offers, { freeCancellationOnly: true, breakfastRequired: true }).matching?.perNight).toBe(260);
+  });
+});
+
+describe("double rooms", () => {
+  it("splits only adults, an even number, at least two rooms", () => {
+    expect(splitRoomCount(4, [])).toBe(2);
+    expect(splitRoomCount(6, [])).toBe(3);
+    expect(splitRoomCount(2, [])).toBeNull();
+    expect(splitRoomCount(5, [])).toBeNull();
+    expect(splitRoomCount(4, [8])).toBeNull();
+  });
+
+  it("prices a double room times the rooms and merges it with the rooms for everyone", () => {
+    const single = offersOf(DETAIL, 4); // nothing in DETAIL holds four
+    const doubles = asRooms(offersOf(DETAIL, 2), 2);
+    expect(doubles[0]).toMatchObject({ room: "2 × Doppelzimmer, zwei Betten", perNight: 400, total: 800, guests: 6, rooms: 2 });
+    const merged = mergeOffers(
+      [{ ...doubles[0], room: "Familienzimmer", perNight: 450, total: 900, guests: 4, rooms: 1 }],
+      doubles,
+    );
+    expect(merged.map((o) => o.perNight).slice(0, 3)).toEqual([400, 420, 450]);
+    expect(single.filter((o) => o.guests !== null)).toEqual([]);
   });
 });
 

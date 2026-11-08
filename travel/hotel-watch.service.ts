@@ -23,7 +23,17 @@ import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { travelHotelChecks, travelHotelOffers, travelHotelWatches, users } from "../db/schema";
 import { alertDecision, alertSender, type PriceAlert } from "./hotel-alerts";
-import { isHotelDetail, offersOf, pickProperty, summarize, type HotelOffer } from "./hotel-offers";
+import {
+  ADULTS_PER_ROOM,
+  asRooms,
+  isHotelDetail,
+  mergeOffers,
+  offersOf,
+  pickProperty,
+  splitRoomCount,
+  summarize,
+  type HotelOffer,
+} from "./hotel-offers";
 import { HotelSearchError, monthlySearchBudget, type HotelSearchClient } from "./serpapi-client";
 
 /** How far ahead a watch may end. */
@@ -55,6 +65,8 @@ export interface WatchInput {
   limit_per_night?: number | null;
   free_cancellation_only?: boolean;
   breakfast_required?: boolean;
+  /** Also price the party in double rooms (only adults, even number, at least four). */
+  split_rooms?: boolean;
   end_date: string;
   paused?: boolean;
   notify_push?: boolean;
@@ -74,6 +86,7 @@ export interface HotelWatch {
   limit_per_night: number | null;
   free_cancellation_only: boolean;
   breakfast_required: boolean;
+  split_rooms: boolean;
   end_date: string;
   paused: boolean;
   notify_push: boolean;
@@ -115,6 +128,8 @@ export interface HotelOfferEntry {
   breakfast: boolean;
   guests: number | null;
   link: string | null;
+  /** Rooms the offer books; prices are for all of them together. */
+  rooms: number;
 }
 
 export interface HotelWatchDetail {
@@ -199,6 +214,11 @@ export function normalizeWatchInput(input: WatchInput, today: string): Normalize
     bad("Grenze pro Nacht: eine positive Zahl");
   }
 
+  const splitRooms = input.split_rooms ?? false;
+  if (splitRooms && splitRoomCount(input.adults, children) === null) {
+    bad("Doppelzimmer gehen nur bei einer geraden Zahl Erwachsener ab 4 und ohne Kinder");
+  }
+
   return {
     query,
     check_in: input.check_in,
@@ -209,6 +229,7 @@ export function normalizeWatchInput(input: WatchInput, today: string): Normalize
     limit_per_night: limit,
     free_cancellation_only: input.free_cancellation_only ?? true,
     breakfast_required: input.breakfast_required ?? false,
+    split_rooms: splitRooms,
     end_date: input.end_date,
     paused: input.paused ?? false,
     notify_push: input.notify_push ?? true,
@@ -248,6 +269,7 @@ function toWatch(w: WatchRow, today: string, latest: CheckRow | null, best: numb
     limit_per_night: w.limit_per_night,
     free_cancellation_only: w.free_cancellation_only,
     breakfast_required: w.breakfast_required,
+    split_rooms: w.split_rooms,
     end_date: w.end_date,
     paused: w.paused,
     notify_push: w.notify_push,
@@ -333,6 +355,7 @@ export async function getWatchDetail(userId: number, id: number, now: Date = new
       breakfast: o.breakfast,
       guests: o.guests,
       link: o.link,
+      rooms: o.rooms,
     })),
   };
 }
@@ -361,7 +384,8 @@ export async function updateWatch(userId: number, id: number, input: WatchInput,
     values.currency === before.currency &&
     values.limit_per_night === before.limit_per_night &&
     values.free_cancellation_only === before.free_cancellation_only &&
-    values.breakfast_required === before.breakfast_required;
+    values.breakfast_required === before.breakfast_required &&
+    values.split_rooms === before.split_rooms;
   await db
     .update(travelHotelWatches)
     .set({
@@ -447,6 +471,24 @@ export async function checkWatch(
     error = err instanceof Error ? err.message : String(err);
   }
 
+  // The same hotel in double rooms: one more search, its prices times the rooms.
+  // It only adds offers — when it fails, the check stands with the rooms for everyone.
+  const rooms = splitRoomCount(watch.adults, watch.children_ages ?? []);
+  if (error === null && watch.split_rooms && rooms !== null) {
+    if (used + searches >= budget) {
+      console.warn(`[travel.hotel-watch] watch ${watch.id}: no search left for the double rooms`);
+    } else {
+      try {
+        searches++;
+        const answer = await client.search({ ...base, adults: ADULTS_PER_ROOM, children_ages: [], property_token: token });
+        if (!isHotelDetail(answer)) throw new HotelSearchError("Keine Preise für Doppelzimmer");
+        offers = mergeOffers(offers, asRooms(offersOf(answer, ADULTS_PER_ROOM), rooms));
+      } catch (err) {
+        console.warn(`[travel.hotel-watch] watch ${watch.id} double rooms: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  }
+
   const summary = summarize(offers, {
     freeCancellationOnly: watch.free_cancellation_only,
     breakfastRequired: watch.breakfast_required,
@@ -486,6 +528,7 @@ export async function checkWatch(
           breakfast: o.breakfast,
           guests: o.guests,
           link: o.link,
+          rooms: o.rooms,
         })),
       );
     }
@@ -543,6 +586,7 @@ async function reportPrice(watch: WatchRow, matching: HotelOffer | null, now: Da
     cancelUntil: offer.cancelUntil,
     breakfast: offer.breakfast,
     link: offer.link,
+    rooms: offer.rooms,
     newLow: decision.newLow,
   };
   const sender = alertSender();
