@@ -26,11 +26,90 @@ struct TripSearchedPlace: Codable, Identifiable, Sendable {
     /// leg's own base rather than from where you happen to stand.
     var distanceLabel: String? {
         guard let distanceM else { return nil }
+        return Self.distanceText(distanceM)
+    }
+
+    static func distanceText(_ distanceM: Double) -> String {
         if distanceM >= 1_000 {
             return "\(String(format: "%.1f", distanceM / 1_000).replacingOccurrences(of: ".", with: ",")) km"
         }
         return "\(Int(distanceM.rounded())) m"
     }
+}
+
+/// One of a stay's highlights (ideas plan, stage 2): a place the open
+/// data knows well, with its picture and one line about it.
+struct TripHighlight: Codable, Identifiable, Sendable {
+    let osmRef: String
+    let name: String?
+    let localName: String?
+    let lat: Double
+    let lon: Double
+    let category: String
+    let distanceM: Double
+    let dwellMinutes: Int
+    /// The model's sentence, else the best open-data reason.
+    let reason: String?
+    let picture: TripRoutePhoto?
+    let description: TripSpotDescription?
+    let wikipediaUrl: String?
+    let inPool: Bool
+    let planned: Bool
+
+    var id: String { osmRef }
+
+    /// The same row the name search shows, so adding works one way.
+    func asSearched(legIndex: Int) -> TripSearchedPlace {
+        TripSearchedPlace(
+            osmRef: osmRef, name: name, lat: lat, lon: lon, distanceM: distanceM,
+            categories: [category], legIndex: legIndex, openingHours: nil, phone: nil, website: nil,
+            dwellMinutes: dwellMinutes, inPool: inPool, planned: planned,
+        )
+    }
+}
+
+struct TripHighlightsResponse: Codable, Sendable {
+    let results: [TripHighlight]
+    let hasMore: Bool
+    /// The model has not ordered this stay yet; the list is by fame until then.
+    let sorting: Bool
+    let unavailable: Bool
+}
+
+/// The three ways to look (ideas plan, stage 2).
+enum TripPlaceSearchMode: String, CaseIterable, Identifiable, Sendable {
+    case highlights, name, category
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .highlights: "Highlights"
+        case .name: "Suche"
+        case .category: "Kategorien"
+        }
+    }
+}
+
+/// A category that is one tap: "alle Aussichtspunkte". The ids are the
+/// geo service's own.
+struct TripPlaceCategory: Identifiable, Hashable, Sendable {
+    let id: String
+    let label: String
+    let systemImage: String
+
+    static let all: [TripPlaceCategory] = [
+        .init(id: "museum", label: "Museen", systemImage: "building.columns"),
+        .init(id: "sight", label: "Sehenswürdigkeiten", systemImage: "star"),
+        .init(id: "viewpoint", label: "Aussichtspunkte", systemImage: "binoculars"),
+        .init(id: "worship", label: "Kirchen und Tempel", systemImage: "building"),
+        .init(id: "outdoors", label: "Parks und Natur", systemImage: "leaf"),
+        .init(id: "market", label: "Märkte", systemImage: "basket"),
+        .init(id: "theatre", label: "Theater", systemImage: "theatermasks"),
+        .init(id: "zoo", label: "Zoos", systemImage: "pawprint"),
+        .init(id: "bath", label: "Bäder", systemImage: "drop"),
+        .init(id: "producers", label: "Erzeuger", systemImage: "cart"),
+    ]
 }
 
 struct TripSearchPlacesResponse: Codable, Sendable {
@@ -51,7 +130,15 @@ struct TripSearchPlacesResponse: Codable, Sendable {
 @Observable @MainActor
 final class TripPlaceSearchViewModel {
     var query = ""
+    var mode: TripPlaceSearchMode
     private(set) var results: [TripSearchedPlace] = []
+    private(set) var highlights: [TripHighlight] = []
+    private(set) var highlightsHaveMore = false
+    private(set) var highlightsSorting = false
+    private(set) var highlightsUnavailable = false
+    private(set) var isLoadingHighlights = false
+    private(set) var didLoadHighlights = false
+    private(set) var category: TripPlaceCategory?
     private(set) var hasMore = false
     private(set) var unavailableLegs: [Int] = []
     private(set) var isSearching = false
@@ -68,16 +155,59 @@ final class TripPlaceSearchViewModel {
     static let fallbackDwellMinutes = 45
 
     private let planId: Int
-    private let legIndex: Int?
+    let legIndex: Int?
+    /// A trip of ideas says "Zur Reise"; an older trip "Zu den Kandidaten".
+    let ideas: Bool
 
-    init(planId: Int, legIndex: Int? = nil) {
+    init(planId: Int, legIndex: Int? = nil, ideas: Bool = false) {
         self.planId = planId
         self.legIndex = legIndex
+        self.ideas = ideas
+        // Highlights need one stay to be about; a search for the whole
+        // trip starts at the name.
+        self.mode = legIndex == nil ? .name : .highlights
+    }
+
+    /// The highlights, first page or the next one ("Mehr").
+    func loadHighlights(more: Bool = false) async {
+        guard let legIndex, !isLoadingHighlights else { return }
+        isLoadingHighlights = true
+        defer {
+            isLoadingHighlights = false
+            didLoadHighlights = true
+        }
+        struct Body: Encodable {
+            let legIndex: Int
+            let offset: Int
+        }
+        do {
+            let response: TripHighlightsResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/highlights",
+                body: Body(legIndex: legIndex, offset: more ? highlights.count : 0),
+            )
+            highlights = more ? highlights + response.results : response.results
+            highlightsHaveMore = response.hasMore
+            highlightsSorting = response.sorting
+            highlightsUnavailable = response.unavailable
+            errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Every place of one category around the stay, no name needed.
+    func search(category: TripPlaceCategory) async {
+        self.category = category
+        await run(query: "", categories: [category.id])
     }
 
     func search() async {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count >= 2 else { return }
+        await run(query: text, categories: nil)
+    }
+
+    private func run(query text: String, categories: [String]?) async {
         isSearching = true
         defer {
             isSearching = false
@@ -86,11 +216,12 @@ final class TripPlaceSearchViewModel {
         struct Body: Encodable {
             let query: String
             let legIndex: Int?
+            let categories: [String]?
         }
         do {
             let response: TripSearchPlacesResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/search",
-                body: Body(query: text, legIndex: legIndex),
+                body: Body(query: text, legIndex: legIndex, categories: categories),
             )
             results = response.results
             hasMore = response.hasMore
@@ -111,11 +242,18 @@ final class TripPlaceSearchViewModel {
             )
             added[place.osmRef] = response.merged
                 ? "mit einem vorhandenen Eintrag zusammengeführt"
-                : "bei den Kandidaten"
+                : (ideas ? "in der Reise" : "bei den Kandidaten")
             errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)
         }
+    }
+
+    /// Leaving the category list: back to the categories, not a stale result.
+    func clearCategory() {
+        category = nil
+        results = []
+        hasSearched = false
     }
 
     /// What to send for one search result.

@@ -1,6 +1,6 @@
 # Ideas instead of a pool: an empty list, your own picks, one day band
 
-Status: in progress. Decided with Anton on 2026-11-08. Stage 1 built.
+Status: in progress. Decided with Anton on 2026-11-08. Stages 1 and 2 built.
 
 ## The problem
 
@@ -220,6 +220,31 @@ Built (2026-11-08). As built:
 - Tests: highlights endpoint with a fake fame client and a fake curation
   asker (the fixtures of `curation-job.test.ts`), category search,
   `inPool` flags.
+
+Built (2026-11-08). As built:
+
+- `POST /trip-planner/plans/:planId/highlights` with `legIndex`,
+  `offset`, `limit` (default 15) in `highlights.ts`: the two area
+  searches of `spotsAround` over the leg's reach, `toCandidates` with
+  prominence and `requireProminence`, hidden spots left out, best score
+  first. Each hit carries picture, description, one line (the model's
+  sentence, else the first open-data reason), distance from the lodging
+  and `inPool`/`planned`. Nothing is written to the trip.
+- The model's order is kept per leg in `trip_leg_highlights`
+  (migration 0301): the request writes the top `MAX_CURATION_ENTRIES`
+  as curation entries plus the context and marks the leg `pending` when
+  there is no order or the places changed by more than the curation
+  tolerance; `tickHighlights` in `highlights-job.ts` runs in the same
+  five-minute timer as the candidate curation, with the same prompt and
+  gate (`buildCurationPrompt`, `gateCuration`). Picks come first, the
+  rest by fame after them; nothing the model left out is dropped. While
+  pending the response says `sorting: true`.
+- `searchPlaces` accepts an empty `query` when `categories` is given.
+- iOS: `TripPlaceSearchView` has the segments Highlights, Suche,
+  Kategorien (fixed list `TripPlaceCategory.all` over the geo service's
+  ids); the add control says „Zur Reise“ on a trip of ideas. The priority
+  choice in the same sheet and in the share review comes with stage 3,
+  which introduces priority.
 
 ### Stage 3: priority and constraints
 

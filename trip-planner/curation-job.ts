@@ -70,13 +70,18 @@ const STAYS_PER_TICK = 3;
  * row stays home: the vote reasons ("Herzenswunsch von …") carry a
  * person's name.
  */
-const SHAREABLE_REASON = /Aufrufe im Monat|Artikel in \d+ Sprachen|Wikivoyage|Bilder auf Commons|Sehenswürdigkeit|Wikidata|Wikipedia-Artikel|^ihr wolltet:/;
+export const SHAREABLE_REASON = /Aufrufe im Monat|Artikel in \d+ Sprachen|Wikivoyage|Bilder auf Commons|Sehenswürdigkeit|Wikidata|Wikipedia-Artikel|^ihr wolltet:/;
 
 export type CurationAsker = (prompt: string) => Promise<unknown>;
 
 const defaultAsker: CurationAsker = (prompt) =>
   askForJson(prompt, CURATION_TIMEOUT_MS, { maxTokens: 4096 });
 let asker: CurationAsker = defaultAsker;
+
+/** The model, or whatever a test put in its place. */
+export function askCurationModel(prompt: string): Promise<unknown> {
+  return asker(prompt);
+}
 
 /** For tests: answer instead of the model. */
 export function setCurationAsker(next: CurationAsker): void {
@@ -377,29 +382,58 @@ async function entriesOf(legId: number, db: Db): Promise<{
     };
   });
 
+  return {
+    entries,
+    signature,
+    context: await contextFor({ legId, ...leg, interests }, db),
+  };
+}
+
+/**
+ * The stay as the model hears of it: the town, how long, what the group
+ * wants and who it is in the abstract — never a name.
+ */
+export async function curationContextOf(legId: number, db: Db = dbDefault): Promise<{
+  context: Parameters<typeof buildCurationPrompt>[1];
+  interests: string[];
+} | null> {
+  const [leg] = await db
+    .select({
+      title: tripPlanLegs.title,
+      planId: tripPlanLegs.plan_id,
+      startDate: tripPlanLegs.start_date,
+      constraints: tripPlans.constraints,
+    })
+    .from(tripPlanLegs)
+    .innerJoin(tripPlans, eq(tripPlans.id, tripPlanLegs.plan_id))
+    .where(eq(tripPlanLegs.id, legId));
+  if (!leg) return null;
+  const interests = interestsOf(leg.constraints);
+  return { context: await contextFor({ legId, ...leg, interests }, db), interests };
+}
+
+async function contextFor(
+  leg: { legId: number; title: string | null; planId: number; startDate: string | null; interests: string[] },
+  db: Db,
+): Promise<Parameters<typeof buildCurationPrompt>[1]> {
   const days = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(tripPlanDays)
-    .where(eq(tripPlanDays.leg_id, legId));
+    .where(eq(tripPlanDays.leg_id, leg.legId));
   const travellers = await db
     .select({ birth: tripPlanTravellers.birth_date })
     .from(tripPlanTravellers)
     .where(eq(tripPlanTravellers.plan_id, leg.planId));
-
   return {
-    entries,
-    signature,
-    context: {
-      town: leg.title,
-      days: days[0]?.n ?? 1,
-      interests: interests.map(interestLabel),
-      group: groupLine(travellers.map((t) => t.birth), leg.startDate),
-    },
+    town: leg.title,
+    days: days[0]?.n ?? 1,
+    interests: leg.interests.map(interestLabel),
+    group: groupLine(travellers.map((t) => t.birth), leg.startDate),
   };
 }
 
 /** Wikipedia intros, keyed "lang:Title"; whatever does not answer is left out. */
-async function leadsFor(urls: ReadonlyArray<string | null>): Promise<Map<string, string>> {
+export async function leadsFor(urls: ReadonlyArray<string | null>): Promise<Map<string, string>> {
   const byLang = new Map<string, string[]>();
   for (const url of urls) {
     const article = url ? parseArticleUrl(url) : null;
