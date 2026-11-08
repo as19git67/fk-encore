@@ -5524,3 +5524,21 @@ export const travelHotelOffers = pgTable(
   },
   (table) => [index("travel_hotel_offer_check_idx").on(table.check_id)],
 );
+
+// ========== Label ==========
+
+// A generated sheet of scanner labels "#0001" … (label/scanner-sheet.ts,
+// migration 0298). The PDF is rendered again from these values on download.
+export const labelScannerSheets = pgTable(
+  "label_scanner_sheet",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    first_number: integer("first_number").notNull(),
+    pages: integer("pages").notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("label_scanner_sheet_user_idx").on(table.user_id, table.created_at)],
+);

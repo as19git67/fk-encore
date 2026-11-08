@@ -595,9 +595,16 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/LabelView.vue'),
         meta: { permission: 'label.view' },
       },
+      {
+        path: 'scanner',
+        name: 'label-scanner',
+        component: () => import('../views/ScannerLabelsView.vue'),
+        meta: { permission: 'label.view' },
+      },
     ],
     menuItems: [
       { label: 'Drucken', icon: 'pi pi-print', routeName: 'label-print', permission: 'label.view' },
+      { label: 'Scanner-Etiketten', icon: 'pi pi-hashtag', routeName: 'label-scanner', permission: 'label.view' },
     ],
   },
   {

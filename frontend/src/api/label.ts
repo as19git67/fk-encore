@@ -71,3 +71,52 @@ export function printLabel(req: PrintLabelRequest) {
     body: JSON.stringify(req),
   })
 }
+
+// ---------- Scanner labels (A4 sheet "#0001" …) ----------
+
+export interface ScannerSheet {
+  id: number
+  firstNumber: number
+  lastNumber: number
+  /** "#0001 – #0189", as printed. */
+  range: string
+  pages: number
+  labels: number
+  createdAt: string
+}
+
+export interface ScannerSettings {
+  nextNumber: number
+  offsetXMm: number
+  offsetYMm: number
+}
+
+export interface ScannerOverview extends ScannerSettings {
+  sheet: { name: string; columns: number; rows: number; labelsPerPage: number; maxPages: number }
+  sheets: ScannerSheet[]
+}
+
+export function getScannerOverview() {
+  return apiFetch<ScannerOverview>('/label/scanner')
+}
+
+export function saveScannerSettings(settings: Partial<ScannerSettings>) {
+  return apiFetch<ScannerSettings>('/label/scanner/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  })
+}
+
+export function createScannerSheet(pages: number) {
+  return apiFetch<{ sheet: ScannerSheet; nextNumber: number }>('/label/scanner/sheets', {
+    method: 'POST',
+    body: JSON.stringify({ pages }),
+  })
+}
+
+export function deleteScannerSheet(id: number) {
+  return apiFetch<{ deleted: boolean }>(`/label/scanner/sheets/${id}`, { method: 'DELETE' })
+}
+
+export const scannerSheetPdfPath = (id: number) => `/label/scanner/sheets/${id}/pdf`
+export const SCANNER_TEST_PDF_PATH = '/label/scanner/test-pdf'
