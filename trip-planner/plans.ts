@@ -16,6 +16,8 @@
  * `redistribute.ts`); these endpoints only load, call, and save.
  */
 
+import { carryStops } from "./carry-stops";
+import { isIdeasTrip } from "./ideas-mode";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -88,6 +90,7 @@ import {
   setStopPinned,
   setStopStatus,
   saveDayDetail,
+  markDayDetailed,
   saveRedistribution,
   renamePlan,
   deletePlan,
@@ -280,6 +283,14 @@ export interface DayAnchorRequest {
 export interface CreatePlanRequest {
   title?: string;
   /**
+   * Start every stay with an empty list of ideas (plan
+   * `ideen-statt-pool.md`, stage 1): the planner searches nothing and
+   * fills no day; places come in through "Zur Reise". Defaults to true;
+   * false builds the trip the earlier way, with a pool the region
+   * search filled and the first days solved out of it.
+   */
+  startEmpty?: boolean;
+  /**
    * The legs of the trip, in order. A single-city trip may instead pass
    * the flat `anchor`/`days`/`radiusM` fields below, which build one leg.
    */
@@ -364,8 +375,10 @@ export const createTripPlan = api(
     // "the next two days" means the next two days, whichever leg they
     // fall in.
     let detailBudget = detailDays;
+    const ideas = req.startEmpty ?? startsEmptyByDefault();
     for (const [legIndex, leg] of prepared.entries()) {
       const planned = await planLeg(leg.request, {
+        ideas,
         shape,
         maxWalkMinutes,
         categories: req.categories,
@@ -408,6 +421,10 @@ export const createTripPlan = api(
         // freezing today's numbers into every trip would make changing
         // the defaults a change nobody sees.
         blocks: dayShape,
+        // A trip of ideas stays one: every later re-plan frames its
+        // days and keeps what the travellers put on them. Absent on
+        // every trip from before, which keeps its searched pool.
+        ideas,
       },
       legs,
     });
@@ -587,9 +604,11 @@ async function replanFromStoredSettings(
     const droppedBlocks: DroppedBlockReport[] = [];
     const pendingRegions: PendingRegionReport[] = [];
     for (const leg of plan.legs) {
+      const ideas = isIdeasTrip(constraints);
       const planned = await planLeg(
         { ...legRequestFromStored(leg), mode: frame?.mode ?? leg.mode },
         {
+          ideas,
           // The stored arrival, replayed. Without it every settings
           // change handed back a morning the group spends travelling.
           firstDayStartMinutes: leg.arriveMinutes,
@@ -610,10 +629,15 @@ async function replanFromStoredSettings(
           )).bufferDay,
         },
       );
+      // On a trip of ideas the days were the travellers' own; they come
+      // back on the same days, and what lost its day returns to the list.
+      const carriedOver = ideas
+        ? carryStops(leg, planned.leg.days, { anchor: leg.anchor, mode: frame?.mode ?? leg.mode })
+        : null;
       perLeg.push({
         legId: leg.id,
-        days: [...planned.leg.days] as CreateDayInput[],
-        pool: [...planned.leg.pool],
+        days: carriedOver?.days ?? ([...planned.leg.days] as CreateDayInput[]),
+        pool: [...planned.leg.pool, ...(carriedOver?.back ?? [])],
       });
       awaiting.push({ legId: leg.id, awaiting: planned.pending !== null });
       for (const d of planned.dropped) droppedBlocks.push({ ...d, legIndex: leg.position });
@@ -726,6 +750,9 @@ function mergedConstraints(
   req: UpdateSettingsRequest,
 ): Record<string, unknown> {
   return {
+    // What the settings screen does not show stays as it was: a trip
+    // of ideas stays one (`ideas`), whoever changes the pace.
+    ...stored,
     categories: req.categories ?? stored.categories ?? null,
     interests: req.interests ?? stored.interests ?? null,
     pace: req.pace ?? stored.pace ?? "normal",
@@ -764,6 +791,7 @@ export async function planLegForTrip(
     (constraints.group ?? undefined) as GroupProfile | undefined,
   );
   return await planLeg(request, {
+    ideas: isIdeasTrip(constraints),
     shape,
     maxWalkMinutes: validateMaxWalk(
       (constraints.maxWalkMinutes ?? undefined) as number | undefined),
@@ -933,6 +961,15 @@ export const detailTripDay = api(
     const day = leg.days.find((d) => d.dayIndex === req.dayIndex);
     if (!day) throw APIError.notFound(`day ${req.dayIndex} not found in leg ${legIndex}`);
 
+    // A trip of ideas is never filled by the planner (stage 1 of
+    // `ideen-statt-pool.md`): detailing opens the day for stops and
+    // puts none in. "Reihenfolge vorschlagen" orders what is on it.
+    if (isIdeasTrip(plan.constraints)) {
+      if (!day.detailed) await markDayDetailed(day.id);
+      const updated = await loadPlan(plan.id, userId);
+      if (!updated) throw APIError.internal("plan vanished while detailing a day");
+      return { plan: updated, droppedBlocks: [] };
+    }
     if (day.detailed) {
       throw APIError.failedPrecondition(
         "this day is already planned — use redistribute to change it",
@@ -1514,6 +1551,16 @@ async function planTransitFromRequest(
   return { leg: planned.leg, dropped: [], pending: planned.pending };
 }
 
+/**
+ * Does a new trip start with an empty list? Yes, unless the
+ * environment says otherwise: the test suite builds most trips the
+ * earlier way (`TRIP_START_EMPTY=0` in `vitest.config.ts`), because the
+ * trips from before keep that behaviour and are planned with it.
+ */
+function startsEmptyByDefault(): boolean {
+  return process.env.TRIP_START_EMPTY !== "0";
+}
+
 /** What the import queue's status means, for a sentence to the traveller. */
 function describeRegionStatus(status: string): string {
   switch (status) {
@@ -1533,6 +1580,11 @@ function describeRegionStatus(status: string): string {
 async function planLeg(
   legReq: LegRequest,
   trip: {
+    /**
+     * A trip of ideas (stage 1 of `ideen-statt-pool.md`): no search,
+     * no solved day. Every day is a detailed frame with no stops.
+     */
+    ideas?: boolean;
     shape: ReturnType<typeof shapeDay>;
     /** Null means: take it from the leg's mode. */
     maxWalkMinutes: number | null;
@@ -1610,7 +1662,9 @@ async function planLeg(
   // Since 2026-10-04 the ticks are the one filter, and the categories
   // a sentence names become ticks (interpret.ts) rather than a second,
   // hidden one.
-  const spots = region ? await spotsAround(region.postgresDb, anchor, radiusM, undefined) : [];
+  const spots = region && !trip.ideas
+    ? await spotsAround(region.postgresDb, anchor, radiusM, undefined)
+    : [];
 
   const scored = toCandidates(spots, {
     interests: trip.interests,
@@ -1723,8 +1777,11 @@ async function planLeg(
     // "too far away to plan" but "deliberately kept free" (§7.2). It
     // carries its sentence so the two never look alike.
     const buffer = trip.bufferDay?.dayIndex === dayIndex ? trip.bufferDay : null;
+    // A trip of ideas has nothing to defer: the day is a frame the
+    // travellers fill, today or the evening before, so every day takes
+    // stops from the start.
     const detailed = buffer === null
-      && dayIndex < (trip.detailDays ?? Number.POSITIVE_INFINITY);
+      && (trip.ideas === true || dayIndex < (trip.detailDays ?? Number.POSITIVE_INFINITY));
     // The hour each block begins is part of the frame, so it is kept
     // whether or not the day has spots yet (§8.3).
     const startsByBlock = new Map(framed.blocks.map((b) => [b.id, b.startMinutes]));
@@ -1750,7 +1807,7 @@ async function planLeg(
     // the blocks are filled — is the same machinery pointed at another
     // place.
     const here = dayTrip?.at ?? anchor;
-    const pool = dayTrip === null
+    const pool = dayTrip === null || trip.ideas
       ? available
       : await dayTripPool(dayTrip, trip, radiusM, dayPools);
     // The light speaks only for the spots somebody marked as a photo

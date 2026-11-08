@@ -62,6 +62,7 @@ import { getGeoClient, type GeoDayTarget } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { loadPlan, type StoredLeg } from "./plan-store";
 import { setTripDayAnchor } from "./day-anchor-edit";
+import { isIdeasTrip } from "./ideas-mode";
 import { measureThinPool, type ThinPoolVerdict } from "./thin-pool";
 import { searchRadiusFor } from "./search-reach";
 import type { PlanResponse } from "./plans";
@@ -158,7 +159,7 @@ export const dayTripSuggestion = api(
   { expose: true, method: "GET", path: "/trip-planner/plans/:planId/day-trip", auth: true },
   async (req: DayTripSuggestionRequest): Promise<DayTripSuggestionResponse> => {
     const userId = requireUser();
-    const { leg, legIndex } = await legOf(req.planId, userId, req.legIndex);
+    const { leg, legIndex, ideas } = await legOf(req.planId, userId, req.legIndex);
     // A journey is not a base to make day trips from (§22.7).
     if (leg.kind === "transit") {
       return {
@@ -166,7 +167,7 @@ export const dayTripSuggestion = api(
         uncoveredMinutes: 0, dayMinutes: 0, suggestion: null, note: null,
       };
     }
-    const found = await suggestFor(leg);
+    const found = await suggestFor(leg, ideas);
 
     return {
       legIndex,
@@ -208,8 +209,8 @@ export const acceptDayTrip = api(
   { expose: true, method: "POST", path: "/trip-planner/plans/:planId/day-trip", auth: true },
   async (req: AcceptDayTripRequest): Promise<PlanResponse> => {
     const userId = requireUser();
-    const { leg, legIndex } = await legOf(req.planId, userId, req.legIndex);
-    const found = await suggestFor(leg);
+    const { leg, legIndex, ideas } = await legOf(req.planId, userId, req.legIndex);
+    const found = await suggestFor(leg, ideas);
 
     const suggestion = found.suggestion;
     if (!suggestion || suggestion.target.key !== req.key) {
@@ -301,7 +302,7 @@ interface FoundSuggestion {
  * what is being suggested, and the only way to guarantee that is for
  * both to work it out the same way.
  */
-async function suggestFor(leg: StoredLeg): Promise<FoundSuggestion> {
+async function suggestFor(leg: StoredLeg, ideas: boolean): Promise<FoundSuggestion> {
   const measure = measureThinPool({
     days: leg.days.map((day) => ({
       dayIndex: day.dayIndex,
@@ -311,6 +312,14 @@ async function suggestFor(leg: StoredLeg): Promise<FoundSuggestion> {
     })),
     pool: leg.pool,
   });
+
+  // A stay whose list the travellers make themselves (ideas plan,
+  // stage 1) is empty because nobody has added anything yet, not
+  // because the town does not carry its days: the measure has nothing
+  // to measure there.
+  if (ideas) {
+    return { measure, suggestion: null, note: "Eure Ideen füllen die Tage; einen Ausflug schlägt die App hier nicht vor." };
+  }
 
   // The days carry: there is nothing to suggest anything *for*, and
   // this is where most legs stop (§4.6 — no outing as a gap filler).
@@ -503,13 +512,13 @@ async function legOf(
   planId: number,
   userId: number,
   legIndex: number | undefined,
-): Promise<{ leg: StoredLeg; legIndex: number }> {
+): Promise<{ leg: StoredLeg; legIndex: number; ideas: boolean }> {
   const plan = await loadPlan(planId, userId);
   if (!plan) throw APIError.notFound("plan not found");
   const position = legIndex ?? 0;
   const leg = plan.legs.find((l) => l.position === position);
   if (!leg) throw APIError.notFound(`leg ${position} not found in this plan`);
-  return { leg, legIndex: position };
+  return { leg, legIndex: position, ideas: isIdeasTrip(plan.constraints) };
 }
 
 function requireUser(): number {

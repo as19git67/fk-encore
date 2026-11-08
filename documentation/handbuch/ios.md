@@ -231,9 +231,15 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 ### IOS-PLN-01 Reise anlegen und Aufenthalte planen
 
 - „Neue Reise“ (Name, Unterkunft, Länge, Datum) → „Planen“ öffnet den
-  Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen;
-  Kandidaten je Aufenthalt aus Ideen, Suche („Ort suchen“, „Hier, wo ich bin“) und
-  Entdecken („Gegend wählen“, „Andere Gegend…“).
+  Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen.
+- Eine neue Reise beginnt je Aufenthalt mit einer leeren Liste „Ideen“:
+  die App sucht und plant nichts selbst. Ideen kommen über „Ort suchen“,
+  „Hier, wo ich bin“, Entdecken („Gegend wählen“, „Andere Gegend…“), Teilen
+  aus Apple Karten oder Google Maps und „Aus den Ideen übernehmen“; von dort
+  legt man sie auf einen Tag. Wird die Reise neu geplant (Einstellung,
+  fester Termin, Reiseverlauf), bleiben die Stopps auf ihren Tagen; fällt
+  ein Tag weg, gehen seine Stopps zurück zu den Ideen. Reisen von vorher
+  behalten ihre Kandidaten.
 - Kürzt oder entfernt eine Änderung im Reiseverlauf schon geplante Tage,
   steht sie unter „Änderungen“ und lässt sich dort mit „Rückgängig“
   zurücknehmen: die alten Tage kommen genau so wieder, wie sie waren.

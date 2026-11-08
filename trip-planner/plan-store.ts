@@ -794,6 +794,10 @@ async function insertDays(
           // A stop the frame placed stays where it is (§7.3); the
           // solver's own choices are free to move.
           pinned: stop.pinned ?? false,
+          // A stop carried through a re-plan keeps why it was saved
+          // (ideas plan, stage 1, `carry-stops.ts`).
+          note: (stop as { note?: string | null }).note ?? null,
+          source_url: (stop as { sourceUrl?: string | null }).sourceUrl ?? null,
         });
       }
     }
@@ -1407,6 +1411,11 @@ export async function saveDayDetail(
   await db.update(tripPlanDays).set({ detailed: true }).where(eq(tripPlanDays.id, day.id));
 }
 
+/** Open a framed day for stops without putting any in (ideas plan, stage 1). */
+export async function markDayDetailed(dayId: number, db: Db = dbDefault): Promise<void> {
+  await db.update(tripPlanDays).set({ detailed: true }).where(eq(tripPlanDays.id, dayId));
+}
+
 async function rewriteDay(
   planId: number,
   legId: number,
@@ -1564,10 +1573,19 @@ export async function replanPlan(
           score: c.score,
           reasons: c.reasons,
           ...curationColumns(c),
+          // A stop that lost its day on a trip of ideas comes back as
+          // the idea it was (`carry-stops.ts`).
+          origin: (c as { origin?: string }).origin ?? "search",
+          note: (c as { note?: string | null }).note ?? null,
+          source_url: (c as { sourceUrl?: string | null }).sourceUrl ?? null,
         })),
       );
     }
-    await markCurationDue(leg.legId, db);
+    // The model orders what the search found; a list of ideas the
+    // travellers made themselves has nothing for it to do.
+    if (leg.pool.some((c) => ((c as { origin?: string }).origin ?? "search") === "search")) {
+      await markCurationDue(leg.legId, db);
+    }
   }
 }
 

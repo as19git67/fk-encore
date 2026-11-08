@@ -22,6 +22,10 @@ export default defineConfig({
       // A plan built in a test must not reach Wikimedia for its ranking
       // (trip-planner/fame-client.ts); the tests that cover it set a fake.
       TRIP_SPOT_FAME: "0",
+      // Most trip tests were written for trips whose pool the region search
+      // fills (trips from before the ideas plan keep that behaviour); the
+      // tests of a trip that starts empty pass `startEmpty: true`.
+      TRIP_START_EMPTY: "0",
       DB_TYPE: "postgres",
       // Postgres connection details fall back to a local instance but must
       // stay overridable from the real environment. `test.env` applies ONLY

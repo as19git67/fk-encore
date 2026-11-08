@@ -68,12 +68,21 @@ enum TripUserHome {
 }
 
 /// The settings a trip was planned with.
+extension TripPlan {
+    /// Whether this trip's stays start with an empty list of ideas.
+    var isIdeasTrip: Bool { constraints?.ideas == true }
+}
+
 struct TripConstraints: Codable, Sendable {
     var pace: String?
     var categories: [String]?
     var interests: [String]?
     var maxWalkMinutes: Int?
     var group: Group?
+    /// A trip whose stays start with an empty list (ideas plan,
+    /// stage 1): the app says "Ideen" for the stay's list, and nothing
+    /// in it was put there by the planner. Absent on trips from before.
+    var ideas: Bool?
 
     struct Group: Codable, Sendable {
         var withChildren: Bool?
