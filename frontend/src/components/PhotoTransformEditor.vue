@@ -36,12 +36,12 @@ import {
 import {
   buildRecipeSvgFilter,
   recipeToCssFilter,
-  recipeToCssTransform,
   type PhotoTransformRecipe,
 } from '../utils/photoTransformRecipe'
 import { invalidateUserTransform } from '../composables/useUserPhotoTransform'
 import { markPhotoTransformed } from '../composables/useTransformedPhotosIndex'
 import PhotoCropper from './PhotoCropper.vue'
+import { rotateCrop, turnSwapsAxes, unrotateCrop } from '../utils/cropperFit'
 
 const props = defineProps<{
   /** Open / close state — use v-model:visible. */
@@ -106,12 +106,25 @@ const svgFilterMarkup = computed(() =>
 const cssFilter = computed(() =>
   recipeToCssFilter(recipe.value, svgFilterId.value),
 )
-const cssTransform = computed(() => recipeToCssTransform(recipe.value))
 
 const imageAspect = computed(() => {
   if (!naturalWidth.value || !naturalHeight.value) return 1
   return naturalWidth.value / naturalHeight.value
 })
+
+/**
+ * Rotation the cropper shows. The recipe keeps the crop against the upright
+ * original (the server extracts first and turns afterwards), but the user
+ * crops what they see — the turned image. So the cropper gets the turned
+ * frame and every rectangle is turned on the way in and back on the way out.
+ * Holding Before/After shows the untouched original, unturned.
+ */
+const viewRotation = computed(() => (showOriginal.value ? 0 : recipe.value.rotation ?? 0))
+
+/** Pixel aspect of the image as shown in the cropper (after the turn). */
+const viewAspect = computed(() =>
+  turnSwapsAxes(viewRotation.value) ? 1 / imageAspect.value : imageAspect.value,
+)
 
 // Effective crop used by the cropper. We always pass a crop in so the
 // user has a rectangle to drag; if the user hasn't set one yet we show
@@ -121,8 +134,12 @@ const imageAspect = computed(() => {
 // on release.
 const effectiveCrop = computed(() => {
   if (showOriginal.value) return { x: 0, y: 0, w: 1, h: 1 }
-  return recipe.value.crop ?? { x: 0, y: 0, w: 1, h: 1 }
+  return rotateCrop(recipe.value.crop ?? { x: 0, y: 0, w: 1, h: 1 }, viewRotation.value)
 })
+
+function onCropperUpdate(c: PhotoTransformCrop) {
+  recipe.value.crop = unrotateCrop(c, viewRotation.value)
+}
 
 // Crop aspect ratio passed to the cropper as a lock.
 //
@@ -137,16 +154,17 @@ const effectiveCrop = computed(() => {
 const cropAspectRatio = computed<number | null>(() => {
   if (showOriginal.value) return null
   if (selectedRatio.value === 'free') return null
-  const imgAR = imageAspect.value
+  const imgAR = viewAspect.value
   if (!imgAR) return null
   return aspectRatioToFloat(selectedRatio.value) / imgAR
 })
 
 const cropperImgStyle = computed(() => {
   if (showOriginal.value) return {}
+  // The turn itself is drawn by the cropper (`rotation`), which also
+  // turns the crop rectangle with it.
   return {
     filter: cssFilter.value || undefined,
-    transform: cssTransform.value || undefined,
   }
 })
 
@@ -154,6 +172,7 @@ const originalUrl = computed(() => getPhotoUrl(props.photoFilename))
 
 const hasSuggestionForRatio = computed(() => {
   if (selectedRatio.value === 'free') return false
+  if (turnSwapsAxes(recipe.value.rotation)) return false
   const s = bundle.value?.suggestion
   if (!s) return false
   return Boolean(s.crops[selectedRatio.value])
@@ -166,6 +185,8 @@ const hasSuggestionForRatio = computed(() => {
  * which one just gets a centred fallback.
  */
 function hasAiCropFor(ratio: PhotoTransformAspectRatio): boolean {
+  // Suggestions are for the upright image; a quarter turn swaps their ratio.
+  if (turnSwapsAxes(recipe.value.rotation)) return false
   return Boolean(bundle.value?.suggestion?.crops[ratio])
 }
 
@@ -214,7 +235,8 @@ function centredCropForRatio(
 ): PhotoTransformCrop | null {
   if (!naturalWidth.value || !naturalHeight.value) return null
   const cropAR = aspectRatioToFloat(ratio)
-  const imgAR = naturalWidth.value / naturalHeight.value
+  // The ratio is what the user sees, i.e. the turned image.
+  const imgAR = viewAspect.value
   // wn / hn = cropAR / imgAR.
   const r = cropAR / imgAR
   let w: number
@@ -226,12 +248,9 @@ function centredCropForRatio(
     w = r
     h = 1
   }
-  return {
-    x: (1 - w) / 2,
-    y: (1 - h) / 2,
-    w,
-    h,
-  }
+  // Centred in the turned frame is centred in the original too; only the
+  // axes swap.
+  return unrotateCrop({ x: (1 - w) / 2, y: (1 - h) / 2, w, h }, recipe.value.rotation ?? 0)
 }
 
 function aspectRatioToFloat(r: PhotoTransformAspectRatio): number {
@@ -247,10 +266,28 @@ function applyRatio(ratio: PhotoTransformAspectRatio | 'free') {
     return
   }
   // Prefer the AI suggestion's crop for this ratio, fall back to centred.
-  const suggested = bundle.value?.suggestion?.crops[ratio]
+  // The suggestion was computed for the upright image; turned by a quarter
+  // its ratio would come out swapped, so it only counts at 0° and 180°.
+  const suggested = turnSwapsAxes(recipe.value.rotation)
+    ? undefined
+    : bundle.value?.suggestion?.crops[ratio]
   recipe.value = {
     ...recipe.value,
     crop: suggested ?? centredCropForRatio(ratio),
+  }
+}
+
+/**
+ * Turn the image. The crop stays on the same part of the picture and turns
+ * with it; a ratio lock follows what the crop now shows (4:3 becomes 3:4).
+ */
+function setRotation(r: number) {
+  const swaps = turnSwapsAxes(r) !== turnSwapsAxes(recipe.value.rotation)
+  recipe.value.rotation = r
+  if (swaps && selectedRatio.value !== 'free') {
+    selectedRatio.value = recipe.value.crop
+      ? guessRatioFromCrop(recipe.value.crop) ?? 'free'
+      : 'free'
   }
 }
 
@@ -385,8 +422,9 @@ function guessRatioFromCrop(
   crop: PhotoTransformCrop,
 ): PhotoTransformAspectRatio | null {
   if (!naturalWidth.value || !naturalHeight.value) return null
-  const cropAR =
-    (crop.w * naturalWidth.value) / (crop.h * naturalHeight.value)
+  // Ratio of the result as shown, i.e. after the turn.
+  const pixelAR = (crop.w * naturalWidth.value) / (crop.h * naturalHeight.value)
+  const cropAR = turnSwapsAxes(recipe.value.rotation) ? 1 / pixelAR : pixelAR
   let best: PhotoTransformAspectRatio | null = null
   let bestErr = 0.05
   for (const opt of ratioOptions) {
@@ -460,10 +498,11 @@ onMounted(() => {
           v-if="naturalWidth > 0 && naturalHeight > 0"
           :src="originalUrl"
           :crop="effectiveCrop"
-          :image-aspect="imageAspect"
+          :image-aspect="viewAspect"
+          :rotation="viewRotation"
           :aspect-ratio="cropAspectRatio"
           :img-style="cropperImgStyle"
-          @update:crop="(c) => (recipe.crop = c)"
+          @update:crop="onCropperUpdate"
         />
         <!-- Hidden probe image: fires @load so we know the natural
              pixel dimensions before instantiating the cropper. -->
@@ -651,7 +690,7 @@ onMounted(() => {
               size="small"
               :severity="(recipe.rotation ?? 0) === r ? 'primary' : 'secondary'"
               :outlined="(recipe.rotation ?? 0) !== r"
-              @click="recipe.rotation = r"
+              @click="setRotation(r)"
             />
           </div>
         </section>

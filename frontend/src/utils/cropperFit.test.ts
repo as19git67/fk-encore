@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { containFit, cropToWrapper } from './cropperFit'
+import { containFit, cropToWrapper, rotateCrop, unrotateCrop, turnSwapsAxes } from './cropperFit'
 
 describe('containFit', () => {
   it('is the identity when the wrapper matches the image aspect', () => {
@@ -53,5 +53,44 @@ describe('cropToWrapper', () => {
     const fit = containFit(1600, 900, 16 / 9)
     const r = cropToWrapper({ x: 0.1, y: 0.2, w: 0.5, h: 0.6 }, fit)
     expect(r).toEqual({ left: 0.1, top: 0.2, width: 0.5, height: 0.6 })
+  })
+})
+
+describe('rotateCrop', () => {
+  const crop = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }
+
+  it('keeps the full frame full after any turn', () => {
+    for (const r of [0, 90, 180, 270]) {
+      const v = rotateCrop({ x: 0, y: 0, w: 1, h: 1 }, r)
+      expect(v.x).toBeCloseTo(0, 9)
+      expect(v.y).toBeCloseTo(0, 9)
+      expect(v.w).toBeCloseTo(1, 9)
+      expect(v.h).toBeCloseTo(1, 9)
+    }
+  })
+
+  it('turns clockwise like the server: the top-left corner ends top-right at 90°', () => {
+    const v = rotateCrop({ x: 0, y: 0, w: 0.2, h: 0.5 }, 90)
+    expect(v.x).toBeCloseTo(0.5, 9)
+    expect(v.y).toBeCloseTo(0, 9)
+    expect(v.w).toBeCloseTo(0.5, 9)
+    expect(v.h).toBeCloseTo(0.2, 9)
+  })
+
+  it('unrotateCrop undoes every turn', () => {
+    for (const r of [0, 90, 180, 270]) {
+      const back = unrotateCrop(rotateCrop(crop, r), r)
+      expect(back.x).toBeCloseTo(crop.x, 9)
+      expect(back.y).toBeCloseTo(crop.y, 9)
+      expect(back.w).toBeCloseTo(crop.w, 9)
+      expect(back.h).toBeCloseTo(crop.h, 9)
+    }
+  })
+
+  it('swaps axes only for quarter turns', () => {
+    expect(turnSwapsAxes(0)).toBe(false)
+    expect(turnSwapsAxes(90)).toBe(true)
+    expect(turnSwapsAxes(180)).toBe(false)
+    expect(turnSwapsAxes(270)).toBe(true)
   })
 })

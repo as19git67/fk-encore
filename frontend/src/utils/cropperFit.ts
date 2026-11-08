@@ -65,3 +65,41 @@ export function cropToWrapper(
     height: crop.h * fit.oh,
   }
 }
+
+/** Quarter turns, clockwise — the rotations the photo editor offers. */
+export type CropTurn = 0 | 90 | 180 | 270
+
+/** Normalise a stored rotation to a quarter turn (0 for anything unknown). */
+export function cropTurn(rotation: number | null | undefined): CropTurn {
+  if (!rotation || !Number.isFinite(rotation)) return 0
+  return ((((Math.round(rotation / 90) * 90) % 360) + 360) % 360) as CropTurn
+}
+
+/** True when the turn swaps width and height (90° and 270°). */
+export function turnSwapsAxes(rotation: number | null | undefined): boolean {
+  const t = cropTurn(rotation)
+  return t === 90 || t === 270
+}
+
+type Rect = { x: number; y: number; w: number; h: number }
+
+/**
+ * A crop as the user sees it once the image is turned. The recipe stores the
+ * crop against the upright original (the server extracts first and turns the
+ * result clockwise afterwards), so the cropper, which shows the turned image,
+ * needs the rectangle turned along with it.
+ */
+export function rotateCrop(crop: Rect, rotation: number | null | undefined): Rect {
+  const { x, y, w, h } = crop
+  switch (cropTurn(rotation)) {
+    case 90: return { x: 1 - y - h, y: x, w: h, h: w }
+    case 180: return { x: 1 - x - w, y: 1 - y - h, w, h }
+    case 270: return { x: y, y: 1 - x - w, w: h, h: w }
+    default: return { x, y, w, h }
+  }
+}
+
+/** Inverse of `rotateCrop`: a rectangle drawn on the turned image, back in original coords. */
+export function unrotateCrop(crop: Rect, rotation: number | null | undefined): Rect {
+  return rotateCrop(crop, (360 - cropTurn(rotation)) % 360)
+}

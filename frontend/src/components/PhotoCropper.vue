@@ -23,13 +23,22 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { PhotoTransformCrop } from '../utils/photoTransformRecipe'
 import { computeNextCrop, type CropHandle } from '../utils/photoCropDrag'
-import { containFit, cropToWrapper } from '../utils/cropperFit'
+import { containFit, cropToWrapper, cropTurn, turnSwapsAxes } from '../utils/cropperFit'
 
 const props = defineProps<{
   src: string
   crop: PhotoTransformCrop
-  /** Pixel aspect ratio of the image. Used to lay out the wrapper. */
+  /**
+   * Pixel aspect ratio of the image *as shown*, i.e. after `rotation`.
+   * Used to lay out the wrapper.
+   */
   imageAspect: number
+  /**
+   * Clockwise quarter turn the image is shown with (0/90/180/270). The
+   * cropper draws the image turned into the wrapper; `crop` is expected in
+   * the turned frame too, so the rectangle turns with the picture.
+   */
+  rotation?: number
   /** Crop aspect ratio (w/h) to lock to. null = free crop. */
   aspectRatio: number | null
   /** CSS to apply to the image element (filters, etc). */
@@ -86,6 +95,28 @@ const handleList: Exclude<CropHandle, 'body'>[] = ['nw', 'n', 'ne', 'e', 'se', '
 // Crop rect mapped from image coords onto the rendered-image rect inside the
 // wrapper (accounts for letterbox/pillarbox).
 const rectFrac = computed(() => cropToWrapper(props.crop, fit.value))
+
+/**
+ * The image element is laid out unturned, then turned around its centre so
+ * it fills the rendered-image rect. For 90°/270° its unturned box therefore
+ * has width and height swapped.
+ */
+const imgLayoutStyle = computed<CSSProperties>(() => {
+  const turn = cropTurn(props.rotation)
+  const f = fit.value
+  const swap = turnSwapsAxes(turn)
+  const shownW = wrapperW.value > 0 ? f.ow * wrapperW.value : 0
+  const shownH = wrapperH.value > 0 ? f.oh * wrapperH.value : 0
+  // Before the wrapper is measured fall back to percentages; with no turn
+  // they are exact, with a turn the next measurement corrects them.
+  const width = shownW > 0 ? `${swap ? shownH : shownW}px` : '100%'
+  const height = shownH > 0 ? `${swap ? shownW : shownH}px` : '100%'
+  return {
+    width,
+    height,
+    transform: `translate(-50%, -50%)${turn ? ` rotate(${turn}deg)` : ''}`,
+  }
+})
 
 const rectStyle = computed<CSSProperties>(() => ({
   left: `${rectFrac.value.left * 100}%`,
@@ -250,7 +281,7 @@ onBeforeUnmount(() => {
       :src="src"
       alt=""
       class="cropper-img"
-      :style="imgStyle"
+      :style="[imgStyle, imgLayoutStyle]"
       draggable="false"
     />
 
@@ -318,9 +349,10 @@ onBeforeUnmount(() => {
 }
 
 .cropper-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  object-fit: fill;
   display: block;
   pointer-events: none;
 }
