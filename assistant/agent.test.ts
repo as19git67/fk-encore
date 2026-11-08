@@ -257,6 +257,7 @@ describe("the loop", () => {
   it("budgets against the model's window, learnt from the first reply, and forgets the oldest first", async () => {
     __resetCalibrationForTests();
     // Eight earlier turns, each with a whole result of ~1000 estimated tokens.
+    // The window leaves room for the fixed prompt (rules and every area's examples) plus a few whole results.
     const history: ChatMessage[] = [];
     const historyDigests: Record<string, string> = {};
     for (let i = 0; i < 8; i++) {
@@ -268,9 +269,9 @@ describe("the loop", () => {
       );
       historyDigests[`h${i}`] = `[earlier result of x: turn ${i}]`;
     }
-    const { fn, requests } = scripted([{ ...answer("Ja."), usage: { n_ctx: 8000, prompt_tokens: 3000, completion_tokens: 2 } }]);
+    const { fn, requests } = scripted([{ ...answer("Ja."), usage: { n_ctx: 8500, prompt_tokens: 3000, completion_tokens: 2 } }]);
     const res = await runTurn({
-      user: USER, history, historyDigests, question: "Und?", tools: [], chat: fn, now: NOW, contextWindow: 8000,
+      user: USER, history, historyDigests, question: "Und?", tools: [], chat: fn, now: NOW, contextWindow: 8500,
     });
     const sent = requests[0]!.messages;
     // Every question stays; the oldest results shrank to their digests, the newest are whole.
@@ -280,7 +281,7 @@ describe("the loop", () => {
     expect(results.at(-1)).toBe("zeile 7 ".repeat(400));
     expect(res.context.digested).toBeGreaterThan(0);
     expect(res.context.digested).toBeLessThan(8);
-    expect(res.context.window).toBe(8000);
+    expect(res.context.window).toBe(8500);
     expect(res.context.keptTurns).toBe(8);
     __resetCalibrationForTests();
   });

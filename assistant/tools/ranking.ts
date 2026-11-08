@@ -75,6 +75,12 @@ export function rankRequires(orderKey = ORDER_KEY): Record<string, string[]> {
 }
 
 /** `group_by` and `per_group` for a tool's parameters, from its group table. */
+/** How a list tool's summary names its groups: from the same table as group_by, so a new unit shows in both. */
+export function groupSummary<G extends string>(groups: Record<G, string>): string {
+  const names = Object.keys(groups);
+  return `optionally the first per_group of every ${names.slice(0, -1).join(", ")} or ${names[names.length - 1]} (group_by)`;
+}
+
 export function groupProperties<G extends string>(groups: Record<G, string>): Record<string, unknown> {
   const names = Object.keys(groups) as G[];
   return {

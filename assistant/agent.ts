@@ -292,6 +292,7 @@ Rules:
 - Never do arithmetic yourself. Sums, counts and periods come from tools (transaction_totals, upcoming_payments, consumption_report print them). If no tool computed a number, do not state it.
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
 - The tools below are those of the areas this question seems to need. When it needs another area, call ${SWITCH_AREA_NAME}(area) first: that adds the area's rules and tools for this turn. Combine tools from different areas when the question needs it.
+- "Je Tag", "pro Monat", "je Person" is group_by of the list tool: one call goes through them and picks in each. Never say you cannot go through them one by one.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
 - When ${WRITE_PLAN_NAME} is among the tools, the question needs several steps: the first call writes the plan, every later round follows it step by step, and the plan's own status after each result says what comes next.

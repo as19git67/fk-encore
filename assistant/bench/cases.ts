@@ -350,6 +350,27 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "best-per-day-of-trip-distinct",
+    title: "Je Tag einer Reise die besten, nicht ähnlich, in ein neues Album",
+    question: "Nimm aus dem Urlaub in Beispielland im August 2024 von jedem Tag die 5 besten unterschiedlichen Fotos und mach daraus das Album \"Sommer\".",
+    expect: [
+      { tool: "list_photos", args: { place: { $contains: "Beispielland" }, date_from: "2024-08-01", date_to: "2024-08-31", rank_by: "quality", direction: "desc", group_by: "day", per_group: 5, distinct: true } },
+      { tool: "create_album", args: { name: { $contains: "Sommer" }, from_previous_result: true } },
+    ],
+    results: {
+      list_photos: {
+        rows: [
+          { group: "2024-08-03", id: 1201, taken: "2024-08-03", quality: "90%" },
+          { group: "2024-08-03", id: 1202, taken: "2024-08-03", quality: "86%" },
+          { group: "2024-08-04", id: 1210, taken: "2024-08-04", quality: "88%" },
+        ],
+        total: 3,
+        note: "ordered by quality descending, the first 5 rows of each day (2 groups), look-alikes left out. from_previous_result takes these 3 picked photos.",
+      },
+      create_album: { proposal: "Album „Sommer“ mit 3 Fotos anlegen", status: "proposed" },
+    },
+  },
+  {
     id: "fewest-comments-per-year",
     title: "Je Jahr das Foto mit den wenigsten Kommentaren",
     question: "Welches Foto mit Max hat in jedem Jahr die wenigsten Kommentare?",
