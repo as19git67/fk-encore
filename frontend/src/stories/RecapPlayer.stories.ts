@@ -79,3 +79,20 @@ export const FormatpaarLandscape: Story = {
     counterparts: { 100: PORTRAIT_SIDE },
   },
 }
+
+// A photo book played as a slideshow: every photo of a collage keeps its own
+// caption on its tile, never one caption for the whole slide.
+export const FotobuchCollage: Story = {
+  name: 'Fotobuch-Collage (Bildunterschrift je Foto)',
+  parameters: {
+    testViewport: { width: 844, height: 390 },
+  },
+  args: {
+    title: 'Sommer',
+    subtitle: null,
+    plan: [
+      { photos: [makePhoto(200, 0), makePhoto(201, 5)], captions: ['Max am Beispielsee', 'Erika im Garten'] },
+      { photos: [makePhoto(202, 10)], captions: ['Zuhause'] },
+    ],
+  },
+}

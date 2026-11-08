@@ -25,6 +25,9 @@ export const MAX_CHAPTER_TITLE_LENGTH = 60;
 /** Wikipedia's lead is cut to this many characters before it goes into a prompt. */
 export const MAX_ARTICLE_CHARS = 700;
 
+/** What a photo taken at home is called in a caption or a chapter's places: never the street. */
+export const HOME_PLACE = "Zuhause";
+
 // ── captions ────────────────────────────────────────────────────────────
 
 export interface PoiFacts {
@@ -170,7 +173,8 @@ export function captionWorthKeeping(caption: string, ctx: CaptionContext): boole
 export function captionFacts(ctx: CaptionContext): string[] {
   const lines: string[] = [];
   if (ctx.when) lines.push(`Aufgenommen: ${ctx.when}`);
-  if (ctx.place) lines.push(`Ort: ${ctx.place}`);
+  if (ctx.place === HOME_PLACE) lines.push("Ort: zuhause, bei den Besitzern des Fotobuchs daheim (sag „zuhause“, nie eine Straße oder Adresse)");
+  else if (ctx.place) lines.push(`Ort: ${ctx.place}`);
   if (ctx.poi) {
     lines.push(`Sehenswürdigkeit im Bild: ${ctx.poi.name}${ctx.poi.description ? ` (${ctx.poi.description})` : ""}`);
     if (ctx.poi.extract) lines.push(`Aus Wikipedia: ${ctx.poi.extract}`);
@@ -239,7 +243,7 @@ export function articleExtract(text: string | null | undefined): string | null {
 // ── chapter titles ──────────────────────────────────────────────────────
 
 export interface ChapterContext {
-  /** The title the date rule gave it, e.g. "Tag 2 · Musterstadt". */
+  /** The title the date rule gave it, e.g. "Tag 2 · Musterstadt". Not shown to the model: it would copy "Tag". */
   ruleTitle: string;
   /** The date line under the title, e.g. "Montag, 3. Juni 2024". */
   dates: string | null;
@@ -260,20 +264,38 @@ export const CHAPTER_TITLE_SCHEMA: Record<string, unknown> = {
 
 const CHAPTER_SYSTEM =
   "Du schlägst Kapitelüberschriften für ein privates Fotobuch auf Deutsch vor. " +
-  "Eine Überschrift ist kurz (zwei bis sechs Wörter), anschaulich und trifft, was das Kapitel zeigt. " +
-  "Du nutzt nur die Fakten, die du bekommst, und erfindest keine Namen, Orte oder Ereignisse. " +
-  "Kein Datum in der Überschrift, es steht schon darunter. Keine Anführungszeichen, keine Emojis.";
+  "Eine Überschrift ist kurz (zwei bis sechs Wörter) und sachlich: sie nennt, was man den Fotos nicht ansieht — " +
+  "den Ort, die Sehenswürdigkeit, die Personen, den Anlass, eine Tatsache aus den Bildunterschriften. " +
+  "Lieber nüchtern und genau als blumig: \"Altstadt und Dom von Musterstadt\" statt \"Tage voller Entdeckungen\". " +
+  "Sie beginnt nie mit \"Tag\" oder \"Tage\" und nennt weder die Zahl der Tage noch die Zahl der Fotos. " +
+  "Kein Datum in der Überschrift, es steht schon darunter. " +
+  "Du nutzt nur die Fakten, die du bekommst, und erfindest keine Namen, Orte oder Ereignisse. Keine Anführungszeichen, keine Emojis.";
 
-export function buildChapterTitlePrompt(ctx: ChapterContext): LlmPrompt {
+/** Whether there is anything to title a chapter with beyond its dates; without, the rule's title stays. */
+export function chapterHasFacts(ctx: ChapterContext): boolean {
+  return ctx.places.length > 0 || ctx.pois.length > 0 || ctx.people.length > 0 || ctx.captions.length > 0;
+}
+
+/** Why a proposed title was turned down, said back to the model on its second try. */
+export type ChapterTitleRejection = "date" | "day-word" | "count";
+
+export function buildChapterTitlePrompt(ctx: ChapterContext, rejected?: { title: string; reason: ChapterTitleRejection } | null): LlmPrompt {
+  const why: Record<ChapterTitleRejection, string> = {
+    date: "sie enthält ein Datum",
+    "day-word": "sie beginnt mit „Tag“ oder „Tage“",
+    count: "sie nennt eine Anzahl von Tagen oder Fotos",
+  };
   const lines = [
     "Schlage eine Überschrift für dieses Kapitel vor.",
-    `Bisheriger Titel: ${ctx.ruleTitle}`,
     ctx.dates ? `Zeitraum (steht unter der Überschrift): ${ctx.dates}` : "",
-    ctx.places.length ? `Orte: ${ctx.places.join(", ")}` : "",
+    ctx.places.length
+      ? `Orte: ${ctx.places.join(", ")}${ctx.places.includes(HOME_PLACE) ? " (Zuhause = bei den Besitzern daheim; sag „zuhause“, nie eine Straße)" : ""}`
+      : "",
     ctx.pois.length ? `Sehenswürdigkeiten: ${ctx.pois.join(", ")}` : "",
     ctx.people.length ? `Personen: ${ctx.people.join(", ")}` : "",
     ctx.captions.length ? "Bildunterschriften des Kapitels:" : "",
     ...ctx.captions.map((c) => `- ${c}`),
+    rejected ? `Dein Vorschlag „${rejected.title}“ geht nicht, weil ${why[rejected.reason]}. Schlage einen anderen vor.` : "",
     'Antworte als JSON-Objekt {"title": "…"}.',
   ];
   return { system: CHAPTER_SYSTEM, prompt: lines.filter(Boolean).join("\n"), schema: CHAPTER_TITLE_SCHEMA };
@@ -281,13 +303,30 @@ export function buildChapterTitlePrompt(ctx: ChapterContext): LlmPrompt {
 
 /** A date in the title repeats the line under it ("3. Juni", "2024", "03.06."). */
 const DATE_IN_TITLE = /\b\d{1,2}\.\s?(?:\d{1,2}\.|Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)|\b(?:19|20)\d{2}\b/i;
+/** "Tage am See", "Tag der Ankunft": the opener the model falls back on when it has nothing to say. */
+const DAY_WORD_START = /^(?:ein(?:ige)?\s+|zwei\s+|drei\s+|vier\s+|fünf\s+|\d+\s+)?tag(?:e|en)?\b/i;
+/** How many days or photos: the span is under the title, the count says nothing. */
+const COUNT_IN_TITLE = /\b(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|zwölf|viele|einige)\s+(?:tagen?|nächten?|fotos|bildern?|aufnahmen)\b/i;
 
-export function parseChapterTitle(raw: unknown): string | null {
+/** Why a chapter title is not kept, or null when it is fine. */
+export function chapterTitleRejection(title: string): ChapterTitleRejection | null {
+  if (DATE_IN_TITLE.test(title)) return "date";
+  if (DAY_WORD_START.test(title)) return "day-word";
+  if (COUNT_IN_TITLE.test(title)) return "count";
+  return null;
+}
+
+/** The cleaned title the model proposed, whether or not it may be kept. */
+export function proposedChapterTitle(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
   const title = cleanText((raw as Record<string, unknown>).title, MAX_CHAPTER_TITLE_LENGTH);
-  if (!title) return null;
-  const clean = title.replace(/[.!]+$/, "").trim();
-  if (!clean || DATE_IN_TITLE.test(clean)) return null;
+  const clean = title?.replace(/[.!]+$/, "").trim();
+  return clean || null;
+}
+
+export function parseChapterTitle(raw: unknown): string | null {
+  const clean = proposedChapterTitle(raw);
+  if (!clean || chapterTitleRejection(clean)) return null;
   return clean;
 }
 

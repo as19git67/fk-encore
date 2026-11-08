@@ -36,8 +36,9 @@ describe('photo book slideshow', () => {
     expect(slides.map((s) => s.photos.map((p) => p.id))).toEqual([[1], [2, 3], [4, 7], [5, 6]])
     expect(slides[0]).toMatchObject({ chapterTitle: 'Am Beispielsee', chapterSubtitle: 'Juni' })
     // A page without captions shows none; an opener without a photo hands its title on.
-    expect(slides[1]!.caption).toBeNull()
+    expect(slides[1]!.captions).toEqual([null, null])
     expect(slides[2]!.chapterTitle).toBeNull()
-    expect(slides[3]).toMatchObject({ chapterTitle: 'Musterstadt', caption: 'Alter Turm' })
+    // Each photo keeps its own caption: the turm is the second photo, not the slide.
+    expect(slides[3]).toMatchObject({ chapterTitle: 'Musterstadt', captions: [null, 'Alter Turm'] })
   })
 })

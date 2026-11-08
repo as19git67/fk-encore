@@ -7,15 +7,17 @@
  * hands its title to the next slide. A page of one, two or three photos is a
  * single photo, a duo or a trio; a page of four or more is split into
  * collages of two or three, so no photo is lost and none gets a tile too
- * small to see. A slide carries the first caption of its photos when the page
- * shows captions — what the printed page would say.
+ * small to see. When the page shows captions, every photo keeps its own —
+ * what the printed page says under it — and the player shows it on that
+ * photo, never one caption for the whole slide.
  */
 import type { Photo } from '../api/photos'
 import type { PhotoBook, PhotoBookPage } from '../api/photoBooks'
 
 export interface PlanSlide {
   photos: Photo[]
-  caption?: string | null
+  /** One per photo, in the same order; null where a photo has none. */
+  captions?: (string | null)[]
   chapterTitle?: string | null
   chapterSubtitle?: string | null
 }
@@ -60,10 +62,9 @@ export function photoBookSlideshow(book: PhotoBook): PlanSlide[] {
     for (const size of chunkSizes(slots.length)) {
       const group = slots.slice(at, at + size)
       at += size
-      const caption = page.captions ? group.find((s) => s.caption?.trim())?.caption?.trim() ?? null : null
       out.push({
         photos: group.map((s) => slotPhoto(s, book.created_at)),
-        caption,
+        captions: group.map((s) => (page.captions ? s.caption?.trim() || null : null)),
         chapterTitle: pendingChapter?.title ?? null,
         chapterSubtitle: pendingChapter?.subtitle ?? null,
       })

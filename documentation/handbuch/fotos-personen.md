@@ -340,7 +340,14 @@ und PDF.
      Layouts), „Vorschläge holen“.
 - **Ergebnis:** Vorschläge erscheinen neben den Kapiteln und als
   Unterschriften; „Wie oft du Layouts geändert hast“ zeigt die Statistik.
+  Kapitelüberschriften sind sachlich (Ort, Sehenswürdigkeit, Personen,
+  Anlass), beginnen nie mit „Tag“/„Tage“ und nennen keine Zahl von Tagen
+  oder Fotos; unter der Überschrift steht die Zeitspanne (mehrere Tage
+  als Datumsbereich, ein Tag mit Uhrzeit des ersten bis letzten Fotos).
+  Fotos im Umkreis von 200 m um das Zuhause aus der Reiseplanung heißen
+  „Zuhause“, nie die Straße.
 - **Fehler und Grenzfälle:** Läuft als Job; der Dialog zeigt den Stand.
+  Ohne hinterlegtes Zuhause gilt der Ort des Fotos.
 - **Test:** –
 
 ### FOT-FBD-08 Als PDF ausgeben
@@ -363,7 +370,10 @@ und PDF.
 - **Schritte:**
   1. Drücken.
 - **Ergebnis:** Player wie bei Rückblicken spielt das Buch Seite für
-  Seite.
+  Seite. Eine Kapitelüberschrift bekommt drei Sekunden eigene Zeit über
+  dem abgedunkelten Foto und ist verschwunden, bevor das Foto seine volle
+  Zeit allein spielt. Jede Bildunterschrift steht am eigenen Foto: bei
+  einem Einzelbild unten, in einer Collage auf der jeweiligen Kachel.
 - **Fehler und Grenzfälle:** keine
 - **Test:** –
 
