@@ -5,7 +5,7 @@ import * as path from "path";
 import sharp from "sharp";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
-import { albumPhotos, albums, faces, photoBook, photoCuration, photos, users } from "../db/schema";
+import { albumPhotos, albums, faces, photoBook, photoCuration, photoTransforms, photos, users } from "../db/schema";
 import { createUserLogic } from "../user/user.service";
 import * as service from "./photo.service";
 import {
@@ -18,6 +18,8 @@ import {
   cellRect,
   chapterSubtitle,
   chooseLayout,
+  editMisfit,
+  findBookLayout,
   formatDayRange,
   isRecognisableFace,
   limitPhotos,
@@ -30,6 +32,7 @@ import {
 import {
   createPhotoBook,
   deletePhotoBook,
+  fitPhotoBookToEdits,
   getPhotoBookView,
   listPhotoBooks,
   loadPhotoBook,
@@ -165,6 +168,33 @@ describe("photo book pages", () => {
   });
 });
 
+describe("photo book pages after an edit", () => {
+  const stack = findBookLayout("photos", 2, "stack")!;
+  const landscape = (id: number) => ({ ...photo(id, null), originalWidth: 3000, originalHeight: 2000 });
+  const turned = (id: number) => ({ ...photo(id, null, { width: 2000, height: 3000 }), originalWidth: 3000, originalHeight: 2000 });
+
+  it("leaves a page alone when no photo changed its shape", () => {
+    expect(editMisfit("a4-landscape", "photos", stack, "rule", [landscape(1), landscape(2)])).toBeNull();
+  });
+
+  it("lays out again a page that turned photos no longer fit, and only says so for the user's own layout", () => {
+    // Two photos turned upright in two wide strips: side by side cuts far less.
+    expect(editMisfit("a4-landscape", "photos", stack, "rule", [turned(1), turned(2)])).toBe("relayout");
+    expect(editMisfit("a4-landscape", "photos", stack, "llm", [turned(1), turned(2)])).toBe("relayout");
+    expect(editMisfit("a4-landscape", "photos", stack, "user", [turned(1), turned(2)])).toBe("own_layout");
+  });
+
+  it("does not touch a page the edit fits as well as any other layout", () => {
+    const side = findBookLayout("photos", 2, "side")!;
+    expect(editMisfit("a4-landscape", "photos", side, "rule", [turned(1), turned(2)])).toBeNull();
+  });
+
+  it("never touches an opener", () => {
+    const opener = findBookLayout("opener", 1, "opener")!;
+    expect(editMisfit("a4-landscape", "opener", opener, "rule", [turned(1)])).toBeNull();
+  });
+});
+
 describe("photo book service", () => {
   let user: { id: number };
   let other: { id: number };
@@ -267,6 +297,44 @@ describe("photo book service", () => {
     await updatePhotoBook(user.id, id, { coverPhotoId: anyPhoto });
     expect((await getPhotoBookView(user.id, id)).cover_photo_id).toBe(anyPhoto);
     await expect(updatePhotoBook(user.id, id, { coverPhotoId: 999999 })).rejects.toThrow(/cover/);
+  });
+
+  it("shows the owner's edit and lays out on request the pages it no longer fits", async () => {
+    const list = [];
+    for (let i = 0; i < 8; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`, { auto_crop: { x: 0.2, y: 0.1 } }));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id) });
+    let view = await getPhotoBookView(user.id, id);
+    expect(view.edit_misfit_count).toBe(0);
+    expect(view.pages.every((p) => p.edit_misfit === null)).toBe(true);
+
+    // Every photo turned upright; somebody else's edit counts for nobody but them.
+    await db.insert(photoTransforms).values(list.map((p) => ({ photo_id: p.id, user_id: user.id, source: "user", rotation: 90 })));
+    await db.insert(photoTransforms).values({ photo_id: list[0].id, user_id: other.id, source: "user", rotation: 180 });
+    view = await getPhotoBookView(user.id, id);
+    const slot = view.pages.flatMap((p) => p.slots)[0];
+    expect(slot.edited_at).not.toBeNull();
+    expect(slot.auto_crop).toEqual({ x: 0.2, y: 0.1 });
+    expect(slot.focal).toEqual({ x: 0.9, y: 0.2 });
+    expect(view.cover_edited_at).not.toBeNull();
+    expect(view.edit_misfit_count).toBeGreaterThan(0);
+
+    // A page whose layout the user chose keeps it.
+    const own = view.pages.find((p) => p.edit_misfit === "relayout")!;
+    await setPhotoBookPageLayout(user.id, id, own.id, own.layout_options.find((o) => o.id !== own.layout)!.id);
+    view = await getPhotoBookView(user.id, id);
+    const ownLayout = view.pages.find((p) => p.id === own.id)!.layout;
+    const toFit = view.edit_misfit_count;
+
+    expect(await fitPhotoBookToEdits(user.id, id)).toBe(toFit);
+    view = await getPhotoBookView(user.id, id);
+    expect(view.edit_misfit_count).toBe(0);
+    expect(view.pages.find((p) => p.id === own.id)!.layout).toBe(ownLayout);
+    expect(view.photo_count).toBe(8);
+    expect(await fitPhotoBookToEdits(user.id, id)).toBe(0);
+
+    // The PDF cuts the edited photo around the focal point of the edit.
+    const book = toRenderBook(await loadPhotoBook(user.id, id));
+    expect(book.pages.flatMap((p) => p.slots).find((s) => s.photoId === slot.photo_id)!.focal).toEqual({ x: 0.9, y: 0.2 });
   });
 
   it("repairs pages whose photo was deleted, and rebuilds from the source", async () => {

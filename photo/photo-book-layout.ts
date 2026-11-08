@@ -578,6 +578,63 @@ export function relayoutPage(format: PhotoBookFormat, kind: PageKind, photos: Bo
   return choice ? { kind, layout: choice.layout.id, photoIds: choice.photos.map((p) => p.id) } : null;
 }
 
+// ── edited photos ───────────────────────────────────────────────────────
+
+/** A photo on a page, as edited and as it was before. */
+export interface EditedBookPhoto extends BookPhoto {
+  /** The original's size; differs from `width`/`height` when an edit crops or turns it. */
+  originalWidth: number | null;
+  originalHeight: number | null;
+}
+
+/** An edit changes a photo's shape when its aspect moves by more than this (log ratio, ≈ 5 %). */
+const SHAPE_CHANGE = 0.05;
+/** A page is worth laying out again when that cuts this much less of its photos on average. */
+export const EDIT_MISFIT_MARGIN = 0.05;
+
+/** Whether an edit gave the photo another shape (turned it, or cropped it to another aspect). */
+export function shapeChanged(p: EditedBookPhoto): boolean {
+  if (!p.width || !p.height || !p.originalWidth || !p.originalHeight) return false;
+  return Math.abs(Math.log((p.width / p.height) / (p.originalWidth / p.originalHeight))) > SHAPE_CHANGE;
+}
+
+/** How much a layout cuts away of its photos (in cell order), on average. */
+export function pageCropLoss(format: PhotoBookFormat, layout: BookLayout, photos: Pick<BookPhoto, "width" | "height">[]): number {
+  if (!photos.length) return 0;
+  let loss = 0;
+  photos.forEach((p, i) => {
+    const c = layout.cells[i];
+    if (c) loss += cropLoss(photoAspect(p), cellAspect(format, layout, c));
+  });
+  return loss / photos.length;
+}
+
+/**
+ * Whether a page no longer fits photos that were edited after it was laid out,
+ * and what to do about it. A page qualifies when one of its photos changed its
+ * shape and the rule's layout for the photos as they are now cuts clearly
+ * less: "relayout" when the rule (or the model) chose the layout, so "Seiten
+ * anpassen" lays it out again; "own_layout" when the user chose it, which
+ * stays — the page only says so. Openers have one layout and never qualify.
+ */
+export function editMisfit(
+  format: PhotoBookFormat,
+  kind: PageKind,
+  layout: BookLayout,
+  layoutSource: "rule" | "llm" | "user",
+  photos: EditedBookPhoto[],
+): "relayout" | "own_layout" | null {
+  if (kind !== "photos" || !photos.some(shapeChanged)) return null;
+  const draft = relayoutPage(format, kind, photos);
+  if (!draft) return null;
+  const next = findBookLayout(kind, draft.photoIds.length, draft.layout);
+  if (!next) return null;
+  const byId = new Map(photos.map((p) => [p.id, p]));
+  const nextLoss = pageCropLoss(format, next, draft.photoIds.map((id) => byId.get(id)!));
+  if (nextLoss >= pageCropLoss(format, layout, photos) - EDIT_MISFIT_MARGIN) return null;
+  return layoutSource === "user" ? "own_layout" : "relayout";
+}
+
 // ── captions on a page ──────────────────────────────────────────────────
 
 /** A caption as compared with the others of its page: case, spaces and punctuation aside. */

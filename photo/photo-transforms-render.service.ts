@@ -134,6 +134,8 @@ export async function renderPhotoWithRecipe(
   const W = meta.width ?? 0;
   const H = meta.height ?? 0;
 
+  // The photo book reads the same order (crop, then rotation) from
+  // photo-edit-geometry.ts to lay out an edited photo; change both together.
   // Two-stage pipeline because sharp collapses subsequent .rotate() calls.
   // Stage 1: EXIF-aware auto-rotate + extract crop, emit an intermediate
   // buffer. Stage 2: user rotation + colour ops + resize. The intermediate

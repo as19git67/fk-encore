@@ -74,7 +74,7 @@ export function toRenderBook(loaded: LoadedBook): RenderBook {
     format: loaded.format,
     title: loaded.book.title,
     subtitle: loaded.book.subtitle,
-    cover: loaded.cover ? { photoId: loaded.cover.photo_id, focal: loaded.cover.auto_crop } : null,
+    cover: loaded.cover ? { photoId: loaded.cover.photo_id, focal: loaded.cover.focal } : null,
     pages: loaded.pages.map((p) => {
       const ch = p.chapter_id != null ? chapters.get(p.chapter_id) : undefined;
       const texts = p.photos.map((s) => loaded.captions.get(s.photo_id)?.text ?? null);
@@ -85,7 +85,7 @@ export function toRenderBook(loaded: LoadedBook): RenderBook {
         chapterSubtitle: p.kind === "opener" ? ch?.subtitle ?? null : null,
         captioned: pageCaptioned(loaded, p),
         // A caption that repeats one above it on the page is printed once.
-        slots: p.photos.map((s, i) => ({ photoId: s.photo_id, focal: s.auto_crop, caption: repeats[i] ? null : texts[i] })),
+        slots: p.photos.map((s, i) => ({ photoId: s.photo_id, focal: s.focal, caption: repeats[i] ? null : texts[i] })),
       };
     }),
     bleedMm: settings.bleed_mm,
