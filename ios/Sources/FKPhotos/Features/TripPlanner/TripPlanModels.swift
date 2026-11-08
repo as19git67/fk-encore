@@ -71,6 +71,14 @@ enum TripUserHome {
 extension TripPlan {
     /// Whether this trip's stays start with an empty list of ideas.
     var isIdeasTrip: Bool { constraints?.ideas == true }
+    /// The vote ring, the fairness and „Damit neu planen“ (stage 7).
+    var isVoting: Bool { constraints?.isVoting ?? true }
+}
+
+extension TripConstraints {
+    /// Off on a trip of ideas unless somebody switched it on; on for a
+    /// trip from before, whose votes were already in use.
+    var isVoting: Bool { voting ?? (ideas != true) }
 }
 
 struct TripConstraints: Codable, Sendable {
@@ -83,6 +91,9 @@ struct TripConstraints: Codable, Sendable {
     /// stage 1): the app says "Ideen" for the stay's list, and nothing
     /// in it was put there by the planner. Absent on trips from before.
     var ideas: Bool?
+    /// Whether the travellers vote on the list (ideas plan, stage 7).
+    /// Absent means the default: off on a trip of ideas, on before.
+    var voting: Bool?
 
     struct Group: Codable, Sendable {
         var withChildren: Bool?
@@ -279,9 +290,37 @@ struct TripDay: Codable, Identifiable, Sendable {
     /// every ordinary day, which stays at the quarters. Optional so a
     /// response from an older server still decodes.
     var anchor: TripDayAnchor?
+    /// Breaks on a day of ideas (ideas plan, stage 4): a label and
+    /// minutes at a place in the day's line, no venue.
+    var breaks: [TripDayBreak]? = nil
+    /// The day of ideas on the clock, computed by the server from the
+    /// order, the ways and the opening hours. Nil on other trips.
+    var window: TripDayWindow? = nil
+    var plannedMinutes: Int? = nil
+    var waitMinutes: Int? = nil
+    var freeMinutes: Int? = nil
+    var overrunMinutes: Int? = nil
 
     /// True when the day was kept free rather than left unplanned.
     var isBuffer: Bool { !(bufferReason ?? "").isEmpty }
+}
+
+/// "Mittag", 60 minutes, after the second stop (ideas plan, stage 4).
+struct TripDayBreak: Codable, Identifiable, Sendable, Equatable {
+    let id: String
+    let label: String
+    let minutes: Int
+    let blockId: String
+    /// Where in the block's line, counting stops and breaks from zero.
+    let position: Int
+    var etaMinutes: Int? = nil
+}
+
+/// The part of the day its spots block holds, minutes past midnight.
+struct TripDayWindow: Codable, Sendable, Equatable {
+    let startMinutes: Int
+    let endMinutes: Int
+    var minutes: Int { max(0, endMinutes - startMinutes) }
 }
 
 /// A day trip's destination (§4.5).
@@ -551,6 +590,12 @@ struct TripStop: Codable, Identifiable, Sendable {
     var openingHours: String? = nil
     /// Its opening hours say closed on the date of its day.
     var closedThatDay: Bool? = nil
+    /// When the visit begins, estimated from the order (stage 4).
+    var etaMinutes: Int? = nil
+    /// Minutes waited at the door before it.
+    var waitMinutes: Int? = nil
+    /// At this hour it is not open for the whole visit, or the ticket is missed.
+    var outsideHours: Bool? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }

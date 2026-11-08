@@ -66,7 +66,8 @@ struct TripPoolView: View {
     /// Voting belongs to the list as such. Opened to fill one block,
     /// the screen has one question — which spot goes here — and the
     /// rings would only be in the way.
-    private var votes: Bool { placeInto == nil }
+    /// Off unless the trip votes at all (ideas plan, stage 7).
+    private var votes: Bool { placeInto == nil && viewModel.plan?.isVoting == true }
 
     private func ballotEntry(_ osmRef: String) -> TripBallotEntry? {
         guard votes else { return nil }
@@ -213,8 +214,14 @@ struct TripPoolView: View {
                 } else if matches(in: leg).isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
+                    // Food is a list of its own on a trip of ideas
+                    // (stage 6): never ordered into a day.
+                    let found = matches(in: leg)
+                    let food = ideas ? found.filter { TripBlockTargets.mealCategories.contains($0.category) } : []
+                    let rest = food.isEmpty ? found : found.filter { !TripBlockTargets.mealCategories.contains($0.category) }
+                    if !rest.isEmpty {
                     Section {
-                        ForEach(matches(in: leg)) { candidate in
+                        ForEach(rest) { candidate in
                             row(candidate, leg: leg)
                         }
                     } header: {
@@ -229,6 +236,19 @@ struct TripPoolView: View {
                         }
                     } footer: {
                         Text(poolFooter)
+                    }
+                    }
+                    if !food.isEmpty {
+                        Section {
+                            ForEach(food) { candidate in
+                                row(candidate, leg: leg)
+                            }
+                        } header: {
+                            Text("Essen & Trinken")
+                        } footer: {
+                            Text("Kommt nie in die vorgeschlagene Reihenfolge. Bei „Jetzt aussuchen“ an einer Pause "
+                                 + "und bei „Essen in der Nähe“ stehen eure Ideen zuerst.")
+                        }
                     }
                 }
                 let planned = plannedEntries(in: leg)

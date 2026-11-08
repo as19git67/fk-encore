@@ -28,6 +28,8 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { displayName } from "./readable-name";
+import { loadPlan } from "./plan-store";
+import { haversineMeters } from "./travel";
 
 /** Walking distance for a meal, not a search across town. */
 const DEFAULT_RADIUS_M = 1_000;
@@ -61,6 +63,13 @@ export interface NearbyFoodRequest {
   /** Keep only places tagged step-free. */
   wheelchair?: boolean;
   limit?: number;
+  /**
+   * The trip whose own food ideas come first (ideas plan, stage 6):
+   * every restaurant or café on its list within the radius, marked as
+   * the travellers' idea, nearest first, then the map's list as always.
+   * The filters do not apply to them: somebody chose that place already.
+   */
+  planId?: number;
 }
 
 export interface FoodPlace {
@@ -86,6 +95,10 @@ export interface FoodPlace {
   /** Reaching them without a map app (§9.1). */
   phone: string | null;
   website: string | null;
+  /** One of the trip's own food ideas (stage 6); absent for the map's. */
+  idea?: boolean;
+  /** Why it was saved, for an idea. */
+  note?: string | null;
 }
 
 export interface NearbyFoodResponse {
@@ -99,7 +112,7 @@ export interface NearbyFoodResponse {
 export const nearbyFood = api(
   { expose: true, method: "POST", path: "/trip-planner/food", auth: true },
   async (req: NearbyFoodRequest): Promise<NearbyFoodResponse> => {
-    requireUser();
+    const userId = requireUser();
     const position = validatePosition(req.position);
     const radiusM = validateRadius(req.radiusM);
     const limit = validateLimit(req.limit);
@@ -123,12 +136,14 @@ export const nearbyFood = api(
       limit: Math.min(MAX_LIMIT * 4, limit * 4),
     });
 
-    const filtered = page.spots.filter((spot) => matches(spot, req));
+    const ideas = req.planId === undefined ? [] : await foodIdeas(req.planId, userId, position, radiusM, categories);
+    const theirs = new Set(ideas.map((idea) => idea.osmRef));
+    const filtered = page.spots.filter((spot) => matches(spot, req) && !theirs.has(spot.osmRef));
 
     return {
       region: region.postgresDb,
-      places: filtered.slice(0, limit).map(toFoodPlace),
-      consideredCount: page.spots.length,
+      places: [...ideas, ...filtered.slice(0, Math.max(0, limit - ideas.length)).map(toFoodPlace)],
+      consideredCount: page.spots.length + ideas.length,
     };
   },
 );
@@ -148,6 +163,48 @@ function matches(spot: GeoPoiSearchSpot, req: NearbyFoodRequest): boolean {
   // answer for someone deciding, but not what "step-free" was asked for.
   if (req.wheelchair && spot.wheelchair !== "yes") return false;
   return true;
+}
+
+/** The trip's restaurants and cafés within the radius, nearest first. */
+async function foodIdeas(
+  planId: number,
+  userId: number,
+  position: { lat: number; lon: number },
+  radiusM: number,
+  categories: readonly string[],
+): Promise<FoodPlace[]> {
+  const plan = await loadPlan(planId, userId);
+  if (!plan) throw APIError.notFound("plan not found");
+  const seen = new Set<string>();
+  const out: FoodPlace[] = [];
+  for (const leg of plan.legs) {
+    for (const idea of leg.pool) {
+      if (!categories.includes(idea.category) || seen.has(idea.osmRef)) continue;
+      const distanceM = Math.round(haversineMeters(position, idea));
+      if (distanceM > radiusM) continue;
+      seen.add(idea.osmRef);
+      out.push({
+        osmRef: idea.osmRef,
+        name: idea.name,
+        lat: idea.lat,
+        lon: idea.lon,
+        distanceM,
+        kind: idea.kind ?? null,
+        categories: [idea.category],
+        cuisine: null,
+        openingHours: idea.openingHours ?? null,
+        dietVegetarian: null,
+        dietVegan: null,
+        outdoorSeating: null,
+        wheelchair: null,
+        phone: null,
+        website: null,
+        idea: true,
+        note: idea.note ?? null,
+      });
+    }
+  }
+  return out.sort((a, b) => a.distanceM - b.distanceM || (a.osmRef < b.osmRef ? -1 : 1));
 }
 
 function toFoodPlace(spot: GeoPoiSearchSpot): FoodPlace {

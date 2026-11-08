@@ -39,6 +39,7 @@ export function carryStops(
   const days = fresh.map((day) => ({ ...day, blocks: day.blocks.map((b) => ({ ...b, stops: [...b.stops] })) }));
 
   for (const old of before.days) {
+    carryBreaks(old, days[old.dayIndex]);
     const stops = old.blocks.flatMap((block) =>
       block.stops
         .filter((stop) => stop.status === "planned")
@@ -64,6 +65,24 @@ export function carryStops(
     target.detailed = true;
   }
   return { days, back };
+}
+
+/**
+ * The breaks somebody put on a day (stage 4) go back onto it, into the
+ * block with the same id or the day's first spots block.
+ */
+function carryBreaks(old: Pick<StoredLeg["days"][number], "breaks">, target: CreateDayInput | undefined): void {
+  if (!target || !old.breaks || old.breaks.length === 0) return;
+  const blocks = target.blocks as unknown as CurrentBlock[];
+  const fallback = blocks.find((b) => b.kind === "spots");
+  if (!fallback) return;
+  target.breaks = old.breaks.map(({ id, label, minutes, blockId, position }) => ({
+    id,
+    label,
+    minutes,
+    blockId: blocks.some((b) => b.id === blockId && b.kind === "spots") ? blockId : fallback.id,
+    position,
+  }));
 }
 
 /** A stop as it goes onto the new day: the same decision, walked again. */

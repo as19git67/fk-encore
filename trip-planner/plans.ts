@@ -17,7 +17,7 @@
  */
 
 import { carryStops } from "./carry-stops";
-import { isIdeasTrip } from "./ideas-mode";
+import { isIdeasTrip, votingOn } from "./ideas-mode";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -26,7 +26,7 @@ import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { requestRegionFor } from "./region-request";
 import { waterDetourBetween } from "./water-detour";
-import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
+import { DEFAULT_DAY, IDEAS_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type CuratedPlace, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
@@ -363,7 +363,9 @@ export const createTripPlan = api(
     // the same day, and DEFAULT_DAY at that point quietly turned a
     // custom day back into the standard four (§4.1).
     const dayShape = req.blocks ? validateDayShape(req.blocks) : null;
-    const shape = shapeDay(dayShape ?? DEFAULT_DAY, req.pace ?? "normal", req.group);
+    const ideas = req.startEmpty ?? startsEmptyByDefault();
+    // A trip of ideas has one window a day (stage 4 of the ideas plan).
+    const shape = shapeDay(dayShape ?? (ideas ? IDEAS_DAY : DEFAULT_DAY), req.pace ?? "normal", req.group);
 
     const prepared = applyTransfers(legRequests);
     const detailDays = validateDetailDays(req.detailDays);
@@ -375,7 +377,6 @@ export const createTripPlan = api(
     // "the next two days" means the next two days, whichever leg they
     // fall in.
     let detailBudget = detailDays;
-    const ideas = req.startEmpty ?? startsEmptyByDefault();
     for (const [legIndex, leg] of prepared.entries()) {
       const planned = await planLeg(leg.request, {
         ideas,
@@ -493,6 +494,12 @@ export interface UpdateSettingsRequest {
    * moved should not have to be planned again.
    */
   startDate?: string | null;
+  /**
+   * Whether the travellers vote on the list (ideas plan, stage 7). Off
+   * by default on a trip of ideas. Changing it alone does not re-plan:
+   * the vote counts from the next "Damit neu planen".
+   */
+  voting?: boolean;
   /**
    * Rebuild the days from the new settings. True by default. Pass false
    * to record the change and leave the plan exactly as it stands.
@@ -620,7 +627,7 @@ async function replanFromStoredSettings(
           // answers "what should we see", not "how far ahead".
           detailDays: leg.days.filter((d) => d.detailed).length,
           hidden,
-          votes: tally(await votesOfLeg(leg.id), fairness),
+          votes: votingOn(constraints) ? tally(await votesOfLeg(leg.id), fairness) : undefined,
           // The local model's order of this stay, where it gave one
           // (stage 3): the days are built out of it.
           curated: await curatedOfLeg(leg.id),
@@ -689,6 +696,11 @@ function firstSettledStop(plan: StoredPlan): string | null {
  * away the solver's arrangement of a trip and is refused outright once
  * a day has begun, so renaming a running trip would fail for no reason.
  */
+/** Who asked for what on this leg, or nobody when the trip does not vote (stage 7). */
+async function wishesOf(constraints: Record<string, unknown>, legId: number): Promise<Tally> {
+  return votingOn(constraints) ? tally(await votesOfLeg(legId)) : tally([]);
+}
+
 function changesTheDays(req: UpdateSettingsRequest, mode: TransportMode | undefined): boolean {
   return mode !== undefined
     || req.pace !== undefined
@@ -762,6 +774,7 @@ function mergedConstraints(
     // part of the trip: dropping it here would reset a day somebody
     // drew the next time they changed the pace.
     blocks: stored.blocks ?? null,
+    ...(req.voting !== undefined ? { voting: req.voting } : {}),
   };
 }
 
@@ -1040,7 +1053,7 @@ export const detailTripDay = api(
       blocks: budgetsForSolver(shapes, framedToday),
       // Who asked for what (§6.1), so a wished-for restaurant takes
       // the meal block on a day filled in later too (§10.3).
-      candidates: withoutFramed(markWanted(pool, tally(await votesOfLeg(leg.id))), framedToday),
+      candidates: withoutFramed(markWanted(pool, await wishesOf(plan.constraints, leg.id)), framedToday),
       maxWalkMinutes,
       mode: leg.mode,
     });
@@ -1418,7 +1431,7 @@ export const redistributeDay = api(
         // The leg's own pool: a spot in Osaka is not a replacement for
         // one missed in Tokyo (§4.2) — with who asked for what, so a
         // wished-for restaurant can take the meal block (§10.3).
-        pool: markWanted(leg.pool, tally(await votesOfLeg(leg.id))),
+        pool: markWanted(leg.pool, await wishesOf(plan.constraints, leg.id)),
         position,
         // Where *this day* ends, which is not the quarters on a day
         // trip or on the day the train leaves (§4.4, §4.5).

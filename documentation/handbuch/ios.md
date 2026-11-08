@@ -276,6 +276,26 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   auf der Linie dazwischen. Der Kopf darunter ist immer der Aufenthalt
   (Unterkunft, Fortbewegung) und öffnet dessen Sheet; der Ausflug eines
   Tages steht als erste Zeile im Rahmen des Tages und öffnet den Ausflug.
+- Auf einer Reise mit Ideen ist der Tag ein Fenster ohne Vormittag und
+  Nachmittag. Oben steht, wie viel verplant ist und wie viel frei bleibt,
+  bei jedem Stopp die geschätzte Uhrzeit („ca. 10:40“) und eine Wartezeit,
+  wenn er erst später öffnet. „Reihenfolge vorschlagen“ ordnet die Ideen
+  des Tages nach Ticket, Öffnungszeiten und Wegen und lässt nichts weg;
+  passt der Tag nicht, sind die Ideen markiert, die zurück zu den Ideen
+  könnten („Wenn Zeit“ zuerst, nie „Muss“). „Pause“ fügt Mittag, Kaffee
+  oder eine kurze Pause am Ende ein; das Kreuz entfernt sie wieder.
+  Darüber zeigt ein Band den Tag von Anfang bis Ende: Besuche als Felder,
+  Wege als Linien, Pausen gestrichelt, Termine orange, heute ein roter
+  Strich für „jetzt“. Ein Tipp auf einen Besuch markiert ihn in der
+  Liste. Unter jedem Tag in der Tagesleiste zeigt ein dünner Balken, wie
+  voll er ist.
+- Restaurants und Cafés unter den Ideen stehen in der Liste unter „Essen
+  & Trinken“ und kommen nie in die vorgeschlagene Reihenfolge. An einer
+  Pause öffnet „Jetzt aussuchen“ die Lokale in der Nähe, eure eigenen
+  Ideen zuerst („eure Idee“); die Wahl öffnet die Karten-App.
+- Abstimmen ist auf einer Reise mit Ideen ab Werk aus. Einschalten unter
+  Einstellungen › „Planen mit“ › „Abstimmen“; dann zeigt die Liste den
+  Ring je Ort, die Fairness und „Damit neu planen“.
 - **Test:** –
 
 ### IOS-PLN-03 Gemeinsam planen

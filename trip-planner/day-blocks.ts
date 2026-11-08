@@ -26,8 +26,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { DEFAULT_DAY } from "./blocks";
-import { dayShapeOf, validateDayShape, type BlockShapeInput } from "./day-shape";
+import { dayShapeOf, defaultDayOf, validateDayShape, type BlockShapeInput } from "./day-shape";
 import { requireOrganiser } from "./plan-access";
 import { loadPlan } from "./plan-store";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
@@ -55,7 +54,7 @@ export const getTripDayShape = api(
     const blocks = dayShapeOf(plan.constraints as Record<string, unknown>);
     return {
       blocks: blocks.map((block) => ({ ...block })),
-      isDefault: blocks === DEFAULT_DAY,
+      isDefault: blocks === defaultDayOf(plan.constraints as Record<string, unknown>),
     };
   },
 );

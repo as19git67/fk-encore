@@ -22,6 +22,7 @@
  *     only knows the arithmetic.
  */
 
+import { votingOn } from "./ideas-mode";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -299,6 +300,10 @@ export const applyVotesToPlan = api(
     if (!(await isOnTrip(req.planId, userId))) throw APIError.notFound("plan not found");
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
+    // Ideas plan, stage 7: without the switch nothing is voted on.
+    if (!votingOn(plan.constraints as Record<string, unknown>)) {
+      throw APIError.failedPrecondition("auf dieser Reise wird nicht abgestimmt — einschalten unter „Planen mit“");
+    }
     return await replanAfterFrameChange(plan, userId);
   },
 );

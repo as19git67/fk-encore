@@ -27,6 +27,9 @@ struct TripFoodListView: View {
     /// Called after a place was put into the block, so the screen that
     /// owns the plan can reload it.
     var onPlaced: (() async -> Void)? = nil
+    /// The trip whose food ideas come first, marked „eure Idee“ (ideas
+    /// plan, stage 6). Taken from `target` when that is given.
+    var planId: Int? = nil
 
     /// Where a chosen place goes: which plan, which leg, which day,
     /// which block. Everything the two calls need, handed in rather
@@ -128,11 +131,26 @@ struct TripFoodListView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(place.displayName)
+                        if place.idea == true {
+                            // One of the trip's own food ideas (stage 6),
+                            // listed first within the radius.
+                            Text("eure Idee")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.tint.opacity(0.15), in: .capsule)
+                        }
                         Spacer()
                         Text(place.distanceLabel)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
+                    }
+                    if let note = place.note, !note.isEmpty {
+                        Text(note)
+                            .font(.caption)
+                            .italic()
+                            .foregroundStyle(.secondary)
                     }
                     if let subtitle = place.attributeLine {
                         Text(subtitle)
@@ -307,6 +325,7 @@ struct TripFoodListView: View {
             let outdoorSeating: Bool
             let wheelchair: Bool
             let categories: [String]?
+            let planId: Int?
         }
         do {
             let response: NearbyFoodResponse = try await APIClient.shared.post(
@@ -318,6 +337,7 @@ struct TripFoodListView: View {
                     outdoorSeating: outdoorSeating,
                     wheelchair: wheelchair,
                     categories: onlyCafes ? ["cafe"] : nil,
+                    planId: planId ?? target?.planId,
                 ),
             )
             places = response.places
@@ -353,6 +373,9 @@ struct FoodPlace: Codable, Identifiable, Sendable {
     let wheelchair: String?
     let phone: String?
     let website: String?
+    /// One of the trip's own food ideas (stage 6), with why it was saved.
+    var idea: Bool? = nil
+    var note: String? = nil
 
     var id: String { osmRef }
     var displayName: String { name ?? "Unbenanntes Lokal" }

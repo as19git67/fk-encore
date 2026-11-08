@@ -24,6 +24,8 @@ import SwiftUI
 ///     interrogate is a plan nobody trusts (§3.8).
 struct TripPlanDayView: View {
     @State private var showSettings = false
+    /// The visit tapped on the day's band, marked in the list.
+    @State private var bandSelection: String?
     /// The itinerary, opened on the journey whose time a day shows.
     @State private var itineraryFocus: TripItineraryFocus?
     /// Which map app gets the handoff, when the traveller has not
@@ -350,6 +352,9 @@ struct TripPlanDayView: View {
                 dayOfferCards
                 if day.detailed {
                     weatherOfferCard(day)
+                    if viewModel.plan?.isIdeasTrip == true {
+                        dayOrderCard(day)
+                    }
                     ForEach(day.blocks) { block in
                         blockCard(block)
                     }
@@ -986,6 +991,15 @@ struct TripPlanDayView: View {
                                 : AnyShapeStyle(.clear),
                             in: .rect(cornerRadius: 10),
                         )
+                        // How full the day is, on a trip of ideas (stage 5):
+                        // the stay shows at a glance which days are empty.
+                        .overlay(alignment: .bottom) {
+                            if viewModel.plan?.isIdeasTrip == true, let band = TripDayBandModel(day: day) {
+                                TripDayFillMark(fill: band.fill)
+                                    .padding(.horizontal, 8)
+                                    .padding(.bottom, 2)
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
                     .id(day.dayIndex)
@@ -1539,6 +1553,35 @@ struct TripPlanDayView: View {
                         .foregroundStyle(.secondary)
                     addStopRow(block)
                 }
+            } else if let day = viewModel.day, !(day.breaks ?? []).isEmpty {
+                // A day of ideas with breaks (stage 4): one line, the
+                // breaks where they were put.
+                ForEach(TripDayClock.line(stops: block.stops,
+                                          breaks: TripDayClock.breaks(of: day, blockId: block.id))) { item in
+                    switch item {
+                    case .stop(let stop):
+                        if stop.travelFromPrevious.minutes > 0 {
+                            travelRow(stop.travelFromPrevious)
+                        }
+                        stopRow(stop, in: block)
+                    case .pause(let pause):
+                        TripBreakRow(pause: pause) {
+                            Task { await viewModel.removeBreak(pause) }
+                        }
+                        // Somewhere to eat for this break (stage 6): the
+                        // trip's own food ideas first, then what is near.
+                        // Choosing opens the map, it plans nothing.
+                        NavigationLink {
+                            TripFoodListView(
+                                position: breakPosition(pause, in: block),
+                                planId: viewModel.planId,
+                            )
+                        } label: {
+                            Label("Jetzt aussuchen", systemImage: "fork.knife.circle")
+                                .font(.footnote)
+                        }
+                    }
+                }
             } else {
                 ForEach(Array(block.stops.enumerated()), id: \.element.rowId) { index, stop in
                     if index > 0 || stop.travelFromPrevious.minutes > 0 {
@@ -1801,6 +1844,99 @@ struct TripPlanDayView: View {
         }
     }
 
+    /// Where a break happens: at the stop before it, or where the day starts.
+    private func breakPosition(_ pause: TripDayBreak, in block: TripBlock) -> TripCoordinate {
+        let before = TripDayClock.line(stops: block.stops,
+                                       breaks: viewModel.day.map { TripDayClock.breaks(of: $0, blockId: block.id) } ?? [])
+            .prefix { item in
+                if case .pause(let other) = item { return other.id != pause.id }
+                return true
+            }
+            .compactMap { item -> TripStop? in
+                if case .stop(let stop) = item { return stop }
+                return nil
+            }
+        return before.last?.coordinate
+            ?? viewModel.day?.anchor?.coordinate
+            ?? viewModel.leg?.anchor
+            ?? TripCoordinate(lat: 0, lon: 0)
+    }
+
+    /// "ca. 10:40 · 45 min · 10 min warten" on a day of ideas, the
+    /// dwell (and the route) everywhere else.
+    private func stopCaption(_ stop: TripStop) -> String {
+        let dwell = stop.extent.map { "\($0.summary) · \(TripClock.duration(stop.dwellMinutes))" }
+            ?? TripClock.duration(stop.dwellMinutes)
+        var parts: [String] = []
+        if stop.stopStatus == .planned, let eta = TripDayClock.eta(stop) { parts.append(eta) }
+        parts.append(dwell)
+        if let wait = stop.waitMinutes, wait > 0 { parts.append("\(TripClock.duration(wait)) warten") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func adviceSuggestsDropping(_ stop: TripStop) -> Bool {
+        guard let advice = viewModel.orderAdvice,
+              advice.applies(legIndex: viewModel.legIndex, dayIndex: viewModel.dayIndex) else { return false }
+        return advice.suggestsDropping(stop.osmRef)
+    }
+
+    /// The day of ideas as one window (stage 4): what it holds, the
+    /// order on request, and a break to put in.
+    @ViewBuilder
+    private func dayOrderCard(_ day: TripDay) -> some View {
+        let hasStops = day.blocks.contains { !$0.stops.isEmpty }
+        VStack(alignment: .leading, spacing: 8) {
+            // The day as one band (stage 5): what is planned when, and
+            // what is still free.
+            if let band = TripDayBandModel(day: day) {
+                TripDayBand(model: band,
+                            now: viewModel.isToday ? TripDayTimeline.minutesOfDay(Date()) : nil) { osmRef in
+                    bandSelection = bandSelection == osmRef ? nil : osmRef
+                }
+            }
+            if let summary = TripDayClock.summary(for: day) {
+                Label(summary, systemImage: "clock")
+                    .font(.footnote)
+                    .foregroundStyle((day.overrunMinutes ?? 0) > 0 ? .red : .secondary)
+            }
+            if let advice = viewModel.orderAdvice,
+               advice.applies(legIndex: viewModel.legIndex, dayIndex: viewModel.dayIndex),
+               advice.overrunMinutes > 0 {
+                Text(advice.toDrop.isEmpty
+                     ? "Der Tag hält nicht alles, und keine Idee ist „Wenn Zeit“ oder „Will“. Ihr entscheidet, was wegfällt."
+                     : "Damit der Tag passt, könnten die markierten Ideen zurück zu den Ideen. Entfernt wird nichts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Button {
+                    Task { await viewModel.orderDay() }
+                } label: {
+                    Label("Reihenfolge vorschlagen", systemImage: "arrow.triangle.swap")
+                }
+                .disabled(!hasStops)
+                Spacer()
+                Menu {
+                    ForEach(TripBreakPreset.allCases) { preset in
+                        Button {
+                            Task { await viewModel.addBreak(label: preset.label, minutes: preset.minutes) }
+                        } label: {
+                            Label("\(preset.label) · \(TripClock.duration(preset.minutes))",
+                                  systemImage: preset.symbolName)
+                        }
+                    }
+                } label: {
+                    Label("Pause", systemImage: "pause.circle")
+                }
+                .accessibilityLabel("Pause einfügen")
+            }
+            .font(.subheadline)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 12))
+    }
+
     private func stopRow(_ stop: TripStop, in block: TripBlock) -> some View {
         let reasons = viewModel.reasons(for: stop)
         return VStack(alignment: .leading, spacing: 6) {
@@ -1843,10 +1979,21 @@ struct TripPlanDayView: View {
                         // at the door (§10.4).
                         Text(TripSpotName.line(stop.displayName, local: stop.localName))
                             .strikethrough(stop.stopStatus == .skipped)
-                        Text(stop.extent.map { "\($0.summary) · \(TripClock.duration(stop.dwellMinutes))" }
-                             ?? TripClock.duration(stop.dwellMinutes))
+                        Text(stopCaption(stop))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        // The order's estimate says it misses the hours
+                        // or the ticket (stage 4).
+                        if stop.outsideHours == true && stop.closedThatDay != true {
+                            Label("Um diese Zeit nicht geöffnet", systemImage: "clock.badge.exclamationmark")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        if stop.stopStatus == .planned, adviceSuggestsDropping(stop) {
+                            Label("Zurück zu den Ideen?", systemImage: "tray.and.arrow.down")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                         // The ticket this stop is here for (§4.4).
                         if let fix = visit(of: stop), fix.isVisit {
                             Label("Termin \(fix.startsAt)", systemImage: "calendar.badge.clock")
@@ -1911,6 +2058,10 @@ struct TripPlanDayView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: viewModel.expandedReasons)
+        // The visit tapped on the day's band (stage 5).
+        .padding(.horizontal, bandSelection == stop.osmRef ? 6 : 0)
+        .background(bandSelection == stop.osmRef ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear),
+                    in: .rect(cornerRadius: 8))
     }
 
     // MARK: - While you are out

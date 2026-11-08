@@ -17,6 +17,8 @@
  */
 
 import { withIdeaHints } from "./idea-hints";
+import { withDayTimes, type DayBreak, type DayWindow } from "./day-times";
+import { isIdeasTrip } from "./ideas-mode";
 import { DEFAULT_PRIORITY, priorityOf } from "./priority";
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { visibleToUser } from "./plan-access";
@@ -205,6 +207,19 @@ export interface StoredDay {
   blocks: StoredBlock[];
   /** The hard times framing this day (§4.4), earliest binding first. */
   fixpoints: StoredFixpoint[];
+  /** Breaks on a day of ideas (stage 4): label and minutes, no venue. */
+  breaks?: DayBreak[];
+  /**
+   * A day of ideas on the clock (stage 4), computed on read: the window
+   * its spots blocks hold, the ways, visits and breaks planned in it,
+   * the minutes spent waiting at doors, what is left, and how far the
+   * line runs past the window's end.
+   */
+  window?: DayWindow;
+  plannedMinutes?: number;
+  waitMinutes?: number;
+  freeMinutes?: number;
+  overrunMinutes?: number;
   /**
    * Where this day happens when it is a day trip (§4.5), null when it
    * stays at the quarters — which is every ordinary day.
@@ -275,6 +290,12 @@ export interface StoredStop extends CurrentStop {
   rowId: number;
   /** Its opening hours say closed on the date of its day (ideas plan, stage 3). */
   closedThatDay?: boolean;
+  /** When the visit begins, estimated from the order (stage 4, read only). */
+  etaMinutes?: number;
+  /** Minutes waited at the door before it, when it opens later or the ticket is for later. */
+  waitMinutes?: number;
+  /** At this hour it is not open for the whole visit, or the ticket is missed. */
+  outsideHours?: boolean;
   /** What the group calls it, when they have renamed it (§10.4). */
   title?: string | null;
   /** The picture on the card (ranking plan, stage 2), from `trip_spot_fame`. */
@@ -339,6 +360,8 @@ export interface CreateDayInput {
    * anchor and changes nothing about the arithmetic.
    */
   anchor?: DayAnchor | null;
+  /** Breaks on a day of ideas (stage 4), carried through a re-plan. */
+  breaks?: readonly DayBreak[];
 }
 
 /** A day trip's destination, as stored beside the day. */
@@ -739,6 +762,7 @@ async function insertDays(
         day_index: dayIndex,
         detailed: dayInput.detailed ?? true,
         buffer_reason: dayInput.bufferReason ?? null,
+        breaks: (dayInput.breaks ?? []).map(({ id, label, minutes, blockId, position }) => ({ id, label, minutes, blockId, position })),
         anchor_lat: dayInput.anchor?.lat ?? null,
         anchor_lon: dayInput.anchor?.lon ?? null,
         anchor_label: dayInput.anchor?.label ?? null,
@@ -1293,6 +1317,7 @@ export async function loadPlan(
       bufferReason: row.buffer_reason,
       blocks: blocksByDay.get(row.id) ?? [],
       fixpoints: fixpointsByDay.get(row.id) ?? [],
+      ...(row.breaks.length > 0 ? { breaks: row.breaks } : {}),
       // Both or neither: half a coordinate is not a place with a gap
       // in it, and a day trip to one would be planned off the coast of
       // Africa.
@@ -1383,11 +1408,19 @@ export async function loadPlan(
       // hin und zurück" — and computing it a second time in Swift would
       // be a second travel model (§4.5).
       ...withIdeaHints(
-        withPassed(
-          withTravel(daysByLeg.get(l.id) ?? [],
-                     { lat: l.anchor_lat, lon: l.anchor_lon },
-                     l.mode as TransportMode),
-          poolByLeg.get(l.id) ?? [],
+        withDayTimes(
+          withPassed(
+            withTravel(daysByLeg.get(l.id) ?? [],
+                       { lat: l.anchor_lat, lon: l.anchor_lon },
+                       l.mode as TransportMode),
+            poolByLeg.get(l.id) ?? [],
+          ),
+          {
+            ideas: isIdeasTrip(plan.constraints as Record<string, unknown>),
+            startDate: l.start_date,
+            anchor: { lat: l.anchor_lat, lon: l.anchor_lon },
+            mode: l.mode as TransportMode,
+          },
         ),
         poolByLeg.get(l.id) ?? [],
         l.start_date,
