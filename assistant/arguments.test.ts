@@ -4,9 +4,12 @@
  * what is allowed.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
 
 import { argumentError, checkArguments, nearestName } from "./arguments";
+import { HAND_TOOLS } from "./catalog";
 import type { JsonSchema } from "./types";
 
 const SCHEMA: JsonSchema = {
@@ -49,6 +52,20 @@ describe("checkArguments", () => {
 
   it("names a value outside the enum with the allowed ones", () => {
     expect(checkArguments(tool, { q: "x", direction: "expenses" })).toEqual(['direction must be one of out, in; got "expenses"']);
+  });
+
+  it("lets every enum value of every tool through, a group unit described as YYYY-MM-DD too", () => {
+    for (const t of HAND_TOOLS) {
+      const properties = (t.parameters as JsonSchema).properties ?? {};
+      for (const [name, schema] of Object.entries(properties)) {
+        const values = (schema as { enum?: unknown[] }).enum;
+        if (!Array.isArray(values)) continue;
+        for (const v of values) {
+          const errors = checkArguments(t, { [name]: v }).filter((e) => e.startsWith(`${name} `));
+          expect(errors, `${t.name}.${name} = ${String(v)}`).toEqual([]);
+        }
+      }
+    }
   });
 
   it("names a wrong type, in arrays too", () => {
