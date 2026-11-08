@@ -743,11 +743,14 @@ export function groupsAsked(question: string): string[] {
  * of a tool that groups, made without the group the question names, is
  * refused once with the arguments to add. Null when the call may run.
  */
-export function groupGuard(question: string, tool: Pick<ToolSpec, "name" | "parameters">, args: Record<string, unknown>): string | null {
+export function groupGuard(question: string, tool: Pick<ToolSpec, "name" | "parameters">, args: Record<string, unknown>, grouped: ReadonlySet<string> = new Set()): string | null {
   const property = (tool.parameters as { properties?: Record<string, { enum?: unknown[] }> }).properties?.group_by;
   const offered = Array.isArray(property?.enum) ? property!.enum.map(String) : [];
   if (!offered.length) return null;
-  const asked = groupsAsked(question).filter((u) => offered.includes(u));
+  // A unit an earlier call of this turn already grouped by is done: the
+  // next call narrows or writes that pick (from_previous_result) and must
+  // not be sent back to group again.
+  const asked = groupsAsked(question).filter((u) => offered.includes(u) && !grouped.has(u));
   const given = [args.group_by, args.then_by].map((v) => (typeof v === "string" ? v : undefined));
   const missing = asked.filter((u) => !given.includes(u));
   if (!missing.length) return null;
@@ -849,6 +852,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   /** Per tool, the advice of its last empty result, until the tool runs again. */
   const loosenMemory = new Map<string, LoosenMemory>();
   const groupNudged = new Set<string>();
+  const groupedUnits = new Set<string>();
   /** The ungrounded answer and the nudge, sent along until the model calls a tool or answers again. */
   let nudge: ChatMessage[] | null = null;
   /** One more request for words after an empty reply; never twice. */
@@ -1261,7 +1265,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       }
       loosenMemory.delete(name);
       // "Je Tag" without group_by = day, refused once per tool and turn.
-      const ungrouped = groupNudged.has(name) ? null : groupGuard(input.question, tool, args);
+      const ungrouped = groupNudged.has(name) ? null : groupGuard(input.question, tool, args, groupedUnits);
       if (ungrouped) {
         groupNudged.add(name);
         result(ungrouped);
@@ -1269,6 +1273,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         input.log?.({ tool: name, arguments: args, rows: 0, ms: 0, error: ungrouped });
         continue;
       }
+      for (const k of ["group_by", "then_by"]) if (typeof args[k] === "string") groupedUnits.add(args[k] as string);
       // Only a call that runs counts; a refused one may come again.
       seenCalls.add(key);
 
