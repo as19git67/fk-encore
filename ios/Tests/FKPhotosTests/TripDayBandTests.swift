@@ -1,5 +1,5 @@
 import XCTest
-@testable import FKPhotos
+@testable import FKPhotosLib
 
 /// The day of ideas as one band (ideas plan, stage 5).
 final class TripDayBandTests: XCTestCase {

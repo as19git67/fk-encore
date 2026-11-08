@@ -1,5 +1,5 @@
 import XCTest
-@testable import FKPhotos
+@testable import FKPhotosLib
 
 /// The day of ideas as one window (ideas plan, stage 4).
 final class TripDayOrderTests: XCTestCase {
