@@ -343,7 +343,7 @@ und PDF.
   Kapitelüberschriften sind sachlich (Ort, Sehenswürdigkeit, Personen,
   Anlass), beginnen nie mit „Tag“/„Tage“ und nennen keine Zahl von Tagen
   oder Fotos; unter der Überschrift steht die Zeitspanne (mehrere Tage
-  als Datumsbereich, ein Tag mit Uhrzeit des ersten bis letzten Fotos).
+  als Datumsbereich ohne Zahl der Tage, ein Tag mit Uhrzeit des ersten bis letzten Fotos).
   Fotos im Umkreis von 200 m um das Zuhause aus der Reiseplanung heißen
   „Zuhause“, nie die Straße.
 - **Fehler und Grenzfälle:** Läuft als Job; der Dialog zeigt den Stand.

@@ -350,7 +350,7 @@ function clockTime(takenAt: string): string | null {
 }
 
 /**
- * The span a chapter covers: "3 Tage, 1.–3. Juni 2024" for more than one
+ * The span a chapter covers: "1.–3. Juni 2024" for more than one
  * day, else the day with the hours from the first to the last photo,
  * "Montag, 3. Juni 2024, 10:15–17:40 Uhr". `from` and `to` are capture
  * times or bare days; without a time of day only the day is said.
@@ -359,7 +359,8 @@ export function chapterSubtitle(from: string, to: string): string {
   const a = datePart(from);
   const b = datePart(to);
   const days = dayNumber(b) - dayNumber(a) + 1;
-  if (days > 1) return `${days} Tage, ${formatDayRange(a, b)}`;
+  // The dates say how long it was; the number of days adds nothing.
+  if (days > 1) return formatDayRange(a, b);
   const day = `${weekday(a)}, ${formatDay(a)}`;
   const start = clockTime(from);
   const end = clockTime(to);
