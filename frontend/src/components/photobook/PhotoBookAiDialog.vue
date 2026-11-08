@@ -32,7 +32,7 @@ const emit = defineEmits<{
 }>()
 
 const captions = ref(true)
-const chapters = ref(true)
+const chapters = ref(false)
 const layouts = ref(false)
 const overwrite = ref(false)
 const status = ref<PhotoBookAiStatus | null>(null)
@@ -137,7 +137,7 @@ function share(changed: number, pages: number): string {
       </div>
       <div class="pba-row">
         <Checkbox v-model="chapters" binary input-id="pba-chapters" />
-        <label for="pba-chapters">Kapitelüberschriften – aus Zeit, Orten, Personen und den Bildunterschriften</label>
+        <label for="pba-chapters">Kapitelüberschriften als Vorschlag – die Überschrift nennt den Zeitraum oder Ort des Kapitels, ein Vorschlag steht daneben, bis du ihn übernimmst</label>
       </div>
       <div class="pba-row">
         <Checkbox v-model="layouts" binary input-id="pba-layouts" />

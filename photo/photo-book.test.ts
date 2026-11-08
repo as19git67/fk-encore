@@ -16,6 +16,7 @@ import {
   buildChapterPages,
   buildChapters,
   cellRect,
+  chooseChapterGrain,
   chapterSubtitle,
   chooseLayout,
   editMisfit,
@@ -27,6 +28,7 @@ import {
   relayoutPage,
   slotDpi,
   spineWidthMm,
+  targetChapters,
   type BookPhoto,
 } from "./photo-book-layout";
 import {
@@ -44,6 +46,13 @@ import {
 } from "./photo-book.service";
 import { renderCoverPdf, renderHomePdf, renderInsidePdf, type RenderBook } from "./photo-book-pdf";
 import { toRenderBook } from "./photo-book-export";
+
+/** The day `n` days after `day`, as "YYYY-MM-DD". */
+function dayAfter(day: string, n: number): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 
 function photo(id: number, takenAt: string | null, opts: Partial<BookPhoto> = {}): BookPhoto {
   return { id, takenAt, width: 3000, height: 2000, score: 50, city: null, ...opts };
@@ -115,27 +124,79 @@ describe("photo book chapters", () => {
   });
 
   it("makes one chapter per day for a short span and folds small days into the one before", () => {
+    const hour = (i: number) => String(6 + (i % 15)).padStart(2, "0");
     const list = [
-      ...[1, 2, 3, 4].map((i) => photo(i, `2024-06-01 0${i}:00:00`, { city: "Musterstadt" })),
-      photo(5, "2024-06-02 09:00:00"),
-      ...[6, 7, 8, 9].map((i) => photo(i, `2024-06-03 0${i - 5}:00:00`)),
-      photo(10, null),
+      ...Array.from({ length: 30 }, (_, i) => photo(i + 1, `2024-06-01 ${hour(i)}:${String(i).padStart(2, "0")}:00`, { city: "Musterstadt" })),
+      photo(31, "2024-06-02 09:00:00"),
+      ...Array.from({ length: 30 }, (_, i) => photo(32 + i, `2024-06-03 ${String(10 + (i % 8)).padStart(2, "0")}:${String(i).padStart(2, "0")}:00`)),
+      photo(99, null),
     ];
     const chapters = buildChapters(list);
-    expect(chapters.map((c) => c.photos.map((p) => p.id))).toEqual([[1, 2, 3, 4, 5], [6, 7, 8, 9], [10]]);
-    expect(chapters[0].title).toBe("Tag 1–2 · Musterstadt");
-    expect(chapters[0].subtitle).toBe("1.–2. Juni 2024");
-    expect(chapters[1].title).toBe("Tag 3");
-    expect(chapters[1].subtitle).toBe("Montag, 3. Juni 2024, 01:00–04:00 Uhr");
+    expect(chapters.map((c) => c.photos.length)).toEqual([31, 30, 1]);
+    expect(chapters[0].photos.at(-1)!.id).toBe(31);
+    // The title names the period, the subtitle adds what it leaves out.
+    expect(chapters[0].title).toBe("1.–2. Juni 2024");
+    expect(chapters[0].subtitle).toBe("Musterstadt");
+    expect(chapters[1].title).toBe("Montag, 3. Juni 2024");
+    expect(chapters[1].subtitle).toBe("10:00–17:23 Uhr");
     expect(chapters[2].title).toBe("Ohne Datum");
   });
 
   it("goes by month for a long span", () => {
     const list = [
-      ...[1, 2, 3, 4].map((i) => photo(i, `2024-01-1${i} 10:00:00`)),
-      ...[5, 6, 7, 8].map((i) => photo(i, `2024-03-1${i - 4} 10:00:00`)),
+      ...Array.from({ length: 30 }, (_, i) => photo(i + 1, `2024-01-${String(i + 1).padStart(2, "0")} 10:00:00`)),
+      ...Array.from({ length: 30 }, (_, i) => photo(i + 31, `2024-03-${String(i + 1).padStart(2, "0")} 10:00:00`)),
     ];
-    expect(buildChapters(list).map((c) => c.title)).toEqual(["Januar 2024", "März 2024"]);
+    const chapters = buildChapters(list);
+    expect(chapters.map((c) => c.title)).toEqual(["Januar 2024", "März 2024"]);
+    expect(chapters[0].subtitle).toBe("1.–30. Januar 2024");
+  });
+
+  it("keeps a handful of photos in one chapter", () => {
+    const list = [1, 2, 3, 4, 5, 6].map((i) => photo(i, `2024-0${i}-10 10:00:00`));
+    expect(buildChapters(list).map((c) => c.title)).toEqual(["2024"]);
+  });
+
+  it("picks the grain that fits the number of photos", () => {
+    // 120 photos over five weeks: five chapters of a week fit better than 35 days.
+    const weeks = Array.from({ length: 120 }, (_, i) => {
+      const day = dayAfter("2024-06-03", Math.floor((i * 35) / 120));
+      return photo(i + 1, `${day} 1${i % 10}:00:00`);
+    });
+    expect(chooseChapterGrain(weeks.filter((p) => p.takenAt)).grain).toBe("week");
+    const chapters = buildChapters(weeks);
+    expect(chapters[0].title).toBe("Woche ab 3. Juni 2024");
+    expect(chapters).toHaveLength(5);
+
+    // 100 photos over two years: a chapter per month would be many, a year two.
+    const years = Array.from({ length: 100 }, (_, i) => photo(i + 1, `${dayAfter("2023-01-01", i * 7)} 10:00:00`));
+    expect(targetChapters(100)).toBeCloseTo(100 / 24);
+    const grain = chooseChapterGrain(years).grain;
+    expect(["month", "year"]).toContain(grain);
+    expect(buildChapters(years).every((c) => !/Tag|Fotos|Bilder/.test(c.title))).toBe(true);
+  });
+
+  it("makes a chapter per town when the trip moves on", () => {
+    const towns = ["Musterstadt", "Beispielhausen", "Probedorf"];
+    // Three towns, two days each, 15 photos a day; some photos have no place.
+    const list = Array.from({ length: 90 }, (_, i) => {
+      const day = dayAfter("2024-06-01", Math.floor(i / 15));
+      const town = towns[Math.floor(i / 30)];
+      return photo(i + 1, `${day} ${String(8 + (i % 15)).padStart(2, "0")}:00:00`, { city: i % 7 === 3 ? null : town, country: "Beispielland" });
+    });
+    const chapters = buildChapters(list);
+    expect(chapters.map((c) => c.title)).toEqual(towns);
+    expect(chapters[0].subtitle).toBe("1.–2. Juni 2024");
+    expect(chapters.map((c) => c.photos.length)).toEqual([30, 30, 30]);
+  });
+
+  it("makes a chapter per country for a long journey", () => {
+    const countries = ["Beispielland", "Musterland", "Probeland"];
+    const list = Array.from({ length: 72 }, (_, i) => photo(i + 1, `${dayAfter("2024-03-01", i * 2)} 10:00:00`, {
+      city: `Ort ${i}`, // a new town for nearly every photo: too many chapters
+      country: countries[Math.floor(i / 24)],
+    }));
+    expect(buildChapters(list).map((c) => c.title)).toEqual(countries);
   });
 });
 
@@ -367,7 +428,7 @@ describe("photo book service", () => {
     for (let i = 0; i < 4; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`));
     const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id) });
     const book = toRenderBook(await loadPhotoBook(user.id, id));
-    expect(book.pages[0].chapterTitle).toBe("1. Juni 2024");
+    expect(book.pages[0].chapterTitle).toBe("Samstag, 1. Juni 2024");
     expect(book.pages.slice(1).every((p) => p.chapterTitle === null)).toBe(true);
     expect(book.pages.flatMap((p) => p.slots).length).toBe(4);
   });
@@ -403,7 +464,7 @@ describe("photo book PDF", () => {
       subtitle: "Juni 2024",
       cover: { photoId: 1, focal: null },
       pages: [
-        { layout: bookLayouts("opener", 1)[0], chapterTitle: "Tag 1 · Musterstadt", chapterSubtitle: "Samstag, 1. Juni 2024", slots: [{ photoId: 1, focal: null }] },
+        { layout: bookLayouts("opener", 1)[0], chapterTitle: "Samstag, 1. Juni 2024", chapterSubtitle: "Musterstadt", slots: [{ photoId: 1, focal: null }] },
         { layout: layouts(3, "hero-left"), chapterTitle: null, chapterSubtitle: null, slots: [2, 3, 4].map((photoId) => ({ photoId, focal: null })) },
         { layout: layouts(1, "full"), chapterTitle: null, chapterSubtitle: null, slots: [{ photoId: 5, focal: { x: 0.5, y: 0.5 } }] },
       ],

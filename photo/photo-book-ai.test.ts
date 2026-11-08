@@ -277,7 +277,7 @@ describe("photo book: the model's texts and layouts", () => {
     };
   }
 
-  it("writes captions from the facts, keeps the user's, and titles the chapter", async () => {
+  it("writes captions from the facts, keeps the user's, and proposes a chapter title beside the period", async () => {
     const list = [];
     for (let i = 0; i < 5; i++) list.push(await upload(`2024-06-01 1${i}:00:00`, { location_city: "Musterstadt", location_country: "Beispielland" }));
     await db.insert(poiReferences).values({ qid: "Q1", name: "Old Tower", name_de: "Alter Turm", wikipedia_url: "https://de.wikipedia.org/wiki/Alter_Turm" });
@@ -305,7 +305,8 @@ describe("photo book: the model's texts and layouts", () => {
     expect(title).toContain("Sehenswürdigkeiten: Alter Turm");
 
     let view = await getPhotoBookView(user.id, id);
-    expect(view.chapters[0]).toMatchObject({ title: "Rund um den Alten Turm", title_source: "llm", title_suggestion: "Rund um den Alten Turm" });
+    // The title names the period; the model's title is only a proposal.
+    expect(view.chapters[0]).toMatchObject({ title: "Samstag, 1. Juni 2024", title_suggestion: "Rund um den Alten Turm" });
     const slots = view.pages.flatMap((p) => p.slots);
     expect(slots.find((s) => s.photo_id === list[2].id)).toMatchObject({ caption: "Mein eigener Text", caption_source: "user" });
     expect(slots.filter((s) => s.caption_source === "llm")).toHaveLength(4);
@@ -376,10 +377,10 @@ describe("photo book: the model's texts and layouts", () => {
     expect(vision.every((p) => p.includes("Ort: zuhause") && !p.includes("Beispielstraße"))).toBe(true);
     expect(titles).toHaveLength(2);
     expect(titles[0]).toContain("Orte: Zuhause");
-    expect(titles[0]).not.toContain("Tag 1");
+    expect(titles[0]).not.toContain("Samstag");
     expect(titles[1]).toContain("„Tage daheim“ geht nicht");
     const view = await getPhotoBookView(user.id, id);
-    expect(view.chapters[0].title).toBe("Sommerfest zuhause");
+    expect(view.chapters[0]).toMatchObject({ title: "Samstag, 1. Juni 2024", title_suggestion: "Sommerfest zuhause" });
   });
 
   it("writes from the facts alone when the model cannot see, and stops while the GPU is lent", async () => {

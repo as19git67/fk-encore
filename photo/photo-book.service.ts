@@ -247,6 +247,7 @@ interface PhotoRow {
   quality: number | null;
   aesthetic: number | null;
   city: string | null;
+  country: string | null;
 }
 
 /** A face on the photo that could identify someone (`isRecognisableFace` in SQL). */
@@ -347,6 +348,7 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
       quality: photos.ai_quality_score,
       aesthetic: aestheticScoreSql,
       city: photos.location_city,
+      country: photos.location_country,
     }).from(photos).where(and(...conds)),
   );
   let list: BookPhoto[] = rows.map((r) => ({
@@ -356,6 +358,7 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
     height: r.height,
     score: photoScore(r.aesthetic, r.quality),
     city: r.city,
+    country: r.country,
   }));
   if (hasWeights(source.weights) && list.length) {
     const shares = await loadSubjectShares(list.map((p) => p.id));

@@ -262,6 +262,8 @@ export interface BookPhoto {
   /** 0..100: aesthetics, else quality, else 50 (`photoScore`). */
   score: number;
   city: string | null;
+  /** `photos.location_country`; only the chapter rule reads it. */
+  country?: string | null;
 }
 
 /** `clip_aesthetics` and `ai_quality_score` are both 0..1. */
@@ -292,10 +294,21 @@ export function limitPhotos<T extends BookPhoto>(list: T[], max: number | null |
 
 // ── chapters ────────────────────────────────────────────────────────────
 
-/** Up to this span the book gets one chapter per day, beyond it one per month. */
-export const DAY_CHAPTER_MAX_SPAN_DAYS = 31;
 /** A chapter with fewer photos joins the one before it. */
 export const MIN_CHAPTER_PHOTOS = 4;
+/** About this many photos make a chapter; the grain is picked to come closest. */
+export const TARGET_CHAPTER_PHOTOS = 24;
+/** More chapters than this make a book of openers. */
+export const MAX_TARGET_CHAPTERS = 24;
+/** A place grain needs a place on this share of the dated photos. */
+export const PLACE_COVERAGE = 0.6;
+/** Weeks only for a book that spans this many days: a long weekend cut at Monday is no chapter. */
+export const WEEK_GRAIN_MIN_SPAN_DAYS = 14;
+
+/** What a chapter is: one country, one town, or one fixed span of time. */
+export type ChapterGrain = "country" | "city" | "day" | "week" | "month" | "year";
+/** On a tie the earlier one wins: a place reads better than a date, a short span better than a long one. */
+export const CHAPTER_GRAINS: ChapterGrain[] = ["city", "country", "day", "week", "month", "year"];
 
 export interface ChapterDraft {
   title: string;
@@ -377,10 +390,177 @@ function mainCity(list: BookPhoto[]): string | null {
   return best && n * 2 >= list.length ? best : null;
 }
 
+/** Monday of the week `day` lies in, as a day number (1970-01-01 was a Thursday). */
+function weekStart(day: string): number {
+  const n = dayNumber(day);
+  return n - ((n + 3) % 7);
+}
+
+function dayOf(n: number): string {
+  return new Date(n * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** The key a photo has in a grain; null = no place known (it stays with its neighbours). */
+function grainKey(grain: ChapterGrain, p: BookPhoto): string | null {
+  const day = datePart(p.takenAt!);
+  switch (grain) {
+    case "day": return day;
+    case "week": return String(weekStart(day));
+    case "month": return day.slice(0, 7);
+    case "year": return day.slice(0, 4);
+    case "city": return p.city?.trim() ? `${p.city.trim()}|${p.country?.trim() ?? ""}` : null;
+    case "country": return p.country?.trim() || null;
+  }
+}
+
+export interface ChapterRun {
+  key: string | null;
+  photos: BookPhoto[];
+}
+
 /**
- * Chapters from the capture time: per day for a set spanning up to
- * `DAY_CHAPTER_MAX_SPAN_DAYS`, else per month; a chapter below
- * `MIN_CHAPTER_PHOTOS` joins the one before it; undated photos come last.
+ * Consecutive photos with the same key. A photo without a place stays
+ * in the run it was taken in; leading ones join the first place.
+ */
+function runsOf(grain: ChapterGrain, dated: BookPhoto[]): ChapterRun[] {
+  const runs: ChapterRun[] = [];
+  for (const p of dated) {
+    const key = grainKey(grain, p);
+    const last = runs[runs.length - 1];
+    if (last && (key === null || last.key === key || last.key === null)) {
+      if (last.key === null) last.key = key;
+      last.photos.push(p);
+    } else {
+      runs.push({ key, photos: [p] });
+    }
+  }
+  return runs;
+}
+
+/** Small runs join the one before them (the first one the next). */
+function mergeSmall(runs: ChapterRun[]): { groups: ChapterRun[][]; absorbed: number } {
+  const groups: ChapterRun[][] = [];
+  let absorbed = 0;
+  for (const r of runs) {
+    if (groups.length && r.photos.length < MIN_CHAPTER_PHOTOS) {
+      groups[groups.length - 1].push(r);
+      absorbed += r.photos.length;
+    } else {
+      groups.push([r]);
+    }
+  }
+  if (groups.length > 1 && groups[0].length === 1 && groups[0][0].photos.length < MIN_CHAPTER_PHOTOS) {
+    absorbed += groups[0][0].photos.length;
+    groups[1].unshift(...groups[0]);
+    groups.shift();
+  }
+  return { groups, absorbed };
+}
+
+/** How many chapters the book should have for `n` photos. */
+export function targetChapters(n: number): number {
+  return Math.min(MAX_TARGET_CHAPTERS, Math.max(1, n / TARGET_CHAPTER_PHOTOS));
+}
+
+export interface GrainChoice {
+  grain: ChapterGrain;
+  groups: ChapterRun[][];
+}
+
+/**
+ * The grain whose chapters come closest to `targetChapters`: the
+ * distance is counted on a log scale (twice as many is as far off as
+ * half as many), plus the share of photos that ended up in a chapter
+ * not their own. A place grain needs `PLACE_COVERAGE` and two places,
+ * the week a span of `WEEK_GRAIN_MIN_SPAN_DAYS`.
+ */
+export function chooseChapterGrain(dated: BookPhoto[]): GrainChoice {
+  const target = targetChapters(dated.length);
+  const span = dayNumber(datePart(dated[dated.length - 1].takenAt!)) - dayNumber(datePart(dated[0].takenAt!)) + 1;
+  let best: (GrainChoice & { cost: number }) | null = null;
+  for (const grain of CHAPTER_GRAINS) {
+    if (grain === "city" || grain === "country") {
+      const known = dated.filter((p) => grainKey(grain, p) !== null);
+      if (known.length < dated.length * PLACE_COVERAGE) continue;
+      if (new Set(known.map((p) => grainKey(grain, p))).size < 2) continue;
+    }
+    if (grain === "week" && span < WEEK_GRAIN_MIN_SPAN_DAYS) continue;
+    const { groups, absorbed } = mergeSmall(runsOf(grain, dated));
+    const cost = Math.abs(Math.log(groups.length / target)) + absorbed / dated.length;
+    if (!best || cost < best.cost - 1e-9) best = { grain, groups, cost };
+  }
+  return { grain: best!.grain, groups: best!.groups };
+}
+
+function monthSpan(from: string, to: string): string {
+  const a = parseDay(from);
+  const b = parseDay(to);
+  if (a.y === b.y && a.m === b.m) return `${MONTHS[a.m - 1]} ${a.y}`;
+  if (a.y === b.y) return `${MONTHS[a.m - 1]} – ${MONTHS[b.m - 1]} ${b.y}`;
+  return `${MONTHS[a.m - 1]} ${a.y} – ${MONTHS[b.m - 1]} ${b.y}`;
+}
+
+/** The place that holds most of the chapter's photos. */
+function mainKey(runs: ChapterRun[]): string | null {
+  const counts = new Map<string, number>();
+  for (const r of runs) if (r.key) counts.set(r.key, (counts.get(r.key) ?? 0) + r.photos.length);
+  let best: string | null = null;
+  let n = 0;
+  for (const [k, c] of counts) if (c > n) { best = k; n = c; }
+  return best;
+}
+
+/**
+ * Title and subtitle of a chapter: the title names its period and
+ * nothing else ("Musterstadt", "Juni 2024", "Woche ab 3. Juni 2024",
+ * "Montag, 3. Juni 2024"); the subtitle adds what the title leaves out
+ * — the days, the hours of a single day, the town of a span of time.
+ */
+function chapterTexts(grain: ChapterGrain, runs: ChapterRun[]): { title: string; subtitle: string | null } {
+  const photos = runs.flatMap((r) => r.photos);
+  const first = photos[0].takenAt!;
+  const last = photos[photos.length - 1].takenAt!;
+  const from = datePart(first);
+  const to = datePart(last);
+  const dates = chapterSubtitle(first, last);
+  const city = mainCity(photos);
+  const withCity = (s: string | null) => (city ? (s ? `${s} · ${city}` : city) : s);
+
+  switch (grain) {
+    case "city":
+    case "country": {
+      const key = mainKey(runs);
+      const title = key ? (grain === "city" ? key.split("|")[0] : key) : formatDayRange(from, to);
+      return { title, subtitle: dates };
+    }
+    case "day": {
+      if (from !== to) return { title: formatDayRange(from, to), subtitle: withCity(null) };
+      const start = clockTime(first);
+      const end = clockTime(last);
+      const hours = start && end ? (start === end ? `${start} Uhr` : `${start}–${end} Uhr`) : null;
+      return { title: `${weekday(from)}, ${formatDay(from)}`, subtitle: withCity(hours) };
+    }
+    case "week": {
+      const a = weekStart(from);
+      const b = weekStart(to);
+      const title = a === b ? `Woche ab ${formatDay(dayOf(a))}` : formatDayRange(dayOf(a), dayOf(b + 6));
+      return { title, subtitle: withCity(dates) };
+    }
+    case "month":
+      return { title: monthSpan(from, to), subtitle: withCity(dates) };
+    case "year": {
+      const a = from.slice(0, 4);
+      const b = to.slice(0, 4);
+      return { title: a === b ? a : `${a}–${b}`, subtitle: withCity(dates) };
+    }
+  }
+}
+
+/**
+ * Chapters of fixed periods: one per country, town, day, week, month
+ * or year, whichever fits the number of photos best
+ * (`chooseChapterGrain`); a chapter below `MIN_CHAPTER_PHOTOS` joins
+ * the one before it; undated photos come last.
  */
 export function buildChapters(list: BookPhoto[]): ChapterDraft[] {
   const sorted = [...list].sort(byTime);
@@ -389,52 +569,11 @@ export function buildChapters(list: BookPhoto[]): ChapterDraft[] {
   const out: ChapterDraft[] = [];
 
   if (dated.length) {
-    const firstDay = datePart(dated[0].takenAt!);
-    const lastDay = datePart(dated[dated.length - 1].takenAt!);
-    const byDay = dayNumber(lastDay) - dayNumber(firstDay) + 1 <= DAY_CHAPTER_MAX_SPAN_DAYS;
-    const keyOf = (p: BookPhoto) => (byDay ? datePart(p.takenAt!) : p.takenAt!.slice(0, 7));
-
-    const groups: BookPhoto[][] = [];
-    let current: BookPhoto[] = [];
-    let currentKey = "";
-    for (const p of dated) {
-      const k = keyOf(p);
-      if (current.length && k !== currentKey) { groups.push(current); current = []; }
-      current.push(p);
-      currentKey = k;
-    }
-    if (current.length) groups.push(current);
-
-    const merged: BookPhoto[][] = [];
-    for (const g of groups) {
-      if (merged.length && g.length < MIN_CHAPTER_PHOTOS) merged[merged.length - 1].push(...g);
-      else merged.push([...g]);
-    }
-    // A short first chapter has nobody before it: it joins the next one.
-    if (merged.length > 1 && merged[0].length < MIN_CHAPTER_PHOTOS) {
-      merged[1].unshift(...merged[0]);
-      merged.shift();
-    }
-
-    const tripStart = dayNumber(firstDay);
-    for (const g of merged) {
-      const from = datePart(g[0].takenAt!);
-      const to = datePart(g[g.length - 1].takenAt!);
-      const city = mainCity(g);
-      let title: string;
-      if (byDay) {
-        const dayNo = dayNumber(from) - tripStart + 1;
-        const toNo = dayNumber(to) - tripStart + 1;
-        title = merged.length === 1 ? formatDayRange(from, to) : toNo > dayNo ? `Tag ${dayNo}–${toNo}` : `Tag ${dayNo}`;
-      } else {
-        const a = parseDay(from);
-        const b = parseDay(to);
-        title = a.y === b.y && a.m === b.m ? `${MONTHS[a.m - 1]} ${a.y}`
-          : a.y === b.y ? `${MONTHS[a.m - 1]} – ${MONTHS[b.m - 1]} ${b.y}`
-          : `${MONTHS[a.m - 1]} ${a.y} – ${MONTHS[b.m - 1]} ${b.y}`;
-      }
-      if (city) title += ` · ${city}`;
-      out.push({ title, subtitle: chapterSubtitle(g[0].takenAt!, g[g.length - 1].takenAt!), startsAt: g[0].takenAt, endsAt: g[g.length - 1].takenAt, photos: g });
+    const { grain, groups } = chooseChapterGrain(dated);
+    for (const runs of groups) {
+      const photos = runs.flatMap((r) => r.photos);
+      const { title, subtitle } = chapterTexts(grain, runs);
+      out.push({ title, subtitle, startsAt: photos[0].takenAt, endsAt: photos[photos.length - 1].takenAt, photos });
     }
   }
 
