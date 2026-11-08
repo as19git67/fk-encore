@@ -17,9 +17,13 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const YEAR_RE = /^\d{4}$/;
 const MONTH_RE = /^(\d{4})-(\d{2})$/;
 
-/** Does the description promise a date (the schemas say "YYYY-MM-DD")? */
+/**
+ * Does the description promise a date (the schemas say "YYYY-MM-DD")? An
+ * enum never is one: `group_by` describes its unit "day" as YYYY-MM-DD keys,
+ * and read as a date it refused every "day".
+ */
 function isDateProperty(schema: Record<string, unknown>): boolean {
-  return typeof schema.description === "string" && schema.description.includes("YYYY-MM-DD");
+  return !Array.isArray(schema.enum) && typeof schema.description === "string" && schema.description.includes("YYYY-MM-DD");
 }
 
 function show(value: unknown): string {

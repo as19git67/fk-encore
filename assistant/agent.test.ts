@@ -1418,6 +1418,10 @@ describe("the group a question asks for", () => {
     expect(groupGuard("je Person und Jahr", listPhotos, { group_by: "year", then_by: "person" })).toBeNull();
   });
 
+  it("lets a later call of the turn narrow a pick that already grouped by the unit", () => {
+    expect(groupGuard("von jedem Tag die 10 besten", listPhotos, { from_previous_result: true, distinct: true }, new Set(["day"]))).toBeNull();
+  });
+
   it("stays out of a tool that cannot group by that unit", () => {
     expect(groupGuard("pro Woche", listPhotos, {})).toBeNull();
     expect(groupGuard("je Tag", { name: "consumption_report", parameters: { type: "object", properties: {} } }, {})).toBeNull();
@@ -1441,5 +1445,23 @@ describe("the loop and 'je Tag'", () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(run.mock.calls[0]![0]).toMatchObject({ group_by: "day", per_group: 10 });
     expect(String(requests[1]!.messages.at(-1)!.content)).toContain('group_by = "day"');
+  });
+});
+
+describe("the loop after a grouped call", () => {
+  it("runs a narrowing call of the same turn without sending it back to group again", async () => {
+    const run = vi.fn(async () => ({ text: "rows", rowCount: 1 }));
+    const tool = {
+      name: "list_photos", kind: "read" as const, summary: "photos", permissions: [], source: "hand" as const,
+      parameters: { type: "object", properties: { place: { type: "string" }, group_by: { type: "string", enum: ["day", "month"] }, per_group: { type: "integer" }, from_previous_result: { type: "boolean" }, distinct: { type: "boolean" } } },
+      run,
+    };
+    const { fn } = scripted([
+      { content: null, tool_calls: [{ id: "a", type: "function", function: { name: "list_photos", arguments: JSON.stringify({ place: "Beispielstadt", group_by: "day", per_group: 10 }) } }] },
+      { content: null, tool_calls: [{ id: "b", type: "function", function: { name: "list_photos", arguments: JSON.stringify({ from_previous_result: true, distinct: true }) } }] },
+      answer("Fertig."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "Von jedem Tag in Beispielstadt die 10 besten Fotos", tools: [tool as never], chat: fn, now: NOW });
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
