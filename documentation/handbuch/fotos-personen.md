@@ -346,6 +346,11 @@ und PDF.
   als Datumsbereich ohne Zahl der Tage, ein Tag mit Uhrzeit des ersten bis letzten Fotos).
   Fotos im Umkreis von 200 m um das Zuhause aus der Reiseplanung heißen
   „Zuhause“, nie die Straße.
+  Bildunterschriften nennen zuerst den Ort (oder die Sehenswürdigkeit);
+  eine Unterschrift mit nur einem Namen wird einmal neu angefragt.
+  Personen, die auf mindestens einem Viertel der Fotos des Buchs (und
+  mindestens drei) zu sehen sind, werden nur genannt, wenn es sonst
+  nichts zu sagen gibt.
 - **Fehler und Grenzfälle:** Läuft als Job; der Dialog zeigt den Stand.
   Ohne hinterlegtes Zuhause gilt der Ort des Fotos.
 - **Test:** –

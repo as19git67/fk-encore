@@ -69,6 +69,8 @@ const CAPTION_SYSTEM =
   "wer darauf ist, was auf einem Schild steht, was die Beschreibung des Fotos sagt oder eine kurze Tatsache aus dem Wikipedia-Text. " +
   "Was man ohnehin sieht, beschreibst du nicht: kein \"Blick auf\", kein \"Detail\", keine Decke, kein Gewölbe, keine Gasse, " +
   "keine Adjektive über das Aussehen wie prachtvoll, kunstvoll, malerisch oder bemalt. " +
+  "Der Ort hat Vorrang: ist ein Ort, eine Sehenswürdigkeit oder ein Spot der Reise bekannt, nennst du ihn. " +
+  "Personen nennst du höchstens zusätzlich zum Ort, nie statt seiner. " +
   "Kurz: eine Wortgruppe, höchstens zehn Wörter, oft nur ein Name. " +
   "Das Bild hilft dir nur zu entscheiden, welche Fakten passen. " +
   "Du erfindest keine Namen, Orte, Daten oder Ereignisse. Personen nennst du nur mit den angegebenen Namen. " +
@@ -103,20 +105,56 @@ function namesTerm(text: string, term: string): boolean {
  */
 export function captionNamesAFact(caption: string, ctx: CaptionContext): boolean {
   const text = caption.toLowerCase();
-  const terms: string[] = [];
-  if (ctx.place) terms.push(...ctx.place.split(","));
-  if (ctx.poi) {
-    const words = ctx.poi.name.trim().split(/\s+/);
-    terms.push(ctx.poi.name, words[words.length - 1] ?? "");
-  }
+  const terms: string[] = placeTerms(ctx);
   for (const name of ctx.people) terms.push(name.trim().split(/\s+/)[0] ?? "");
   if (ctx.description) terms.push(...ctx.description.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5));
   if (ctx.signText) terms.push(...ctx.signText.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5));
-  if (ctx.tripSpot) {
-    const words = ctx.tripSpot.spot.trim().split(/\s+/);
-    terms.push(ctx.tripSpot.spot, words[words.length - 1] ?? "");
-  }
   return terms.some((t) => namesTerm(text, t));
+}
+
+/** The words that name where a photo is: the place by any of its parts, a landmark or trip spot by its name or last word. */
+function placeTerms(ctx: CaptionContext): string[] {
+  const terms: string[] = [];
+  if (ctx.place) terms.push(...ctx.place.split(","));
+  for (const name of [ctx.poi?.name, ctx.tripSpot?.spot]) {
+    if (!name) continue;
+    const words = name.trim().split(/\s+/);
+    terms.push(name, words[words.length - 1] ?? "");
+  }
+  return terms;
+}
+
+/** Whether the app knows where the photo is: a place, a landmark or a spot of a trip. */
+export function knowsPlace(ctx: CaptionContext): boolean {
+  return !!(ctx.place || ctx.poi || ctx.tripSpot);
+}
+
+/** Whether a caption says where the photo is, by place, landmark or trip spot. */
+export function captionNamesPlace(caption: string, ctx: CaptionContext): boolean {
+  const text = caption.toLowerCase();
+  return placeTerms(ctx).some((t) => namesTerm(text, t));
+}
+
+/** A person on at least this share of the book's photos is familiar: naming them on every photo says nothing. */
+export const FAMILIAR_SHARE = 0.25;
+/** ...and on at least this many photos, so a small book still names its people. */
+export const FAMILIAR_MIN_PHOTOS = 3;
+
+/** The people who appear on so many photos of the book that a caption need not name them. */
+export function familiarPeople(peopleByPhoto: Map<number, string[]>, photoCount: number): Set<string> {
+  const n = new Map<string, number>();
+  for (const names of peopleByPhoto.values()) for (const name of new Set(names)) n.set(name, (n.get(name) ?? 0) + 1);
+  const threshold = Math.max(FAMILIAR_MIN_PHOTOS, Math.ceil(photoCount * FAMILIAR_SHARE));
+  return new Set([...n].filter(([, k]) => k >= threshold).map(([name]) => name));
+}
+
+/**
+ * The people a caption may name: the familiar ones only when there is
+ * nothing else to say about the photo, so the place gets the room.
+ */
+export function captionPeople(names: string[], familiar: Set<string>, otherFacts: boolean): string[] {
+  if (!otherFacts) return names;
+  return names.filter((n) => !familiar.has(n));
 }
 
 /** Short words that say nothing about the picture: articles, prepositions, conjunctions. */
@@ -188,7 +226,7 @@ export function captionFacts(ctx: CaptionContext): string[] {
 }
 
 /** The caption prompt; `withImage` false when the model cannot look at the picture. */
-export function buildCaptionPrompt(ctx: CaptionContext, withImage: boolean): LlmPrompt {
+export function buildCaptionPrompt(ctx: CaptionContext, withImage: boolean, rejected?: string | null): LlmPrompt {
   const facts = captionFacts(ctx);
   const prompt = [
     withImage ? "Schreibe eine Bildunterschrift für dieses Foto." : "Schreibe eine Bildunterschrift für ein Foto, das du nicht sehen kannst, nur aus den Fakten.",
@@ -199,6 +237,12 @@ export function buildCaptionPrompt(ctx: CaptionContext, withImage: boolean): Llm
       : "",
     ctx.onPage?.length
       ? `Auf derselben Seite stehen schon diese Bildunterschriften: ${ctx.onPage.map((c) => `„${c}“`).join(", ")}. Wiederhole sie nicht; sag etwas anderes oder nichts.`
+      : "",
+    knowsPlace(ctx)
+      ? "Nenne den Ort, die Sehenswürdigkeit oder den Spot der Reise beim Namen; eine Person nur zusätzlich dazu. "
+      : "",
+    rejected
+      ? `Dein Vorschlag „${rejected}“ nennt keinen Ort. Schreibe eine Bildunterschrift, die sagt, wo das Foto ist.`
       : "",
     "Nenne mindestens einen der Fakten (Ort, Sehenswürdigkeit, Spot der Reise, Personen, Beschreibung oder Text im Bild) beim Namen, und sonst fast nichts. " +
       "Nicht: „Das kunstvoll bemalte Gewölbe in Musterstadt“, „Blick auf die prachtvolle Decke in Musterstadt“. " +
