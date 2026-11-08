@@ -35,7 +35,11 @@ import {
   descriptiveWords,
   hasConcreteFacts,
   parseCaption,
+  captionNamesPlace,
+  captionPeople,
+  captionRejection,
   chapterTitleRejection,
+  familiarPeople,
   parseChapterTitle,
   parseLayoutPick,
 } from "./photo-book-prompts";
@@ -151,6 +155,33 @@ describe("photo book captions: geometry and prompts", () => {
     expect(chapterTitleRejection("Altstadt und Dom von Musterstadt")).toBeNull();
     expect(chapterTitleRejection("Tagebuch vom Alten Turm")).toBeNull();
     expect(parseChapterTitle({ title: "Tage voller Sonne" })).toBeNull();
+  });
+
+  it("names the place first and leaves out the people who are on most photos", () => {
+    const ctx = { when: null, place: "Altstadt, Musterstadt", poi: null, people: ["Erika"], description: null, keywords: [] };
+    expect(captionNamesPlace("Erika", ctx)).toBe(false);
+    expect(captionNamesPlace("Erika in der Altstadt", ctx)).toBe(true);
+    expect(captionNamesPlace("Musterstadt", ctx)).toBe(true);
+    const byPhoto = new Map<number, string[]>([[1, ["Erika", "Max"]], [2, ["Erika"]], [3, ["Erika"]], [4, ["Max"]], [5, []], [6, []]]);
+    // Erika is on three of six photos: familiar; Max on two: still named.
+    expect([...familiarPeople(byPhoto, 6)]).toEqual(["Erika"]);
+    // In a bigger book three photos are no longer a quarter of it.
+    expect([...familiarPeople(byPhoto, 12)]).toEqual(["Erika"]);
+    expect([...familiarPeople(byPhoto, 20)]).toEqual([]);
+    // One unfamiliar face brings everybody back: all or none.
+    expect(captionPeople(["Erika", "Max"], new Set(["Erika"]), true)).toEqual(["Erika", "Max"]);
+    expect(captionPeople(["Erika"], new Set(["Erika"]), true)).toEqual([]);
+    // Without anything else to say, even a familiar face is worth a caption.
+    expect(captionPeople(["Erika"], new Set(["Erika"]), false)).toEqual(["Erika"]);
+    const prompt = buildCaptionPrompt(ctx, true).prompt;
+    expect(prompt).toContain("Nenne den Ort");
+    expect(buildCaptionPrompt(ctx, true, { caption: "Erika", reason: "no-place" }).prompt).toContain("„Erika“ nennt keinen Ort");
+    const two = { ...ctx, people: ["Erika", "Max"] };
+    expect(captionRejection("Max in Musterstadt", two)).toBe("part-of-people");
+    expect(captionRejection("Erika und Max in Musterstadt", two)).toBeNull();
+    expect(captionRejection("Altstadt von Musterstadt", two)).toBeNull();
+    expect(buildCaptionPrompt(two, true).prompt).toContain("dann alle angegebenen");
+    expect(buildCaptionPrompt(two, true, { caption: "Max in Musterstadt", reason: "part-of-people" }).prompt).toContain("Nenne alle (Erika, Max) oder keine");
   });
 
   it("calls a photo taken at home „Zuhause“, never its street", () => {
@@ -290,6 +321,33 @@ describe("photo book: the model's texts and layouts", () => {
     expect(view.pages.flatMap((p) => p.slots).find((s) => s.photo_id === list[2].id)!.caption).toBe("Mein eigener Text");
     await acceptPhotoBookChapterSuggestion(user.id, id, view.chapters[0].id);
     expect((await getPhotoBookView(user.id, id)).chapters[0].title).toBe("Turm und Gassen");
+  });
+
+  it("asks again for a caption that names a person but not the place, and leaves out familiar faces", async () => {
+    const [person] = await db.insert(persons).values({ user_id: user.id, name: "Erika" }).returning();
+    const list = [];
+    for (let i = 0; i < 4; i++) {
+      const p = await upload(`2024-06-01 1${i}:00:00`, { location_city: "Musterstadt", location_country: "Beispielland" });
+      const [face] = await db.insert(faces).values({ photo_id: p.id, bbox: JSON.stringify({ x: 0.4, y: 0.3, width: 0.2, height: 0.2 }), embedding: "[]" }).returning();
+      await db.insert(userFaceAssignments).values({ user_id: user.id, face_id: face.id, person_id: person.id });
+      list.push(p);
+    }
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id) });
+    const asked: string[] = [];
+    const { deps } = fakeDeps({
+      askVision: async (_img, prompt) => {
+        asked.push(prompt.prompt);
+        // The first try names only the person; told so, it names the place.
+        return { result: { caption: prompt.prompt.includes("nennt keinen Ort") ? `Musterstadt ${asked.length}` : "Erika" }, model: "m" };
+      },
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions"] }, deps);
+    expect(job.captions).toBe(4);
+    // Erika is on every photo: familiar, so not offered as a fact.
+    expect(asked.every((p) => !p.includes("Personen im Bild: Erika"))).toBe(true);
+    expect(asked.filter((p) => p.includes("nennt keinen Ort"))).toHaveLength(4);
+    const view = await getPhotoBookView(user.id, id);
+    expect(view.pages.flatMap((p) => p.slots).every((s) => !s.caption || s.caption.startsWith("Musterstadt"))).toBe(true);
   });
 
   it("says „zuhause“ for photos taken at home and asks again for a title that starts with „Tage“", async () => {

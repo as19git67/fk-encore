@@ -57,7 +57,10 @@ import {
   buildCaptionPrompt,
   buildChapterTitlePrompt,
   buildLayoutPrompt,
+  captionPeople,
+  captionRejection,
   captionWorthKeeping,
+  familiarPeople,
   hasConcreteFacts,
   parseCaption,
   parseChapterTitle,
@@ -67,6 +70,7 @@ import {
   HOME_PLACE,
   parseLayoutPick,
   type CaptionContext,
+  type CaptionRejection,
   type ChapterContext,
   type LlmPrompt,
   type PoiFacts,
@@ -370,7 +374,10 @@ async function writeCaptions(
       )
     : [];
   const byId = new Map(facts.map((f) => [f.id, f]));
-  const people = await peopleByPhoto(userId, ids);
+  // Who is on many of the book's photos is named only where nothing else is known.
+  const allIds = bookPhotoIds(loaded);
+  const everyone = await peopleByPhoto(userId, allIds);
+  const familiar = familiarPeople(everyone, allIds.length);
   const pois = await poiByPhoto(ids);
   const signs = await signTextByPhoto(ids);
   const spots = await tripSpotByPhoto(userId, ids);
@@ -398,13 +405,14 @@ async function writeCaptions(
       when: when(f.taken_at),
       place: place(f, home),
       poi,
-      people: people.get(id) ?? [],
+      people: [],
       description: f.description?.trim() || null,
       keywords: (f.keywords ?? []).slice(0, 8),
       signText: signs.get(id) ?? null,
       tripSpot: spots.get(id) ?? null,
       onPage: pageCaptions(loaded, id),
     };
+    ctx.people = captionPeople(everyone.get(id) ?? [], familiar, hasConcreteFacts(ctx));
     // Nothing concrete to say: no caption, rather than one that only
     // describes the picture. With "neu schreiben" an earlier one goes too.
     if (!hasConcreteFacts(ctx)) {
@@ -413,22 +421,31 @@ async function writeCaptions(
       job.done += 1;
       continue;
     }
-    let answer: { result: unknown; model: string } | null = null;
     const image = vision ? await deps.image(id) : null;
-    if (image) {
-      try {
-        answer = await deps.askVision(image, buildCaptionPrompt(ctx, true));
-      } catch (err) {
-        if (!(err instanceof VisionUnavailableError)) throw err;
-        vision = false;
+    const ask = async (rejected: { caption: string; reason: CaptionRejection } | null): Promise<{ result: unknown; model: string }> => {
+      if (image && vision) {
+        try {
+          return await deps.askVision(image, buildCaptionPrompt(ctx, true, rejected));
+        } catch (err) {
+          if (!(err instanceof VisionUnavailableError)) throw err;
+          vision = false;
+        }
       }
+      // Without the picture the facts alone carry the caption.
+      return deps.askText(buildCaptionPrompt(ctx, false, rejected));
+    };
+    let answer = await ask(null);
+    let parsed = parseCaption(answer.result);
+    // Where the photo is comes first, and people go all or none: otherwise asked once more, with the reason.
+    const reason = parsed ? captionRejection(parsed, ctx) : null;
+    if (parsed && reason) {
+      answer = await ask({ caption: parsed, reason });
+      parsed = parseCaption(answer.result);
+      if (parsed && captionRejection(parsed, ctx)) parsed = null;
     }
-    // Without the picture the facts alone carry the caption.
-    if (!answer) answer = await deps.askText(buildCaptionPrompt(ctx, false));
-    const parsed = answer ? parseCaption(answer.result) : null;
     const repeats = parsed != null && (ctx.onPage ?? []).some((c) => captionKey(c) === captionKey(parsed));
     const text = parsed && !repeats && captionWorthKeeping(parsed, ctx) ? parsed : null;
-    if (text && answer) {
+    if (text) {
       await saveCaption(loaded.book.id, id, text, answer.model);
       loaded.captions.set(id, { text, source: "llm" });
       job.captions += 1;
