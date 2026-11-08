@@ -46,6 +46,7 @@ import { applyVotesToPlan, castVote } from "./plan-votes";
 import { inviteToTrip } from "./shares";
 import { addFind } from "./add-find";
 import { getTripItinerary, putTripItinerary, type ItineraryItem } from "./itinerary";
+import { planJournal, undoPlanOp } from "./plan-ops";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
 const NEXT = { lat: 48.37, lon: 11.4 };
@@ -735,5 +736,91 @@ describe("changing a stay", () => {
     const created = await oneStay();
     await expect(putTripItinerary({ planId: created.id, startDate: null, items: [] }))
       .rejects.toThrow(/Aufenthalt/);
+  });
+});
+
+describe("taking a change of the itinerary back", () => {
+  const itineraryRows = async (planId: number) =>
+    (await planJournal({ planId })).entries.filter((e) => e.kind === "itinerary");
+
+  /** A first stay, then a second one in the east, both with planned stops. */
+  async function twoStays() {
+    const created = await oneStay();
+    const chain = await chainOf(created.id);
+    chain.items.push({ kind: "journey" }, { kind: "stay", title: "Ostort", anchor: EAST, days: 2, radiusM: 4_000, mode: "foot" });
+    const { plan } = await write(created.id, chain);
+    return plan;
+  }
+
+  it("journals a change that shortens planned days, and the undo brings the same days back", async () => {
+    const created = await oneStay();
+    const leg = created.legs[0];
+    const refsBefore = stopRefs(leg);
+    expect(refsBefore.length).toBeGreaterThan(0);
+    expect(leg.days).toHaveLength(2);
+
+    const { plan: shorter } = await editStay(created.id, 0, { days: 1 });
+    expect(shorter.legs[0].days).toHaveLength(1);
+
+    const [entry] = await itineraryRows(created.id);
+    expect(entry.sentence).toMatch(/„Westort" neu geplant \(kürzer oder entfernt\)/);
+    expect(entry.undoable).toBe(true);
+
+    const journal = await undoPlanOp({ planId: created.id, opId: entry.id });
+    const undone = journal.entries.find((e) => e.id === entry.id)!;
+    expect(undone.undoable).toBe(false);
+    expect(undone.undoneAt).not.toBeNull();
+    expect(journal.entries.some((e) => e.kind === "itinerary-undo")).toBe(true);
+
+    const { plan } = await getTripPlan({ planId: created.id });
+    expect(plan.legs[0].id).toBe(leg.id);
+    expect(plan.legs[0].days).toHaveLength(2);
+    expect(stopRefs(plan.legs[0])).toEqual(refsBefore);
+    // Back on the day, not also waiting in the pool.
+    expect(plan.legs[0].pool.map((c) => c.osmRef).filter((r) => refsBefore.includes(r))).toEqual([]);
+
+    await expect(undoPlanOp({ planId: created.id, opId: entry.id })).rejects.toThrow(/schon zurückgenommen/);
+  });
+
+  it("brings a removed stay back with its days", async () => {
+    const created = await twoStays();
+    const east = created.legs.find((l) => l.title === "Ostort")!;
+    const refsBefore = stopRefs(east);
+    expect(refsBefore.length).toBeGreaterThan(0);
+
+    const chain = await chainOf(created.id);
+    const { plan: without } = await write(created.id, { ...chain, items: chain.items.slice(0, stayAt(chain.items, 0) + 1) });
+    expect(without.legs.filter((l) => l.kind === "stay")).toHaveLength(1);
+
+    const [entry] = await itineraryRows(created.id);
+    await undoPlanOp({ planId: created.id, opId: entry.id });
+
+    const { plan } = await getTripPlan({ planId: created.id });
+    const stays = plan.legs.filter((l) => l.kind === "stay");
+    expect(stays.map((l) => l.title)).toEqual(["Westort", "Ostort"]);
+    expect(stopRefs(stays[1])).toEqual(refsBefore);
+  });
+
+  it("only offers the newest change, and journals nothing when no planned day was touched", async () => {
+    const created = await oneStay();
+    await editStay(created.id, 0, { days: 3 });
+    await editStay(created.id, 0, { days: 1 });
+    const rows = await itineraryRows(created.id);
+    expect(rows).toHaveLength(2);
+    const [newest, older] = rows;
+    expect(newest.undoable).toBe(true);
+    expect(older.undoable).toBe(false);
+    await expect(undoPlanOp({ planId: created.id, opId: older.id })).rejects.toThrow(/letzte Änderung/);
+
+    // Once the newest is back, the one before it is the newest.
+    await undoPlanOp({ planId: created.id, opId: newest.id });
+    expect((await itineraryRows(created.id)).find((e) => e.id === older.id)!.undoable).toBe(true);
+    await undoPlanOp({ planId: created.id, opId: older.id });
+    const { plan } = await getTripPlan({ planId: created.id });
+    expect(plan.legs[0].days).toHaveLength(2);
+
+    const plain = await oneStay();
+    await editStay(plain.id, 0, { anchorLabel: "Pension Musterhof" });
+    expect(await itineraryRows(plain.id)).toEqual([]);
   });
 });

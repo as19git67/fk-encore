@@ -26,6 +26,9 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
+import { and, eq, inArray } from "drizzle-orm";
+import db from "../db/database";
+import { tripPlanOps, tripPlanPool } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { isJourneyDeparture, journeyDeparture } from "./aboard";
 import { addDays, daysBetween, isCalendarDate } from "./leg-dates";
@@ -167,13 +170,19 @@ export const putTripItinerary = api(
     if (!plan) throw APIError.notFound("plan not found");
     await requireOrganiser(req.planId, userId, "Den Reiseverlauf");
 
-    const frames = deriveFrames(
-      { startDate: req.startDate, items: req.items },
-      { home: plan.home !== null, homeLabel: plan.home?.label ?? "Zuhause" },
-    );
-    const slots = resolveSlots(plan, frames);
-    const planned = await planSlots(plan, slots);
-    await writeSlots(plan, slots, planned);
+    const before = itineraryOf(plan);
+    const { planned, rebuilt } = await applyChain(plan, { startDate: req.startDate, items: req.items });
+    // A change that rebuilt days somebody had planned can be taken back
+    // (plan, "Decisions taken": shortening a stay is allowed, with an
+    // undo). One that only moved dates rebuilt nothing worth keeping.
+    const worthKeeping = rebuilt.filter(hasStops);
+    if (worthKeeping.length > 0) {
+      await journalItineraryChange(plan.id, userId, {
+        startDate: before.startDate,
+        items: before.items,
+        days: Object.fromEntries(worthKeeping.map((leg) => [String(leg.id), leg.days.map(dayInputOf)])),
+      }, changeSentence(plan, worthKeeping, req.items));
+    }
 
     const updated = await loadPlan(req.planId, userId);
     if (!updated) throw APIError.internal("plan vanished while it was being written");
@@ -184,6 +193,204 @@ export const putTripItinerary = api(
     };
   },
 );
+
+// MARK: - Taking a change back
+
+/** The journal's name for a change of the itinerary (`trip_plan_ops.kind`). */
+export const ITINERARY_OP = "itinerary";
+
+/** The journal line an undo of an itinerary change leaves. */
+export const ITINERARY_UNDO_OP = "itinerary-undo";
+
+/**
+ * What a change of the itinerary replaced, so it can be taken back:
+ * the chain as it was, and the days of every stay the change rebuilt,
+ * by the leg id those stays had then.
+ */
+export interface ItinerarySnapshot {
+  startDate: string | null;
+  items: ItineraryItem[];
+  days: Record<string, CreateDayInput[]>;
+}
+
+/**
+ * Put the itinerary back the way a snapshot says, days included.
+ *
+ * The chain is written as any other change is, and then every stay the
+ * snapshot knows gets its old days back instead of freshly planned
+ * ones: the stops, their order, the fixed times and day trips, so the
+ * undo is the trip it was and not a similar one (§6.3). A stay that
+ * the change deleted comes back as a new leg with its old days; its
+ * votes and notes went with the old row and do not return, which the
+ * journal says. A split block comes back together.
+ */
+export async function restoreItinerary(plan: StoredPlan, snapshot: ItinerarySnapshot): Promise<void> {
+  const existing = new Set(plan.legs.map((leg) => leg.id));
+  const restore = new Map<ItineraryItem, CreateDayInput[]>();
+  const items = snapshot.items.map((item) => {
+    const days = item.legId === undefined ? undefined : snapshot.days[String(item.legId)];
+    // A leg that no longer exists is a new one now.
+    const copy: ItineraryItem = item.legId !== undefined && !existing.has(item.legId)
+      ? { ...item, legId: undefined }
+      : { ...item };
+    if (days && copy.kind === "stay") restore.set(copy, days);
+    return copy;
+  });
+  await applyChain(plan, { startDate: snapshot.startDate, items }, restore);
+}
+
+/** Whether somebody has a planned stop on this leg. */
+function hasStops(leg: StoredLeg): boolean {
+  return leg.days.some((day) => day.blocks.some((block) => block.stops.length > 0));
+}
+
+/** A stored day, as the input that writes it again. */
+export function dayInputOf(day: StoredLeg["days"][number]): CreateDayInput {
+  return {
+    detailed: day.detailed,
+    bufferReason: day.bufferReason ?? null,
+    anchor: day.anchor
+      ? {
+        lat: day.anchor.lat,
+        lon: day.anchor.lon,
+        label: day.anchor.label,
+        radiusM: day.anchor.radiusM,
+        departMinutes: day.anchor.departMinutes,
+        returnMinutes: day.anchor.returnMinutes,
+        waterDetourM: day.anchor.waterDetourM,
+        waterAround: day.anchor.waterAround ?? null,
+      }
+      : null,
+    fixpoints: day.fixpoints.map((fix) => ({
+      id: fix.id,
+      label: fix.label,
+      kind: fix.kind,
+      startMinutes: fix.startMinutes,
+      durationMinutes: fix.durationMinutes,
+      travelMinutes: fix.travelMinutes,
+      bufferMinutes: fix.bufferMinutes,
+      blockId: fix.blockId,
+      spotRef: fix.spotRef,
+      lat: fix.lat,
+      lon: fix.lon,
+    })),
+    blocks: day.blocks.map((block) => ({
+      id: block.id,
+      label: block.label,
+      kind: block.kind,
+      budgetMinutes: block.budgetMinutes,
+      usedMinutes: block.usedMinutes,
+      carriedInMinutes: block.carriedInMinutes,
+      startMinutes: block.startMinutes ?? undefined,
+      stops: block.stops.map((stop) => ({
+        osmRef: stop.osmRef,
+        name: stop.name,
+        localName: stop.localName ?? null,
+        wikipediaUrl: stop.wikipediaUrl ?? null,
+        facadeAzimuth: stop.facadeAzimuth ?? null,
+        kind: stop.kind ?? null,
+        origin: stop.origin,
+        extent: stop.extent,
+        reasons: stop.reasons ?? [],
+        lat: stop.lat,
+        lon: stop.lon,
+        category: stop.category,
+        dwellMinutes: stop.dwellMinutes,
+        score: stop.score,
+        travelFromPrevious: stop.travelFromPrevious,
+        pinned: stop.pinned,
+      })),
+    })),
+  };
+}
+
+/** The journal line: which stays lost or changed their planned days. */
+function changeSentence(plan: StoredPlan, rebuilt: readonly StoredLeg[], items: readonly ItineraryItem[]): string {
+  const names = rebuilt.map((leg) => leg.title ?? `Aufenthalt ${leg.position + 1}`);
+  const shortened = rebuilt.filter((leg) => {
+    const now = items.find((item) => item.legId === leg.id);
+    return now === undefined || (now.days ?? leg.days.length) < leg.days.length;
+  });
+  const list = names.length === 1 ? `„${names[0]}"` : names.map((n) => `„${n}"`).join(", ");
+  if (shortened.length > 0) return `Reiseverlauf geändert, ${list} neu geplant (kürzer oder entfernt)`;
+  return `Reiseverlauf geändert, ${list} neu geplant`;
+}
+
+async function journalItineraryChange(
+  planId: number,
+  userId: number,
+  snapshot: ItinerarySnapshot,
+  sentence: string,
+): Promise<void> {
+  await db.insert(tripPlanOps).values({
+    plan_id: planId,
+    client_op_id: `itinerary-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    kind: ITINERARY_OP,
+    payload: { sentence },
+    previous: snapshot,
+    actor_id: userId,
+  });
+}
+
+/**
+ * Write a chain: derive the frames, plan what changed, write it. With
+ * `restore`, the stays it names keep those days instead of new ones.
+ * Returns the stays whose days were rebuilt or deleted, as they were.
+ */
+async function applyChain(
+  plan: StoredPlan,
+  chain: { startDate: string | null; items: readonly ItineraryItem[] },
+  restore?: ReadonlyMap<ItineraryItem, CreateDayInput[]>,
+): Promise<{ planned: Planned; rebuilt: StoredLeg[] }> {
+  const frames = deriveFrames(chain, { home: plan.home !== null, homeLabel: plan.home?.label ?? "Zuhause" });
+  const slots = resolveSlots(plan, frames);
+  if (restore) {
+    for (const slot of slots.slots) {
+      const days = restore.get(slot.frame.item);
+      if (!days) continue;
+      if (slot.existing && !slot.replan) refuseSettled(slot.existing, "zurückgesetzt");
+      slot.replan = true;
+    }
+  }
+  const planned = await planSlots(plan, slots);
+  if (restore) {
+    for (const [index, slot] of slots.slots.entries()) {
+      const days = restore.get(slot.frame.item);
+      const result = planned.legs.get(index);
+      if (!days || !result) continue;
+      const kept = new Set(days.flatMap((day) => day.blocks.flatMap((block) => block.stops.map((stop) => stop.osmRef))));
+      result.leg = {
+        ...result.leg,
+        days,
+        pool: result.leg.pool.filter((candidate) => !kept.has(candidate.osmRef)),
+      };
+    }
+  }
+  await writeSlots(plan, slots, planned);
+  if (restore) await dropPlannedFromManualPool(plan);
+
+  const rebuilt = [
+    ...slots.slots.filter((slot) => slot.replan && slot.existing?.kind === "stay").map((slot) => slot.existing as StoredLeg),
+    ...slots.removed.filter((leg) => leg.kind === "stay"),
+  ];
+  return { planned, rebuilt };
+}
+
+/**
+ * A find somebody added by hand survives every re-plan in the pool;
+ * once its old day is back, it is on the day and must not also wait in
+ * the pool.
+ */
+async function dropPlannedFromManualPool(before: StoredPlan): Promise<void> {
+  const plan = await loadPlan(before.id, before.ownerId);
+  if (!plan) return;
+  for (const leg of plan.legs) {
+    const onDays = new Set(leg.days.flatMap((day) => day.blocks.flatMap((block) => block.stops.map((stop) => stop.osmRef))));
+    const doubled = leg.pool.filter((candidate) => onDays.has(candidate.osmRef)).map((candidate) => candidate.osmRef);
+    if (doubled.length === 0) continue;
+    await db.delete(tripPlanPool).where(and(eq(tripPlanPool.leg_id, leg.id), inArray(tripPlanPool.osm_ref, doubled)));
+  }
+}
 
 // MARK: - Reading the chain
 

@@ -190,12 +190,22 @@ itinerary.
 
 ## Decisions taken (2026-11-02)
 
-- Length is stored in days; the UI shows days and nights side by side.
+- Length is stored in days; the UI shows days first and nights second,
+  as in the mock: "4 Tage · 3 Nächte".
 - "Neue Reise" lands in the itinerary, "Planen" leads on to the day view.
 - Between two stays there is always a journey, "Zeiten offen" until
   somebody knows them.
-- A change in the itinerary may shorten planned days; undo exists
-  (`…/ops/undo`).
+- A change in the itinerary may shorten planned days, and it can be
+  taken back (`…/ops/undo`, built 2026-11-08). `PUT …/itinerary` journals
+  every change that rebuilds or deletes a stay with planned stops as an
+  `itinerary` row in `trip_plan_ops`; `previous` holds the chain as it
+  was and the days of each rebuilt stay as `CreateDayInput`. The undo
+  (`restoreItinerary` in `itinerary.ts`) writes that chain and gives
+  those stays their stored days back instead of new ones, so it is the
+  same trip again, not a similar re-plan (§6.3). Only the newest
+  itinerary row is undoable, since its snapshot is the trip right before
+  it. Limits: a removed stay comes back as a new leg, so its votes and
+  notes stay lost; a split block comes back as one.
 - The level is called Aufenthalt in the UI.
 
 ## Usage notes (2026-11-06, round 4)
