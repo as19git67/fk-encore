@@ -350,7 +350,8 @@ und PDF.
   eine Unterschrift mit nur einem Namen wird einmal neu angefragt.
   Personen, die auf mindestens einem Viertel der Fotos des Buchs (und
   mindestens drei) zu sehen sind, werden nur genannt, wenn es sonst
-  nichts zu sagen gibt.
+  nichts zu sagen gibt oder eine weitere Person auf dem Foto ist:
+  Personen werden immer alle oder keine genannt.
 - **Fehler und Grenzfälle:** Läuft als Job; der Dialog zeigt den Stand.
   Ohne hinterlegtes Zuhause gilt der Ort des Fotos.
 - **Test:** –

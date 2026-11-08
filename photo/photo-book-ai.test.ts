@@ -37,6 +37,7 @@ import {
   parseCaption,
   captionNamesPlace,
   captionPeople,
+  captionRejection,
   chapterTitleRejection,
   familiarPeople,
   parseChapterTitle,
@@ -167,12 +168,20 @@ describe("photo book captions: geometry and prompts", () => {
     // In a bigger book three photos are no longer a quarter of it.
     expect([...familiarPeople(byPhoto, 12)]).toEqual(["Erika"]);
     expect([...familiarPeople(byPhoto, 20)]).toEqual([]);
-    expect(captionPeople(["Erika", "Max"], new Set(["Erika"]), true)).toEqual(["Max"]);
+    // One unfamiliar face brings everybody back: all or none.
+    expect(captionPeople(["Erika", "Max"], new Set(["Erika"]), true)).toEqual(["Erika", "Max"]);
+    expect(captionPeople(["Erika"], new Set(["Erika"]), true)).toEqual([]);
     // Without anything else to say, even a familiar face is worth a caption.
     expect(captionPeople(["Erika"], new Set(["Erika"]), false)).toEqual(["Erika"]);
     const prompt = buildCaptionPrompt(ctx, true).prompt;
     expect(prompt).toContain("Nenne den Ort");
-    expect(buildCaptionPrompt(ctx, true, "Erika").prompt).toContain("„Erika“ nennt keinen Ort");
+    expect(buildCaptionPrompt(ctx, true, { caption: "Erika", reason: "no-place" }).prompt).toContain("„Erika“ nennt keinen Ort");
+    const two = { ...ctx, people: ["Erika", "Max"] };
+    expect(captionRejection("Max in Musterstadt", two)).toBe("part-of-people");
+    expect(captionRejection("Erika und Max in Musterstadt", two)).toBeNull();
+    expect(captionRejection("Altstadt von Musterstadt", two)).toBeNull();
+    expect(buildCaptionPrompt(two, true).prompt).toContain("dann alle angegebenen");
+    expect(buildCaptionPrompt(two, true, { caption: "Max in Musterstadt", reason: "part-of-people" }).prompt).toContain("Nenne alle (Erika, Max) oder keine");
   });
 
   it("calls a photo taken at home „Zuhause“, never its street", () => {

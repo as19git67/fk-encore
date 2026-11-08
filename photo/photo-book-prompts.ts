@@ -149,12 +149,36 @@ export function familiarPeople(peopleByPhoto: Map<number, string[]>, photoCount:
 }
 
 /**
- * The people a caption may name: the familiar ones only when there is
- * nothing else to say about the photo, so the place gets the room.
+ * The people a caption may name: all of them or none. Only familiar faces
+ * on the photo are left out when there is something else to say, so the
+ * place gets the room; one unfamiliar face brings everybody back, since a
+ * caption naming part of a group reads as if the others were strangers.
  */
 export function captionPeople(names: string[], familiar: Set<string>, otherFacts: boolean): string[] {
   if (!otherFacts) return names;
-  return names.filter((n) => !familiar.has(n));
+  return names.some((n) => !familiar.has(n)) ? names : [];
+}
+
+/** First names of the people a caption mentions. */
+function namedPeople(caption: string, people: string[]): string[] {
+  const text = caption.toLowerCase();
+  return people.filter((n) => namesTerm(text, n.trim().split(/\s+/)[0] ?? ""));
+}
+
+/** Whether a caption names some of the photo's people but not all of them. */
+export function captionNamesPartOfPeople(caption: string, ctx: CaptionContext): boolean {
+  const named = namedPeople(caption, ctx.people).length;
+  return named > 0 && named < ctx.people.length;
+}
+
+/** Why a caption is asked for again: it says nowhere, or it names part of the people. */
+export type CaptionRejection = "no-place" | "part-of-people";
+
+/** Why a caption is not kept as it is, or null. */
+export function captionRejection(caption: string, ctx: CaptionContext): CaptionRejection | null {
+  if (knowsPlace(ctx) && !captionNamesPlace(caption, ctx)) return "no-place";
+  if (captionNamesPartOfPeople(caption, ctx)) return "part-of-people";
+  return null;
 }
 
 /** Short words that say nothing about the picture: articles, prepositions, conjunctions. */
@@ -226,7 +250,11 @@ export function captionFacts(ctx: CaptionContext): string[] {
 }
 
 /** The caption prompt; `withImage` false when the model cannot look at the picture. */
-export function buildCaptionPrompt(ctx: CaptionContext, withImage: boolean, rejected?: string | null): LlmPrompt {
+export function buildCaptionPrompt(
+  ctx: CaptionContext,
+  withImage: boolean,
+  rejected?: { caption: string; reason: CaptionRejection } | null,
+): LlmPrompt {
   const facts = captionFacts(ctx);
   const prompt = [
     withImage ? "Schreibe eine Bildunterschrift für dieses Foto." : "Schreibe eine Bildunterschrift für ein Foto, das du nicht sehen kannst, nur aus den Fakten.",
@@ -241,8 +269,12 @@ export function buildCaptionPrompt(ctx: CaptionContext, withImage: boolean, reje
     knowsPlace(ctx)
       ? "Nenne den Ort, die Sehenswürdigkeit oder den Spot der Reise beim Namen; eine Person nur zusätzlich dazu. "
       : "",
-    rejected
-      ? `Dein Vorschlag „${rejected}“ nennt keinen Ort. Schreibe eine Bildunterschrift, die sagt, wo das Foto ist.`
+    ctx.people.length > 1 ? "Nennst du Personen, dann alle angegebenen, nie nur einen Teil." : "",
+    rejected?.reason === "no-place"
+      ? `Dein Vorschlag „${rejected.caption}“ nennt keinen Ort. Schreibe eine Bildunterschrift, die sagt, wo das Foto ist.`
+      : "",
+    rejected?.reason === "part-of-people"
+      ? `Dein Vorschlag „${rejected.caption}“ nennt nur einen Teil der Personen. Nenne alle (${ctx.people.join(", ")}) oder keine.`
       : "",
     "Nenne mindestens einen der Fakten (Ort, Sehenswürdigkeit, Spot der Reise, Personen, Beschreibung oder Text im Bild) beim Namen, und sonst fast nichts. " +
       "Nicht: „Das kunstvoll bemalte Gewölbe in Musterstadt“, „Blick auf die prachtvolle Decke in Musterstadt“. " +

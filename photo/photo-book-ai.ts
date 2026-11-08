@@ -57,12 +57,11 @@ import {
   buildCaptionPrompt,
   buildChapterTitlePrompt,
   buildLayoutPrompt,
-  captionNamesPlace,
   captionPeople,
+  captionRejection,
   captionWorthKeeping,
   familiarPeople,
   hasConcreteFacts,
-  knowsPlace,
   parseCaption,
   parseChapterTitle,
   proposedChapterTitle,
@@ -71,6 +70,7 @@ import {
   HOME_PLACE,
   parseLayoutPick,
   type CaptionContext,
+  type CaptionRejection,
   type ChapterContext,
   type LlmPrompt,
   type PoiFacts,
@@ -422,7 +422,7 @@ async function writeCaptions(
       continue;
     }
     const image = vision ? await deps.image(id) : null;
-    const ask = async (rejected: string | null): Promise<{ result: unknown; model: string }> => {
+    const ask = async (rejected: { caption: string; reason: CaptionRejection } | null): Promise<{ result: unknown; model: string }> => {
       if (image && vision) {
         try {
           return await deps.askVision(image, buildCaptionPrompt(ctx, true, rejected));
@@ -436,11 +436,12 @@ async function writeCaptions(
     };
     let answer = await ask(null);
     let parsed = parseCaption(answer.result);
-    // Where the photo is comes first: a caption with only a name is asked for once more.
-    if (parsed && knowsPlace(ctx) && !captionNamesPlace(parsed, ctx)) {
-      answer = await ask(parsed);
+    // Where the photo is comes first, and people go all or none: otherwise asked once more, with the reason.
+    const reason = parsed ? captionRejection(parsed, ctx) : null;
+    if (parsed && reason) {
+      answer = await ask({ caption: parsed, reason });
       parsed = parseCaption(answer.result);
-      if (parsed && !captionNamesPlace(parsed, ctx)) parsed = null;
+      if (parsed && captionRejection(parsed, ctx)) parsed = null;
     }
     const repeats = parsed != null && (ctx.onPage ?? []).some((c) => captionKey(c) === captionKey(parsed));
     const text = parsed && !repeats && captionWorthKeeping(parsed, ctx) ? parsed : null;
