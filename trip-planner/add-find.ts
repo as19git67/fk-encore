@@ -19,6 +19,7 @@
  *      says so instead of the planner reckoning with invented values.
  */
 
+import { DEFAULT_PRIORITY, isPriority, PRIORITY_POINTS, type IdeaPriority } from "./priority";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -83,6 +84,8 @@ export interface AddFindRequest {
    * in twice. A tap on a map has no such reference and gets one made.
    */
   osmRef?: string;
+  /** Muss / Will / Wenn Zeit (ideas plan, stage 3). Will when not said. */
+  priority?: IdeaPriority;
 }
 
 export interface AddFindResponse {
@@ -108,6 +111,10 @@ export const addFind = api(
     const position = validatePosition(req);
     const note = validateNote(req.note);
     const extent = validateExtent(position, req);
+    if (req.priority !== undefined && !isPriority(req.priority)) {
+      throw APIError.invalidArgument("priority must be must, want or maybe");
+    }
+    const priority = req.priority ?? DEFAULT_PRIORITY;
 
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
@@ -148,6 +155,7 @@ export const addFind = api(
         note,
         sourceUrl: req.sourceUrl ?? null,
         addedBy: userId,
+        priority: req.priority,
       });
       if (!entry) {
         // It is already planned into a day rather than sitting in the
@@ -194,7 +202,9 @@ export const addFind = api(
       // nothing plans it into a day. But a top pick of the pool —
       // whoever adds a place wants to see it (stage 0 of the ranking
       // plan); only a heart wish outranks it.
-      score: MANUAL_SCORE,
+      score: MANUAL_SCORE + PRIORITY_POINTS[priority],
+      priority,
+      openingHours: match?.openingHours ?? null,
       reasons: reasonsFor(note, req.sourceUrl),
       origin: "manual",
       note,

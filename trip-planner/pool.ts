@@ -124,6 +124,10 @@ export const placeFromPool = api(
           // returns to the pool as a search result is one the next
           // re-plan deletes.
           origin: candidate.origin,
+          // And how much it matters and when it is open (ideas plan,
+          // stage 3): the stop is the idea while it is on a day.
+          priority: candidate.priority,
+          openingHours: candidate.openingHours ?? null,
           // And "why here?" (§8.3): the day screen promises it on
           // every stop, and this is the moment it used to be lost.
           reasons: candidate.reasons,

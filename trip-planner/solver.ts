@@ -18,6 +18,7 @@
  * so two runs never disagree.
  */
 
+import type { IdeaPriority } from "./priority";
 import type { PlannedBlockShape } from "./blocks";
 import { leaveFrom, type SpotExtent } from "./extent";
 import { isPassedByAny, passedBy } from "./on-the-way";
@@ -85,6 +86,10 @@ export interface Candidate extends Coordinate {
   score: number;
   /** Somebody asked for it (votes.ts) — what earns a restaurant the meal block. */
   wanted?: boolean;
+  /** Muss / Will / Wenn Zeit, said by the travellers (ideas plan, stage 3). */
+  priority?: IdeaPriority;
+  /** OpenStreetMap's opening_hours, unverified; absent when the map has none. */
+  openingHours?: string | null;
 }
 
 /** What a meal block may hold (move.ts says the same for a drop). */
@@ -93,6 +98,10 @@ const MEAL_CATEGORIES: ReadonlySet<string> = new Set(["food", "cafe"]);
 export interface PlannedStop {
   osmRef: string;
   name: string | null;
+  /** See `Candidate.priority`; carried so a day knows which ideas matter most. */
+  priority?: IdeaPriority;
+  /** See `Candidate.openingHours`. */
+  openingHours?: string | null;
   /** See `Candidate.localName`. */
   localName?: string | null;
   /** See `Candidate.wikipediaUrl`. */

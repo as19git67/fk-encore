@@ -413,6 +413,13 @@ struct TripPoolView: View {
                 await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
             },
         ]
+        // How much it matters (ideas plan, stage 3) — on a trip of ideas,
+        // where the list is what the travellers said they want.
+        if viewModel.plan?.isIdeasTrip == true {
+            actions.append(contentsOf: TripIdeaPriority.actions(current: candidate.ideaPriority) { priority in
+                await viewModel.setPriority(osmRef: candidate.osmRef, priority)
+            })
+        }
         // What I want of it (§6.1): the same answers as the ring on the
         // row, so the map's sheet and the detail screen can vote too.
         if let entry = ballotEntry(candidate.osmRef) {
@@ -590,6 +597,8 @@ struct TripPoolView: View {
             if let extent = candidate.extent {
                 Text(extent.summary).font(.caption).foregroundStyle(.secondary)
             }
+            TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
+                          closedOn: candidate.closedOn ?? [], openingHours: candidate.openingHours)
 
             // A stop longer than every block that takes spots is never
             // chosen by the planner — it keeps to the frame it was

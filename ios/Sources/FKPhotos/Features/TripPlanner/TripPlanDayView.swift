@@ -1774,6 +1774,13 @@ struct TripPlanDayView: View {
         ) {
             await viewModel.hide(osmRef: stop.osmRef)
         })
+        // How much it matters (ideas plan, stage 3): the same choice as
+        // on the list of ideas, while the stop is still to come.
+        if viewModel.plan?.isIdeasTrip == true && status == .planned {
+            actions.append(contentsOf: TripIdeaPriority.actions(current: stop.ideaPriority) { priority in
+                await viewModel.setPriority(osmRef: stop.osmRef, priority)
+            })
+        }
         return actions
     }
 
@@ -1854,6 +1861,11 @@ struct TripPlanDayView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        // Priority and hours (ideas plan, stage 3). The
+                        // ticket is already the line above.
+                        TripIdeaChips(priority: stop.ideaPriority,
+                                      closedThatDay: stop.closedThatDay == true,
+                                      openingHours: stop.openingHours)
                     }
                 }
                 .buttonStyle(.plain)

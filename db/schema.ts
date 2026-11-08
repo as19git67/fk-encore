@@ -3817,6 +3817,10 @@ export const tripPlanStops = pgTable(
     // moment somebody acts on the find, which deletes the pool row.
     note: text("note"),
     source_url: text("source_url"),
+    // How much the idea matters, and when it is open (ideas plan,
+    // stage 3) — carried from the pool row like the note.
+    priority: text("priority").notNull().default("want"),
+    opening_hours: text("opening_hours"),
     // The name on the sign, when the readable name is not it (§10.4).
     // Null across most of Europe, where the two are the same and a
     // second identical line would be noise.
@@ -3948,6 +3952,10 @@ export const tripPlanPool = pgTable(
     // laut Blog" matters more than the name (§9.2).
     note: text("note"),
     source_url: text("source_url"),
+    // Muss / Will / Wenn Zeit (ideas plan, stage 3).
+    priority: text("priority").notNull().default("want"),
+    // OpenStreetMap's opening_hours, as the place had it when taken.
+    opening_hours: text("opening_hours"),
     added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),
     // True when no OSM entry could be matched: opening hours and category
     // are unknown, and the planner says so rather than inventing them.

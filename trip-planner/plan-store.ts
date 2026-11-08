@@ -16,6 +16,8 @@
  * database never has an opinion about what belongs in a block.
  */
 
+import { withIdeaHints } from "./idea-hints";
+import { DEFAULT_PRIORITY, priorityOf } from "./priority";
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { visibleToUser } from "./plan-access";
 import dbDefault from "../db/database";
@@ -152,6 +154,10 @@ export interface StoredLeg {
 export interface StoredCandidate extends ScoredCandidate {
   /** search | manual — found by the planner, or brought in by a person. */
   origin: string;
+  /** Dates of the stay on which its opening hours say closed (ideas plan, stage 3). */
+  closedOn?: string[];
+  /** "Mo 7.9. 14:00" when a booked visit holds it. */
+  ticket?: string | null;
   /**
    * The picture on the card (ranking plan, stage 2). Read from the
    * per-place cache on the way out, like the notes, because a re-plan
@@ -267,6 +273,8 @@ export interface StoredBlock extends CurrentBlock {
 
 export interface StoredStop extends CurrentStop {
   rowId: number;
+  /** Its opening hours say closed on the date of its day (ideas plan, stage 3). */
+  closedThatDay?: boolean;
   /** What the group calls it, when they have renamed it (§10.4). */
   title?: string | null;
   /** The picture on the card (ranking plan, stage 2), from `trip_spot_fame`. */
@@ -461,6 +469,8 @@ export async function insertLeg(
         score: c.score,
         reasons: c.reasons,
         ...curationColumns(c),
+        priority: c.priority ?? DEFAULT_PRIORITY,
+        opening_hours: c.openingHours ?? null,
       })),
     );
     await markCurationDue(leg.id, db);
@@ -798,6 +808,8 @@ async function insertDays(
           // (ideas plan, stage 1, `carry-stops.ts`).
           note: (stop as { note?: string | null }).note ?? null,
           source_url: (stop as { sourceUrl?: string | null }).sourceUrl ?? null,
+          priority: stop.priority ?? DEFAULT_PRIORITY,
+          opening_hours: stop.openingHours ?? null,
         });
       }
     }
@@ -1051,6 +1063,8 @@ export async function saveMovedDays(
           done_at: stop.doneAt ?? null,
           note: stop.note ?? null,
           source_url: stop.sourceUrl ?? null,
+          priority: stop.priority ?? DEFAULT_PRIORITY,
+          opening_hours: stop.openingHours ?? null,
           local_name: stop.localName ?? null,
           wikipedia_url: stop.wikipediaUrl ?? null,
           facade_azimuth: stop.facadeAzimuth ?? null,
@@ -1224,6 +1238,8 @@ export async function loadPlan(
       note: written?.note ?? row.note,
       sourceUrl: written?.url ?? row.source_url,
       title: written?.title ?? null,
+      priority: priorityOf(row.priority),
+      openingHours: row.opening_hours,
       image: images.get(row.osm_ref) ?? null,
       description: descriptions.get(row.osm_ref) ?? null,
     });
@@ -1321,6 +1337,8 @@ export async function loadPlan(
       note: written?.note ?? row.note,
       sourceUrl: written?.url ?? row.source_url,
       title: written?.title ?? null,
+      priority: priorityOf(row.priority),
+      openingHours: row.opening_hours,
       unmatched: row.unmatched,
       image: images.get(row.osm_ref) ?? null,
       description: descriptions.get(row.osm_ref) ?? null,
@@ -1364,13 +1382,16 @@ export async function loadPlan(
       // all three. The app needs it for one sentence — "Pisa · 1 h 10
       // hin und zurück" — and computing it a second time in Swift would
       // be a second travel model (§4.5).
-      days: withPassed(
-        withTravel(daysByLeg.get(l.id) ?? [],
-                   { lat: l.anchor_lat, lon: l.anchor_lon },
-                   l.mode as TransportMode),
+      ...withIdeaHints(
+        withPassed(
+          withTravel(daysByLeg.get(l.id) ?? [],
+                     { lat: l.anchor_lat, lon: l.anchor_lon },
+                     l.mode as TransportMode),
+          poolByLeg.get(l.id) ?? [],
+        ),
         poolByLeg.get(l.id) ?? [],
+        l.start_date,
       ),
-      pool: poolByLeg.get(l.id) ?? [],
     })),
   };
 }
@@ -1504,8 +1525,10 @@ async function rewriteDay(
           // Provenance survives the rewrite, because it is not the
           // redistribution's to decide (§9.2).
           origin: known?.origin ?? c.origin ?? "search",
-          note: known?.note ?? null,
-          source_url: known?.source_url ?? null,
+          note: known?.note ?? (c as { note?: string | null }).note ?? null,
+          source_url: known?.source_url ?? (c as { sourceUrl?: string | null }).sourceUrl ?? null,
+          priority: known?.priority ?? c.priority ?? DEFAULT_PRIORITY,
+          opening_hours: known?.opening_hours ?? c.openingHours ?? null,
           unmatched: known?.unmatched ?? false,
         };
       }),
@@ -1578,6 +1601,8 @@ export async function replanPlan(
           origin: (c as { origin?: string }).origin ?? "search",
           note: (c as { note?: string | null }).note ?? null,
           source_url: (c as { sourceUrl?: string | null }).sourceUrl ?? null,
+          priority: c.priority ?? DEFAULT_PRIORITY,
+          opening_hours: c.openingHours ?? null,
         })),
       );
     }
@@ -2236,6 +2261,8 @@ export async function findInPool(
     origin: row.origin,
     note: row.note,
     sourceUrl: row.source_url,
+    priority: priorityOf(row.priority),
+    openingHours: row.opening_hours,
     unmatched: row.unmatched,
   };
 }

@@ -88,6 +88,8 @@ function carried(stop: CurrentStop): CurrentStop {
     note: stop.note ?? null,
     sourceUrl: stop.sourceUrl ?? null,
     origin: stop.origin ?? "manual",
+    priority: stop.priority,
+    openingHours: stop.openingHours ?? null,
   };
 }
 
@@ -111,5 +113,7 @@ function asIdea(stop: CurrentStop): ReturnedIdea {
     origin: "manual",
     note: stop.note ?? null,
     sourceUrl: stop.sourceUrl ?? null,
+    priority: stop.priority,
+    openingHours: stop.openingHours ?? null,
   };
 }

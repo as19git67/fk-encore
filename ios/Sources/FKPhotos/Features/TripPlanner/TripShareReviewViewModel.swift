@@ -28,6 +28,8 @@ final class TripShareReviewViewModel {
     var chosenOption: [String: TripShareProposal.Option] = [:]
     /// The duration given for a proposal with no OSM entry behind it.
     var dwellMinutes: [String: Int] = [:]
+    /// How much each proposal matters (ideas plan, stage 3); Will when not chosen.
+    var priority: [String: TripIdeaPriority] = [:]
 
     /// The default offered for "wie lange?".
     ///
@@ -197,7 +199,7 @@ final class TripShareReviewViewModel {
         let dwell = dwellMinutes[proposal.id] ?? 0
         if needsDuration && dwell <= 0 { return nil }
 
-        return TripAddFindRequest(
+        var request = TripAddFindRequest(
             lat: position.lat,
             lon: position.lon,
             name: userTitle.isEmpty ? (chosen?.name ?? proposal.name) : userTitle,
@@ -206,6 +208,8 @@ final class TripShareReviewViewModel {
             legIndex: chosen?.legIndex ?? proposal.legIndex,
             dwellMinutes: needsDuration ? dwell : nil,
         )
+        request.priority = priority[proposal.id]?.rawValue
+        return request
     }
 
     /// The note sent to the server: user's own note (if any) followed by
