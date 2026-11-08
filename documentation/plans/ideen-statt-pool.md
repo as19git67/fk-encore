@@ -125,7 +125,7 @@ with the distance named, as today.
 
 ## Data model
 
-Migration 0296 or later; every new column has a default so that
+Migration 0301 or later; every new column has a default so that
 existing trips read as before.
 
 - `trip_plan_pool.priority` text `must | want | maybe`, default `want`.
