@@ -66,6 +66,7 @@ import { tickFillPending } from "./fill-pending";
 import { tickLiveActivities } from "./live-activity";
 import { refillSpotFame } from "./spot-fame";
 import { tickCuration } from "./curation-job";
+import { tickHighlights } from "./highlights-job";
 import { describeSpots } from "./spot-description";
 
 // A trip planned for a place with no imported region is saved framed
@@ -122,6 +123,9 @@ schedule({
   nextFire: everyMs(5 * 60_000),
   run: async () => {
     await tickCuration();
+    // The highlights of a stay of ideas (ideas plan, stage 2): the
+    // same model and prompt, a list nobody has planned from yet.
+    await tickHighlights();
   },
 });
 

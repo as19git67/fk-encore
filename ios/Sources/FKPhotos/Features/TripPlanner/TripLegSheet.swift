@@ -55,7 +55,8 @@ struct TripLegSheet: View {
                 // The way into the candidates that needs nothing else —
                 // no share sheet, no map app, no model (§9.2, case 4).
                 NavigationLink {
-                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position) {
+                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position,
+                                        ideas: viewModel.plan?.isIdeasTrip == true) {
                         Task { await viewModel.load() }
                     }
                 } label: {

@@ -2357,7 +2357,7 @@ async function dayTripPool(
  * found earlier. One of the two failing is survivable; the other page
  * still plans the day.
  */
-async function spotsAround(
+export async function spotsAround(
   postgresDb: string,
   at: { lat: number; lon: number },
   radiusM: number,

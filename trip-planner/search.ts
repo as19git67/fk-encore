@@ -39,8 +39,8 @@ const MAX_QUERY_CHARS = 120;
 
 export interface SearchPlacesRequest {
   planId: number;
-  /** What the traveller typed. */
-  query: string;
+  /** What the traveller typed; may be empty when `categories` names what to find. */
+  query?: string;
   /**
    * Which leg to search around. All of them by default — you look
    * things up for the trip, not for the screen you happen to be on.
@@ -90,7 +90,10 @@ export const searchPlaces = api(
   async (req: SearchPlacesRequest): Promise<SearchPlacesResponse> => {
     const userId = requireUser();
     const query = typeof req.query === "string" ? req.query.trim() : "";
-    if (query.length < MIN_QUERY_CHARS) {
+    // A category on its own is a search too — "alle Aussichtspunkte"
+    // is one tap (ideas plan, stage 2).
+    const byCategory = (req.categories?.length ?? 0) > 0;
+    if (query.length < MIN_QUERY_CHARS && !(byCategory && query.length === 0)) {
       throw APIError.invalidArgument(`bitte mindestens ${MIN_QUERY_CHARS} Zeichen suchen`);
     }
     if (query.length > MAX_QUERY_CHARS) {
@@ -116,7 +119,7 @@ export const searchPlaces = api(
       try {
         const page = await getGeoClient().searchPois(leg.regionDb, {
           center: { ...leg.anchor, radiusM: RESOLUTION_RADIUS_M },
-          name: query,
+          name: query.length > 0 ? query : undefined,
           categories: req.categories?.length ? req.categories : undefined,
           // One over, so "there are more" is known without a second
           // query — the same trick the area search itself uses.

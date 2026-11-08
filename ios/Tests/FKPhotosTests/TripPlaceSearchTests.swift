@@ -88,4 +88,32 @@ final class TripSearchedPlaceTests: XCTestCase {
     func testAnUnknownDistanceHasNoLabelRatherThanAZero() {
         XCTAssertNil(withDistance(nil).distanceLabel)
     }
+
+    // MARK: - Highlights (ideas plan, stage 2)
+
+    func testAStayStartsAtTheHighlightsAndTheTripAtTheName() {
+        XCTAssertEqual(TripPlaceSearchViewModel(planId: 1, legIndex: 0).mode, .highlights)
+        XCTAssertEqual(TripPlaceSearchViewModel(planId: 1).mode, .name)
+    }
+
+    func testAHighlightDecodesAndAddsLikeASearchResult() throws {
+        let json = """
+        {"results":[{"osmRef":"node:7","name":"Beispielturm","localName":null,"lat":48.37,"lon":10.9,
+          "category":"viewpoint","distanceM":1300,"dwellMinutes":20,"reason":"Der Blick über Musterstadt.",
+          "picture":{"title":"File:X.jpg","thumbUrl":"https://example.test/x.jpg","thumbWidth":320,
+            "thumbHeight":240,"pageUrl":"https://example.test/File:X.jpg","author":null,"license":null},
+          "description":null,"wikipediaUrl":null,"inPool":false,"planned":false}],
+         "hasMore":true,"sorting":true,"unavailable":false}
+        """
+        let response = try JSONDecoder().decode(TripHighlightsResponse.self, from: Data(json.utf8))
+        XCTAssertTrue(response.sorting)
+        let highlight = try XCTUnwrap(response.results.first)
+        XCTAssertEqual(highlight.picture?.thumbUrl, "https://example.test/x.jpg")
+        let searched = highlight.asSearched(legIndex: 2)
+        XCTAssertEqual(searched.legIndex, 2)
+        XCTAssertEqual(searched.categories, ["viewpoint"])
+        XCTAssertEqual(TripSearchedPlace.distanceText(highlight.distanceM), "1,3 km")
+        // The category's duration is known, so none travels.
+        XCTAssertNil(TripPlaceSearchViewModel(planId: 1, legIndex: 2).requestFor(searched).dwellMinutes)
+    }
 }

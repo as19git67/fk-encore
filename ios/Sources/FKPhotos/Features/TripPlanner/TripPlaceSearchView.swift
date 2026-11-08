@@ -19,42 +19,30 @@ struct TripPlaceSearchView: View {
     private let onChanged: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
-    init(planId: Int, legIndex: Int? = nil, onChanged: (() -> Void)? = nil) {
-        _model = State(initialValue: TripPlaceSearchViewModel(planId: planId, legIndex: legIndex))
+    init(planId: Int, legIndex: Int? = nil, ideas: Bool = false, onChanged: (() -> Void)? = nil) {
+        _model = State(initialValue: TripPlaceSearchViewModel(planId: planId, legIndex: legIndex, ideas: ideas))
         self.onChanged = onChanged
     }
 
     var body: some View {
         List {
-            if model.isSearching {
-                HStack { ProgressView(); Text("Wird gesucht…") }
-            }
-
-
-            if !model.hasSearched && !model.isSearching {
-                // Something before the first search: the screen used to
-                // be a title over nothing.
-                ContentUnavailableView {
-                    Label("Nach Namen suchen", systemImage: "magnifyingglass")
-                } description: {
-                    Text("Ein Museum, ein Café, ein Aussichtspunkt — was ihr findet, kommt zu "
-                         + "den Kandidaten dieses Aufenthalts.")
+            if model.legIndex != nil {
+                // Three ways to look (ideas plan, stage 2): what the
+                // place is known for, a name, a kind of place.
+                Picker("Suchen", selection: $model.mode) {
+                    ForEach(TripPlaceSearchMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
             }
 
-            if model.hasSearched && model.results.isEmpty && !model.isSearching {
-                Text("Nichts gefunden. Vielleicht heißt der Ort in OpenStreetMap anders.")
-                    .foregroundStyle(.secondary)
-            }
-
-            ForEach(model.results) { place in
-                row(place)
-            }
-
-            if model.hasMore {
-                Text("Es gibt mehr Treffer — genauer suchen hilft.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            switch model.mode {
+            case .highlights: highlightsSection
+            case .name: nameSection
+            case .category: categorySection
             }
 
             // Not a footnote: a search that silently skipped a region
@@ -66,15 +54,153 @@ struct TripPlaceSearchView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .searchable(text: $model.query, prompt: "Name des Ortes")
-        .onSubmit(of: .search) { Task { await model.search() } }
+        .modifier(NameSearchField(model: model))
         .navigationTitle("Ort suchen")
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: model.mode) {
+            if model.mode == .highlights && !model.didLoadHighlights { await model.loadHighlights() }
+        }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Fertig") { dismiss() }
             }
+        }
+    }
+
+    // MARK: - Highlights
+
+    @ViewBuilder
+    private var highlightsSection: some View {
+        if model.isLoadingHighlights && model.highlights.isEmpty {
+            HStack { ProgressView(); Text("Wird geladen…") }
+        }
+        if model.highlightsSorting {
+            Label("Die Reihenfolge wird noch sortiert; bis dahin nach Bekanntheit.",
+                  systemImage: "arrow.up.arrow.down")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        if model.highlightsUnavailable {
+            Label("Die Umgebung konnte gerade nicht durchsucht werden.", systemImage: "exclamationmark.triangle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else if model.didLoadHighlights && model.highlights.isEmpty && !model.isLoadingHighlights {
+            ContentUnavailableView {
+                Label("Keine Highlights", systemImage: "star")
+            } description: {
+                Text("Über diese Gegend wissen die offenen Daten wenig. Sucht nach einem Namen oder einer Kategorie.")
+            }
+        }
+        ForEach(model.highlights) { highlight in
+            highlightRow(highlight)
+        }
+        if model.highlightsHaveMore {
+            Button {
+                Task { await model.loadHighlights(more: true) }
+            } label: {
+                if model.isLoadingHighlights {
+                    HStack { ProgressView(); Text("Wird geladen…") }
+                } else {
+                    Text("Mehr")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func highlightRow(_ highlight: TripHighlight) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            if let picture = highlight.picture {
+                TripSpotThumbnail(image: picture, height: 64, width: 64)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.quaternary)
+                    .frame(width: 64, height: 64)
+                    .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(highlight.name ?? highlight.osmRef).font(.headline)
+                if let line = highlight.reason ?? highlight.description?.text {
+                    Text(line)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Text(TripSearchedPlace.distanceText(highlight.distanceM))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                addControl(highlight.asSearched(legIndex: model.legIndex ?? 0))
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - Name
+
+    @ViewBuilder
+    private var nameSection: some View {
+        if model.isSearching {
+            HStack { ProgressView(); Text("Wird gesucht…") }
+        }
+        if !model.hasSearched && !model.isSearching {
+            // Something before the first search: the screen used to
+            // be a title over nothing.
+            ContentUnavailableView {
+                Label("Nach Namen suchen", systemImage: "magnifyingglass")
+            } description: {
+                Text(model.ideas
+                     ? "Ein Museum, ein Café, ein Aussichtspunkt — was ihr übernehmt, kommt zu den Ideen dieses Aufenthalts."
+                     : "Ein Museum, ein Café, ein Aussichtspunkt — was ihr findet, kommt zu "
+                     + "den Kandidaten dieses Aufenthalts.")
+            }
+        }
+        if model.hasSearched && model.results.isEmpty && !model.isSearching {
+            Text("Nichts gefunden. Vielleicht heißt der Ort in OpenStreetMap anders.")
+                .foregroundStyle(.secondary)
+        }
+        resultRows
+    }
+
+    // MARK: - Category
+
+    @ViewBuilder
+    private var categorySection: some View {
+        if let category = model.category {
+            Button {
+                model.clearCategory()
+            } label: {
+                Label("Alle Kategorien", systemImage: "chevron.left")
+            }
+            Text(category.label).font(.headline)
+            if model.isSearching {
+                HStack { ProgressView(); Text("Wird gesucht…") }
+            }
+            if model.hasSearched && model.results.isEmpty && !model.isSearching {
+                Text("In der Nähe nichts von dieser Art.")
+                    .foregroundStyle(.secondary)
+            }
+            resultRows
+        } else {
+            ForEach(TripPlaceCategory.all) { category in
+                Button {
+                    Task { await model.search(category: category) }
+                } label: {
+                    Label(category.label, systemImage: category.systemImage)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var resultRows: some View {
+        ForEach(model.results) { place in
+            row(place)
+        }
+        if model.hasMore {
+            Text("Es gibt mehr Treffer — genauer suchen hilft.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -94,35 +220,59 @@ struct TripPlaceSearchView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if place.planned {
-                Label("Schon eingeplant", systemImage: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if place.inPool {
-                Label("Schon bei den Kandidaten", systemImage: "tray.full")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if let outcome = model.added[place.osmRef] {
-                Label(outcome, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            } else {
-                Button {
-                    Task {
-                        await model.add(place)
-                        if model.added[place.osmRef] != nil { onChanged?() }
-                    }
-                } label: {
-                    if model.addingRef == place.osmRef {
-                        HStack { ProgressView(); Text("Wird übernommen…") }
-                    } else {
-                        Label("Zu den Kandidaten", systemImage: "plus.circle")
-                    }
-                }
-                .buttonStyle(.borderless)
-                .font(.callout)
-            }
+            addControl(place)
         }
         .padding(.vertical, 2)
+    }
+
+    /// "Zur Reise", or what already happened to the place. One control
+    /// for every way of looking, so a place reads the same everywhere.
+    @ViewBuilder
+    private func addControl(_ place: TripSearchedPlace) -> some View {
+        if place.planned {
+            Label("Schon eingeplant", systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if place.inPool {
+            Label(model.ideas ? "In der Reise" : "Schon bei den Kandidaten",
+                  systemImage: model.ideas ? "lightbulb" : "tray.full")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if let outcome = model.added[place.osmRef] {
+            Label(outcome, systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        } else {
+            Button {
+                Task {
+                    await model.add(place)
+                    if model.added[place.osmRef] != nil { onChanged?() }
+                }
+            } label: {
+                if model.addingRef == place.osmRef {
+                    HStack { ProgressView(); Text("Wird übernommen…") }
+                } else {
+                    Label(model.ideas ? "Zur Reise" : "Zu den Kandidaten", systemImage: "plus.circle")
+                }
+            }
+            .buttonStyle(.borderless)
+            .font(.callout)
+        }
+    }
+}
+
+/// The search field belongs to the name search only: on the highlights
+/// and the categories it would be a box that does nothing.
+private struct NameSearchField: ViewModifier {
+    @Bindable var model: TripPlaceSearchViewModel
+
+    func body(content: Content) -> some View {
+        if model.mode == .name {
+            content
+                .searchable(text: $model.query, prompt: "Name des Ortes")
+                .onSubmit(of: .search) { Task { await model.search() } }
+        } else {
+            content
+        }
     }
 }

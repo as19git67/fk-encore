@@ -4006,6 +4006,31 @@ export const tripLegCuration = pgTable("trip_leg_curation", {
 });
 
 /**
+ * The highlights of a stay (ideas plan, stage 2): the best-known places
+ * around it, ordered by the local model in the background. Not part of
+ * the trip — the list the travellers pick from.
+ */
+export const tripLegHighlights = pgTable("trip_leg_highlights", {
+  leg_id: integer("leg_id")
+    .primaryKey()
+    .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
+  /** pending | running | done | failed */
+  status: text("status").notNull().default("pending"),
+  /** Sorted refs and interests at the time of asking. */
+  signature: jsonb("signature").$type<{ refs: string[]; interests: string[] }>(),
+  /** What the model is to be told: the entries, as the request saw them. */
+  entries: jsonb("entries").$type<unknown[]>(),
+  context: jsonb("context").$type<Record<string, unknown>>(),
+  /** [{ osmRef, reason }], best first. */
+  picks: jsonb("picks").$type<Array<{ osmRef: string; reason: string | null }>>(),
+  attempts: integer("attempts").notNull().default(0),
+  error: text("error"),
+  requested_at: timestamp("requested_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  started_at: timestamp("started_at", { mode: "string", withTimezone: true }),
+  finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
+});
+
+/**
  * What a person has to say about one spot (§9.2, §10.4).
  *
  * Keyed on the leg and the OSM reference, never on the stop row: a

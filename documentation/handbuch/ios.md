@@ -240,6 +240,14 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   fester Termin, Reiseverlauf), bleiben die Stopps auf ihren Tagen; fällt
   ein Tag weg, gehen seine Stopps zurück zu den Ideen. Reisen von vorher
   behalten ihre Kandidaten.
+- „Ort suchen“ hat drei Reiter: **Highlights** zeigt, wofür die Gegend um
+  den Aufenthalt bekannt ist (Bild, eine Zeile dazu, Entfernung zur
+  Unterkunft; „Mehr“ blättert weiter), solange das lokale Modell noch
+  sortiert nach Bekanntheit mit dem Hinweis „wird noch sortiert“.
+  **Suche** findet einen Ort nach Namen, **Kategorien** zeigt mit einem
+  Tipp alle Orte einer Art (Museen, Aussichtspunkte, Märkte …). „Zur Reise“
+  legt einen Treffer zu den Ideen; was schon dort ist, steht als „In der
+  Reise“ oder „Schon eingeplant“ in der Liste.
 - Kürzt oder entfernt eine Änderung im Reiseverlauf schon geplante Tage,
   steht sie unter „Änderungen“ und lässt sich dort mit „Rückgängig“
   zurücknehmen: die alten Tage kommen genau so wieder, wie sie waren.
