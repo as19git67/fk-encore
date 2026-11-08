@@ -343,10 +343,29 @@ export function formatDayRange(from: string, to: string): string {
   return `${formatDay(from)} – ${formatDay(to)}`;
 }
 
-/** "3 Tage, 1.–3. Juni 2024" for more than one day, else the day. */
+/** "14:20" of a capture time, or null for a bare day or midnight (no time known). */
+function clockTime(takenAt: string): string | null {
+  const t = takenAt.slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(t) && t !== "00:00" ? t : null;
+}
+
+/**
+ * The span a chapter covers: "1.–3. Juni 2024" for more than one
+ * day, else the day with the hours from the first to the last photo,
+ * "Montag, 3. Juni 2024, 10:15–17:40 Uhr". `from` and `to` are capture
+ * times or bare days; without a time of day only the day is said.
+ */
 export function chapterSubtitle(from: string, to: string): string {
-  const days = dayNumber(to) - dayNumber(from) + 1;
-  return days > 1 ? `${days} Tage, ${formatDayRange(from, to)}` : `${weekday(from)}, ${formatDay(from)}`;
+  const a = datePart(from);
+  const b = datePart(to);
+  const days = dayNumber(b) - dayNumber(a) + 1;
+  // The dates say how long it was; the number of days adds nothing.
+  if (days > 1) return formatDayRange(a, b);
+  const day = `${weekday(a)}, ${formatDay(a)}`;
+  const start = clockTime(from);
+  const end = clockTime(to);
+  if (!start || !end) return day;
+  return start === end ? `${day}, ${start} Uhr` : `${day}, ${start}–${end} Uhr`;
 }
 
 function mainCity(list: BookPhoto[]): string | null {
@@ -415,7 +434,7 @@ export function buildChapters(list: BookPhoto[]): ChapterDraft[] {
           : `${MONTHS[a.m - 1]} ${a.y} – ${MONTHS[b.m - 1]} ${b.y}`;
       }
       if (city) title += ` · ${city}`;
-      out.push({ title, subtitle: chapterSubtitle(from, to), startsAt: g[0].takenAt, endsAt: g[g.length - 1].takenAt, photos: g });
+      out.push({ title, subtitle: chapterSubtitle(g[0].takenAt!, g[g.length - 1].takenAt!), startsAt: g[0].takenAt, endsAt: g[g.length - 1].takenAt, photos: g });
     }
   }
 

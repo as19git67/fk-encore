@@ -30,6 +30,7 @@ import {
   photoPoiMatches,
   photos,
   poiReferences,
+  tripUserHomes,
   userFaceAssignments,
   type PhotoOcrBlock,
 } from "../db/schema";
@@ -60,8 +61,13 @@ import {
   hasConcreteFacts,
   parseCaption,
   parseChapterTitle,
+  proposedChapterTitle,
+  chapterTitleRejection,
+  chapterHasFacts,
+  HOME_PLACE,
   parseLayoutPick,
   type CaptionContext,
+  type ChapterContext,
   type LlmPrompt,
   type PoiFacts,
 } from "./photo-book-prompts";
@@ -134,9 +140,41 @@ interface PhotoFacts {
   location_country: string | null;
   description: string | null;
   keywords: string[] | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
-function place(p: PhotoFacts): string | null {
+/** A photo this close to where the owner lives was taken at home (the garden, the street outside). */
+export const HOME_RADIUS_M = 200;
+
+export interface HomePoint {
+  lat: number;
+  lon: number;
+}
+
+/** Whether a photo was taken at home; false without a home or without coordinates. */
+export function takenAtHome(p: Pick<PhotoFacts, "latitude" | "longitude">, home: HomePoint | null): boolean {
+  if (!home || p.latitude == null || p.longitude == null) return false;
+  const dLat = p.latitude - home.lat;
+  const dLon = (p.longitude - home.lon) * Math.cos((home.lat * Math.PI) / 180);
+  return 111_320 * Math.sqrt(dLat * dLat + dLon * dLon) <= HOME_RADIUS_M;
+}
+
+/**
+ * Where the owner lives, as they told the trip planner (§22.7), or null.
+ * The meters' home is not used: it is rounded to a grid of kilometres and
+ * would call the whole town home.
+ */
+async function ownerHome(userId: number): Promise<HomePoint | null> {
+  const [row] = await dbAll<{ lat: number; lon: number }>(
+    db.select({ lat: tripUserHomes.lat, lon: tripUserHomes.lon }).from(tripUserHomes).where(eq(tripUserHomes.user_id, userId)),
+  );
+  return row ? { lat: Number(row.lat), lon: Number(row.lon) } : null;
+}
+
+/** The place said in a caption: "Zuhause" at home, else the short name or name, town and country. */
+export function place(p: PhotoFacts, home: HomePoint | null = null): string | null {
+  if (takenAtHome(p, home)) return HOME_PLACE;
   if (p.location_short) return p.location_short;
   const parts = [p.location_name, p.location_city, p.location_country].filter((x): x is string => !!x && !!x.trim());
   return parts.length ? [...new Set(parts)].join(", ") : null;
@@ -326,6 +364,8 @@ async function writeCaptions(
           location_country: photos.location_country,
           description: photos.description,
           keywords: photos.keywords,
+          latitude: photos.latitude,
+          longitude: photos.longitude,
         }).from(photos).where(inArray(photos.id, ids)),
       )
     : [];
@@ -334,6 +374,7 @@ async function writeCaptions(
   const pois = await poiByPhoto(ids);
   const signs = await signTextByPhoto(ids);
   const spots = await tripSpotByPhoto(userId, ids);
+  const home = await ownerHome(userId);
   const articles = new Map<string, Promise<{ description: string | null; extract: string | null } | null>>();
   let vision = true;
 
@@ -355,7 +396,7 @@ async function writeCaptions(
     }
     const ctx: CaptionContext = {
       when: when(f.taken_at),
-      place: place(f),
+      place: place(f, home),
       poi,
       people: people.get(id) ?? [],
       description: f.description?.trim() || null,
@@ -430,6 +471,7 @@ async function writeChapterTitles(userId: number, loaded: LoadedBook, job: Photo
   const ids = bookPhotoIds(loaded);
   const people = await peopleByPhoto(userId, ids);
   const pois = await poiByPhoto(ids);
+  const home = await ownerHome(userId);
   const facts = ids.length
     ? await dbAll<PhotoFacts>(
         db.select({
@@ -441,6 +483,8 @@ async function writeChapterTitles(userId: number, loaded: LoadedBook, job: Photo
           location_country: photos.location_country,
           description: photos.description,
           keywords: photos.keywords,
+          latitude: photos.latitude,
+          longitude: photos.longitude,
         }).from(photos).where(inArray(photos.id, ids)),
       )
     : [];
@@ -453,16 +497,33 @@ async function writeChapterTitles(userId: number, loaded: LoadedBook, job: Photo
       job.done += 1;
       continue;
     }
-    const prompt = buildChapterTitlePrompt({
+    const context: ChapterContext = {
       ruleTitle: ch.title,
       dates: ch.subtitle,
-      places: countBy(chIds.map((id) => byId.get(id)?.location_city ?? "").filter(Boolean)).slice(0, 5),
+      places: countBy(chIds.map((id) => {
+        const f = byId.get(id);
+        if (!f) return "";
+        return takenAtHome(f, home) ? HOME_PLACE : f.location_city ?? "";
+      }).filter(Boolean)).slice(0, 5),
       pois: countBy(chIds.map((id) => pois.get(id)?.name ?? "").filter(Boolean)).slice(0, 6),
       people: countBy(chIds.flatMap((id) => people.get(id) ?? [])).slice(0, 6),
       captions: chIds.map((id) => loaded.captions.get(id)?.text).filter((t): t is string => !!t).slice(0, CHAPTER_CAPTIONS),
-    });
-    const answer = await deps.askText(prompt);
-    const title = parseChapterTitle(answer.result);
+    };
+    if (!chapterHasFacts(context)) {
+      job.skipped += 1;
+      job.done += 1;
+      continue;
+    }
+    const prompt = buildChapterTitlePrompt(context);
+    let answer = await deps.askText(prompt);
+    let title = parseChapterTitle(answer.result);
+    // One more try, told why: "Tage am See" or "12 Fotos aus Musterstadt" say nothing.
+    const proposed = title ? null : proposedChapterTitle(answer.result);
+    const reason = proposed ? chapterTitleRejection(proposed) : null;
+    if (proposed && reason) {
+      answer = await deps.askText(buildChapterTitlePrompt(context, { title: proposed, reason }));
+      title = parseChapterTitle(answer.result);
+    }
     if (title) {
       // A title the user wrote stays; the proposal is kept beside it.
       await dbExec(db.update(photoBookChapter).set({

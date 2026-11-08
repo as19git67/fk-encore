@@ -18,6 +18,7 @@ import {
   poiReferences,
   tripPlanVisits,
   tripPlans,
+  tripUserHomes,
   userFaceAssignments,
   users,
 } from "../db/schema";
@@ -34,6 +35,7 @@ import {
   descriptiveWords,
   hasConcreteFacts,
   parseCaption,
+  chapterTitleRejection,
   parseChapterTitle,
   parseLayoutPick,
 } from "./photo-book-prompts";
@@ -48,7 +50,7 @@ import {
   updatePhotoBook,
   updatePhotoBookChapter,
 } from "./photo-book.service";
-import { layoutPickStats, runPhotoBookAi, type PhotoBookAiDeps, type PhotoBookAiJob } from "./photo-book-ai";
+import { layoutPickStats, place, runPhotoBookAi, takenAtHome, type PhotoBookAiDeps, type PhotoBookAiJob } from "./photo-book-ai";
 import type { LlmPrompt } from "./photo-book-prompts";
 import { toRenderBook } from "./photo-book-export";
 import { renderHomePdf } from "./photo-book-pdf";
@@ -140,6 +142,32 @@ describe("photo book captions: geometry and prompts", () => {
     // The date is under the title already.
     expect(parseChapterTitle({ title: "Am See, 3. Juni" })).toBeNull();
     expect(parseChapterTitle({ title: "Sommer 2024" })).toBeNull();
+    // "Tage …" and counts say nothing; the span is under the title.
+    expect(chapterTitleRejection("Tage am See")).toBe("day-word");
+    expect(chapterTitleRejection("Drei Tage in Musterstadt")).toBe("day-word");
+    expect(chapterTitleRejection("Tag der Ankunft")).toBe("day-word");
+    expect(chapterTitleRejection("Musterstadt in 40 Bildern")).toBe("count");
+    expect(chapterTitleRejection("Zwölf Fotos aus Musterstadt")).toBe("count");
+    expect(chapterTitleRejection("Altstadt und Dom von Musterstadt")).toBeNull();
+    expect(chapterTitleRejection("Tagebuch vom Alten Turm")).toBeNull();
+    expect(parseChapterTitle({ title: "Tage voller Sonne" })).toBeNull();
+  });
+
+  it("calls a photo taken at home „Zuhause“, never its street", () => {
+    const home = { lat: 10, lon: 20 };
+    const facts = {
+      id: 1, taken_at: null, location_name: "Beispielstraße 1", location_short: "Beispielstraße, Musterstadt", location_city: "Musterstadt",
+      location_country: "Beispielland", description: null, keywords: null, latitude: 10.0005, longitude: 20.0005,
+    };
+    expect(takenAtHome(facts, home)).toBe(true);
+    expect(place(facts, home)).toBe("Zuhause");
+    expect(place(facts, null)).toBe("Beispielstraße, Musterstadt");
+    // A few hundred metres away is no longer home.
+    expect(takenAtHome({ latitude: 10.01, longitude: 20 }, home)).toBe(false);
+    expect(takenAtHome({ latitude: null, longitude: null }, home)).toBe(false);
+    const prompt = buildCaptionPrompt({ when: null, place: "Zuhause", poi: null, people: [], description: null, keywords: [] }, true).prompt;
+    expect(prompt).toContain("Ort: zuhause");
+    expect(captionWorthKeeping("Zuhause", { when: null, place: "Zuhause", poi: null, people: [], description: null, keywords: [] })).toBe(true);
   });
 
   it("cuts an article at a sentence end", () => {
@@ -262,6 +290,38 @@ describe("photo book: the model's texts and layouts", () => {
     expect(view.pages.flatMap((p) => p.slots).find((s) => s.photo_id === list[2].id)!.caption).toBe("Mein eigener Text");
     await acceptPhotoBookChapterSuggestion(user.id, id, view.chapters[0].id);
     expect((await getPhotoBookView(user.id, id)).chapters[0].title).toBe("Turm und Gassen");
+  });
+
+  it("says „zuhause“ for photos taken at home and asks again for a title that starts with „Tage“", async () => {
+    await db.insert(tripUserHomes).values({ user_id: user.id, lat: 10, lon: 20, label: "Zuhause" });
+    const list = [];
+    for (let i = 0; i < 4; i++) {
+      list.push(await upload(`2024-06-01 1${i}:00:00`, {
+        location_short: "Beispielstraße, Musterstadt", location_city: "Musterstadt", latitude: 10.0003, longitude: 20.0003,
+      }));
+    }
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id) });
+    const titles: string[] = [];
+    const { deps, prompts } = fakeDeps({
+      askVision: async (_img, prompt) => {
+        prompts.push({ kind: "vision", prompt });
+        return { result: { caption: "Zuhause" }, model: "m" };
+      },
+      askText: async (prompt) => {
+        titles.push(prompt.prompt);
+        return { result: { title: titles.length === 1 ? "Tage daheim" : "Sommerfest zuhause" }, model: "m" };
+      },
+    });
+    const job = await runPhotoBookAi(user.id, id, newJob(id), { tasks: ["captions", "chapters"] }, deps);
+    expect(job.status).toBe("done");
+    const vision = prompts.filter((p) => p.kind === "vision").map((p) => p.prompt.prompt);
+    expect(vision.every((p) => p.includes("Ort: zuhause") && !p.includes("Beispielstraße"))).toBe(true);
+    expect(titles).toHaveLength(2);
+    expect(titles[0]).toContain("Orte: Zuhause");
+    expect(titles[0]).not.toContain("Tag 1");
+    expect(titles[1]).toContain("„Tage daheim“ geht nicht");
+    const view = await getPhotoBookView(user.id, id);
+    expect(view.chapters[0].title).toBe("Sommerfest zuhause");
   });
 
   it("writes from the facts alone when the model cannot see, and stops while the GPU is lent", async () => {

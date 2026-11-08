@@ -76,7 +76,8 @@ interface Slide {
   key: string
   layout: SlideLayout
   photos: Photo[]
-  caption?: string | null
+  /** One per photo (a photo book's captions); a single slide shows its one at the bottom, a collage on each tile. */
+  captions?: (string | null)[]
   chapterTitle?: string | null
   chapterSubtitle?: string | null
 }
@@ -139,6 +140,11 @@ function buildSlides(photos: Photo[]): Slide[] {
 }
 
 const MAP_INTRO_DURATION_MS = 5500
+/**
+ * A chapter's title comes before its photo: the title over the dimmed photo
+ * for this long, then it fades and the photo gets its full time on its own.
+ */
+const CHAPTER_INTRO_MS = 3000
 
 // Orientation variants: the sequence as shown — every photo replaced by its
 // counterpart where that one fits the screen and the photo does not. Same
@@ -160,7 +166,7 @@ function slidesFromPlan(plan: PlanSlide[]): Slide[] {
         key: `plan-${i}-${group.map((p) => p.id).join('-')}`,
         layout: group.length === 3 ? 'trio' : group.length === 2 ? 'duo' : 'single',
         photos: group,
-        caption: s.caption ?? null,
+        captions: group.map((_, i) => s.captions?.[i] ?? null),
         chapterTitle: s.chapterTitle ?? null,
         chapterSubtitle: s.chapterSubtitle ?? null,
       }
@@ -186,10 +192,19 @@ const total = computed(() => slides.value.length)
 function slideDurationMs(slide: Slide | null): number {
   if (!slide) return photoDurationMs.value
   if (slide.layout === 'map') return MAP_INTRO_DURATION_MS
-  return slide.layout === 'single'
+  const own = slide.layout === 'single'
     ? photoDurationMs.value
     : Math.round(photoDurationMs.value * COLLAGE_DURATION_FACTOR)
+  return slide.chapterTitle ? CHAPTER_INTRO_MS + own : own
 }
+
+/** The caption at the bottom of the screen: only a single photo's; a collage labels each tile. */
+function bottomCaption(slide: Slide | null): string | null {
+  if (!slide || slide.layout !== 'single') return null
+  return slide.captions?.[0] ?? null
+}
+
+const currentCaption = computed(() => bottomCaption(currentSlide.value))
 
 const currentSlide = computed<Slide | null>(() => slides.value[index.value] ?? null)
 const currentDurationMs = computed(() => slideDurationMs(currentSlide.value))
@@ -779,6 +794,14 @@ onBeforeUnmount(() => {
               <span v-if="slotA.layout === 'compare'" class="compare-label">
                 {{ compareLabel(tileIdx) }}
               </span>
+              <span
+                v-else-if="slotA.captions?.[tileIdx]"
+                class="collage-caption"
+                :class="{ 'after-intro': !!slotA.chapterTitle }"
+                :style="{ '--chapter-ms': `${CHAPTER_INTRO_MS}ms` }"
+              >
+                {{ slotA.captions[tileIdx] }}
+              </span>
             </div>
           </div>
         </div>
@@ -824,6 +847,14 @@ onBeforeUnmount(() => {
               <span v-if="slotB.layout === 'compare'" class="compare-label">
                 {{ compareLabel(tileIdx) }}
               </span>
+              <span
+                v-else-if="slotB.captions?.[tileIdx]"
+                class="collage-caption"
+                :class="{ 'after-intro': !!slotB.chapterTitle }"
+                :style="{ '--chapter-ms': `${CHAPTER_INTRO_MS}ms` }"
+              >
+                {{ slotB.captions[tileIdx] }}
+              </span>
             </div>
           </div>
         </div>
@@ -834,24 +865,29 @@ onBeforeUnmount(() => {
         <div v-if="subtitle" class="recap-player-subtitle">{{ subtitle }}</div>
       </div>
 
-      <Transition name="recap-text">
-        <div
-          v-if="currentSlide?.chapterTitle"
-          :key="`chapter-${currentSlide.key}`"
-          class="recap-player-chapter"
-        >
+      <!-- The chapter's title has its own time before the photo: it fades
+           out together with the dimming, and the photo then plays alone. -->
+      <div
+        v-if="currentSlide?.chapterTitle"
+        :key="`chapter-${currentSlide.key}`"
+        class="recap-player-chapter-intro"
+        :class="{ 'is-paused': paused }"
+        :style="{ '--chapter-ms': `${CHAPTER_INTRO_MS}ms` }"
+      >
+        <div class="recap-player-chapter">
           <div class="recap-player-chapter-title">{{ currentSlide.chapterTitle }}</div>
           <div v-if="currentSlide.chapterSubtitle" class="recap-player-subtitle">{{ currentSlide.chapterSubtitle }}</div>
         </div>
-      </Transition>
+      </div>
       <Transition name="recap-text">
         <div
-          v-if="currentSlide?.caption"
-          :key="`caption-${currentSlide.key}`"
+          v-if="currentCaption"
+          :key="`caption-${currentSlide?.key}`"
           class="recap-player-caption"
-          :class="{ 'is-raised': showControls }"
+          :class="{ 'is-raised': showControls, 'after-intro': !!currentSlide?.chapterTitle }"
+          :style="{ '--chapter-ms': `${CHAPTER_INTRO_MS}ms` }"
         >
-          {{ currentSlide.caption }}
+          {{ currentCaption }}
         </div>
       </Transition>
 
@@ -1096,6 +1132,22 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(4px);
 }
 
+/* A photo book's caption on its own tile of a collage. */
+.collage-caption {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff; /* audit-ok: player chrome on a dark pill (see .recap-player) */
+  font-size: var(--text-base);
+  text-align: center;
+  pointer-events: none;
+}
+
 .recap-player-title {
   position: absolute;
   top: 2rem;
@@ -1124,6 +1176,38 @@ onBeforeUnmount(() => {
   margin-top: 0.25rem;
 }
 
+/* The title's own time at the start of a chapter's slide: the photo dimmed
+   behind it, both gone before the photo plays on alone. */
+.recap-player-chapter-intro {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  animation: chapter-intro var(--chapter-ms, 3000ms) ease forwards;
+  pointer-events: none;
+}
+
+.recap-player-chapter-intro.is-paused {
+  animation-play-state: paused;
+}
+
+@keyframes chapter-intro {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Captions of a chapter's first photo wait until its title is gone. */
+.after-intro {
+  opacity: 0;
+  animation: after-intro 600ms ease var(--chapter-ms, 3000ms) forwards;
+}
+
+@keyframes after-intro {
+  to { opacity: 1; }
+}
+
 .recap-player-chapter {
   position: absolute;
   top: 50%;
@@ -1131,8 +1215,6 @@ onBeforeUnmount(() => {
   transform: translate(-50%, -50%);
   max-width: 90%;
   padding: var(--space-4) var(--space-5);
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.45);
   text-align: center;
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
   pointer-events: none;

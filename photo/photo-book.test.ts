@@ -107,8 +107,11 @@ describe("photo book chapters", () => {
   it("formats ranges and durations", () => {
     expect(formatDayRange("2024-06-01", "2024-06-03")).toBe("1.–3. Juni 2024");
     expect(formatDayRange("2024-05-30", "2024-06-02")).toBe("30. Mai – 2. Juni 2024");
-    expect(chapterSubtitle("2024-06-01", "2024-06-03")).toBe("3 Tage, 1.–3. Juni 2024");
+    expect(chapterSubtitle("2024-06-01", "2024-06-03")).toBe("1.–3. Juni 2024");
     expect(chapterSubtitle("2024-06-03", "2024-06-03")).toBe("Montag, 3. Juni 2024");
+    expect(chapterSubtitle("2024-06-03 10:15:00", "2024-06-03 17:40:00")).toBe("Montag, 3. Juni 2024, 10:15–17:40 Uhr");
+    expect(chapterSubtitle("2024-06-03 10:15:00", "2024-06-03 10:15:00")).toBe("Montag, 3. Juni 2024, 10:15 Uhr");
+    expect(chapterSubtitle("2024-06-01 09:00:00", "2024-06-03 18:00:00")).toBe("1.–3. Juni 2024");
   });
 
   it("makes one chapter per day for a short span and folds small days into the one before", () => {
@@ -121,8 +124,9 @@ describe("photo book chapters", () => {
     const chapters = buildChapters(list);
     expect(chapters.map((c) => c.photos.map((p) => p.id))).toEqual([[1, 2, 3, 4, 5], [6, 7, 8, 9], [10]]);
     expect(chapters[0].title).toBe("Tag 1–2 · Musterstadt");
-    expect(chapters[0].subtitle).toBe("2 Tage, 1.–2. Juni 2024");
+    expect(chapters[0].subtitle).toBe("1.–2. Juni 2024");
     expect(chapters[1].title).toBe("Tag 3");
+    expect(chapters[1].subtitle).toBe("Montag, 3. Juni 2024, 01:00–04:00 Uhr");
     expect(chapters[2].title).toBe("Ohne Datum");
   });
 
