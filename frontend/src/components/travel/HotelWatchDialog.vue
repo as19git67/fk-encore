@@ -42,6 +42,7 @@ const currency = ref('EUR')
 const limit = ref<number | null>(null)
 const freeCancellationOnly = ref(true)
 const breakfastRequired = ref(false)
+const splitRooms = ref(false)
 const endDate = ref<Date | null>(null)
 const paused = ref(false)
 const notifyPush = ref(true)
@@ -78,6 +79,7 @@ watch(
     limit.value = w?.limit_per_night ?? null
     freeCancellationOnly.value = w?.free_cancellation_only ?? true
     breakfastRequired.value = w?.breakfast_required ?? false
+    splitRooms.value = w?.split_rooms ?? false
     endDate.value = w ? parseLocalDate(w.end_date) : null
     paused.value = w?.paused ?? false
     notifyPush.value = w?.notify_push ?? true
@@ -101,6 +103,12 @@ const ages = computed<number[] | null>(() => {
   if (!text) return []
   const parts = text.split(/[,;\s]+/).filter(Boolean).map(Number)
   return parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 17) ? parts : null
+})
+
+/** Double rooms for the party: only adults, an even number, at least two rooms (as the server checks). */
+const splitCount = computed<number | null>(() => {
+  const n = adults.value ?? 0
+  return (ages.value ?? []).length === 0 && n >= 4 && n % 2 === 0 ? n / 2 : null
 })
 
 const nights = computed(() =>
@@ -133,6 +141,7 @@ function save() {
     limit_per_night: limit.value,
     free_cancellation_only: freeCancellationOnly.value,
     breakfast_required: breakfastRequired.value,
+    split_rooms: splitCount.value !== null && splitRooms.value,
     end_date: toLocalIsoDate(endDate.value),
     paused: paused.value,
     notify_push: notifyPush.value,
@@ -175,6 +184,13 @@ function save() {
       <div class="field">
         <label for="hw-children">Alter der Kinder</label>
         <InputText id="hw-children" v-model="childrenAges" placeholder="z. B. 8, 12" />
+      </div>
+      <div v-if="splitCount !== null" class="field field-wide field-check split">
+        <Checkbox v-model="splitRooms" input-id="hw-split" binary />
+        <label for="hw-split">Auch {{ splitCount }} Doppelzimmer à 2 Erwachsene prüfen</label>
+        <small class="muted">
+          Eine zweite Suche je Prüfung. Der Preis gilt für alle Zimmer zusammen; ob so viele frei sind, zeigt erst der Anbieter.
+        </small>
       </div>
 
       <div class="field">
@@ -277,6 +293,12 @@ function save() {
 }
 .field-check label {
   color: var(--p-text-color);
+}
+.split {
+  flex-wrap: wrap;
+}
+.split small {
+  flex-basis: 100%;
 }
 .notify {
   border: 0;

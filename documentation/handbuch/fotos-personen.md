@@ -251,7 +251,9 @@ Titelseite, dann Kapitel mit Doppelseiten; je Seite Layout-Wahl,
 Bildunterschriften an/aus, Menü je Foto („Als Titelbild“, „Aus dem Buch
 nehmen“). `#actions`: „PDF“, „Diashow“, „KI“, „Buch“, „Auswahl“, im
 Mehr-Menü „Neu verteilen“ und „Fotobuch löschen“. Ein Hinweis warnt,
-wenn Fotos unter 200 dpi gedruckt würden.
+wenn Fotos unter 200 dpi gedruckt würden. Jedes Foto erscheint so, wie
+der Besitzer es bearbeitet hat (Drehung, Zuschnitt, Farbe), in Vorschau
+und PDF.
 
 ### FOT-FBD-01 Kapitelüberschrift ändern
 
@@ -376,6 +378,23 @@ wenn Fotos unter 200 dpi gedruckt würden.
 - **Fehler und Grenzfälle:** keine
 - **Test:** –
 
+### FOT-FBD-11 Seiten an bearbeitete Fotos anpassen
+
+- **Wo:** Hinweis „n Seiten passen nach deiner Bearbeitung von Fotos nicht
+  mehr gut“ mit Knopf „Seiten anpassen“; betroffene Seiten tragen ein
+  Hinweis-Symbol neben dem Layout
+- **Recht:** Besitzer
+- **Vorbedingung:** ein Foto im Buch wurde nach dem Anlegen gedreht oder
+  auf ein anderes Seitenverhältnis zugeschnitten, und ein anderes Layout
+  schnitte von den Fotos der Seite deutlich weniger ab
+- **Schritte:**
+  1. „Seiten anpassen“.
+- **Ergebnis:** Die betroffenen Seiten werden für die bearbeiteten Fotos
+  neu angeordnet; Fotos und Kapitel bleiben.
+- **Fehler und Grenzfälle:** Eine Seite, deren Layout der Besitzer selbst
+  gewählt hat, bleibt unverändert und zeigt nur das Hinweis-Symbol.
+- **Test:** –
+
 ---
 
 ## Abdeckung
@@ -407,3 +426,4 @@ wenn Fotos unter 200 dpi gedruckt würden.
 | FOT-FBD-08 | Als PDF ausgeben | view | – |
 | FOT-FBD-09 | Diashow | view | – |
 | FOT-FBD-10 | Neu verteilen und löschen | Besitzer | – |
+| FOT-FBD-11 | Seiten an bearbeitete Fotos anpassen | Besitzer | – |

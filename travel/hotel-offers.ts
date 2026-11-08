@@ -23,6 +23,8 @@ export interface HotelOffer {
   breakfast: boolean;
   guests: number | null;
   link: string | null;
+  /** Rooms the offer books; `perNight` and `total` are for all of them. */
+  rooms: number;
 }
 
 export interface OfferConditions {
@@ -68,6 +70,7 @@ export function offersOf(detail: any, guests: number): HotelOffer[] {
           breakfast: rate.breakfast_included === true,
           guests: num(rate.num_guests ?? room.num_guests),
           link: url(rate.link) ?? url(room.link) ?? url(fp.link),
+          rooms: 1,
         });
       }
     }
@@ -88,11 +91,47 @@ export function offersOf(detail: any, guests: number): HotelOffer[] {
       breakfast: false,
       guests: num(p.num_guests),
       link: url(p.link),
+      rooms: 1,
     });
   }
   return offers
     .filter((o) => o.guests === null || o.guests >= guests)
     .sort((a, b) => a.perNight - b.perNight);
+}
+
+/** Adults per room when a watch also prices double rooms. */
+export const ADULTS_PER_ROOM = 2;
+
+/**
+ * How many double rooms a party fills, or null when it cannot be split
+ * evenly: only adults, an even number, at least two rooms.
+ */
+export function splitRoomCount(adults: number, childrenAges: number[]): number | null {
+  if (childrenAges.length > 0) return null;
+  if (adults < 2 * ADULTS_PER_ROOM || adults % ADULTS_PER_ROOM !== 0) return null;
+  return adults / ADULTS_PER_ROOM;
+}
+
+/**
+ * The offers of a search for one double room, booked `rooms` times: the
+ * price is for all rooms together, so it compares with a room for the whole
+ * party. Google shows the price of one room; whether that many are free is
+ * only seen at the provider.
+ */
+export function asRooms(offers: HotelOffer[], rooms: number): HotelOffer[] {
+  return offers.map((o) => ({
+    ...o,
+    room: `${rooms} × ${o.room}`,
+    perNight: o.perNight * rooms,
+    total: o.total === null ? null : o.total * rooms,
+    guests: o.guests === null ? null : o.guests * rooms,
+    rooms,
+  }));
+}
+
+/** Two lists from `offersOf`/`asRooms` as one, cheapest first. */
+export function mergeOffers(a: HotelOffer[], b: HotelOffer[]): HotelOffer[] {
+  return [...a, ...b].sort((x, y) => x.perNight - y.perNight);
 }
 
 export function meetsConditions(offer: HotelOffer, conditions: OfferConditions): boolean {

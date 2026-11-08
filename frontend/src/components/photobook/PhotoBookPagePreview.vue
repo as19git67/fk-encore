@@ -5,7 +5,8 @@
  * is a button; what it does is the parent's (`slot-click`).
  */
 import { computed } from 'vue'
-import { photoBookThumbUrl, type PageRect, type PhotoBookPage, type PhotoBookSlot } from '../../api/photoBooks'
+import { photoBookImageUrl, type PageRect, type PhotoBookPage, type PhotoBookSlot } from '../../api/photoBooks'
+import { useAuthStore } from '../../stores/auth'
 
 const props = defineProps<{
   page: PhotoBookPage
@@ -16,6 +17,13 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ (e: 'slot-click', slot: PhotoBookSlot, event: MouseEvent): void }>()
+
+const auth = useAuthStore()
+
+/** The photo as the PDF prints it: with the owner's edit. */
+function imageUrl(s: PhotoBookSlot): string {
+  return photoBookImageUrl({ photoId: s.photo_id, filename: s.filename, editedAt: s.edited_at }, auth.user?.id)
+}
 
 const aspect = computed(() => `${props.widthMm} / ${props.heightMm}`)
 
@@ -29,7 +37,7 @@ function box(r: PageRect) {
 }
 
 function focal(s: PhotoBookSlot): string {
-  const f = s.auto_crop
+  const f = s.focal ?? s.auto_crop
   return f ? `${f.x * 100}% ${f.y * 100}%` : '50% 50%'
 }
 
@@ -87,7 +95,7 @@ function slotLabel(s: PhotoBookSlot): string {
       :aria-label="slotLabel(s)"
       @click="emit('slot-click', s, $event)"
     >
-      <img :src="photoBookThumbUrl(s.filename)" alt="" loading="lazy" :style="{ objectPosition: focal(s) }" />
+      <img :src="imageUrl(s)" alt="" loading="lazy" :style="{ objectPosition: focal(s) }" />
       <span v-if="s.low_dpi" class="pbp-warn" aria-hidden="true"><i class="pi pi-exclamation-triangle" /></span>
     </button>
     <template v-for="s in page.slots" :key="`c${s.slot}`">

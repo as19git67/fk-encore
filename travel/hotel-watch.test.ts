@@ -89,6 +89,13 @@ describe("criteria", () => {
     expect(() => normalizeWatchInput(input({ children_ages: [18] }), TODAY)).toThrow(/Kindes/);
   });
 
+  it("allows double rooms only for an even number of adults from four, without children", () => {
+    expect(normalizeWatchInput(input({ adults: 4, split_rooms: true }), TODAY).split_rooms).toBe(true);
+    expect(normalizeWatchInput(input(), TODAY).split_rooms).toBe(false);
+    expect(() => normalizeWatchInput(input({ adults: 3, split_rooms: true }), TODAY)).toThrow(/Doppelzimmer/);
+    expect(() => normalizeWatchInput(input({ adults: 4, children_ages: [6], split_rooms: true }), TODAY)).toThrow(/Doppelzimmer/);
+  });
+
   it("ends once the end date or the check-in has passed", () => {
     const w = { paused: false, end_date: "2027-05-11", check_in: "2027-05-12" };
     expect(watchStatus(w, TODAY)).toBe("active");
@@ -206,6 +213,42 @@ describe("job", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("double rooms", () => {
+  it("search a second time for two adults and keep both kinds of offer", async () => {
+    const calls: HotelSearchParams[] = [];
+    const { watch } = await endpoints.createHotelWatch(input({ adults: 4, split_rooms: true, limit_per_night: 500 }));
+    await runDueChecks(fakeClient(calls), NOW);
+    expect(calls.map((c) => [c.adults, c.property_token ?? null])).toEqual([
+      [4, null],
+      [4, "tok-beispiel"],
+      [2, "tok-beispiel"],
+    ]);
+    const detail = await endpoints.getHotelWatch({ id: watch.id });
+    expect(detail.checks[0].searches).toBe(3);
+    const doubles = detail.offers.filter((o) => o.rooms === 2);
+    expect(doubles[0]).toMatchObject({ room: "2 × Doppelzimmer, zwei Betten", per_night: 400 });
+    // The cheapest free rate is in double rooms: 2 × 240.
+    expect(detail.checks[0]).toMatchObject({ matching_per_night: 480, below_limit: true });
+  });
+
+  it("keep the check when the double-room search fails", async () => {
+    const calls: HotelSearchParams[] = [];
+    const inner = fakeClient(calls);
+    const client: HotelSearchClient = {
+      async search(params) {
+        if (params.adults === 2) throw new Error("boom");
+        return inner.search(params);
+      },
+    };
+    const { watch } = await endpoints.createHotelWatch(input({ adults: 4, split_rooms: true }));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await runDueChecks(client, NOW);
+    const detail = await endpoints.getHotelWatch({ id: watch.id });
+    expect(detail.checks[0]).toMatchObject({ error: null, searches: 3 });
+    expect(detail.offers.every((o) => o.rooms === 1)).toBe(true);
   });
 });
 

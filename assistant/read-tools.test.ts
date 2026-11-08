@@ -290,7 +290,7 @@ describe("list_photos", () => {
         { person_ids: [41, 42], rank_by: "quality", direction: "desc", group_by: "person", then_by: "year", per_group: 2, distinct: true },
         ctx(),
       );
-      expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ personIds: "41", limit: 5001 }));
+      expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ personIds: "41", limit: 5000 }));
       expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ personIds: "42" }));
       expect(out.text).toContain("person 41 · 2017 | 11 |");
       expect(out.text).toContain("person 41 · 2017 | 13 |");
@@ -311,7 +311,8 @@ describe("list_photos", () => {
     clients.photo.listPhotos.mockImplementation(async (req: { dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit: number }) => {
       let rows = all.filter((p) => (!req.dateFrom || p.taken_at.slice(0, 10) >= req.dateFrom) && (!req.dateTo || p.taken_at.slice(0, 10) <= req.dateTo));
       if (req.sortBy === "date") rows = [...rows].sort((a, b) => (req.sortDir === "asc" ? 1 : -1) * a.taken_at.localeCompare(b.taken_at));
-      return { photos: rows.slice(0, req.limit) };
+      // Like the endpoint: never more than 5000 rows, whatever the limit.
+      return { photos: rows.slice(0, Math.min(req.limit, 5000)) };
     });
     const out = await tool("list_photos").run({ rank_by: "quality", direction: "desc", group_by: "month" }, ctx());
     // 2016 alone exceeds the cap and is read month by month; 2017 fits in one read.
@@ -323,7 +324,22 @@ describe("list_photos", () => {
     expect(out.text).not.toContain("more than");
   });
 
-  it("splits a range into years, then months, and stops at a single month", async () => {
+  it("splits a read that comes back at the endpoint's maximum: exactly 5000 rows is not 'all of them'", async () => {
+    // 5000 photos of 2016 rank above 2017; the endpoint returns 5000 rows for any larger limit.
+    const y2016 = Array.from({ length: 5000 }, (_, i) => ({ id: i + 1, taken_at: `2016-0${(i % 6) + 1}-10T10:00:00Z`, ai_quality_score: 90 }));
+    const y2017 = [{ id: 9001, taken_at: "2017-03-01T10:00:00Z", ai_quality_score: 40 }];
+    const all = [...y2016, ...y2017];
+    clients.photo.listPhotos.mockImplementation(async (req: { dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit: number }) => {
+      let rows = all.filter((p) => (!req.dateFrom || p.taken_at.slice(0, 10) >= req.dateFrom) && (!req.dateTo || p.taken_at.slice(0, 10) <= req.dateTo));
+      if (req.sortBy === "date") rows = [...rows].sort((a, b) => (req.sortDir === "asc" ? 1 : -1) * a.taken_at.localeCompare(b.taken_at));
+      return { photos: rows.slice(0, Math.min(req.limit, 5000)) };
+    });
+    const out = await tool("list_photos").run({ rank_by: "quality", direction: "desc", group_by: "month" }, ctx());
+    expect(out.text).toContain("2017-03 | 9001 |");
+    expect(out.ref?.ids).toContain(9001);
+  });
+
+  it("splits a range into years, then months, then days, and stops at a single day", async () => {
     const { splitPeriod } = await import("./tools/photos");
     expect(splitPeriod("2015-06-03", "2017-02-01")).toEqual([
       { from: "2015-06-03", to: "2015-12-31" }, { from: "2016-01-01", to: "2016-12-31" }, { from: "2017-01-01", to: "2017-02-01" },
@@ -331,7 +347,24 @@ describe("list_photos", () => {
     expect(splitPeriod("2023-01-15", "2023-03-31")).toEqual([
       { from: "2023-01-15", to: "2023-01-31" }, { from: "2023-02-01", to: "2023-02-28" }, { from: "2023-03-01", to: "2023-03-31" },
     ]);
-    expect(splitPeriod("2023-04-01", "2023-04-30")).toBeNull();
+    expect(splitPeriod("2023-04-28", "2023-04-30")).toEqual([
+      { from: "2023-04-28", to: "2023-04-28" }, { from: "2023-04-29", to: "2023-04-29" }, { from: "2023-04-30", to: "2023-04-30" },
+    ]);
+    expect(splitPeriod("2023-04-30", "2023-04-30")).toBeNull();
+  });
+
+  it("groups per day ('von jedem Tag die 10 besten'), each day with its own best photos", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [
+      { id: 1, taken_at: "2025-05-02T21:00:00", ai_quality_score: 95 },
+      { id: 2, taken_at: "2025-05-02T09:00:00", ai_quality_score: 90 },
+      { id: 3, taken_at: "2025-05-02T12:00:00", ai_quality_score: 80 },
+      { id: 4, taken_at: "2025-05-03T10:00:00", ai_quality_score: 40 },
+    ] });
+    const out = await tool("list_photos").run({ place: "Musterstadt", rank_by: "quality", direction: "desc", group_by: "day", per_group: 2 }, ctx());
+    expect(out.text).toContain("2025-05-02 | 1 |");
+    expect(out.text).toContain("2025-05-02 | 2 |");
+    expect(out.text).toContain("2025-05-03 | 4 |");
+    expect(out.ref?.ids).toEqual([1, 2, 4]);
   });
 
   it("refuses group_by person without person_ids", async () => {

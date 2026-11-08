@@ -27,7 +27,10 @@ gewählte Wächter steht in der Adresse (`?watch=<id>`).
 - **Recht:** `travel.manage`
 - **Schritte:**
   1. Hotel eingeben (Name, gern mit Ort), Anreise und Abreise wählen.
-  2. Erwachsene und optional das Alter der Kinder angeben.
+  2. Erwachsene und optional das Alter der Kinder angeben. Bei einer
+     geraden Zahl Erwachsener ab vier und ohne Kinder optional „Auch n
+     Doppelzimmer à 2 Erwachsene prüfen“: jede Prüfung sucht dann zweimal
+     (rund 60 statt 30 Suchen im Monat).
   3. Optional eine Grenze pro Nacht inklusive Steuern; Währung (EUR).
   4. „Nur kostenlos stornierbare Tarife zählen“ (an) und „Nur Tarife mit
      Frühstück zählen“ (aus) festlegen.
@@ -73,7 +76,10 @@ gewählte Wächter steht in der Adresse (`?watch=<id>`).
   Preis unter der Grenze ist hervorgehoben. Ein Anbieter, den Google nur
   mit Preis nennt, steht mit Storno „unbekannt“; der Name des Anbieters
   führt zum Angebot. Ein Tarif mit unbekanntem Storno zählt nie als
-  kostenlos stornierbar.
+  kostenlos stornierbar. Doppelzimmer stehen als „2 × …“ mit dem Preis für
+  alle Zimmer und darunter dem Preis je Zimmer; Grenze und „Passend“
+  vergleichen die günstigere Art, alle unterzubringen. Ob so viele Zimmer
+  frei sind, zeigt erst der Anbieter.
 - **Test:** –
 
 ### REI-HPR-06 Meldung bei günstigem Preis

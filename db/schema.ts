@@ -5458,6 +5458,8 @@ export const travelHotelWatches = pgTable(
     limit_per_night: doublePrecision("limit_per_night"),
     free_cancellation_only: boolean("free_cancellation_only").notNull().default(true),
     breakfast_required: boolean("breakfast_required").notNull().default(false),
+    /** Also price the party in double rooms (two adults each): a second search per check. */
+    split_rooms: boolean("split_rooms").notNull().default(false),
     /** Last day the job checks this watch. */
     end_date: date("end_date", { mode: "string" }).notNull(),
     paused: boolean("paused").notNull().default(false),
@@ -5521,6 +5523,8 @@ export const travelHotelOffers = pgTable(
     guests: integer("guests"),
     /** Where to book the offer, as Google Hotels links it. */
     link: text("link"),
+    /** Rooms the offer books; prices above are for all of them together. */
+    rooms: integer("rooms").notNull().default(1),
   },
   (table) => [index("travel_hotel_offer_check_idx").on(table.check_id)],
 );
@@ -5528,7 +5532,7 @@ export const travelHotelOffers = pgTable(
 // ========== Label ==========
 
 // A generated sheet of scanner labels "#0001" … (label/scanner-sheet.ts,
-// migration 0298). The PDF is rendered again from these values on download.
+// migration 0299). The PDF is rendered again from these values on download.
 export const labelScannerSheets = pgTable(
   "label_scanner_sheet",
   {

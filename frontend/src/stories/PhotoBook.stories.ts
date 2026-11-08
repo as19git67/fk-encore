@@ -21,6 +21,8 @@ function slot(i: number, rect: PageRect, lowDpi = false): PhotoBookSlot {
     photo_id: id,
     filename: FILES[id % FILES.length]!,
     auto_crop: null,
+    focal: null,
+    edited_at: null,
     rect,
     dpi: lowDpi ? 140 : 320,
     low_dpi: lowDpi,
@@ -62,6 +64,7 @@ function page(id: number, chapter: number, kind: PhotoBookPage['kind'], layout: 
     captions_override: null,
     layout_source: 'rule',
     layout_reason: null,
+    edit_misfit: null,
     slots: rects.map((r, i) => slot(i, r, id === 3 && i === 2)),
     ...extra,
   }
@@ -84,12 +87,15 @@ const MOCK_BOOK: PhotoBook = {
   cover_photo_id: 1,
   cover_filename: 'castle.jpg',
   cover_auto_crop: null,
+  cover_focal: null,
+  cover_edited_at: null,
   settings: { bleed_mm: 3, crop_marks: false, spreads: true, paper_mm: 0.12, captions: false },
   source: { kind: 'photos', photo_ids: [1, 2, 3, 4, 5, 6, 7, 8], quality_min: null, aesthetic_min: null, without_recognisable_faces: false, max_photos: null },
   page_count: 5,
   photo_count: 9,
   spine_mm: 0.4,
   low_dpi_count: 1,
+  edit_misfit_count: 0,
   chapters: [
     { id: 1, position: 0, title: 'Rund um den Alten Turm', subtitle: 'Samstag, 1. Juni 2024', starts_at: '2024-06-01 09:00:00', ends_at: '2024-06-01 18:00:00', title_source: 'llm', title_suggestion: 'Rund um den Alten Turm' },
     { id: 2, position: 1, title: 'Tag 2', subtitle: 'Sonntag, 2. Juni 2024', starts_at: '2024-06-02 09:00:00', ends_at: '2024-06-02 18:00:00', title_source: 'user', title_suggestion: 'Ein Tag am Beispielsee' },
@@ -159,4 +165,29 @@ export const Buch: StoryObj<typeof PhotoBookDetailView> = {
   name: 'Fotobuch (Seiten)',
   render: () => ({ components: { PhotoBookDetailView }, template: '<PhotoBookDetailView />' }),
   decorators: [at('/fotos/fotobuecher/1')],
+}
+
+/** Photos edited after the book was laid out: the notice with "Seiten anpassen" and the marked pages. */
+const EDITED_BOOK: PhotoBook = {
+  ...MOCK_BOOK,
+  edit_misfit_count: 1,
+  pages: MOCK_BOOK.pages.map((p) =>
+    p.id === 3 ? { ...p, edit_misfit: 'relayout' } : p.id === 5 ? { ...p, layout_source: 'user', edit_misfit: 'own_layout' } : p,
+  ),
+}
+
+export const BuchBearbeitet: StoryObj<typeof PhotoBookDetailView> = {
+  name: 'Fotobuch (Fotos nachträglich bearbeitet)',
+  render: () => ({ components: { PhotoBookDetailView }, template: '<PhotoBookDetailView />' }),
+  decorators: [at('/fotos/fotobuecher/1')],
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/photo-books/:id/export', () => HttpResponse.json({ status: 'none', progress: 0, files: [] })),
+        http.get('/api/photo-books/:id/ai', () => HttpResponse.json({ status: 'none', job: null })),
+        http.get('/api/photo-books/:id', () => HttpResponse.json(EDITED_BOOK)),
+        ...handlers,
+      ],
+    },
+  },
 }

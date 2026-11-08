@@ -6,6 +6,7 @@
  * GET    /photo-books/:id                      the book for the editor
  * PATCH  /photo-books/:id                      title, format, cover, print settings
  * POST   /photo-books/:id/rebuild              lay it out again from its source, optionally with a new narrowing
+ * POST   /photo-books/:id/fit-edits            "Seiten anpassen": lay out again the pages edited photos no longer fit
  * DELETE /photo-books/:id
  * PATCH  /photo-books/:id/chapters/:chapterId  chapter title and subtitle
  * PUT    /photo-books/:id/pages/:pageId/layout another layout for the page
@@ -32,6 +33,7 @@ import {
   acceptPhotoBookChapterSuggestion,
   createPhotoBook,
   deletePhotoBook,
+  fitPhotoBookToEdits,
   getPhotoBookView,
   listPhotoBooks,
   photoBookFormats,
@@ -148,6 +150,20 @@ export const rebuildPhotoBookApi = api(
   async ({ id, narrowing }: RebuildPhotoBookRequest): Promise<PhotoBookView> => {
     const userId = viewer();
     await rebuildPhotoBook(userId, id, narrowing);
+    return getPhotoBookView(userId, id);
+  },
+);
+
+/**
+ * Pages whose layout the rule or the model chose and that photos edited
+ * since (turned, cropped) no longer fit are laid out again; pages with the
+ * user's own layout stay.
+ */
+export const fitPhotoBookToEditsApi = api(
+  { expose: true, method: "POST", path: "/photo-books/:id/fit-edits", auth: true },
+  async ({ id }: { id: number }): Promise<PhotoBookView> => {
+    const userId = viewer();
+    await fitPhotoBookToEdits(userId, id);
     return getPhotoBookView(userId, id);
   },
 );
