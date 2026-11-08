@@ -29,13 +29,14 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import db from "../db/database";
 import { tripPlanOps, tripPlanVotes, users } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { hideTripSpot, unhideTripSpot } from "./hidden-spots";
 import { castVote } from "./plan-votes";
-import { isOnTrip } from "./plan-access";
+import { ITINERARY_OP, ITINERARY_UNDO_OP, restoreItinerary, type ItinerarySnapshot } from "./itinerary";
+import { isOnTrip, requireOrganiser } from "./plan-access";
 import { findSpotNote, loadPlan, type StoredPlan } from "./plan-store";
 import { getTripPlan, type PlanResponse } from "./plans";
 import { saveTripSpotNote } from "./spot-notes";
@@ -210,17 +211,27 @@ export const planJournal = api(
       .map((row) => row.undoneById)
       .filter((id): id is number => id !== null));
 
+    // Only the newest change of the itinerary can be taken back: its
+    // snapshot is the trip right before it, and an older one would
+    // skip every change made since.
+    const newestItinerary = await newestItineraryOp(req.planId);
+
     return {
       entries: rows.map((row) => {
         const payload = (row.payload ?? {}) as Record<string, unknown>;
         const kind = row.kind as OpKind;
+        const itinerary = row.kind === ITINERARY_OP || row.kind === ITINERARY_UNDO_OP;
         return {
           id: row.id,
           kind: row.kind,
-          sentence: describe(kind, payload, nameOfSpot(plan, payload)),
+          sentence: itinerary && typeof payload.sentence === "string"
+            ? payload.sentence
+            : describe(kind, payload, nameOfSpot(plan, payload)),
           actor: row.actor,
           at: row.at,
-          undoable: isOpKind(row.kind) && isUndoable(kind) && row.undoneAt === null,
+          undoable: row.kind === ITINERARY_OP
+            ? row.id === newestItinerary && row.undoneAt === null
+            : isOpKind(row.kind) && isUndoable(kind) && row.undoneAt === null,
           undoneAt: row.undoneAt,
           undoneBy: row.undoneById === null ? null : names.get(row.undoneById) ?? null,
         };
@@ -252,6 +263,10 @@ export const undoPlanOp = api(
     if (row.undone_at !== null) {
       throw APIError.failedPrecondition("diese Änderung ist schon zurückgenommen");
     }
+    if (row.kind === ITINERARY_OP) {
+      await undoItinerary(req.planId, userId, row.id, row.previous as ItinerarySnapshot | null);
+      return await planJournal({ planId: req.planId });
+    }
     if (!isOpKind(row.kind) || !isUndoable(row.kind)) {
       throw APIError.failedPrecondition(
         "Diesen Schritt kann die App nicht zurücknehmen: der Tag wurde danach neu gerechnet. "
@@ -282,6 +297,55 @@ export const undoPlanOp = api(
     return await planJournal({ planId: req.planId });
   },
 );
+
+/** The id of the newest change of the itinerary not yet taken back. */
+async function newestItineraryOp(planId: number): Promise<number | null> {
+  const [row] = await db
+    .select({ id: tripPlanOps.id })
+    .from(tripPlanOps)
+    .where(and(
+      eq(tripPlanOps.plan_id, planId),
+      eq(tripPlanOps.kind, ITINERARY_OP),
+      isNull(tripPlanOps.undone_at),
+    ))
+    .orderBy(desc(tripPlanOps.created_at), desc(tripPlanOps.id))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+/**
+ * Put the itinerary and the days of the stays it rebuilt back as they
+ * were before that change: the stored snapshot, not a re-plan.
+ */
+async function undoItinerary(
+  planId: number,
+  userId: number,
+  opId: number,
+  snapshot: ItinerarySnapshot | null,
+): Promise<void> {
+  await requireOrganiser(planId, userId, "Den Reiseverlauf");
+  if (!snapshot) throw APIError.failedPrecondition("zu dieser Änderung ist kein vorheriger Stand gespeichert");
+  if ((await newestItineraryOp(planId)) !== opId) {
+    throw APIError.failedPrecondition(
+      "Nur die letzte Änderung am Reiseverlauf lässt sich zurücknehmen, "
+        + "sonst gingen die späteren mit verloren.",
+    );
+  }
+  const plan = await loadPlan(planId, userId);
+  if (!plan) throw APIError.notFound("plan not found");
+  await restoreItinerary(plan, snapshot);
+  await db.insert(tripPlanOps).values({
+    plan_id: planId,
+    client_op_id: `undo-${opId}-${Date.now()}`,
+    kind: ITINERARY_UNDO_OP,
+    payload: { sentence: "Änderung am Reiseverlauf zurückgenommen" },
+    actor_id: userId,
+  });
+  await db
+    .update(tripPlanOps)
+    .set({ undone_at: sql`now()`, undone_by: userId })
+    .where(eq(tripPlanOps.id, opId));
+}
 
 /** Run one operation through the endpoint that owns it. */
 async function perform(

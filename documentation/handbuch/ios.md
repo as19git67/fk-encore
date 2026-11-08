@@ -234,6 +234,11 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen;
   Kandidaten je Aufenthalt aus Ideen, Suche („Ort suchen“, „Hier, wo ich bin“) und
   Entdecken („Gegend wählen“, „Andere Gegend…“).
+- Kürzt oder entfernt eine Änderung im Reiseverlauf schon geplante Tage,
+  steht sie unter „Änderungen“ und lässt sich dort mit „Rückgängig“
+  zurücknehmen: die alten Tage kommen genau so wieder, wie sie waren.
+  Zurücknehmen lässt sich immer nur die letzte solche Änderung; ein
+  entfernter Aufenthalt kommt ohne seine Wünsche und Notizen zurück.
 - **Test:** –
 
 ### IOS-PLN-02 Tag planen
