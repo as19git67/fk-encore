@@ -587,6 +587,48 @@ describe("a card the rest of the question waits for", () => {
     expect(request.messages.some((m) => m.role === "tool" && String(m.content).includes("NOT executed"))).toBe(false);
   });
 
+  it("after Ausführen, the same card is not proposed again: the model reads that it ran", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 5 }, { id: 6 }] });
+    const conversation = await createConversation({});
+    vi.mocked(chat)
+      .mockResolvedValueOnce(toolCall("create_album", { name: "Sommer", photos: { favorite: true } }))
+      .mockResolvedValueOnce(text("Ich habe das Album „Sommer“ vorgeschlagen."));
+    const res = await ask({ id: conversation.id, message: "Leg ein Album mit meinen Favoriten an." });
+    await __settleSummariesForTests();
+    const id = Number(res.blocks.find((b) => b.kind === "proposal")!.rows[0]!.proposal_id);
+    clients.photo.createAlbum.mockResolvedValue({ id: 31, name: "Sommer" });
+    await executeAssistantProposal({ id });
+
+    vi.mocked(chat).mockReset();
+    vi.mocked(chat)
+      .mockResolvedValueOnce(noAreas())
+      .mockResolvedValueOnce(toolCall("create_album", { name: "Sommer", photos: { favorite: true } }))
+      .mockResolvedValueOnce(text("Das Album ist angelegt."));
+    const next = await ask({ id: conversation.id, message: "Die Karte ist ausgeführt. Mach jetzt weiter: das Album anlegen" });
+    await __settleSummariesForTests();
+
+    expect(next.blocks.some((b) => b.kind === "proposal")).toBe(false);
+    expect(await db.select().from(assistantProposal)).toHaveLength(1);
+    const refusal = vi.mocked(chat).mock.calls[2]![0].messages.filter((m) => m.role === "tool").at(-1)!;
+    expect(refusal.content).toContain(`no new proposal: Proposal #${id} (Album „Sommer“ anlegen und 2 Fotos hinzufügen) was EXECUTED`);
+  });
+
+  it("a pending card is not doubled in its conversation, a discarded one may come again", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 5 }] });
+    const conversation = await createConversation({});
+    const inConversation = { ...ctx(), conversationId: conversation.id };
+    const first = await tool("create_album").run({ name: "Winter", photos: { favorite: true } }, inConversation);
+    const id = Number(first.block?.rows[0].proposal_id);
+    await expect(tool("create_album").run({ name: "Winter", photos: { favorite: true } }, inConversation))
+      .rejects.toThrow(new RegExp(`Proposal #${id} \\(Album „Winter“[^)]*\\) already does exactly this`));
+    // Another album is another card.
+    await tool("create_album").run({ name: "Herbst", photos: { favorite: true } }, inConversation);
+
+    await discardAssistantProposal({ id });
+    const again = await tool("create_album").run({ name: "Winter", photos: { favorite: true } }, inConversation);
+    expect(Number(again.block?.rows[0].proposal_id)).not.toBe(id);
+  });
+
   it("a discarded card reads as discarded, and a placeholder is no continuation", async () => {
     clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 5 }] });
     const conversation = await createConversation({});
