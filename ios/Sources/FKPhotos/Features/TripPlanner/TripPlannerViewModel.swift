@@ -614,6 +614,30 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// How much an idea matters (ideas plan, stage 3), wherever it is:
+    /// on the list or already on a day.
+    func setPriority(osmRef: String, _ priority: TripIdeaPriority) async {
+        guard requireOnline() else { return }
+        struct Body: Encodable {
+            let legIndex: Int
+            let osmRef: String
+            let priority: String
+        }
+        struct Response: Decodable {
+            let plan: TripPlan
+        }
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/ideas/priority",
+                body: Body(legIndex: legIndex, osmRef: osmRef, priority: priority.rawValue),
+            )
+            plan = response.plan
+            errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
     /// Put a hard time on the day on screen (§4.4).
     ///
     /// The frame, not the content: the server re-frames the day around

@@ -154,6 +154,18 @@ struct TripShareReviewView: View {
             ))
         }
 
+        if model.added[proposal.id] == nil && proposal.isAddable {
+            Picker("Priorität", selection: Binding(
+                get: { model.priority[proposal.id] ?? .want },
+                set: { model.priority[proposal.id] = $0 },
+            )) {
+                ForEach(TripIdeaPriority.allCases) { priority in
+                    Text(priority.label).tag(priority)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+
         if let outcome = model.added[proposal.id] {
             Label(outcome, systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)

@@ -134,6 +134,8 @@ struct TripAddFindRequest: Encodable, Sendable {
     var end: TripCoordinate? = nil
     var lengthM: Int? = nil
     var ascentM: Int? = nil
+    /// Muss / Will / Wenn Zeit (ideas plan, stage 3); the server takes Will when absent.
+    var priority: String? = nil
 }
 
 struct TripAddFindResponse: Decodable, Sendable {

@@ -6,6 +6,7 @@
  * anything here runs.
  */
 
+import { DEFAULT_PRIORITY, priorityOf, rescored, type IdeaPriority } from "./priority";
 import { and, eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { tripPlanPool } from "../db/schema";
@@ -28,6 +29,8 @@ export interface StoredPoolEntry {
   note: string | null;
   sourceUrl: string | null;
   addedBy: number | null;
+  priority: IdeaPriority;
+  openingHours: string | null;
   /** True when no OSM entry could be matched (§9.2, rule 5). */
   unmatched: boolean;
   /** Where it finishes, when that is not where it begins (§4.7). */
@@ -49,6 +52,9 @@ export interface AddPoolEntryInput {
   sourceUrl: string | null;
   addedBy: number;
   unmatched: boolean;
+  /** Muss / Will / Wenn Zeit (ideas plan, stage 3); Will when not said. */
+  priority?: IdeaPriority;
+  openingHours?: string | null;
   /** See `StoredPoolEntry.extent`. Omitted for the ordinary point. */
   extent?: SpotExtent;
 }
@@ -75,6 +81,8 @@ export async function addPoolEntry(
       added_by: input.addedBy,
       unmatched: input.unmatched,
       extent: input.extent,
+      priority: input.priority ?? DEFAULT_PRIORITY,
+      opening_hours: input.openingHours ?? null,
     })
     .returning();
   return toStoredPoolEntry(row);
@@ -86,6 +94,8 @@ export interface MergeIntoPoolEntryInput {
   note: string | null;
   sourceUrl: string | null;
   addedBy: number;
+  /** Said again with the second find: the newer word wins. */
+  priority?: IdeaPriority;
 }
 
 /**
@@ -130,7 +140,10 @@ export async function mergeIntoPoolEntry(
       origin: "manual",
       // And a top pick from now on, like any place a person brought
       // in; a score the votes already raised further stays.
-      score: Math.max(existing.score, MANUAL_SCORE),
+      score: input.priority && input.priority !== priorityOf(existing.priority)
+        ? rescored(Math.max(existing.score, MANUAL_SCORE), priorityOf(existing.priority), input.priority)
+        : Math.max(existing.score, MANUAL_SCORE),
+      ...(input.priority ? { priority: input.priority } : {}),
       added_by: existing.added_by ?? input.addedBy,
     })
     .where(eq(tripPlanPool.id, existing.id))
@@ -161,6 +174,8 @@ function toStoredPoolEntry(row: typeof tripPlanPool.$inferSelect): StoredPoolEnt
     note: row.note,
     sourceUrl: row.source_url,
     addedBy: row.added_by,
+    priority: priorityOf(row.priority),
+    openingHours: row.opening_hours,
     unmatched: row.unmatched,
     extent: storedExtent(row.extent),
   };

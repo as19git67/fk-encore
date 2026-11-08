@@ -243,20 +243,45 @@ struct TripPlaceSearchView: View {
                 .font(.caption)
                 .foregroundStyle(.green)
         } else {
-            Button {
-                Task {
-                    await model.add(place)
-                    if model.added[place.osmRef] != nil { onChanged?() }
+            if model.addingRef == place.osmRef {
+                HStack { ProgressView(); Text("Wird übernommen…") }
+                    .font(.callout)
+            } else if model.ideas {
+                // A tap takes it as „Will“; holding asks how much it
+                // matters (ideas plan, stage 3).
+                Menu {
+                    ForEach(TripIdeaPriority.allCases) { priority in
+                        Button {
+                            add(place, priority: priority)
+                        } label: {
+                            Label("Zur Reise · \(priority.label)", systemImage: priority.systemImage)
+                        }
+                    }
+                } label: {
+                    Label("Zur Reise", systemImage: "plus.circle")
+                } primaryAction: {
+                    add(place, priority: nil)
                 }
-            } label: {
-                if model.addingRef == place.osmRef {
-                    HStack { ProgressView(); Text("Wird übernommen…") }
-                } else {
-                    Label(model.ideas ? "Zur Reise" : "Zu den Kandidaten", systemImage: "plus.circle")
+                .buttonStyle(.borderless)
+                .font(.callout)
+            } else {
+                Button {
+                    add(place, priority: nil)
+                } label: {
+                    Label("Zu den Kandidaten", systemImage: "plus.circle")
                 }
+                .buttonStyle(.borderless)
+                .font(.callout)
             }
-            .buttonStyle(.borderless)
-            .font(.callout)
+        }
+    }
+}
+
+extension TripPlaceSearchView {
+    fileprivate func add(_ place: TripSearchedPlace, priority: TripIdeaPriority?) {
+        Task {
+            await model.add(place, priority: priority)
+            if model.added[place.osmRef] != nil { onChanged?() }
         }
     }
 }

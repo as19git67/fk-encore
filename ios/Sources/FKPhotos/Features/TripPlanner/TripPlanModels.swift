@@ -546,8 +546,15 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// it is open, and from an older server.
     var doneAt: String? = nil
 
+    /// Muss / Will / Wenn Zeit, carried from the idea (ideas plan, stage 3).
+    var priority: String? = nil
+    var openingHours: String? = nil
+    /// Its opening hours say closed on the date of its day.
+    var closedThatDay: Bool? = nil
+
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }
+    var ideaPriority: TripIdeaPriority { TripIdeaPriority(raw: priority) }
     /// "10:42" on this phone's clock, for a stop that is done and knows
     /// when. The row says it next to the tick: a day that moved a stop
     /// into the morning should say why it is there.
@@ -664,9 +671,19 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     /// What the place is, with its source (candidate ranking, stage 4).
     var description: TripSpotDescription? = nil
 
+    /// Muss / Will / Wenn Zeit (ideas plan, stage 3).
+    var priority: String? = nil
+    /// OpenStreetMap's opening_hours, unverified.
+    var openingHours: String? = nil
+    /// Dates of the stay on which it is closed.
+    var closedOn: [String]? = nil
+    /// "Mo 7.9. 14:00" when a booked visit holds it.
+    var ticket: String? = nil
+
     var id: String { osmRef }
     var isPhotoStop: Bool { photoStop == true }
     var isManual: Bool { origin == "manual" }
+    var ideaPriority: TripIdeaPriority { TripIdeaPriority(raw: priority) }
     var displayName: String { title ?? name ?? TripCategory.unnamed(category) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
 }

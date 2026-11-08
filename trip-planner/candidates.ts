@@ -322,6 +322,8 @@ export function toCandidates(
       score: fromRank ?? searchScore,
       reasons,
       searchScore,
+      // Kept for the idea it may become (ideas plan, stage 3).
+      ...(spot.openingHours ? { openingHours: spot.openingHours } : {}),
       ...(fromRank !== undefined ? { curatedScore: fromRank, curatedReason: curated?.reason ?? null } : {}),
     });
   }

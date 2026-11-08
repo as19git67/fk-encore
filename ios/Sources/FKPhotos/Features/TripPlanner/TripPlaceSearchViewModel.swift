@@ -232,13 +232,15 @@ final class TripPlaceSearchViewModel {
         }
     }
 
-    func add(_ place: TripSearchedPlace) async {
+    func add(_ place: TripSearchedPlace, priority: TripIdeaPriority? = nil) async {
         addingRef = place.osmRef
         defer { addingRef = nil }
+        var request = requestFor(place)
+        request.priority = priority?.rawValue
         do {
             let response: TripAddFindResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/finds",
-                body: requestFor(place),
+                body: request,
             )
             added[place.osmRef] = response.merged
                 ? "mit einem vorhandenen Eintrag zusammengeführt"

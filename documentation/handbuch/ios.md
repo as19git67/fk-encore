@@ -248,6 +248,14 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
   Tipp alle Orte einer Art (Museen, Aussichtspunkte, Märkte …). „Zur Reise“
   legt einen Treffer zu den Ideen; was schon dort ist, steht als „In der
   Reise“ oder „Schon eingeplant“ in der Liste.
+- Jede Idee hat eine Priorität: **Muss**, **Will** (Standard) oder **Wenn
+  Zeit**. Langes Drücken auf „Zur Reise“ fragt sie beim Übernehmen, beim
+  Teilen steht sie als Auswahl dabei; danach ändert man sie im Menü der
+  Idee oder des Stopps. Neben dem Namen steht, was zählt: die Priorität,
+  ein gebuchtes Ticket, an welchen Tagen des Aufenthalts der Ort laut
+  OpenStreetMap geschlossen ist (auf einem Tag: „an diesem Tag
+  geschlossen“) oder „Öffnungszeiten unklar“, wenn die App die Angabe
+  nicht sicher lesen kann.
 - Kürzt oder entfernt eine Änderung im Reiseverlauf schon geplante Tage,
   steht sie unter „Änderungen“ und lässt sich dort mit „Rückgängig“
   zurücknehmen: die alten Tage kommen genau so wieder, wie sie waren.

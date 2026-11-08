@@ -1,6 +1,6 @@
 # Ideas instead of a pool: an empty list, your own picks, one day band
 
-Status: in progress. Decided with Anton on 2026-11-08. Stages 1 and 2 built.
+Status: in progress. Decided with Anton on 2026-11-08. Stages 1 to 3 built.
 
 ## The problem
 
@@ -265,6 +265,37 @@ Built (2026-11-08). As built:
 - Tests: parser table (string → windows for a given date, including
   "closed on Mondays" and a holiday), priority in the score, chips in
   the pool read.
+
+Built (2026-11-08). As built:
+
+- Migration 0302: `priority` (`must | want | maybe`, default `want`) and
+  `opening_hours` on **both** `trip_plan_pool` and `trip_plan_stops`.
+  Placing an idea moves the pool row onto the day, so the stop has to
+  carry both, like the note and the origin; `pool.ts`, `to-pool.ts`,
+  `carry-stops.ts` and every pool and stop write in `plan-store.ts` pass
+  them on.
+- `priority.ts`: `PRIORITY_POINTS` (+2 / 0 / −2 on top of
+  `MANUAL_SCORE`), `rescored` for a change. `POST /finds` takes
+  `priority`; a merge with a new priority takes the newer word.
+  `POST /trip-planner/plans/:planId/ideas/priority` (`idea-priority.ts`)
+  changes it on the pool row and on any stop of that place in the leg.
+- `opening-hours.ts`: `openingOn(spec, date, { holiday })` for weekday
+  ranges and lists, hour ranges (several, past midnight), `off`,
+  `PH`, `24/7`; a later rule for the same day wins; anything else is
+  `unknown`. The hours come from the matched OSM entry on `addFind` and
+  from the search on `toCandidates`. Refreshing them when the region is
+  re-read is not built: the string is what the place had when taken.
+- `idea-hints.ts` (on the way out of `loadPlan`, never stored): an idea
+  gets `closedOn` (dates of the stay it is closed) and `ticket`
+  ("So 6.9. 14:00" from a fixpoint with `spotRef`); a stop on a dated
+  day gets `closedThatDay`.
+- iOS: `TripIdeaChips` on the idea row and the stop row (Muss / Wenn
+  Zeit, Ticket, geschlossen …, Öffnungszeiten unklar), priority actions
+  in `candidateActions` and `stopActions` on a trip of ideas, „Zur
+  Reise“ with a long-press menu for the priority in the place search,
+  a segmented priority in the share review.
+- Not built here: the light chip ("Licht 17:10–18:40"); the day band of
+  stage 5 shows the light windows of the day.
 
 ### Stage 4: ordering, and the day as one window
 
