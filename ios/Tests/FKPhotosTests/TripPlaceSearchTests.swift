@@ -91,11 +91,13 @@ final class TripSearchedPlaceTests: XCTestCase {
 
     // MARK: - Highlights (ideas plan, stage 2)
 
+    @MainActor
     func testAStayStartsAtTheHighlightsAndTheTripAtTheName() {
         XCTAssertEqual(TripPlaceSearchViewModel(planId: 1, legIndex: 0).mode, .highlights)
         XCTAssertEqual(TripPlaceSearchViewModel(planId: 1).mode, .name)
     }
 
+    @MainActor
     func testAHighlightDecodesAndAddsLikeASearchResult() throws {
         let json = """
         {"results":[{"osmRef":"node:7","name":"Beispielturm","localName":null,"lat":48.37,"lon":10.9,
