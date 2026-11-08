@@ -7,15 +7,23 @@ import { feed, photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 import { similarPairs, thinSimilar } from "../../photo/photo-book-subjects";
-import { compositeKey, dateKey, groupProperties, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
+import { compositeKey, dateKey, groupProperties, isDateUnit, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe, type ProbeCount } from "./hints";
 
 const PHOTOS = ["module.photos", "photos.view"];
 
 /** Photos counted per call; past this the answer says "more than". */
 const PHOTO_COUNT_CAP = 2000;
-/** Photos read to narrow a previous result or to group; the most the endpoint returns. */
-const NARROW_CAP = 5000;
+/** The most rows photo.listPhotos returns, whatever limit it is asked for. */
+const LIST_ENDPOINT_MAX = 5000;
+/**
+ * Photos read to narrow a previous result or to group. One below the
+ * endpoint's maximum: a read asks for one more than the cap to tell "more
+ * than" apart, and a cap at the maximum got exactly the maximum back from a
+ * longer list, which read as complete — a grouped read then held only the
+ * best-ranked 5000 photos and lost every month they did not reach.
+ */
+const NARROW_CAP = LIST_ENDPOINT_MAX - 1;
 /** With `distinct`, this many candidates per pick are compared before the picks are taken. */
 const DISTINCT_POOL = 4;
 
@@ -38,7 +46,10 @@ type PhotoRankField = keyof typeof RANK_FIELDS;
 
 const GROUPS = {
   year: "taken",
+  quarter: "taken, YYYY-Qn",
   month: "taken, YYYY-MM",
+  week: "taken, ISO week",
+  day: "taken, YYYY-MM-DD; 'je Tag' is a calendar day, never a keyword tag",
   country: "of the place",
   city: "of the place",
   person: "of person_ids, each person on its own (needs person_ids)",
@@ -80,7 +91,7 @@ function rankCell(p: PhotoRow, field: PhotoRankField): number | string | undefin
 function groupKey(p: PhotoRow, by: PhotoGroup): string | undefined {
   if (by === "person") return p.person_id === undefined ? undefined : `person ${p.person_id}`;
   const date = p.taken_at ?? p.created_at;
-  if (by === "year" || by === "month") return dateKey(date, by);
+  if (isDateUnit(by)) return dateKey(date, by);
   return by === "country" ? p.location_country || undefined : p.location_city || undefined;
 }
 interface NaturalResult { photoId: number; filename?: string; taken_at?: string; created_at: string; location_city?: string; location_country?: string; score: number }
@@ -448,7 +459,7 @@ async function readComplete(
   return { rows: out, capped, split: true };
 }
 
-/** The years of a range, or its months when it lies in one year; null for a single month. */
+/** The years of a range, its months when it lies in one year, its days when it lies in one month; null for a single day. */
 export function splitPeriod(from: string, to: string): Array<{ from: string; to: string }> | null {
   const [fy, fm] = [Number(from.slice(0, 4)), Number(from.slice(5, 7))];
   const [ty, tm] = [Number(to.slice(0, 4)), Number(to.slice(5, 7))];
@@ -460,6 +471,13 @@ export function splitPeriod(from: string, to: string): Array<{ from: string; to:
   if (fm !== tm) {
     const last = (m: number) => new Date(Date.UTC(fy, m, 0)).getUTCDate();
     return Array.from({ length: tm - fm + 1 }, (_, i) => clamp(`${fy}-${pad(fm + i)}-01`, `${fy}-${pad(fm + i)}-${pad(last(fm + i))}`));
+  }
+  const [fd, td] = [Number(from.slice(8, 10)), Number(to.slice(8, 10))];
+  if (fd !== td) {
+    return Array.from({ length: td - fd + 1 }, (_, i) => {
+      const day = `${fy}-${pad(fm)}-${pad(fd + i)}`;
+      return { from: day, to: day };
+    });
   }
   return null;
 }

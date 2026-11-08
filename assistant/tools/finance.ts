@@ -98,6 +98,8 @@ const RANK_FIELDS = {
 } satisfies Record<string, RankField & { sortBy: "date" | "amount" }>;
 
 const GROUPS = {
+  day: "YYYY-MM-DD",
+  week: "ISO week",
   month: "YYYY-MM",
   quarter: "YYYY-Qn",
   year: "YYYY",
