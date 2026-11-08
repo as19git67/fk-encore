@@ -31,12 +31,20 @@ played as a slideshow.
   whose sharpness is unknown or at least `RECOGNISABLE_FACE_MIN_SHARPNESS`
   (0.25, `photo/face-sharpness.ts`). Small, blurred background faces do not
   count. The two numbers live in `photo/photo-book-layout.ts`.
-- **Chapters** come from the capture time: one chapter per calendar day when
-  the whole set spans at most 31 days, otherwise one per month. A chapter
-  with fewer than four photos joins the one before it. Photos without a date
-  form a last chapter "Ohne Datum". The default title is the date (and the
-  city most of the chapter's photos share), the subtitle the date range and
-  duration. Stage 2 lets the LLM propose better headings.
+- **Chapters** are fixed periods: one per country, town, day, week, month
+  or year, whichever fits the number of photos best (`chooseChapterGrain`
+  in `photo/photo-book-layout.ts`). The aim is about 24 photos a chapter
+  (at most 24 chapters); the grain whose chapter count comes closest on a
+  log scale wins, plus a penalty for photos that end up in a chapter not
+  their own. A place grain needs a place on 60 % of the photos and two
+  places; a town or country chapter is a run of consecutive photos there,
+  a photo without a place stays in its run. Weeks only for a span of 14
+  days or more. A chapter with fewer than four photos joins the one before
+  it. Photos without a date form a last chapter "Ohne Datum". The title
+  names the period and nothing else ("Musterstadt", "Juni 2024", "Woche ab
+  3. Juni 2024", "Montag, 3. Juni 2024"); the subtitle adds what the title
+  leaves out — the days of a place or month, the hours of a single day, the
+  town of a span of time.
 - **Page layouts** are a table in `photo/photo-book-layout.ts`, normalised to
   the page's content box, like the collage layouts: 1 photo (full bleed,
   framed), 2, 3 and 4 photos in several variants, and a chapter opener (title
@@ -77,9 +85,9 @@ played as a slideshow.
    place, a confident POI match with the start of its Wikipedia article, the
    owner's named people and the image (`/vision/json-prompt`); without the
    projector it is written from the facts alone, and a photo without facts
-   gets none. Chapter titles from time, places, people and the captions; a
-   title the user wrote stays and the model's proposal is shown next to it
-   to take ("Übernehmen"). Runs in the `llm` slot at background priority,
+   gets none. Chapter titles from time, places, people and the captions, only
+   as a proposal: the period stays the title, the model's proposal is shown
+   next to it to take ("Übernehmen"). Runs in the `llm` slot at background priority,
    started from the book's page ("KI"), never while the GPU is lent.
    A caption is written only when there is something concrete to say — a
    place, a landmark, people the owner named, the photo's description, text

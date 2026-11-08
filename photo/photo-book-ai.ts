@@ -6,8 +6,8 @@
  * assistant and anyone waiting at a button go first.
  *
  * What the model writes never replaces what the user wrote: a caption the
- * user typed stays, a chapter title the user edited stays (the proposal is
- * kept next to it), a layout the user picked stays. A layout the model picks
+ * user typed stays, a chapter title is only ever a proposal next to the
+ * period the chapter covers, which stays its title, a layout the user picked stays. A layout the model picks
  * is only taken when it crops at most `LAYOUT_MAX_EXTRA_COST` more than the
  * rule's own; each page remembers who picked it, so the editor can show how
  * often the model's picks are kept against the rule's (`layoutPickStats`).
@@ -542,11 +542,9 @@ async function writeChapterTitles(userId: number, loaded: LoadedBook, job: Photo
       title = parseChapterTitle(answer.result);
     }
     if (title) {
-      // A title the user wrote stays; the proposal is kept beside it.
-      await dbExec(db.update(photoBookChapter).set({
-        title_suggestion: title,
-        ...(ch.title_source === "user" ? {} : { title, title_source: "llm" as const }),
-      }).where(eq(photoBookChapter.id, ch.id)));
+      // The title names the chapter's period and stays; the proposal waits
+      // beside it until the user takes it.
+      await dbExec(db.update(photoBookChapter).set({ title_suggestion: title }).where(eq(photoBookChapter.id, ch.id)));
       job.chapters += 1;
     } else {
       job.skipped += 1;

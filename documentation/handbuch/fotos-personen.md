@@ -264,7 +264,9 @@ und PDF.
 - **Schritte:**
   1. Text ändern (speichert beim Verlassen) oder Vorschlag übernehmen.
 - **Ergebnis:** Überschrift auf der Kapitelseite; ein eigener Titel wird
-  von der KI nie überschrieben.
+  von der KI nie überschrieben. Ohne eigene Änderung nennt die Überschrift
+  den Zeitraum oder Ort des Kapitels (Land, Stadt, Tag, Woche, Monat oder
+  Jahr, je nachdem, was zur Zahl der Fotos passt).
 - **Fehler und Grenzfälle:** keine
 - **Test:** –
 
@@ -338,7 +340,8 @@ und PDF.
 - **Schritte:**
   1. Aufgaben anhaken (Kapitelüberschriften, Bildunterschriften,
      Layouts), „Vorschläge holen“.
-- **Ergebnis:** Vorschläge erscheinen neben den Kapiteln und als
+- **Ergebnis:** Vorschläge erscheinen neben den Kapiteln (die
+  Überschrift bleibt der Zeitraum, bis man „Übernehmen“ tippt) und als
   Unterschriften; „Wie oft du Layouts geändert hast“ zeigt die Statistik.
   Kapitelüberschriften sind sachlich (Ort, Sehenswürdigkeit, Personen,
   Anlass), beginnen nie mit „Tag“/„Tage“ und nennen keine Zahl von Tagen

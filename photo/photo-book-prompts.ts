@@ -319,7 +319,7 @@ export function articleExtract(text: string | null | undefined): string | null {
 // ── chapter titles ──────────────────────────────────────────────────────
 
 export interface ChapterContext {
-  /** The title the date rule gave it, e.g. "Tag 2 · Musterstadt". Not shown to the model: it would copy "Tag". */
+  /** The title the chapter rule gave it, its period, e.g. "Montag, 3. Juni 2024". Not shown to the model: it would copy the date. */
   ruleTitle: string;
   /** The date line under the title, e.g. "Montag, 3. Juni 2024". */
   dates: string | null;
