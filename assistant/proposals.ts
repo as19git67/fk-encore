@@ -229,6 +229,8 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
       const { [AFTER_EXECUTE]: after, ...args } = rawArgs;
       const continuation = cleanContinuation(after);
       const prepared = await def.prepare(args, ctx);
+      const twin = await sameProposal(ctx, def.name, prepared.arguments);
+      if (twin) throw new Error(twinRefusal(twin));
       const [stored] = await db
         .insert(assistantProposal)
         .values({
@@ -411,6 +413,40 @@ export async function proposalStates(conversationId: number): Promise<Map<number
       details: executed && result.details && typeof result.details === "object" ? result.details as Record<string, unknown> : null,
     }];
   }));
+}
+
+/**
+ * A card of this conversation that does the very same thing: same tool, same
+ * prepared arguments, not discarded. After "Ausführen" the app asks the
+ * assistant to go on, and the model proposed the card it had just run once
+ * more — the user saw the same card again. A discarded card may be proposed
+ * again; a pending or executed one is never doubled.
+ */
+async function sameProposal(ctx: ToolContext, tool: string, args: Record<string, unknown>): Promise<{ id: number; state: ProposalState } | null> {
+  if (ctx.conversationId == null) return null;
+  const [row] = await db
+    .select({ id: assistantProposal.id })
+    .from(assistantProposal)
+    .where(and(
+      eq(assistantProposal.conversation_id, ctx.conversationId),
+      eq(assistantProposal.user_id, Number(ctx.user.userID)),
+      eq(assistantProposal.tool, tool),
+      sql`${assistantProposal.status} <> 'discarded'`,
+      sql`${assistantProposal.arguments} = ${JSON.stringify(args)}::jsonb`,
+    ))
+    .orderBy(sql`${assistantProposal.id} DESC`)
+    .limit(1);
+  if (!row) return null;
+  const state = (await proposalStates(ctx.conversationId)).get(row.id);
+  return state ? { id: row.id, state } : null;
+}
+
+/** Why the write did not become a second card, and what to do instead. */
+export function twinRefusal(twin: { id: number; state: ProposalState }): string {
+  const now = twin.state.status === "pending"
+    ? `Proposal #${twin.id} (${twin.state.summary}) already does exactly this and still waits for the user's "Ausführen".`
+    : proposalStateText(twin.id, twin.state);
+  return `no new proposal: ${now} Do not propose it again. Go on with the next step of the request, or, if nothing is left, tell the user what was done.`;
 }
 
 /** One line on what became of a card, as the model reads it in a later turn. */
