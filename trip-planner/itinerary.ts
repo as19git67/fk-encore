@@ -59,6 +59,8 @@ import {
   type PlanResponse,
 } from "./plans";
 import { minutesOf } from "./transit-leg";
+import { carryStops } from "./carry-stops";
+import { isIdeasTrip } from "./ideas-mode";
 import type { TransportMode } from "./travel";
 
 /** Mirrors `plans.ts`: counted in stays, the journeys are free. */
@@ -353,6 +355,19 @@ async function applyChain(
     }
   }
   const planned = await planSlots(plan, slots);
+  // On a trip of ideas every stop is somebody's choice: a stay planned
+  // again keeps them on their days (`carry-stops.ts`).
+  if (isIdeasTrip(plan.constraints)) {
+    for (const [index, slot] of slots.slots.entries()) {
+      const result = planned.legs.get(index);
+      if (!result || !slot.replan || !slot.existing || restore?.has(slot.frame.item)) continue;
+      const carried = carryStops(slot.existing, result.leg.days, {
+        anchor: result.leg.anchor,
+        mode: result.leg.mode ?? slot.existing.mode,
+      });
+      result.leg = { ...result.leg, days: carried.days, pool: [...result.leg.pool, ...carried.back] };
+    }
+  }
   if (restore) {
     for (const [index, slot] of slots.slots.entries()) {
       const days = restore.get(slot.frame.item);

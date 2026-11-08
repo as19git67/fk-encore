@@ -102,7 +102,7 @@ struct TripPoolView: View {
             case .map:  map
             }
         }
-        .navigationTitle(placeInto == nil ? "Kandidaten" : "Stopp hinzufügen")
+        .navigationTitle(placeInto == nil ? (ideas ? "Ideen" : "Kandidaten") : "Stopp hinzufügen")
         .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -209,12 +209,7 @@ struct TripPoolView: View {
             }
             if let leg {
                 if leg.pool.isEmpty {
-                    ContentUnavailableView(
-                        "Noch keine Kandidaten",
-                        systemImage: "tray",
-                        description: Text("Was der Planer findet und was ihr selbst beisteuert, "
-                                          + "sammelt sich hier."),
-                    )
+                    emptyPool(systemImage: "tray")
                 } else if matches(in: leg).isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
@@ -254,6 +249,30 @@ struct TripPoolView: View {
         }
     }
 
+    /// On a trip of ideas the list is the travellers' own (ideas plan,
+    /// stage 1): it starts empty, and the empty screen names the ways in.
+    private var ideas: Bool { viewModel.plan?.isIdeasTrip == true }
+
+    @ViewBuilder
+    private func emptyPool(systemImage: String) -> some View {
+        if ideas {
+            ContentUnavailableView(
+                "Noch keine Ideen",
+                systemImage: "lightbulb",
+                description: Text("Ideen kommen über „Ort suchen“, über Teilen aus Apple Karten oder "
+                                  + "Google Maps und über „Aus den Ideen übernehmen“ im Aufenthalt. "
+                                  + "Erst was ihr hinzufügt, lässt sich auf einen Tag legen."),
+            )
+        } else {
+            ContentUnavailableView(
+                "Noch keine Kandidaten",
+                systemImage: systemImage,
+                description: Text("Was der Planer findet und was ihr selbst beisteuert, "
+                                  + "sammelt sich hier."),
+            )
+        }
+    }
+
     // MARK: - The pool as a map
 
     /// The same pool, as places (§5.2).
@@ -266,12 +285,7 @@ struct TripPoolView: View {
     private var map: some View {
         if let leg {
             if leg.pool.isEmpty {
-                ContentUnavailableView(
-                    "Noch keine Kandidaten",
-                    systemImage: "map",
-                    description: Text("Was der Planer findet und was ihr selbst beisteuert, "
-                                      + "sammelt sich hier."),
-                )
+                emptyPool(systemImage: "map")
             } else {
                 pins(of: leg)
             }

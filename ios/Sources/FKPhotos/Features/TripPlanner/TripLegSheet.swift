@@ -90,7 +90,9 @@ struct TripLegSheet: View {
             } header: {
                 Text("Hinzufügen")
             } footer: {
-                Text("Alles landet im Vorrat; von dort aus wird in die Tage geplant.")
+                Text(viewModel.plan?.isIdeasTrip == true
+                     ? "Alles landet bei den Ideen dieses Aufenthalts; von dort legt ihr es auf einen Tag."
+                     : "Alles landet im Vorrat; von dort aus wird in die Tage geplant.")
             }
 
             Section {
@@ -100,7 +102,10 @@ struct TripLegSheet: View {
                 NavigationLink {
                     TripPoolView(viewModel: viewModel, legIndex: leg.position)
                 } label: {
-                    Label("Kandidaten (\(leg.pool.count))", systemImage: "tray.full")
+                    Label(viewModel.plan?.isIdeasTrip == true
+                          ? "Ideen (\(leg.pool.count))"
+                          : "Kandidaten (\(leg.pool.count))",
+                          systemImage: viewModel.plan?.isIdeasTrip == true ? "lightbulb.max" : "tray.full")
                 }
                 if !leg.isTransit {
                     // „Vier Tage in San Gimignano" — and the city an hour
@@ -114,7 +119,7 @@ struct TripLegSheet: View {
                     }
                 }
             } header: {
-                Text("Vorrat")
+                Text(viewModel.plan?.isIdeasTrip == true ? "Ideen" : "Vorrat")
             }
         }
         .navigationTitle(leg.isTransit ? "Weiterreise" : "Aufenthalt")

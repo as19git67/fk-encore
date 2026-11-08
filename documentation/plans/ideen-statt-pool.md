@@ -1,6 +1,6 @@
 # Ideas instead of a pool: an empty list, your own picks, one day band
 
-Status: planned (2026-11-08). Decided with Anton on 2026-11-08; nothing built yet.
+Status: in progress. Decided with Anton on 2026-11-08. Stage 1 built.
 
 ## The problem
 
@@ -152,6 +152,33 @@ test data is synthetic (Musterstadt, Beispielplatz); no real trip of
 the household appears in tests or stories.
 
 ### Stage 1: the empty list
+
+Built (2026-11-08). As built:
+
+- A trip is a trip of ideas when `constraints.ideas` is true
+  (`trip-planner/ideas-mode.ts`). `createTripPlan` sets it unless the
+  request says `startEmpty: false`; trips from before carry no flag and
+  keep their searched pool and solved days. The test suite builds most
+  trips the earlier way (`TRIP_START_EMPTY=0` in `vitest.config.ts`),
+  because those trips still exist; `ideas-start.test.ts` covers the new
+  one.
+- On a trip of ideas `planLeg` searches nothing, and every day is a
+  detailed frame with no stops (not `detailed=false`): a day takes
+  stops from the start, so placing an idea needs no "plan this day"
+  first. `POST …/days/detail` only opens a day that is not open yet
+  (a buffer day) and puts nothing in it.
+- A re-plan (a setting, a fixpoint, a change in the itinerary) frames
+  the days again and puts every planned stop back on the day with the
+  same index, in the block with the same id where there is one
+  (`carry-stops.ts`); a stop whose day no longer exists goes back to
+  the stay's ideas as a manual entry. `mergedConstraints` keeps every
+  stored key, so changing the pace does not turn a trip of ideas back
+  into a searched one.
+- The day-trip suggestion is off on a trip of ideas (its days are empty
+  because nobody has added anything yet). The curation is only marked
+  due when a re-plan writes search rows.
+- iOS: on a trip of ideas the stay sheet says "Ideen (n)" and the list
+  is titled "Ideen", with an empty state that names the ways in.
 
 - `planLeg` no longer calls the region search for the pool and no
   longer solves days. It writes the frame of every day (today's
