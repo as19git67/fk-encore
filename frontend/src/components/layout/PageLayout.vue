@@ -14,6 +14,7 @@ import {
 } from '../../utils/listAnchor'
 import type { ListAnchor } from '../../utils/listAnchor'
 import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory'
+import { useAtLeast } from '../../composables/useBreakpoint'
 
 /**
  * The one page skeleton every view fills (issue #1272, stage 1).
@@ -59,6 +60,12 @@ import { navigatedFromHistory, readScrollOffset } from '../../utils/scrollMemory
  * starting at the same edge, and the title is cut with "…". A page with
  * many actions hands them to `ResponsiveToolbar`, which folds what does not
  * fit into a "more" menu instead of wrapping into a third line.
+ *
+ * `inline-toolbar` (with `sticky-header`): from `xl` on the toolbar stands on
+ * the title row, right of the title, and the hint moves under the title as a
+ * small second line — on a wide screen the title row is mostly empty, and the
+ * two rows together cost the content a fifth of the viewport. Below `xl`
+ * nothing changes.
  *
  * `#menu`: actions a page rarely needs (re-read, re-derive) go into one
  * "more" button that stands at the end of the title's own line, right of
@@ -107,6 +114,12 @@ const props = withDefaults(
      * needs the line for the actions.
      */
     titleHidden?: boolean
+    /**
+     * From `xl` on, put the toolbar on the title row (needs `sticky-header`)
+     * and the hint under the title. For a detail page whose toolbar carries
+     * the page (the album).
+     */
+    inlineToolbar?: boolean
   }>(),
   {
     hint: undefined,
@@ -118,6 +131,7 @@ const props = withDefaults(
     legacyAnchorKey: undefined,
     stickyHeader: false,
     titleHidden: false,
+    inlineToolbar: false,
   },
 )
 
@@ -147,6 +161,11 @@ const stackTarget = `#${STACK_TARGET_ID}`
 // per render (portrait or not) whether it fills `#actions`.
 function isBareHeader(): boolean {
   return !!props.titleHidden && !props.hint && !slots.actions && !slots.back && !slots.menu
+}
+const wideScreen = useAtLeast('xl')
+// A function, not a computed, for the same reason as `isBareHeader`.
+function toolbarInline(): boolean {
+  return props.stickyHeader && props.inlineToolbar && !!slots.toolbar && wideScreen.value
 }
 const hasStackContent = computed(() => props.stickyHeader || !!(slots.toolbar || slots.notice || slots.selection))
 
@@ -260,7 +279,7 @@ defineExpose({ contentEl })
          bar. In the shell this lands in the app's stack; elsewhere it
          renders right here. -->
     <Teleport v-if="hasStackContent" :to="stackTarget" :disabled="!hasStackTarget">
-      <div class="page-stack" :class="[`page--width-${width}`, { 'page-stack--inline': !hasStackTarget }]">
+      <div class="page-stack" :class="[`page--width-${width}`, { 'page-stack--inline': !hasStackTarget, 'page-stack--toolbar-inline': toolbarInline() }]">
         <header
           v-if="stickyHeader"
           class="page-header page-header--sticky"
@@ -277,6 +296,7 @@ defineExpose({ contentEl })
                 <slot name="menu" />
               </div>
             </div>
+            <p v-if="hint && toolbarInline()" class="page-hint page-hint--sub" data-testid="page-hint">{{ hint }}</p>
           </div>
           <div v-if="slots.actions" class="page-actions">
             <slot name="actions" />
@@ -296,7 +316,7 @@ defineExpose({ contentEl })
 
     <!-- With a sticky header the hint stays on the page: it explains the
          page once, it does not need to follow the reader down. -->
-    <p v-if="stickyHeader && hint" class="page-hint page-hint--lead">{{ hint }}</p>
+    <p v-if="stickyHeader && hint && !toolbarInline()" class="page-hint page-hint--lead">{{ hint }}</p>
     <header v-if="!stickyHeader" class="page-header" :class="{ 'page-header--back': !!slots.back, 'page-header--menu': !!slots.menu, 'page-header--bare': isBareHeader() }">
       <div class="page-heading">
         <div class="page-title-line">
@@ -502,6 +522,58 @@ defineExpose({ contentEl })
 .page-stack:has(> .page-header--sticky ~ :not(:empty)) {
   padding-bottom: var(--space-2);
 }
+/* `inline-toolbar` on a wide screen: title and toolbar share one line, the
+   selection bar and notices keep a line of their own below. The title gives
+   way (cut with "…") before the toolbar does; the toolbar's own buttons fold
+   into its "more" menu as usual. */
+.page-stack--toolbar-inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+.page-stack--toolbar-inline > .page-header--sticky {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  max-width: 40%;
+}
+.page-stack--toolbar-inline > .page-header--sticky .page-heading {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* Title and badge on one line, the hint below both: the actions line up
+   with the title, not with the middle of the two lines. */
+.page-stack--toolbar-inline > .page-header--sticky {
+  align-items: flex-start;
+}
+.page-stack--toolbar-inline > .page-header--sticky .page-actions {
+  flex: 0 0 auto;
+  min-height: var(--page-back-width, 2.5rem);
+}
+.page-stack--toolbar-inline > .page-toolbar {
+  flex: 1 1 0;
+}
+.page-stack--toolbar-inline > .page-selection,
+.page-stack--toolbar-inline > .page-notice {
+  flex-basis: 100%;
+}
+.page-hint--sub {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Under the title, not under the back button beside it. */
+.page-header--back .page-hint--sub {
+  padding-left: calc(var(--page-back-width, 2.5rem) + var(--space-1));
+}
+.page-stack--toolbar-inline .page-title {
+  line-height: 1.2;
+}
+
 /* Without the app shell the block sits above the header, looking the same. */
 .page-stack--inline {
   padding: var(--space-2) 0;
