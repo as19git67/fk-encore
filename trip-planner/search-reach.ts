@@ -46,6 +46,39 @@ const REACH_BY_MODE: Readonly<Record<string, number>> = {
 
 const FALLBACK_REACH_M = 3_000;
 
+/**
+ * A stay with nothing booked has no base, only a town: its centre stands
+ * in, and the search reaches 15 km around it so the town's outskirts and
+ * the sights just outside it are in (reise-planen-und-unterwegs.md).
+ */
+export const NO_LODGING_REACH_M = 15_000;
+
+/**
+ * The reach of a stay's searches: an explicit radius wins; a stay with
+ * nothing booked reaches at least `NO_LODGING_REACH_M`; otherwise the
+ * mode decides.
+ */
+export function stayReach(leg: {
+  radiusM: number | null;
+  mode?: string;
+  anchorLabel: string | null;
+  anchorRadiusM: number | null;
+  quartersAboard: boolean;
+}): number {
+  if (leg.radiusM !== null) return leg.radiusM;
+  const byMode = searchRadiusFor(leg.mode);
+  return hasNoLodging(leg) ? Math.max(NO_LODGING_REACH_M, byMode) : byMode;
+}
+
+/**
+ * Nothing booked: no named base, or a base that is only a zone. A port
+ * day sleeps aboard and has its pier.
+ */
+export function hasNoLodging(leg: { anchorLabel: string | null; anchorRadiusM: number | null; quartersAboard: boolean }): boolean {
+  if (leg.quartersAboard) return false;
+  return leg.anchorRadiusM !== null || !leg.anchorLabel?.trim();
+}
+
 /** The cap, matching what the geo service will search at all. */
 export const MAX_SEARCH_RADIUS_M = 50_000;
 

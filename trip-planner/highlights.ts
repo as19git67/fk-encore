@@ -30,7 +30,7 @@ import {
 } from "./highlights-job";
 import { hiddenRefs, loadPlan, type StoredLeg } from "./plan-store";
 import { spotsAround } from "./plans";
-import { searchRadiusFor } from "./search-reach";
+import { stayReach } from "./search-reach";
 import { imagesFor, prominenceAround, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
 import { haversineMeters } from "./travel";
@@ -139,7 +139,7 @@ async function rankedAround(
   constraints: Record<string, unknown>,
   hidden: ReadonlySet<string>,
 ): Promise<ScoredCandidate[]> {
-  const spots = await spotsAround(leg.regionDb, leg.anchor, leg.radiusM ?? searchRadiusFor(leg.mode), undefined);
+  const spots = await spotsAround(leg.regionDb, leg.anchor, stayReach(leg), undefined);
   const interests = Array.isArray(constraints.interests)
     ? (constraints.interests as unknown[]).filter((v): v is string => typeof v === "string")
     : undefined;
