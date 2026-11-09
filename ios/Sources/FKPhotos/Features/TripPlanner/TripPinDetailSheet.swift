@@ -312,6 +312,7 @@ struct TripPinDetailSheet: View {
         // is an answer about a dot on it, not a modal over it; the
         // system's dimming made the whole screen look switched off.
         .presentationDetents([.medium, .large])
+        .opaqueSheetBackground()
         .presentationDragIndicator(.visible)
         .presentationBackgroundInteraction(.enabled(upThrough: .medium))
     }

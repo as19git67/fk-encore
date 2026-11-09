@@ -108,6 +108,7 @@ struct LoginView: View {
                         }
                 }
                 .presentationDetents([.medium])
+                .opaqueSheetBackground()
             }
         }
     }

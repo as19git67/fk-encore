@@ -563,6 +563,7 @@ struct TripPlanDayView: View {
             }
         }
         .presentationDetents([.medium])
+        .opaqueSheetBackground()
     }
 
     /// "Aussichtspunkt → Vorrat", in the day's own block names.

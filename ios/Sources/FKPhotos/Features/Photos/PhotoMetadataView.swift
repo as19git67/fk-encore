@@ -154,9 +154,11 @@ struct PhotoMetadataView: View {
                     }
                 }
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
             }
         }
         .presentationDetents([.medium, .large])
+        .opaqueSheetBackground()
         .presentationDragIndicator(.visible)
         .task {
             await viewModel.loadAll()

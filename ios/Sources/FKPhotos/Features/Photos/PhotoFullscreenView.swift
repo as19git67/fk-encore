@@ -1224,6 +1224,7 @@ private struct PhotoPageView: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .opaqueSheetBackground()
     }
 
     // MARK: - Row Helpers

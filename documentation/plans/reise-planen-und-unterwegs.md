@@ -3,7 +3,10 @@
 Status: planned. Decided with Anton on 2026-11-09. No stage built yet.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
-("Reiseverlauf: Reise und Stopps anlegen"). This file is the
+("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
+and fictional place names is
+[reise-planen-und-unterwegs-design.md](reise-planen-und-unterwegs-design.md).
+This file is the
 implementation plan; it repeats the rules the code has to follow so that it
 can be read without the doc.
 
@@ -85,6 +88,10 @@ What is still wrong is the shape of the app around it:
 - **Spot details:** a sheet at half height over the day; drag up for
   everything; close by swiping down, tapping the day above, ✕ or "Fertig";
   swipe sideways for the next spot of the day.
+- **Sheets look the same at every height** (Anton, 2026-11-09): a sheet at
+  half height has the same opaque background as at full height, never the
+  translucent glass iOS 26 draws at a partial detent. Every sheet with a
+  partial detent calls `opaqueSheetBackground()`.
 
 ### On the road
 

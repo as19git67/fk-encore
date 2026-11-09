@@ -68,6 +68,7 @@ struct TripRoutesMapView: View {
                 TripRouteCourseView(planId: planId, legIndex: legIndex, route: route)
             }
             .presentationDetents([.medium, .large])
+            .opaqueSheetBackground()
         }
         .overlay(alignment: .bottom) {
             // What the colours mean and how much is drawn. Always
