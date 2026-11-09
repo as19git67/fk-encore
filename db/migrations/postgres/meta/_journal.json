@@ -2129,6 +2129,13 @@
       "when": 1790430000000,
       "tag": "0304_trip_ideas_everywhere",
       "breakpoints": true
+    },
+    {
+      "idx": 305,
+      "version": "7",
+      "when": 1790440000000,
+      "tag": "0305_trip_pin_reason",
+      "breakpoints": true
     }
   ]
 }

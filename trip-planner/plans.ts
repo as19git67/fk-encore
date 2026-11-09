@@ -71,6 +71,7 @@ import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
 import { legLimitFor, type TransportMode } from "./travel";
 import { planTransitLeg } from "./transit-leg";
+import { parsePinReason } from "./pin-reason";
 import {
   DEFAULT_DAY_START_MINUTES,
   parseMinutes,
@@ -260,6 +261,8 @@ export interface FixpointRequest {
    * at 14:00, whose stop the plan puts at that hour and nowhere else.
    */
   spotRef?: string;
+  /** Why the visit has its time (`pin-reason.ts`); only with `spotRef`. */
+  pinReason?: string;
 }
 
 export interface DayAnchorRequest {
@@ -876,6 +879,7 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
         lon: f.lon ?? undefined,
         blockId: f.blockId ?? undefined,
         spotRef: f.spotRef ?? undefined,
+        pinReason: f.pinReason ?? undefined,
       }))),
     // A day trip survives a re-plan for the same reason a fixpoint
     // does: it is part of the frame the traveller set, not of the
@@ -2049,6 +2053,7 @@ function groupFixpoints(
       // Without a block, a spot makes the appointment a booked visit:
       // the stop sits at the appointment's hour and nowhere else.
       spotRef: req.spotRef ? req.spotRef : null,
+      pinReason: req.spotRef ? parsePinReason(req.pinReason) : null,
     };
 
     const list = byDay.get(req.dayIndex) ?? [];

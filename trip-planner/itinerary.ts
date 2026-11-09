@@ -292,6 +292,7 @@ export function dayInputOf(day: StoredLeg["days"][number]): CreateDayInput {
       bufferMinutes: fix.bufferMinutes,
       blockId: fix.blockId,
       spotRef: fix.spotRef,
+      pinReason: fix.pinReason,
       lat: fix.lat,
       lon: fix.lon,
     })),

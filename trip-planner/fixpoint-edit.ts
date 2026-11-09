@@ -25,7 +25,8 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { requireOrganiser } from "./plan-access";
-import { addFixpoint, loadPlan, removeFixpoint, setFixpointSpot, type StoredLeg } from "./plan-store";
+import { addFixpoint, loadPlan, removeFixpoint, setFixpointPinReason, setFixpointSpot, type StoredLeg } from "./plan-store";
+import { parsePinReason } from "./pin-reason";
 import type { FixpointKind } from "./fixpoints";
 import { MIN_BUFFER_MINUTES } from "./fixpoints";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
@@ -77,6 +78,11 @@ export interface AddFixpointRequest {
    * is called after the spot.
    */
   spotRef?: string;
+  /**
+   * Why the spot has this time (`pin-reason.ts`): "ticket", "light",
+   * "reservation", "event", "departure". Only with `spotRef`.
+   */
+  pinReason?: string;
 }
 
 export interface RemoveFixpointRequest {
@@ -124,6 +130,7 @@ export const addTripFixpoint = api(
       bufferMinutes: buffer(req.bufferMinutes),
       ...place(req.lat, req.lon),
       spotRef: spot?.osmRef ?? null,
+      pinReason: spot ? parsePinReason(req.pinReason) : null,
     });
 
     // Re-planned from the trip as it is *now*: the re-planner reads each
@@ -182,6 +189,8 @@ export interface SetFixpointSpotRequest {
   fixpointId: number;
   /** The spot it is for, or null to make it an ordinary appointment again. */
   spotRef: string | null;
+  /** Why it has its time; absent keeps the one it had. Dropped with the spot. */
+  pinReason?: string | null;
 }
 
 /**
@@ -213,7 +222,8 @@ export const setTripFixpointSpot = api(
     if (!leg) throw APIError.notFound("diese feste Zeit gehört nicht zu dieser Reise");
     const spot = req.spotRef ? spotOfLeg(leg, req.spotRef) : null;
 
-    const changed = await setFixpointSpot(req.planId, userId, req.fixpointId, spot?.osmRef ?? null);
+    const reason = req.pinReason === undefined ? undefined : parsePinReason(req.pinReason);
+    const changed = await setFixpointSpot(req.planId, userId, req.fixpointId, spot?.osmRef ?? null, undefined, reason);
     if (!changed) {
       throw APIError.failedPrecondition(
         "nur ein gewöhnlicher Termin lässt sich mit einem Spot verknüpfen — keine Abfahrt und kein Abendtermin",
@@ -223,6 +233,41 @@ export const setTripFixpointSpot = api(
     const written = await loadPlan(req.planId, userId);
     if (!written) throw APIError.internal("plan vanished while tying a fixed time to a spot");
     return await replanAfterFrameChange(written, userId);
+  },
+);
+
+export interface SetFixpointPinReasonRequest {
+  planId: number;
+  /** The booked visit's row id, as the plan reports it. */
+  fixpointId: number;
+  /** "ticket", "light", "reservation", "event", "departure", or null to say none. */
+  pinReason: string | null;
+}
+
+/**
+ * Say why a pinned spot has its time (reise-planen-und-unterwegs.md,
+ * stage 3) — the ticket, the light, the table, the concert, the boat.
+ * The hour stays, so the trip is not re-planned; the plan comes back as
+ * it is, with the reason on the fixpoint.
+ */
+export const setTripFixpointPinReason = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/trip-planner/plans/:planId/fixpoints/pin-reason",
+    auth: true,
+  },
+  async (req: SetFixpointPinReasonRequest): Promise<PlanResponse> => {
+    const userId = requireUser();
+    await requireOrganiser(req.planId, userId, "Feste Zeiten");
+    const reason = parsePinReason(req.pinReason);
+    const changed = await setFixpointPinReason(req.planId, userId, req.fixpointId, reason);
+    if (!changed) {
+      throw APIError.failedPrecondition("nur ein Termin für einen Spot hat einen Grund für seine Zeit");
+    }
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+    return { plan };
   },
 );
 
