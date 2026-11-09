@@ -268,6 +268,18 @@ points: "Route" on the next spot, the way line between two spots, "Route"
 in the spot details; before the trip, "from" is the previous spot or the
 lodging.
 
+Day map: every segment between two stops of the selected day is routed
+(walk, bike, car) and drawn along the streets with its duration as a label;
+geometry is cached per segment (from, to, mode) and only new segments are
+fetched after a reorder. Public transport is not routed (Valhalla has no
+timetable): drawn as a dashed straight line with the existing estimate. The
+list shows a way line between two stops ("9 min zu Fuß · 700 m"); it and
+the map label open "Weg". A mode picked in "Weg" is stored for that segment
+only (`mode` on the segment, default the stay's mode) and the day times use
+its duration. The sheet checks the arrival against opening hours and a
+pinned time. Journeys in the itinerary are drawn, not routed (arc for a
+flight, line for ferry and train).
+
 ### Stage 7 — clean-up
 
 Remove the screens replaced in stages 3 and 4, the candidate search on trip
