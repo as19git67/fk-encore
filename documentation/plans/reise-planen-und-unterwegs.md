@@ -3,7 +3,10 @@
 Status: planned. Decided with Anton on 2026-11-09. No stage built yet.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
-("Reiseverlauf: Reise und Stopps anlegen"). This file is the
+("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
+and fictional place names is
+[reise-planen-und-unterwegs-design.md](reise-planen-und-unterwegs-design.md).
+This file is the
 implementation plan; it repeats the rules the code has to follow so that it
 can be read without the doc.
 
