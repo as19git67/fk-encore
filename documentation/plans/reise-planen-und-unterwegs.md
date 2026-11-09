@@ -200,6 +200,26 @@ go.
   untouched. Test on a trip built the old way (`TRIP_START_EMPTY=0`): after
   the migration it reads like an ideas trip with the same days and stops.
 
+**Built (2026-11-09).** What differs from the list above:
+
+- The zone is not stored. `trip-planner/time-zone.ts` looks it up offline
+  from the anchor (`tz-lookup`) on every read, so a moved anchor can never
+  leave a stale zone behind; `GET …/itinerary` carries `timeZone` per stay
+  and `zoneShiftMinutes` per journey (at the arrival day, or today without
+  a date).
+- A port between two ship journeys is aboard in `deriveFrames` itself, so
+  read and write agree (`betweenShips`). `refuseMovedCruiseEnd` refuses a
+  new port whose halves move the end; the app splits the nights (stage 2).
+- The settings still accept `startDate`: today's iOS settings send it. It
+  goes with the date picker in stage 2.
+- No lodging means no named base, or only a zone (`hasNoLodging` in
+  `search-reach.ts`); the reach is at least 15 km, a car's 25 km stays.
+- A shared pin beyond 50 km (`SHARE_LEG_DISTANCE_M`) gets `legIndex: null`
+  and `stayChoices`, the stays nearest first. Finds keep their 150 km.
+- `POST …/name-suggestion` in `trip-planner/name-suggestion.ts`.
+- Migration `0304_trip_ideas_everywhere.sql`, tested in
+  `ideas-everywhere-migration.test.ts`.
+
 ### Stage 2 — itinerary (iOS)
 
 `TripItineraryView` gains the days under each stay, each with a fill bar

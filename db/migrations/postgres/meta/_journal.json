@@ -2122,6 +2122,13 @@
       "when": 1790420000000,
       "tag": "0303_trip_day_breaks",
       "breakpoints": true
+    },
+    {
+      "idx": 304,
+      "version": "7",
+      "when": 1790430000000,
+      "tag": "0304_trip_ideas_everywhere",
+      "breakpoints": true
     }
   ]
 }
