@@ -85,6 +85,7 @@ struct TripTravellersView: View {
                 }
             }
             .presentationDetents([.medium, .large])
+            .opaqueSheetBackground()
         }
         .navigationTitle("Reisegruppe")
         .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })

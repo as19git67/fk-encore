@@ -74,6 +74,7 @@ struct LibraryPhotoFullscreenView: View {
                 if let asset = currentAsset {
                     LibraryPhotoInfoSheet(asset: asset, serverStatus: serverStatus(for: asset))
                         .presentationDetents([.medium])
+                        .opaqueSheetBackground()
                 }
             }
             .sheet(item: $copyRequest) { request in

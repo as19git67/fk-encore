@@ -123,6 +123,7 @@ struct PhotoTimelineView: View {
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .sheet(isPresented: $showUpload) {
             PhotoUploadView { Task { await reload() } }
@@ -153,6 +154,7 @@ struct PhotoTimelineView: View {
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .overlay {
             if shareManager.isLoading {

@@ -273,6 +273,7 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .sheet(isPresented: $showViewConfig) {
             AlbumViewConfigSheet(
@@ -284,6 +285,7 @@ struct AlbumDetailView: View {
                 }
             )
             .presentationDetents([.medium])
+            .opaqueSheetBackground()
         }
         .toolbar {
             if isSelecting {
@@ -463,6 +465,7 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .overlay {
             if shareManager.isLoading {

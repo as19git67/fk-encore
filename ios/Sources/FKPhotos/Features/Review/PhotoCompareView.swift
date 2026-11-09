@@ -194,6 +194,7 @@ struct PhotoCompareView: View {
             .popover(isPresented: $showGestureHelp) {
                 GestureHelp(isPortrait: orientationIsPortrait)
                     .presentationDetents([.medium, .large])
+                    .opaqueSheetBackground()
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showQuality) {
@@ -205,6 +206,7 @@ struct PhotoCompareView: View {
                         secondQuality: quality[pair.second.id]
                     )
                     .presentationDetents([.medium, .large])
+                    .opaqueSheetBackground()
                 }
             }
         }

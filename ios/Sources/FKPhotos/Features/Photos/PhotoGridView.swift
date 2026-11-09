@@ -205,6 +205,7 @@ struct PhotoGridView: View {
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .navigationDestination(item: $fullscreenNav) { nav in
             PhotoFullscreenView(
@@ -235,6 +236,7 @@ struct PhotoGridView: View {
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .overlay {
             if shareManager.isLoading {

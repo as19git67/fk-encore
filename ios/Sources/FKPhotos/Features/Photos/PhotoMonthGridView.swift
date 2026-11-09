@@ -206,6 +206,7 @@ struct PhotoMonthGridView: View {
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .overlay {
             if shareManager.isLoading {

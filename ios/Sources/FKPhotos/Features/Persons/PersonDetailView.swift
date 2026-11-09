@@ -194,6 +194,7 @@ struct PersonDetailView: View {
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {

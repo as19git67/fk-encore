@@ -88,6 +88,10 @@ What is still wrong is the shape of the app around it:
 - **Spot details:** a sheet at half height over the day; drag up for
   everything; close by swiping down, tapping the day above, ✕ or "Fertig";
   swipe sideways for the next spot of the day.
+- **Sheets look the same at every height** (Anton, 2026-11-09): a sheet at
+  half height has the same opaque background as at full height, never the
+  translucent glass iOS 26 draws at a partial detent. Every sheet with a
+  partial detent calls `opaqueSheetBackground()`.
 
 ### On the road
 

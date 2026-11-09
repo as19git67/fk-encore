@@ -264,6 +264,7 @@ struct AlbumsListView: View {
         .sheet(isPresented: $filterSort.isMenuPresented) {
             AlbumFilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])
+                .opaqueSheetBackground()
         }
         // Album properties (and sharing) straight from the list — the same
         // sheet the detail view opens.
