@@ -62,6 +62,7 @@ import { minutesOf } from "./transit-leg";
 import { carryStops } from "./carry-stops";
 import { isIdeasTrip } from "./ideas-mode";
 import type { TransportMode } from "./travel";
+import { zoneAt, zoneShiftMinutes } from "./time-zone";
 
 /** Mirrors `plans.ts`: counted in stays, the journeys are free. */
 const MAX_STAYS = 20;
@@ -123,6 +124,17 @@ export interface ItineraryItemView extends ItineraryItem {
   /** First and last calendar day, or null while the trip has no date. */
   startDate: string | null;
   endDate: string | null;
+  /**
+   * A stay: the IANA zone at its anchor, which every time on its days is
+   * read in. A journey: null. Derived from the coordinates on read.
+   */
+  timeZone: string | null;
+  /**
+   * A journey: how far the clock jumps between where it leaves and where
+   * it arrives, in minutes ("+8 h" is 480); 0 within one zone, null when
+   * either end has no zone. A stay: null.
+   */
+  zoneShiftMinutes: number | null;
 }
 
 export interface ItineraryResponse {
@@ -497,15 +509,28 @@ function journeyDepartureOf(leg: StoredLeg): { startMinutes: number; label: stri
 function itineraryResponse(plan: StoredPlan): ItineraryResponse {
   const chain = itineraryOf(plan);
   const frames = deriveFrames(chain, { home: plan.home !== null, homeLabel: plan.home?.label ?? "Zuhause" });
+  const zones = chain.items.map((item) => (item.kind === "stay" ? zoneAt(item.anchor) : null));
+  const homeZone = zoneAt(plan.home);
   return {
     planId: plan.id,
     startDate: chain.startDate,
     home: plan.home,
-    items: chain.items.map((item, index) => ({
-      ...item,
-      startDate: frames[index].startDate,
-      endDate: frames[index].endDate,
-    })),
+    items: chain.items.map((item, index) => {
+      const frame = frames[index];
+      let zoneShift: number | null = null;
+      if (frame.kind === "journey") {
+        const from = frame.from === null ? homeZone : zones[frame.from];
+        const to = frame.to === null ? homeZone : zones[frame.to];
+        zoneShift = zoneShiftMinutes(from, to, frame.endDate);
+      }
+      return {
+        ...item,
+        startDate: frame.startDate,
+        endDate: frame.endDate,
+        timeZone: zones[index],
+        zoneShiftMinutes: zoneShift,
+      };
+    }),
   };
 }
 

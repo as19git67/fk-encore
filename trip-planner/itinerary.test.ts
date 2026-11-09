@@ -242,6 +242,18 @@ describe("GET /trip-planner/plans/:planId/itinerary", () => {
     expect(chain.items[0]).toMatchObject({ legId: plan.legs[0].id, days: 2, anchorLabel: "Hotel am Fluss", mode: "car" });
   });
 
+  it("gives every stay the zone at its anchor and every journey its jump", async () => {
+    const plan = await threeStays();
+    const chain = await getTripItinerary({ planId: plan.id });
+    expect(chain.items.map((i) => [i.kind, i.timeZone, i.zoneShiftMinutes])).toEqual([
+      ["stay", "Europe/Berlin", null],
+      ["journey", null, 0],
+      ["stay", "Europe/Berlin", null],
+      ["journey", null, 0],
+      ["stay", "Europe/Berlin", null],
+    ]);
+  });
+
   it("reads a journey as the item that owns its times", async () => {
     const plan = await threeStays();
     await addJourney(plan.id, 0, { departAt: "10:00", arriveAt: "16:00" });
