@@ -62,6 +62,7 @@ import { minutesOf } from "./transit-leg";
 import { carryStops } from "./carry-stops";
 import { isIdeasTrip } from "./ideas-mode";
 import type { TransportMode } from "./travel";
+import { zoneAt, zoneShiftMinutes } from "./time-zone";
 
 /** Mirrors `plans.ts`: counted in stays, the journeys are free. */
 const MAX_STAYS = 20;
@@ -123,6 +124,17 @@ export interface ItineraryItemView extends ItineraryItem {
   /** First and last calendar day, or null while the trip has no date. */
   startDate: string | null;
   endDate: string | null;
+  /**
+   * A stay: the IANA zone at its anchor, which every time on its days is
+   * read in. A journey: null. Derived from the coordinates on read.
+   */
+  timeZone: string | null;
+  /**
+   * A journey: how far the clock jumps between where it leaves and where
+   * it arrives, in minutes ("+8 h" is 480); 0 within one zone, null when
+   * either end has no zone. A stay: null.
+   */
+  zoneShiftMinutes: number | null;
 }
 
 export interface ItineraryResponse {
@@ -173,6 +185,7 @@ export const putTripItinerary = api(
     await requireOrganiser(req.planId, userId, "Den Reiseverlauf");
 
     const before = itineraryOf(plan);
+    refuseMovedCruiseEnd(plan, before, { startDate: req.startDate, items: req.items });
     const { planned, rebuilt } = await applyChain(plan, { startDate: req.startDate, items: req.items });
     // A change that rebuilt days somebody had planned can be taken back
     // (plan, "Decisions taken": shortening a stay is allowed, with an
@@ -497,15 +510,28 @@ function journeyDepartureOf(leg: StoredLeg): { startMinutes: number; label: stri
 function itineraryResponse(plan: StoredPlan): ItineraryResponse {
   const chain = itineraryOf(plan);
   const frames = deriveFrames(chain, { home: plan.home !== null, homeLabel: plan.home?.label ?? "Zuhause" });
+  const zones = chain.items.map((item) => (item.kind === "stay" ? zoneAt(item.anchor) : null));
+  const homeZone = zoneAt(plan.home);
   return {
     planId: plan.id,
     startDate: chain.startDate,
     home: plan.home,
-    items: chain.items.map((item, index) => ({
-      ...item,
-      startDate: frames[index].startDate,
-      endDate: frames[index].endDate,
-    })),
+    items: chain.items.map((item, index) => {
+      const frame = frames[index];
+      let zoneShift: number | null = null;
+      if (frame.kind === "journey") {
+        const from = frame.from === null ? homeZone : zones[frame.from];
+        const to = frame.to === null ? homeZone : zones[frame.to];
+        zoneShift = zoneShiftMinutes(from, to, frame.endDate);
+      }
+      return {
+        ...frame.item,
+        startDate: frame.startDate,
+        endDate: frame.endDate,
+        timeZone: zones[index],
+        zoneShiftMinutes: zoneShift,
+      };
+    }),
   };
 }
 
@@ -594,7 +620,9 @@ export function deriveFrames(
       const endDate = cursor ? addDays(cursor, days - 1) : null;
       frames.push({
         kind: "stay",
-        item,
+        // A port between two ship journeys sleeps aboard whether or not
+        // anybody said so: there is no hotel between two nights at sea.
+        item: betweenShips(before, after) ? { ...item, quartersAboard: true } : item,
         startDate: cursor,
         endDate,
         days,
@@ -628,6 +656,44 @@ export function deriveFrames(
     }
   }
   return frames;
+}
+
+/**
+ * A port added into a cruise keeps the end of the trip where it was: the
+ * ship docks at home on its own date, whatever ports lie between. The
+ * nights of the journey it was added into are split between the two
+ * halves; a chain whose halves do not add up moves the end, and that is
+ * refused with the port named, not written.
+ */
+export function refuseMovedCruiseEnd(
+  plan: Pick<StoredPlan, "home">,
+  before: { startDate: string | null; items: readonly ItineraryItem[] },
+  after: { startDate: string | null; items: readonly ItineraryItem[] },
+): void {
+  const items = after.items;
+  const added = items.findIndex((item, index) =>
+    item.kind === "stay" && item.legId === undefined && betweenShips(items[index - 1], items[index + 1]));
+  if (added === -1 || before.items.length === 0) return;
+  const options = { home: plan.home !== null, homeLabel: "Zuhause" };
+  const oldEnd = deriveFrames(before, options).at(-1)?.endDate ?? null;
+  const newEnd = deriveFrames(after, options).at(-1)?.endDate ?? null;
+  if (oldEnd === null || newEnd === null || oldEnd === newEnd) return;
+  const name = stayTitle(items[added], added, "Zuhause");
+  throw APIError.failedPrecondition(
+    `„${name}“ verschiebt das Ende der Reise vom ${germanDate(oldEnd)} auf den ${germanDate(newEnd)} — ` +
+      "die Nächte der Schiffsfahrt müssen sich auf beide Hälften verteilen",
+  );
+}
+
+/** "2026-09-09" as "9.9.2026". */
+function germanDate(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return `${d}.${m}.${y}`;
+}
+
+/** Both neighbours are journeys by ship: the stay is a port of a cruise. */
+export function betweenShips(before: ItineraryItem | undefined, after: ItineraryItem | undefined): boolean {
+  return before?.kind === "journey" && after?.kind === "journey" && before.mode === "ship" && after.mode === "ship";
 }
 
 function stayTitle(item: ItineraryItem | undefined, index: number, homeLabel: string): string {

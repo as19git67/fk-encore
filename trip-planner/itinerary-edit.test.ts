@@ -471,6 +471,51 @@ describe("the quarters travel along (§21.3)", () => {
     expect(nextPort.arriveMinutes).toBe(480);
   });
 
+  it("puts a port between two ship journeys aboard without being told, with a day from arrival to departure", async () => {
+    const plan = await threeStays();
+    const chain = await chainOf(plan.id);
+    Object.assign(chain.items[stayAt(chain.items, 1)], { days: 1 });
+    Object.assign(chain.items[1], { departAt: "18:00", arriveAt: "06:00", nights: 1, mode: "ship" });
+    Object.assign(chain.items[3], { departAt: "21:00", arriveAt: "08:00", nights: 1, mode: "ship" });
+    const { plan: after } = await write(plan.id, chain);
+
+    const port = after.legs.find((l) => l.title === "Zweiter Ort")!;
+    expect(port.quartersAboard).toBe(true);
+    expect(port.days).toHaveLength(1);
+    expect(port.startDate).toBe("2026-09-07");
+    expect(port.arriveMinutes).toBe(360);
+    expect(departureOf(port)).toMatchObject({ label: "Alle an Bord", startMinutes: 1260, bufferMinutes: 60 });
+
+    const read = await getTripItinerary({ planId: plan.id });
+    expect(read.items[2]).toMatchObject({ kind: "stay", quartersAboard: true, days: 1,
+      startDate: "2026-09-07", endDate: "2026-09-07" });
+  });
+
+  it("adds a port into a ship journey and keeps the end of the trip, or names the port that would move it", async () => {
+    const plan = await twoPorts();
+    await addJourney(plan.id, 0, { departAt: "18:00", arriveAt: "08:00", nights: 4, mode: "ship" });
+    const before = await getTripItinerary({ planId: plan.id });
+    expect(before.items.at(-1)?.endDate).toBe("2026-09-09");
+
+    const port = (seaAfter: number) => {
+      const items = before.items.map((i) => ({ ...i }) as ItineraryItem);
+      const sea = items[1];
+      items.splice(1, 1,
+        { ...sea, legId: undefined, nights: 1, arriveAt: "07:00" },
+        { kind: "stay", title: "Neuer Hafen", anchor: LATER, days: 2, mode: "foot" },
+        { ...sea, legId: undefined, departAt: "20:00", nights: seaAfter });
+      return { startDate: before.startDate, items };
+    };
+
+    await expect(write(plan.id, port(3))).rejects.toThrow(/„Neuer Hafen“ verschiebt das Ende der Reise vom 9\.9\.2026 auf den 10\.9\.2026/);
+
+    await write(plan.id, port(2));
+    const after = await getTripItinerary({ planId: plan.id });
+    expect(after.items.at(-1)?.endDate).toBe("2026-09-09");
+    expect(after.items[2]).toMatchObject({ title: "Neuer Hafen", quartersAboard: true,
+      startDate: "2026-09-06", endDate: "2026-09-07" });
+  });
+
   it("gives a tender port the boat ride back on top", async () => {
     const plan = await twoPorts();
     await setTripHome({ planId: plan.id, lat: HOME.lat, lon: HOME.lon, label: "Zuhause" });

@@ -4,7 +4,9 @@ import {
   dayTripRadiusFor,
   MAX_SEARCH_RADIUS_M,
   mergeByOsmRef,
+  NO_LODGING_REACH_M,
   searchRadiusFor,
+  stayReach,
 } from "./search-reach";
 
 describe("searchRadiusFor", () => {
@@ -93,5 +95,25 @@ describe("dayTripRadiusFor", () => {
     expect(dayTripRadiusFor(0, carLeg)).toBe(DAY_TRIP_REACH_M);
     expect(dayTripRadiusFor(-500, carLeg)).toBe(DAY_TRIP_REACH_M);
     expect(dayTripRadiusFor(Number.NaN, carLeg)).toBe(DAY_TRIP_REACH_M);
+  });
+});
+
+describe("stayReach", () => {
+  const leg = { radiusM: null, mode: "foot", anchorLabel: "Hotel am Fluss", anchorRadiusM: null, quartersAboard: false };
+
+  it("lets an explicit radius win", () => {
+    expect(stayReach({ ...leg, radiusM: 4_000, anchorLabel: null })).toBe(4_000);
+  });
+
+  it("reaches 15 km around a stay with nothing booked", () => {
+    expect(stayReach({ ...leg, anchorLabel: null })).toBe(NO_LODGING_REACH_M);
+    expect(stayReach({ ...leg, anchorRadiusM: 2_000 })).toBe(NO_LODGING_REACH_M);
+    // A car reaches further than that anyway.
+    expect(stayReach({ ...leg, anchorLabel: null, mode: "car" })).toBe(searchRadiusFor("car"));
+  });
+
+  it("keeps the mode's reach for a booked base and for a port day", () => {
+    expect(stayReach(leg)).toBe(searchRadiusFor("foot"));
+    expect(stayReach({ ...leg, anchorLabel: null, quartersAboard: true })).toBe(searchRadiusFor("foot"));
   });
 });
