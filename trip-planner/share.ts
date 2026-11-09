@@ -33,7 +33,8 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { loadPlan } from "./plan-store";
-import { chooseLeg } from "./finds";
+import { chooseLeg, SHARE_LEG_DISTANCE_M } from "./finds";
+import { haversineMeters } from "./travel";
 import { parseMapLink } from "./map-link";
 import { followShortLink } from "./map-link-read";
 import { articleTextFromHtml, prepareArticleText } from "./article";
@@ -71,6 +72,12 @@ export interface ShareProposalOption {
   distanceM: number | null;
 }
 
+export interface ShareStayChoice {
+  legIndex: number;
+  title: string | null;
+  distanceM: number;
+}
+
 export interface ShareProposal {
   /** What to call it: the article's name, or the link's. */
   name: string | null;
@@ -88,6 +95,11 @@ export interface ShareProposal {
   legIndex: number | null;
   /** For `ambiguous`: the places to choose between, nearest first. */
   options: ShareProposalOption[];
+  /**
+   * A pin more than 50 km from every stay lands nowhere on its own: these
+   * are the stays to ask about, nearest first. Empty when `legIndex` is set.
+   */
+  stayChoices: ShareStayChoice[];
   /** The words in the page that put it on the list (§9.3 stage 3). */
   quote: string | null;
   /** "in der Altstadt" — carried as provenance, never acted on. */
@@ -218,6 +230,7 @@ async function mapLinkProposal(
   }
 
   const legIndex = link.position ? legFor(link.position, plan) : null;
+  const stayChoices = link.position && legIndex === null ? staysByDistance(link.position, plan) : [];
   return {
     name,
     // With a position the traveller only has to confirm the pin; with
@@ -229,10 +242,19 @@ async function mapLinkProposal(
     categories: [],
     legIndex,
     options: [],
+    stayChoices,
     quote: null,
     placeHint: null,
     kindHint: null,
   };
+}
+
+/** Every stay of the trip with its distance to a pin, nearest first. */
+function staysByDistance(position: { lat: number; lon: number }, plan: LoadedPlan): ShareStayChoice[] {
+  return plan.legs
+    .filter((leg) => leg.kind !== "transit")
+    .map((leg) => ({ legIndex: leg.position, title: leg.title, distanceM: Math.round(haversineMeters(position, leg.anchor)) }))
+    .sort((a, b) => a.distanceM - b.distanceM);
 }
 
 /** The first non-empty line of a caption, or null. */
@@ -326,6 +348,7 @@ async function resolveExtracted(
       categories: lookup.match.categories,
       legIndex: lookup.legIndex,
       options: [],
+      stayChoices: [],
     };
   }
   if (lookup.verdict === "ambiguous") {
@@ -337,6 +360,7 @@ async function resolveExtracted(
       categories: [],
       legIndex: null,
       options: lookup.options.map(toOption),
+      stayChoices: [],
     };
   }
   // No match. Not a failure — a note with its link and its quote, which
@@ -349,6 +373,7 @@ async function resolveExtracted(
     categories: [],
     legIndex: null,
     options: [],
+    stayChoices: [],
   };
 }
 
@@ -375,6 +400,7 @@ function legFor(position: { lat: number; lon: number }, plan: LoadedPlan): numbe
   const choice = chooseLeg(
     position,
     plan.legs.map((leg) => ({ position: leg.position, title: leg.title, anchor: leg.anchor, kind: leg.kind })),
+    SHARE_LEG_DISTANCE_M,
   );
   return choice.position;
 }

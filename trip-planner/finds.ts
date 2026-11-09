@@ -36,6 +36,13 @@ import { haversineMeters, type Coordinate } from "./travel";
 export const MAX_LEG_DISTANCE_M = 150_000;
 
 /**
+ * How far a shared link may sit from the nearest stay and still land there
+ * on its own (reise-planen-und-unterwegs.md). Further out the traveller is
+ * asked which stay it belongs to.
+ */
+export const SHARE_LEG_DISTANCE_M = 50_000;
+
+/**
  * Two spots this close with the same name are the same place. OSM
  * entries for one building can sit a few dozen metres apart — an
  * entrance node and the outline's centre — and a map app's coordinate
@@ -76,14 +83,15 @@ export interface LegChoice {
 export function chooseLeg(
   find: Coordinate,
   legs: readonly LegCandidate[],
+  maxDistanceM: number = MAX_LEG_DISTANCE_M,
 ): LegChoice {
   if (legs.length === 0) return { position: null, distanceM: null, reason: "no-legs" };
 
   const stays = legs.filter((leg) => leg.kind !== "transit");
   const first = nearest(find, stays.length > 0 ? stays : legs);
-  const best = first && first.distanceM <= MAX_LEG_DISTANCE_M ? first : nearest(find, legs);
+  const best = first && first.distanceM <= maxDistanceM ? first : nearest(find, legs);
 
-  if (!best || best.distanceM > MAX_LEG_DISTANCE_M) {
+  if (!best || best.distanceM > maxDistanceM) {
     return { position: null, distanceM: best?.distanceM ?? null, reason: "too-far" };
   }
   return { position: best.position, distanceM: best.distanceM };

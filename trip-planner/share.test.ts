@@ -142,6 +142,16 @@ describe("POST /trip-planner/plans/:planId/shares", () => {
       expect(res.proposals[0].legIndex).toBe(1);
     });
 
+    it("lands a pin more than 50 km from every stay nowhere and names the stays to ask about", async () => {
+      const plan = await twoLegPlan();
+      const far = { lat: EAST.lat + 0.6, lon: EAST.lon + 0.4 };
+      const res = await analyseShare({ planId: plan.id, url: `geo:${far.lat},${far.lon}` });
+
+      expect(res.proposals[0].legIndex).toBeNull();
+      expect(res.proposals[0].stayChoices.map((c) => c.title)).toEqual(["Oststadt", "Weststadt"]);
+      expect(res.proposals[0].stayChoices[0].distanceM).toBeGreaterThan(50_000);
+    });
+
     it("resolves a Google Maps app link, which names the place but has no coordinate", async () => {
       const plan = await twoLegPlan();
       geo.setSearchSpots("nom_east", [spot(7, EAST, "Beispielwirt")]);
