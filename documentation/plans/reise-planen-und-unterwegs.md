@@ -116,6 +116,27 @@ What is still wrong is the shape of the app around it:
   details. Before the trip, without a location, "from" is the previous spot
   or the lodging.
 
+### Maps
+
+Every view has a map next to its list ("Liste | Karte", "Tage | Karte"),
+remembered per view. List and map show the same things and offer the same
+actions: a tapped marker opens the sheet a tapped row opens.
+
+- **Itinerary:** a numbered marker per stay, a line per journey (mode and
+  time; dashed while the times are open), the selected stay's card below
+  with its day fill bars and "Planen"; swiping the card selects the next
+  stay.
+- **Stay:** chips pick a day, all days or the ideas; the picked day's spots
+  numbered in order with the way from the lodging, other days faded, ideas
+  hollow; the existing time slider of `TripDayMapView` stays. A faded marker
+  or an idea offers "+ Tag n".
+- **Spot picker:** highlights as circles sized by fame, own ideas filled,
+  planned spots with number and day; moving the map does not search until
+  "In diesem Bereich suchen".
+- **On the road:** own location, visited spots with a check, a line through
+  the visits in their real order (drawn from the visit rows, no GPS track is
+  stored), photo count per visited spot, the next spot with "Route".
+
 ### Existing trips (Anton, 2026-11-09)
 
 Trips that already exist keep their stays, journeys and days and move into
@@ -177,7 +198,8 @@ departure, arrival, nights on the way, "Zeiten noch offen", note; "Ab" and
 "Von" on the outbound journey). Plus on the line; plus on a ship journey
 opens "Neuer Hafen" (where, ashore from, aboard until). Drag only without a
 date; swipe left to delete with undo through `…/ops/undo`. Title tap edits
-the name; an empty name shows the suggestion.
+the name; an empty name shows the suggestion. Map variant: stays as
+numbered markers, journeys as lines, the selected stay's card below.
 
 ### Stage 3 — planning view of a stay (iOS)
 
@@ -189,7 +211,9 @@ day as a drop zone. Pin reasons are a field on the stop (`pin_reason`:
 `ticket`, `light`, `reservation`, `event`, `departure`) next to the fixed
 time that already exists; the day order (`day-order.ts`) treats them all as
 hard. Food stops are allowed in a day; `day-order.ts` stops leaving them in
-place unless they are pinned.
+place unless they are pinned. Map variant: `TripDayMapView` grows day chips
+(one day, all days, ideas), faded other days, hollow ideas, "+ Tag n" on a
+marker.
 
 ### Stage 4 — spot picker and spot details (iOS)
 
@@ -201,7 +225,9 @@ open, from `opening-hours.ts` and `day-times.ts`), long press for another
 day or "keep as idea". Spot details become a sheet with two heights, built on
 the existing `TripSpotDetailView` content and `stopActions`/
 `candidateActions` (CLAUDE.md "Aktionen an Spots in der iOS-App": the
-actions stay in one place).
+actions stay in one place). Map variant of the picker (`TripSpotMapView`):
+circles sized by fame, "In diesem Bereich suchen" sends the visible region
+to the highlights and name search.
 
 ### Stage 5 — on the road (backend + iOS)
 
@@ -227,7 +253,10 @@ actions stay in one place).
 - **Weather** per visit: the weather at `arrived_at` from the weather store,
   kept on the visit row (`weather jsonb`), per day as today.
 - **iOS.** The planning view shows the running day as above, past days
-  collapsed, the check-off undo line, the swipe-right check.
+  collapsed, the check-off undo line, the swipe-right check. Its map shows
+  the own location, checks, a line through the visits in order (from the
+  visit rows; no GPS track is stored), photo counts and the next spot with
+  "Route".
 
 ### Stage 6 — route sheet (backend + iOS)
 
