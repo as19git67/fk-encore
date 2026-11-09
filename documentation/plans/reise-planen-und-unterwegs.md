@@ -97,18 +97,23 @@ What is still wrong is the shape of the app around it:
 - Behind plan: a notice says what no longer fits; "Neu ordnen" reorders from
   now on only, and what falls out gets a suggested other day.
 - Past days collapse to one line (weather, visited spots, photo count);
-  future days show the forecast.
+  future days show the forecast as far as there is one (about a week).
 - **Checking off.** A dwell of at least ten minutes within 100 m checks a
   spot off by itself (see stage 5 for how this changes `visits.ts`). A swipe
   right checks a spot off by hand. **Every** check, automatic or manual, can
-  be undone: from the line that appears right after it, or later by tapping
-  the check mark.
+  be undone. After an automatic check the spot's card says "gerade
+  abgehakt" for a while and carries "Doch nicht" (for walking past); later,
+  tapping the check mark offers "Nicht besucht".
 - A spot whose time has passed without a visit stays until the evening; then
   the app asks once: another day or back to the ideas.
 - **Photos** are matched to spots by time and place. Everyone sees only the
   photos they own or can see through a shared album. Taking part in a trip
   grants no access to anyone's photos.
-- **Weather** is recorded per spot at visit time and per day.
+- **Weather** is recorded per spot at visit time and per day. Shown only
+  with a trip date (Anton, 2026-11-09): during the trip the current weather
+  and the forecast for the next days; before the trip only once its start
+  falls inside the forecast range. Without a date, or with a trip far ahead,
+  no weather at all.
 - **"Weg"** (route sheet): from and to (current location or any spot), mode
   (walk, public transport, car, taxi), small map, duration, "In der
   Karten-App starten". Opened from "Route" on the next spot, from the way
@@ -218,7 +223,9 @@ marker.
 ### Stage 4 — spot picker and spot details (iOS)
 
 One sheet replaces `TripPoolView`, `TripPlaceSearchView` and the food list as
-the way in: search field, chips, own ideas first, highlights after
+the way in: search field, chips, own ideas first, highlights after; every
+row like the stay's spot cards (picture, short description, duration,
+priority or hint) and a tap on the row opens the details at once
 (`highlights.ts`), "+ Tag n" with the suggested day computed on the server
 (`POST …/legs/:legId/suggest-day`: first day with room on which the place is
 open, from `opening-hours.ts` and `day-times.ts`), long press for another
@@ -253,7 +260,9 @@ to the highlights and name search.
 - **Weather** per visit: the weather at `arrived_at` from the weather store,
   kept on the visit row (`weather jsonb`), per day as today.
 - **iOS.** The planning view shows the running day as above, past days
-  collapsed, the check-off undo line, the swipe-right check. Its map shows
+  collapsed, "Doch nicht" on a freshly checked card, "Nicht besucht" from
+  the check mark, the swipe-right check, weather only within the forecast
+  range. Its map shows
   the own location, checks, a line through the visits in order (from the
   visit rows; no GPS track is stored), photo counts and the next spot with
   "Route".
