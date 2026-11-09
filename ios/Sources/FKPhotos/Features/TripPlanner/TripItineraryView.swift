@@ -258,13 +258,19 @@ struct TripItineraryView: View {
     /// on top of each other, so the line runs through.
     private func onLine<Content: View>(node: TimelineNode, isFirst: Bool = false, isLast: Bool = false,
                                        @ViewBuilder _ content: () -> Content) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            TimelineGutter(node: node, isFirst: isFirst, isLast: isLast)
-            content()
-                .padding(.vertical, 6)
-        }
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-        .listRowSeparator(.hidden)
+        // The gutter is an overlay: an overlay is offered the row's full
+        // height, so the line runs from top to bottom whatever the card.
+        content()
+            .padding(.vertical, 6)
+            .padding(.leading, 36)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) {
+                TimelineGutter(node: node, isFirst: isFirst, isLast: isLast)
+                    .padding(.leading, 2)
+            }
+            .padding(.horizontal, 16)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
     }
 
     private func plusRow(_ label: String, isFirst: Bool = false, isLast: Bool = false,
