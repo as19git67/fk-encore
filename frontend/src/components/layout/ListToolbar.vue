@@ -50,6 +50,11 @@ const props = defineProps<{
    * toolbar carries the most actions.
    */
   compact?: boolean
+  /**
+   * The view shows the result count elsewhere (the album, from `xl` on, in
+   * the line under its title). The row below then appears only for chips.
+   */
+  hideCount?: boolean
 }>()
 
 const slots = useSlots()
@@ -295,7 +300,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
         class="list-toolbar__clear-all"
         @click="model.filter.clearAll()"
       />
-      <span class="list-toolbar__count" data-testid="list-count">
+      <span v-if="!hideCount" class="list-toolbar__count" data-testid="list-count">
         <i v-if="model.result.loading.value" class="pi pi-spin pi-spinner" aria-label="Lädt" />
         <template v-else>{{ countLabel }}<template v-if="model.result.summary?.value"> · {{ model.result.summary.value }}</template></template>
       </span>
@@ -400,6 +405,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   gap: var(--space-1) var(--space-2);
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Nothing to show (no chips, count shown elsewhere): no row. */
+.list-toolbar__meta:empty {
+  display: none;
 }
 
 .list-toolbar__chips {

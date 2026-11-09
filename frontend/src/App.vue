@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import Menu from 'primevue/menu'
@@ -18,6 +18,8 @@ import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig, ModuleMenuItem } from './config/modules'
 import { useReferenceData } from './composables/useReferenceData'
+import { useAtLeast } from './composables/useBreakpoint'
+import { submenuFitsNavbar } from './utils/navbarLayout'
 import { usePhotoNavStore } from './stores/photoNav'
 import { albumMenuTarget, albumsViewQueryFromStorage, readRememberedAlbumId } from './utils/albumsViewState'
 
@@ -305,14 +307,79 @@ onMounted(observeStack)
 // The stack mounts and unmounts with the session (v-if on isAuthenticated).
 watch(toolbarStackRef, observeStack)
 onBeforeUnmount(() => stackObserver?.disconnect())
+
+// ── Sub-menu in the navbar (wide screens) ─────────────────────────────────────
+// From `xl` on the sub-menu moves up into the navbar's empty middle when all
+// of it fits there, so a wide screen spends one row on the app's menus instead
+// of two. A module whose menu does not fit keeps its own row. The menu itself
+// is rendered once and teleported to whichever place applies.
+const navbarRef = ref<HTMLElement | null>(null)
+const navbarStartRef = ref<HTMLElement | null>(null)
+const navbarEndRef = ref<HTMLElement | null>(null)
+const submenuRef = ref<HTMLElement | null>(null)
+const wideScreen = useAtLeast('xl')
+const submenuInline = ref(false)
+let navbarObserver: ResizeObserver | null = null
+
+/** The sub-menu's width with every entry at its natural size, wherever it sits. */
+function submenuContentWidth(menu: HTMLElement): number {
+  const strip = menu.querySelector<HTMLElement>('.submenu-strip')
+  const actions = menu.querySelector<HTMLElement>('.submenu-actions')
+  let width = 0
+  const items = strip ? Array.from(strip.children) as HTMLElement[] : []
+  const first = items[0]
+  const last = items[items.length - 1]
+  if (first && last) width += last.getBoundingClientRect().right - first.getBoundingClientRect().left
+  if (actions) width += actions.getBoundingClientRect().width
+  return width
+}
+
+function measureSubmenu() {
+  const navbar = navbarRef.value
+  const menu = submenuRef.value
+  if (!wideScreen.value || !navbar || !menu) {
+    submenuInline.value = false
+    return
+  }
+  const style = getComputedStyle(navbar)
+  const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+  submenuInline.value = submenuFitsNavbar({
+    navbar: navbar.clientWidth - padding,
+    start: navbarStartRef.value?.getBoundingClientRect().width ?? 0,
+    end: navbarEndRef.value?.getBoundingClientRect().width ?? 0,
+    content: submenuContentWidth(menu),
+  })
+}
+
+function observeNavbar() {
+  navbarObserver?.disconnect()
+  navbarObserver = null
+  if (typeof ResizeObserver === 'undefined' || !navbarRef.value) return
+  navbarObserver = new ResizeObserver(measureSubmenu)
+  navbarObserver.observe(navbarRef.value)
+}
+
+onMounted(() => {
+  observeNavbar()
+  measureSubmenu()
+  // Web fonts change the entries' widths once they arrive.
+  document.fonts?.ready.then(measureSubmenu).catch(() => {})
+})
+watch(navbarRef, observeNavbar)
+watch(
+  [wideScreen, stripItems, actionItems, submenuRef],
+  () => nextTick(measureSubmenu),
+  { deep: true },
+)
+onBeforeUnmount(() => navbarObserver?.disconnect())
 </script>
 
 <template>
   <div ref="appContainerRef" class="app-container">
     <div v-if="auth.isAuthenticated" ref="toolbarStackRef" class="app-toolbar-stack">
       <!-- Row 1: main menu. Left: module switcher + active module; right: meta icons. -->
-      <nav class="sticky-navbar app-navbar" aria-label="Hauptmenü">
-        <div class="navbar-start">
+      <nav ref="navbarRef" class="sticky-navbar app-navbar" aria-label="Hauptmenü">
+        <div ref="navbarStartRef" class="navbar-start">
           <Button
             icon="pi pi-bars"
             severity="secondary"
@@ -329,7 +396,11 @@ onBeforeUnmount(() => stackObserver?.disconnect())
           </span>
         </div>
 
-        <div class="navbar-end">
+        <!-- Wide screens: the sub-menu, teleported here when it fits (see
+             `submenuInline`). -->
+        <div id="app-navbar-submenu" class="navbar-submenu" />
+
+        <div ref="navbarEndRef" class="navbar-end">
           <!-- The assistant (#1528), reachable from every module. -->
           <Button
             v-if="auth.hasPermission('module.assistant')"
@@ -377,10 +448,16 @@ onBeforeUnmount(() => stackObserver?.disconnect())
       </nav>
 
       <!-- Row 2: the active module's sub-menu. Always one row of fixed height;
-           it scrolls sideways inside itself on a narrow screen, never the page. -->
+           it scrolls sideways inside itself on a narrow screen, never the page.
+           From `xl` on it moves up into the navbar when all of it fits there,
+           and this row disappears. -->
+      <div id="app-submenu-row" class="app-submenu-row" />
+      <Teleport defer :to="submenuInline ? '#app-navbar-submenu' : '#app-submenu-row'">
       <nav
         v-if="activeModule && (stripItems.length || actionItems.length)"
+        ref="submenuRef"
         class="app-submenu"
+        :class="{ 'app-submenu--inline': submenuInline }"
         data-testid="app-submenu"
         :aria-label="`Untermenü ${activeModule.label}`"
       >
@@ -439,6 +516,7 @@ onBeforeUnmount(() => stackObserver?.disconnect())
           />
         </div>
       </nav>
+      </Teleport>
       <DocumentUploadDefaultsHost v-if="activeModule?.id === 'dokumente' && auth.hasPermission('documents.upload')" />
       <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
 
@@ -553,13 +631,36 @@ body {
 }
 
 /* ── Sub-menu row ───────────────────────────────────────────────────────────── */
-.app-submenu {
+.app-submenu-row {
   height: var(--app-submenu-height);
-  display: flex;
-  align-items: stretch;
   padding: 0 0.5rem;
   background: var(--p-content-background);
   border-bottom: 1px solid var(--p-content-border-color);
+}
+.app-submenu-row:empty {
+  display: none;
+}
+.app-submenu {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+/* In the navbar: between the module name and the meta icons, as tall as the
+   navbar, so the active entry's underline sits on its bottom edge. */
+.navbar-submenu {
+  align-self: stretch;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-inline: 1rem;
+}
+.navbar-submenu:empty {
+  display: none;
+}
+.app-submenu--inline {
+  flex: 1 1 auto;
 }
 
 .submenu-strip {

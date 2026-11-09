@@ -32,7 +32,8 @@ import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
-import { upTo, useBelow, useMediaQuery } from '../composables/useBreakpoint'
+import { upTo, useAtLeast, useBelow, useMediaQuery } from '../composables/useBreakpoint'
+import { formatCount } from '../components/layout/listToolbar'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
@@ -195,11 +196,27 @@ const headerDateRange = computed(() => {
   return `${od.toLocaleDateString()} – ${nd.toLocaleDateString()}`
 })
 
+// From `xl` on the toolbar stands on the title row (`inline-toolbar`) and the
+// hint sits under the title. The toolbar's own count line ("2.008 von 2.020")
+// would then be a row of its own saying nearly what the hint says, so the
+// hint carries the count instead and the toolbar drops it.
+const wideHeader = useAtLeast('xl')
+
 /** Photo count and date range under the title (PageLayout's hint line). */
 const headerHint = computed(() => {
   if (!album.value) return undefined
-  const count = galleryTotal.value || album.value.photo_count
-  let hint = `${count} ${count === 1 ? 'Foto' : 'Fotos'}`
+  let hint: string
+  if (wideHeader.value) {
+    const total = albumPhotoTotal.value
+    const shown = filteredAlbumPhotoCount.value
+    const unit = total === 1 ? 'Foto' : 'Fotos'
+    hint = shown < total && !loading.value
+      ? `${formatCount(shown)} von ${formatCount(total)} ${unit}`
+      : `${formatCount(total)} ${unit}`
+  } else {
+    const count = galleryTotal.value || album.value.photo_count
+    hint = `${count} ${count === 1 ? 'Foto' : 'Fotos'}`
+  }
   if (album.value.oldest_photo_at && album.value.newest_photo_at) {
     hint += ` \u2022 ${headerDateRange.value}`
   }
@@ -2659,6 +2676,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     :ready="!loading"
     :resolve-anchor="placesItself"
     sticky-header
+    inline-toolbar
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -2685,7 +2703,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
          input, the album's own actions sit in its actions slot; filter,
          sort, the chips, the count and select mode are the toolbar's own. -->
     <template #toolbar>
-      <ListToolbar v-if="album" :model="toolbar" compact>
+      <ListToolbar v-if="album" :model="toolbar" compact :hide-count="wideHeader">
         <template #search>
           <!-- Natural-language search: global search, results filtered to this album -->
           <NaturalSearchBar

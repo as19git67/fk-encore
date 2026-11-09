@@ -1159,6 +1159,12 @@ Regeln:
   (Eingabe des Assistenten) `.page-dock`. Beide stehen in `style.css`.
 - Detailseiten setzen `sticky-header`, damit Menü und Zeile mit dem
   Zurück-Knopf beim Scrollen stehen bleiben.
+- Eine Detailseite, deren Toolbar die Seite trägt (das Album), setzt
+  zusätzlich `inline-toolbar`: ab `xl` steht die Toolbar dann auf der
+  Titelzeile und `hint` als kleine Zeile unter dem Titel. Ebenfalls ab `xl`
+  rückt das Untermenü eines Moduls in die App-Leiste, wenn es dort ganz
+  hineinpasst (`submenuFitsNavbar` in `utils/navbarLayout.ts`), sonst bleibt
+  es eine eigene Zeile.
 - Keine View definiert eigenes Header-/Toolbar-Layout, `position: sticky`
   oder `top:`-Offsets. Die Stack-Höhe liefert `--app-stack-height`
   (von `App.vue` gemessen, auch auf `<html>`). Was der Browser auf der

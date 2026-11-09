@@ -7,10 +7,12 @@ import App from '../App.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import VirtualAlbumGrid from '../components/VirtualAlbumGrid.vue'
 import GalleryView from '../views/GalleryView.vue'
+import AlbumDetailView from '../views/AlbumDetailView.vue'
 import type { Album } from '../api/photos'
 import type { GalleryGridEntry } from '../api/gallery'
 import { http, HttpResponse } from 'msw'
-import { defaultHandlers } from './handlers'
+import { albumDetail, defaultHandlers } from './handlers'
+import { MOCK_ALBUM_PHOTOS } from './mock-data'
 
 /**
  * The application shell (issue #1272, stage 1): the sticky stack of navbar,
@@ -267,5 +269,44 @@ export const Galerie: Story = {
     grid.scrollTo({ top: 0, behavior: 'instant' })
     await settle()
     if (grid.scrollTop !== 0) throw new Error(`the grid scrolled back to ${grid.scrollTop} after the user left`)
+  },
+}
+
+/**
+ * An album on a wide desktop screen: the sub-menu stands in the navbar, the
+ * album's toolbar on its title row, and the count with the date range under
+ * the title — two rows above the photos instead of six.
+ */
+export const AlbumBreit: Story = {
+  name: 'Album auf breitem Bildschirm (Untermenü und Toolbar in einer Zeile)',
+  parameters: {
+    testViewport: { width: 1440, height: 900 },
+    msw: {
+      handlers: [
+        http.get('/api/albums/:id/photos', () => HttpResponse.json({ photos: MOCK_ALBUM_PHOTOS })),
+        http.get('/api/albums/:id', ({ request }) => HttpResponse.json(albumDetail(request, { display_mode: 'grid' }))),
+        ...defaultHandlers,
+      ],
+    },
+  },
+  render: () => ({
+    components: { App },
+    setup() {
+      const router = useRouter()
+      const name = 'story-album-wide'
+      if (!router.hasRoute(name)) router.addRoute({ path: '/fotos/story-album/:id', name, component: AlbumDetailView })
+      onMounted(() => { void router.push('/fotos/story-album/1') })
+      return () => h(App)
+    },
+  }),
+  play: async () => {
+    const submenu = await waitFor(() => document.querySelector<HTMLElement>('[data-testid="app-submenu"]'), 'the sub-menu')
+    await waitFor(() => submenu.closest('.sticky-navbar'), 'the sub-menu inside the navbar')
+    const header = await waitFor(() => document.querySelector<HTMLElement>('.page-header--sticky'), 'the title row')
+    const toolbar = await waitFor(() => document.querySelector<HTMLElement>('.page-toolbar [data-testid="list-toolbar"]'), 'the toolbar')
+    const h = header.getBoundingClientRect()
+    const t = toolbar.getBoundingClientRect()
+    if (t.top >= h.bottom) throw new Error(`the toolbar sits below the title row (${t.top} >= ${h.bottom})`)
+    if (document.querySelector('[data-testid="list-count"]')) throw new Error('the toolbar still shows its own count line')
   },
 }
