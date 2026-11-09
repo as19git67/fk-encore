@@ -44,6 +44,8 @@ struct TripFixpointSheet: View {
         /// The spot of the trip this appointment is for, if any — the
         /// plan then puts it at this hour and nowhere else.
         var spotRef: String? = nil
+        /// Why the spot has this time — only with `spotRef`.
+        var pinReason: TripPinReason? = nil
         /// The day, when the sheet offered a choice; nil for the day it
         /// was opened on.
         var dayIndex: Int? = nil
@@ -60,6 +62,7 @@ struct TripFixpointSheet: View {
     @State private var durationMinutes = 60
     @State private var saving = false
     @State private var spot: TripSpotChoice?
+    @State private var pinReason: TripPinReason = .ticket
     @State private var dayIndex = 0
     @State private var seeded = false
     @Environment(\.dismiss) private var dismiss
@@ -130,6 +133,13 @@ struct TripFixpointSheet: View {
                             .navigationTitle("Spot für den Termin")
                         } label: {
                             LabeledContent("Spot", value: spot?.name ?? "Keiner")
+                        }
+                        if spot != nil {
+                            Picker("Warum fest?", selection: $pinReason) {
+                                ForEach(TripPinReason.allCases) { reason in
+                                    Label(reason.label, systemImage: reason.systemImage).tag(reason)
+                                }
+                            }
                         }
                     } footer: {
                         Text(spot == nil
@@ -271,6 +281,7 @@ struct TripFixpointSheet: View {
                                 durationMinutes: durationMinutes,
                                 place: place,
                                 spotRef: kind == .appointment ? spot?.osmRef : nil,
+                                pinReason: kind == .appointment && spot != nil ? pinReason : nil,
                                 dayIndex: days.isEmpty ? nil : dayIndex,
                             ))
                             saving = false

@@ -691,6 +691,9 @@ struct TripItineraryView: View {
         else { return }
         viewModel.select(leg: leg.position)
         if let day { viewModel.select(dayIndex: day) }
+        // "Planen" on a stay opens the stay as a whole (stage 3); a day
+        // row opens that day.
+        viewModel.wantsStayPlan = day == nil
         dismiss()
     }
 

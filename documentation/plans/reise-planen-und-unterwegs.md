@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: in progress. Decided with Anton on 2026-11-09. Stages 1 and 2 built.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 3 built.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -261,6 +261,23 @@ hard. Food stops are allowed in a day; `day-order.ts` stops leaving them in
 place unless they are pinned. Map variant: `TripDayMapView` grows day chips
 (one day, all days, ideas), faded other days, hollow ideas, "+ Tag n" on a
 marker.
+
+**Built (2026-11-09).** The pin reason lives on the fixpoint that holds
+the time (`trip_plan_fixpoints.pin_reason`, migration 0305), not on the
+stop: the reason and the hour belong together, and a stop's `pinned`
+flag already means something else ("frame-placed, never moved"). It is
+set with the appointment ("Warum fest?" in the fixed-time sheet), changed
+with `POST …/fixpoints/pin-reason` without a re-plan, rides through every
+re-plan, and goes when the spot is untied (`pin-reason.ts`). The day
+order needed nothing for pinned spots (every booked visit was already a
+hard time); food is no longer held in place. `TripStayPlanView` is
+reached from "Planen" on a stay in the itinerary and from the day's menu
+("Ganzen Aufenthalt planen"); it does not replace `TripPlanDayView` yet,
+which stays the screen of one day (band, order, breaks) that a day
+header opens. Cards carry the actions of `stopActions` behind "⋯", the
+details on a tap, drag onto a card or a day through the move endpoint.
+The map variant lives in the stay view (chips: all days, one day, ideas;
+"+ Tag n" on a tapped marker) rather than in `TripDayMapView`.
 
 ### Stage 4 — spot picker and spot details (iOS)
 
