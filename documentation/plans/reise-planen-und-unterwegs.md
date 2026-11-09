@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: planned. Decided with Anton on 2026-11-09. No stage built yet.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 and 2 built.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -232,6 +232,21 @@ opens "Neuer Hafen" (where, ashore from, aboard until). Drag only without a
 date; swipe left to delete with undo through `…/ops/undo`. Title tap edits
 the name; an empty name shows the suggestion. Map variant: stays as
 numbered markers, journeys as lines, the selected stay's card below.
+
+**Built (2026-11-09).** `TripItineraryView` is a line of stays and
+journeys with the days under every stay (`TripItineraryDays.rows`: label
+with date, arrival and departure, "n Spots" / "noch frei" / "zu viel", fill
+from `plannedMinutes` over the window) and "Liste | Karte"
+(`TripItineraryMapView`: numbered stays, journeys as lines, dashed while
+open, a great circle for a flight, the selected stay's card below). The
+sheets are in `TripItinerarySheets.swift`: `TripStaySheet` (new and edit),
+`TripJourneySheet`, `TripPortSheet` (`insertPort` in the draft splits the
+ship journey and keeps the end), `TripHomeSheet`. Every sheet saves the
+whole chain at once; "Sichern" is gone. Removing a stay and shortening one
+offer "Rückgängig" through the journal's newest `itinerary` entry. A tap on
+a stay or a day selects it in the day view until stage 3 brings the stay's
+own planning view. The settings no longer show a date. A ship journey may
+carry up to 30 nights (`MAX_SHIP_NIGHTS`), every other journey keeps 6.
 
 ### Stage 3 — planning view of a stay (iOS)
 

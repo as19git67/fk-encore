@@ -70,6 +70,12 @@ const MAX_STAYS = 20;
 const MAX_STAY_DAYS = 14;
 /** A journey longer than this is a stay of its own. */
 const MAX_JOURNEY_NIGHTS = 6;
+/**
+ * A ship is the exception: its sea days are its nights on the way
+ * (reise-planen-und-unterwegs.md, "Cruises"), and a cruise before its
+ * ports are put in is one long ship journey.
+ */
+const MAX_SHIP_NIGHTS = 30;
 /** How many days of a newly added stay are planned down to spots (§4.3). */
 const DEFAULT_DETAIL_DAYS = 2;
 
@@ -633,7 +639,7 @@ export function deriveFrames(
       });
       cursor = endDate;
     } else {
-      const nights = validateNights(item.nights, index);
+      const nights = validateNights(item.nights, index, item.mode);
       const departMinutes = timeOf(item.departAt, `items[${index}].departAt`);
       const endMinutes = timeOf(item.arriveAt, `items[${index}].arriveAt`);
       if (nights === 0 && departMinutes !== null && endMinutes !== null && endMinutes <= departMinutes) {
@@ -711,14 +717,17 @@ function validateStayDays(days: number | undefined, index: number): number {
   return days;
 }
 
-function validateNights(nights: number | undefined, index: number): number {
+function validateNights(nights: number | undefined, index: number, mode?: string | null): number {
   if (nights === undefined) return 0;
   if (!Number.isInteger(nights) || nights < 0) {
     throw APIError.invalidArgument(`items[${index}].nights must be a whole number of at least 0`);
   }
-  if (nights > MAX_JOURNEY_NIGHTS) {
+  const max = mode === "ship" ? MAX_SHIP_NIGHTS : MAX_JOURNEY_NIGHTS;
+  if (nights > max) {
     throw APIError.invalidArgument(
-      `eine Weiterreise dauert höchstens ${MAX_JOURNEY_NIGHTS + 1} Tage — länger ist es ein eigener Aufenthalt`,
+      mode === "ship"
+        ? `eine Schiffsfahrt hat höchstens ${max} Nächte — mehr ist eine eigene Reise`
+        : `eine Weiterreise dauert höchstens ${max + 1} Tage — länger ist es ein eigener Aufenthalt`,
     );
   }
   return nights;
