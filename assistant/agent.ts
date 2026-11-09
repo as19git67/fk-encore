@@ -723,17 +723,32 @@ const GROUP_WORDS: Record<string, RegExp> = {
 };
 const PER_PHRASE = /\b(?:je|pro|jede[nmrs]?|für\s+jede[nmrs]?|von\s+jede[nmrs]?|an\s+jede[nmrs]?|in\s+jede[nmrs]?|each|every|per)\s+([a-zäöüß']+)(?:\s+(?:und|and)\s+([a-zäöüß']+))?/gi;
 
-/** The group units a question asks for, in the order it names them. */
+/** "gruppiert nach Person, Jahr und Monat", "nach Person und Monat gruppiert", "grouped by person and year": the list of units. */
+const BY_PHRASE = /\b(?:gruppiert|gruppieren|gruppiere|sortiert|aufgeteilt|grouped|group|split)\s+(?:nach|by)\s+((?:[a-zäöüß']+(?:\s*,\s*|\s+(?:und|and)\s+))*[a-zäöüß']+)|\bnach\s+((?:[a-zäöüß']+(?:\s*,\s*|\s+(?:und|and)\s+))*[a-zäöüß']+)\s+(?:gruppiert|gruppieren|aufgeteilt)/gi;
+
+/**
+ * A date unit whose key already holds the coarser ones: a month key is
+ * YYYY-MM, so "je Jahr und Monat" is one group per month, and only the
+ * finest of them needs a level of its own.
+ */
+const SUBSUMES: Record<string, string[]> = {
+  day: ["week", "month", "quarter", "year"],
+  week: ["year"],
+  month: ["quarter", "year"],
+  quarter: ["year"],
+};
+
+/** The group units a question asks for, in the order it names them, a coarser date unit folded into a finer one. */
 export function groupsAsked(question: string): string[] {
   const units: string[] = [];
-  for (const m of question.matchAll(PER_PHRASE)) {
-    for (const word of [m[1], m[2]]) {
-      if (!word) continue;
-      const unit = Object.keys(GROUP_WORDS).find((u) => GROUP_WORDS[u]!.test(word.toLowerCase()));
-      if (unit && !units.includes(unit)) units.push(unit);
-    }
-  }
-  return units;
+  const add = (word: string | undefined) => {
+    if (!word) return;
+    const unit = Object.keys(GROUP_WORDS).find((u) => GROUP_WORDS[u]!.test(word.toLowerCase()));
+    if (unit && !units.includes(unit)) units.push(unit);
+  };
+  for (const m of question.matchAll(PER_PHRASE)) [m[1], m[2]].forEach(add);
+  for (const m of question.matchAll(BY_PHRASE)) (m[1] ?? m[2] ?? "").split(/\s*,\s*|\s+(?:und|and)\s+/i).forEach(add);
+  return units.filter((u) => !units.some((other) => SUBSUMES[other]?.includes(u)));
 }
 
 /**
@@ -752,7 +767,9 @@ export function groupGuard(question: string, tool: Pick<ToolSpec, "name" | "para
   // not be sent back to group again.
   const asked = groupsAsked(question).filter((u) => offered.includes(u) && !grouped.has(u));
   const given = [args.group_by, args.then_by].map((v) => (typeof v === "string" ? v : undefined));
-  const missing = asked.filter((u) => !given.includes(u));
+  // A call groups on two levels (group_by, then_by); a third unit cannot be
+  // asked of it.
+  const missing = asked.slice(0, 2).filter((u) => !given.includes(u));
   if (!missing.length) return null;
   const [first, second] = asked;
   const call = `group_by = "${first}"${second ? `, then_by = "${second}"` : ""}, per_group = how many per ${first} the question asks for`;

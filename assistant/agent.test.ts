@@ -1407,6 +1407,20 @@ describe("the group a question asks for", () => {
     expect(groupsAsked("Die 20 besten Fotos aus Beispielland")).toEqual([]);
   });
 
+  it("reads 'gruppiert nach …' with a list, and folds a coarser date unit into a finer one", () => {
+    expect(groupsAsked("Nimm die Fotos von Lena und Max gruppiert nach Person, Jahr, Monat und wähle jeweils die 3 besten")).toEqual(["person", "month"]);
+    expect(groupsAsked("die Buchungen nach Konto und Quartal gruppiert")).toEqual(["account", "quarter"]);
+    expect(groupsAsked("grouped by person and year")).toEqual(["person", "year"]);
+    expect(groupsAsked("je Jahr und Tag")).toEqual(["day"]);
+  });
+
+  it("asks a person-and-month question for group_by person, then_by month", () => {
+    const question = "Fotos von Lena und Max gruppiert nach Person, Jahr, Monat, jeweils die 3 besten";
+    const err = groupGuard(question, listPhotos, { group_by: "person", per_group: 3, rank_by: "quality", direction: "desc" });
+    expect(err).toContain('group_by = "person", then_by = "month"');
+    expect(groupGuard(question, listPhotos, { group_by: "person", then_by: "month", per_group: 3 })).toBeNull();
+  });
+
   it("refuses a call without the group the question names, and names the arguments to add", () => {
     const err = groupGuard("Nimm von jedem Tag die 10 besten, nicht ähnlichen Bilder", listPhotos, { place: "Beispielstadt", rank_by: "quality", direction: "desc", distinct: true });
     expect(err).toContain('group_by = "day"');
