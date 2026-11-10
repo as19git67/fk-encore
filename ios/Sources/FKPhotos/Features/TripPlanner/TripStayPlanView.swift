@@ -19,6 +19,9 @@ struct TripStayPlanView: View {
     let stopActions: (TripStop) -> [TripPinSheetAction]
     /// Opens the day on its own screen (the band, the order, the breaks).
     let openDay: (Int) -> Void
+    /// The screen's title when it is the trip's first screen (the
+    /// trip's name); otherwise the stay's.
+    var title: String? = nil
 
     @AppStorage("trip.stayPlan.layout") private var layout = Layout.list.rawValue
     /// The day the map shows numbered; nil is every day.
@@ -78,7 +81,7 @@ struct TripStayPlanView: View {
         .safeAreaInset(edge: .bottom) {
             if let undo { undoBar(undo) }
         }
-        .navigationTitle(viewModel.leg?.displayTitle ?? "Aufenthalt")
+        .navigationTitle(title ?? viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -462,6 +465,10 @@ struct TripStayPlanView: View {
             if case .open(let next, _) = mode { return next }
             return false
         }()
+        let isSettled: Bool = {
+            if case .settled = mode { return true }
+            return false
+        }()
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
                 checkControl(stop, mode: mode)
@@ -489,6 +496,11 @@ struct TripStayPlanView: View {
                                 Text(TripStayPlan.caption(stop))
                                     .font(.caption)
                                     .foregroundStyle(stop.outsideHours == true ? Color.red : Color.secondary)
+                                if let extent = stop.extent {
+                                    Label(extent.summary, systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             HStack(spacing: 6) {
                                 if let visit {
@@ -546,6 +558,17 @@ struct TripStayPlanView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else if stop.extent != nil && !isSettled {
+                // A route is a long card: it starts somewhere, and
+                // getting there is a way of its own.
+                Button {
+                    if let leg = viewModel.leg { wayRequest = makeWayRequest(to: stop, on: day, leg: leg, fromHere: true) }
+                } label: {
+                    Label("Weg zum Start", systemImage: "arrow.triangle.turn.up.right.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
                 .controlSize(.small)
             }
         }

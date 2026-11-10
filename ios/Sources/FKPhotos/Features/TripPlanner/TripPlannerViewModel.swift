@@ -107,6 +107,8 @@ final class TripPlannerViewModel {
     /// Set by the itinerary's "Planen" on a stay: the day screen opens
     /// the stay's planning view once the itinerary has closed (stage 3).
     var wantsStayPlan = false
+    /// Set by the itinerary's day rows: open that day on its own screen.
+    var wantsDayScreen = false
 
     /// Set once the screen has landed on a day of its own accord, so
     /// that reloading after a change does not yank the traveller back

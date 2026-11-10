@@ -360,11 +360,11 @@ struct TripJourneySheet: View {
                     TripOptionalClockRow(title: "Abfahrt", clock: Binding(
                         get: { journey.departAt },
                         set: { value in update { $0.departAt = value } },
-                    ), defaultMinutes: 10 * 60)
+                    ), defaultMinutes: 10 * 60, place: ends.from)
                     TripOptionalClockRow(title: "Ankunft", clock: Binding(
                         get: { journey.arriveAt },
                         set: { value in update { $0.arriveAt = value } },
-                    ), defaultMinutes: 15 * 60)
+                    ), defaultMinutes: 15 * 60, place: ends.to)
                 }
             } footer: {
                 if timesOpen {
@@ -703,9 +703,11 @@ struct TripClockRow: View {
     let title: String
     @Binding var clock: String
     var defaultMinutes = 10 * 60
+    /// Where the time is: the place a journey leaves from or comes to.
+    var place: String? = nil
 
     var body: some View {
-        DatePicker(title, selection: Binding(
+        DatePicker(selection: Binding(
             get: {
                 let minutes = TripClock.minutes(fromClock: clock) ?? defaultMinutes
                 return Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60,
@@ -715,7 +717,27 @@ struct TripClockRow: View {
                 let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
                 clock = TripClock.format((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
             },
-        ), displayedComponents: .hourAndMinute)
+        ), displayedComponents: .hourAndMinute) {
+            TripClockRowLabel(title: title, place: place)
+        }
+    }
+}
+
+/// The title of a time, with its place underneath when it has one.
+struct TripClockRowLabel: View {
+    let title: String
+    let place: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            if let place {
+                Text(place)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -725,6 +747,8 @@ struct TripOptionalClockRow: View {
     let title: String
     @Binding var clock: String?
     let defaultMinutes: Int
+    /// Where the time is: the place a journey leaves from or comes to.
+    var place: String? = nil
 
     var body: some View {
         if let current = clock {
@@ -732,7 +756,7 @@ struct TripOptionalClockRow: View {
                 TripClockRow(title: title, clock: Binding(
                     get: { current },
                     set: { clock = $0 },
-                ), defaultMinutes: defaultMinutes)
+                ), defaultMinutes: defaultMinutes, place: place)
                 Button {
                     clock = nil
                 } label: {
@@ -744,7 +768,7 @@ struct TripOptionalClockRow: View {
             }
         } else {
             HStack {
-                Text(title)
+                TripClockRowLabel(title: title, place: place)
                 Spacer()
                 Button("offen · festlegen") { clock = TripClock.format(defaultMinutes) }
                     .buttonStyle(.borderless)

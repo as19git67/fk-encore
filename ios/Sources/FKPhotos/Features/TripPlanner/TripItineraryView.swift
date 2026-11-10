@@ -682,9 +682,8 @@ struct TripItineraryView: View {
 
     // MARK: - Planning a stay
 
-    /// Back to the days, on this stay and, when given, this day. The
-    /// planning view of a whole stay comes with stage 3; until then the
-    /// day view behind this sheet is where a stay is planned.
+    /// Back to the trip, on this stay and, when given, this day: the
+    /// stay's planning view, or the day on its own screen.
     private func plan(_ stay: TripItineraryItem, day: Int?) {
         guard let legId = stay.legId,
               let leg = viewModel.plan?.legs.first(where: { $0.id == legId })
@@ -694,6 +693,7 @@ struct TripItineraryView: View {
         // "Planen" on a stay opens the stay as a whole (stage 3); a day
         // row opens that day.
         viewModel.wantsStayPlan = day == nil
+        viewModel.wantsDayScreen = day != nil
         dismiss()
     }
 

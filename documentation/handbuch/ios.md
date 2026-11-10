@@ -27,7 +27,7 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 | `REV` | Gruppen-Review | Gruppen-Review, Bewertung, Auswahl anpassen |
 | `SUC` | Tab Suche | Suche |
 | `TRP` | Tab Trip | Trip, Trip starten, Trip & Reise |
-| `PLN` | Reiseplaner | Neue Reise, Reiseverlauf, Kandidaten mit Wünschen, Tagesablauf, Karte, Ideen, Reisegruppe, Planen mit, Dokumente, Reisebereit?, Danach, Unterwegs ohne Netz, … |
+| `PLN` | Reiseplaner | Neue Reise, Reiseverlauf, Spot hinzufügen mit Wünschen, Tagesablauf, Karte, Ideen, Reisegruppe, Planen mit, Dokumente, Reisebereit?, Danach, Unterwegs ohne Netz, … |
 | `ASS` | Assistent (aus der Feed-Toolbar) | Assistent, Neue Unterhaltung, Dokument |
 | `SET` | Tab Einstellungen | Profil, Server, Foto-Synchronisierung, Upload-Warteschlange, iPhone-Mediathek, Benachrichtigungen, Suche auf dem iPhone, Trip & Reise, Karten-App, Benutzer, Rollen, Quellen & Lizenzen |
 | `SHR` | Share-Extension | Gefunden, Fund übernehmen |
@@ -212,12 +212,12 @@ einem Spot tun kann, ist in Liste, Detail, Pin-Sheet und Karte dasselbe.
 
 Bildschirme (je Titel ein Bildschirm): Neue Reise, Reise, Reiseverlauf
 (Aufenthalte und Weiterreisen als eine Kette, Zuhause an beiden Enden,
-Plus auf der Linie, Umsortieren, ein Datum im Kopf), Kandidaten (Pool mit Bild, Grund und
-Abstimmungs-Ring je Zeile, Einplanen, Für später merken, Ausblenden,
-Ausgeblendet, „Damit neu planen“, Fairness, „Schon eingeplant“), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
-Abendlicht, Wetter, „Ab hier umplanen“, „Umräumen“, „Gruppe trennen“ /
-„Wieder zusammen“), Tagesausflug, Ausflug, Karte, Strecken (anlegen,
-auf der Karte, in der Nähe, Als GPX exportieren), Reisezeiten prüfen,
+Plus auf der Linie, Umsortieren, ein Datum im Kopf), Spot hinzufügen (Suche, Chips
+Alles, Ideen, Highlights, Ausflüge, Strecken, Essen, Mehr; Abstimmungs-Ring je Idee,
+Feste Zeit, Für später merken, Priorität, Aus den Ideen entfernen), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
+Wetter, „Ab hier umplanen“, „Umräumen“, „Gruppe trennen“ /
+„Wieder zusammen“), Ausflug, Karte, Strecken (anlegen,
+auf der Karte, Als GPX exportieren), Reisezeiten prüfen,
 Fortbewegung, Ideen (In der Nähe, Ausflug, Essen in der Nähe, Artikel
 lesen und auslesen, Artikel-Sprachen, „In eine Reise übernehmen“, „Wer
 schreibt mit“), Reisegruppe und Mobilität,
@@ -232,6 +232,10 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 
 - „Neue Reise“ (Name, Unterkunft, Länge, Datum) → „Planen“ öffnet den
   Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen.
+- Öffnet man eine Reise, steht oben die Leiste der Aufenthalte und
+  darunter die Planung des gewählten Aufenthalts mit allen Tagen auf einem
+  Bildschirm. Ein Tipp auf einen Tag öffnet diesen Tag für sich (Zeitband,
+  Reihenfolge, Pausen); eine Weiterreise zeigt direkt ihren Tag.
 - Eine neue Reise beginnt je Aufenthalt mit einer leeren Liste „Ideen“:
   die App sucht und plant nichts selbst. Ideen kommen über „Spot hinzufügen“,
   „Hier, wo ich bin“, Entdecken („Gegend wählen“, „Andere Gegend…“), Teilen
@@ -250,7 +254,11 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   noch sortiert“. „+ Tag n“ legt einen Treffer auf den vorgeschlagenen
   Tag, langes Drücken auf einen anderen Tag oder nur zu den Ideen; was
   schon dort ist, steht als „In der Reise“ oder „Schon eingeplant“ in der
-  Liste.
+  Liste. Der Kopf eines Aufenthalts öffnet dieselbe Auswahl über „Spot
+  hinzufügen“, „Ideen (n)“, „Ausflüge“ und „Strecken“, jeweils auf ihrem
+  Chip. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
+  „Feste Zeit …“ (legt sie auf den Tag und hält die Uhrzeit), „Für später
+  merken“, die Priorität und „Aus den Ideen entfernen“.
 - **Regen.** Regnet es laut Vorhersage an einem Tag mit Spots draußen,
   steht oben am Tag in der Planung des Aufenthalts ein Hinweis. „Mit Fr
   tauschen“ zeigt erst ein Blatt, welcher Tag was bekommt und was mit
@@ -270,6 +278,14 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   „Nicht mehr vorschlagen“. Danach sucht die Liste dort, und „+ Tag n“
   legt auf den Ausflugstag, bis man den Chip „Ausflug …“ schließt. Unter
   „Schon geplant“ stehen die Ausflüge des Aufenthalts mit „Dort suchen“.
+- **Strecken.** Der Chip „Strecken“ in „Spot hinzufügen“ zeigt die
+  ausgeschilderten Wander- und Radwege in der Nähe, die lohnendsten
+  zuerst, mit geschätzter Dauer, Länge und Anstieg. Ein Tipp zeigt den
+  Verlauf auf der Karte, „+ Tag n“ legt die Strecke auf den Tag, langes
+  Drücken wählt einen anderen Tag oder „Als Idee behalten“. Am Tag ist
+  sie eine Karte mit Länge, Anstieg und „Weg zum Start“. „Strecke von
+  Hand anlegen“ unter der Liste bleibt für einen Weg, den die Karte nicht
+  kennt.
 - Jede Idee hat eine Priorität: **Muss**, **Will** (Standard) oder **Wenn
   Zeit**. Langes Drücken auf „Zur Reise“ fragt sie beim Übernehmen, beim
   Teilen steht sie als Auswahl dabei; danach ändert man sie im Menü der
@@ -288,7 +304,7 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 ### IOS-PLN-02 Tag planen
 
 - Spots einplanen, in einen anderen Block schieben, feste Zeit setzen,
-  Fotostopp markieren, Abendlicht nutzen, Wetter prüfen, Route in der
+  Fotostopp markieren, Abendlicht in den Details des Spots, Wetter prüfen, Route in der
   Karten-App öffnen („Ganzen Block in Karten öffnen“, „Route hierher“),
   „Erledigt“ unterwegs, „Zurück zu den Kandidaten“.
 - Dieselben Aktionen in Liste, Detail („Alle Details“), Pin-Sheet und
@@ -316,15 +332,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Pause öffnet „Jetzt aussuchen“ die Lokale in der Nähe, eure eigenen
   Ideen zuerst („eure Idee“); die Wahl öffnet die Karten-App.
 - Abstimmen ist auf einer Reise mit Ideen ab Werk aus. Einschalten unter
-  Einstellungen › „Planen mit“ › „Abstimmen“; dann zeigt die Liste den
-  Ring je Ort, die Fairness und „Damit neu planen“.
+  Einstellungen › „Planen mit“ › „Abstimmen“; dann trägt jede Idee in
+  „Spot hinzufügen“ einen Ring, und die Namen stehen darunter.
 - **Test:** –
 
 ### IOS-PLN-03 Gemeinsam planen
 
 - Teilnehmer einladen („Planen mit“), Wünsche abstimmen (der Ring an jeder
-  Zeile der Kandidaten: Will ich, Egal, Lieber nicht, Herzenswunsch; Namen
-  darunter, „Damit neu planen“ oben in der Liste),
+  Idee in „Spot hinzufügen“: Will ich, Egal, Lieber nicht, Herzenswunsch;
+  Namen darunter),
   Ideen teilen („Wer schreibt mit“), Rolle übergeben, Reise verlassen.
 - **Test:** –
 

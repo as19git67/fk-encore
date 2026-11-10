@@ -16,7 +16,7 @@ final class TripStayDayTripsTests: XCTestCase {
 
     func testTheChipSitsBetweenHighlightsAndFood() {
         XCTAssertEqual(TripPickerChip.allCases.map(\.label),
-                       ["Alles", "Ideen", "Highlights", "Ausflüge", "Essen", "Mehr"])
+                       ["Alles", "Ideen", "Highlights", "Ausflüge", "Strecken", "Essen", "Mehr"])
         XCTAssertTrue(TripSpotPicker.items(chip: .trips, query: "", ideas: [], highlights: [], results: []).isEmpty)
     }
 }

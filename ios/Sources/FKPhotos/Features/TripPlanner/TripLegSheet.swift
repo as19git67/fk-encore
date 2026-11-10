@@ -1,24 +1,18 @@
 import SwiftUI
 
-/// Everything about one leg, behind a tap on its header (§25).
+/// Everything about one stay, behind a tap on its header (§25): its
+/// place and length in the itinerary, and the ways into its ideas, all
+/// through the spot picker (reise-planen-und-unterwegs.md, stage 7).
 ///
-/// The planner has three levels — the trip, the leg, the day — and the
-/// middle one had no place of its own: its candidates, its ballot and
-/// its day trips sat in the day screen's menu under "Diese Reise",
-/// next to things that really are the trip's. Now the leg's header is
-/// the way in, and what opens is only what belongs to this leg: ways
-/// to add to its pool, the pool itself, the ballot over it, a day out
-/// of it, and the leg's own settings.
-///
-/// A journey (§22.7) is a leg too: it has a pool of places on the way
-/// and a ballot over them, so it opens the same sheet. Changing either
-/// — its place, its length, its times — happens in the itinerary, the
-/// one screen that holds the whole chain, opened on this leg.
+/// A journey (§22.7) opens the same sheet. Changing either — its
+/// place, its length, its times — happens in the itinerary, the one
+/// screen that holds the whole chain, opened on this leg.
 struct TripLegSheet: View {
     @State var viewModel: TripPlannerViewModel
     let leg: TripLeg
     @Environment(\.dismiss) private var dismiss
-    @State private var pickingSpot = false
+    /// The chip the spot picker opens on, while it is open.
+    @State private var picking: TripPickerChip?
 
     var body: some View {
         List {
@@ -48,83 +42,34 @@ struct TripLegSheet: View {
                 }
             }
 
-            // Every way in tells the plan to reload once something went
-            // in: the count below and the candidate list read the plan
-            // in memory, and a spot that is only on the server is a spot
-            // nobody sees until the next pull.
-            Section {
-                // On a trip of ideas the one way in (stage 4): ideas,
-                // highlights, a name or a link, food, with "+ Tag n".
-                if viewModel.plan?.isIdeasTrip == true, !leg.isTransit, leg.position == viewModel.legIndex {
-                    Button {
-                        pickingSpot = true
-                    } label: {
-                        Label("Spot hinzufügen", systemImage: "plus.circle")
+            // Every way in is the spot picker (reise-planen-und-unterwegs.md,
+            // stage 7, step 5), opened on the chip the row names.
+            if leg.position == viewModel.legIndex {
+                Section {
+                    pickerRow("Spot hinzufügen", systemImage: "plus.circle", chip: .all)
+                    pickerRow("Ideen (\(leg.pool.count))", systemImage: "lightbulb.max", chip: .ideas)
+                    if !leg.isTransit {
+                        pickerRow("Ausflüge", systemImage: "car", chip: .trips)
                     }
-                }
-                // A spot whose way is the point (§4.7): the import knows
-                // only points, so it comes by hand.
-                NavigationLink {
-                    TripRouteEntryView(planId: viewModel.planId, legIndex: leg.position) {
-                        Task { await viewModel.load() }
-                    }
-                } label: {
-                    Label("Strecke anlegen", systemImage: "figure.hiking")
-                }
-                // What the map already knows (§4.7).
-                NavigationLink {
-                    TripNearbyRoutesView(planId: viewModel.planId, legIndex: leg.position) {
-                        Task { await viewModel.load() }
-                    }
-                } label: {
-                    Label("Strecken in der Nähe", systemImage: "map")
-                }
-                // „Ihr habt vier Ideen für Lissabon gesammelt" (§20.3).
-                NavigationLink {
-                    TripPlanIdeasView(viewModel: viewModel)
-                } label: {
-                    Label(viewModel.didLoadPlanIdeas
-                          ? "Aus den Ideen übernehmen (\(viewModel.pendingIdeas.count))"
-                          : "Aus den Ideen übernehmen",
-                          systemImage: "lightbulb")
-                }
-            } header: {
-                Text("Hinzufügen")
-            } footer: {
-                Text(viewModel.plan?.isIdeasTrip == true
-                     ? "Alles landet bei den Ideen dieses Aufenthalts; von dort legt ihr es auf einen Tag."
-                     : "Alles landet im Vorrat; von dort aus wird in die Tage geplant.")
-            }
-
-            Section {
-                // Everything this leg could do, and why (§5) — and
-                // what everybody wants of it (§6.1): one list since the
-                // candidate ranking's stage 5, the vote a ring per row.
-                NavigationLink {
-                    TripPoolView(viewModel: viewModel, legIndex: leg.position)
-                } label: {
-                    Label(viewModel.plan?.isIdeasTrip == true
-                          ? "Ideen (\(leg.pool.count))"
-                          : "Kandidaten (\(leg.pool.count))",
-                          systemImage: viewModel.plan?.isIdeasTrip == true ? "lightbulb.max" : "tray.full")
-                }
-                if !leg.isTransit {
-                    // „Vier Tage in San Gimignano" — and the city an hour
-                    // away (§4.6).
+                    pickerRow("Strecken", systemImage: "figure.hiking", chip: .routes)
+                    // „Ihr habt vier Ideen für Lissabon gesammelt" (§20.3).
                     NavigationLink {
-                        TripDayTripView(planId: viewModel.planId, legIndex: leg.position) {
-                            Task { await viewModel.load() }
-                        }
+                        TripPlanIdeasView(viewModel: viewModel)
                     } label: {
-                        Label("Tagesausflug", systemImage: "car")
+                        Label(viewModel.didLoadPlanIdeas
+                              ? "Aus den Ideen übernehmen (\(viewModel.pendingIdeas.count))"
+                              : "Aus den Ideen übernehmen",
+                              systemImage: "lightbulb")
                     }
+                } header: {
+                    Text("Ideen")
+                } footer: {
+                    Text("Alles landet bei den Ideen dieses Aufenthalts oder gleich auf einem Tag.")
                 }
-            } header: {
-                Text(viewModel.plan?.isIdeasTrip == true ? "Ideen" : "Vorrat")
             }
         }
-        .sheet(isPresented: $pickingSpot) {
-            TripSpotPickerView(viewModel: viewModel)
+        .sheet(item: $picking) { chip in
+            TripSpotPickerView(viewModel: viewModel, chip: chip)
         }
         .navigationTitle(leg.isTransit ? "Weiterreise" : "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
@@ -132,6 +77,14 @@ struct TripLegSheet: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Fertig") { dismiss() }
             }
+        }
+    }
+
+    private func pickerRow(_ title: String, systemImage: String, chip: TripPickerChip) -> some View {
+        Button {
+            picking = chip
+        } label: {
+            Label(title, systemImage: systemImage)
         }
     }
 }

@@ -25,16 +25,29 @@ struct TripSpotPickerView: View {
     /// After "Ausflüge": the day out the search is around, and the day
     /// "+ Tag n" adds to.
     @State private var tripFocus: TripDayTripFocus?
+    /// The idea a fixed time is being written for (§4.4).
+    @State private var appointmentFor: TripCandidate?
+    /// What an action in the details queued for when they have closed:
+    /// a second sheet cannot open while the first is up.
+    @State private var afterDetail: (@MainActor () -> Void)?
+    /// The vote over the stay's ideas, when the trip votes.
+    @State private var ballot: TripStayBallot
     @AppStorage("trip.spotPicker.layout") private var layout = Layout.list.rawValue
     @Environment(\.dismiss) private var dismiss
 
     private enum Layout: String { case list, map }
 
-    init(viewModel: TripPlannerViewModel) {
+    /// `chip` is where the picker opens: the stay sheet's "Ideen",
+    /// "Ausflüge" and "Strecken" open on theirs.
+    init(viewModel: TripPlannerViewModel, chip: TripPickerChip = .all) {
         _viewModel = State(initialValue: viewModel)
         _search = State(initialValue: TripPlaceSearchViewModel(
             planId: viewModel.planId, legIndex: viewModel.legIndex, ideas: true))
+        _chip = State(initialValue: chip)
+        _ballot = State(initialValue: TripStayBallot(planId: viewModel.planId, legIndex: viewModel.legIndex))
     }
+
+    private var votes: Bool { viewModel.plan?.isVoting == true }
 
     private var legIndex: Int { viewModel.legIndex }
 
@@ -55,89 +68,123 @@ struct TripSpotPickerView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if chip == .food, let leg = viewModel.leg {
-                    food(leg)
-                } else if chip == .trips, let leg = viewModel.leg {
-                    TripStayDayTripsList(planId: viewModel.planId, leg: leg) { focus, area in
-                        await viewModel.load()
-                        tripFocus = focus
-                        search.area = area
-                        chip = .highlights
-                        search.forgetSuggestions()
-                        await reload()
-                    }
-                } else if layout == Layout.map.rawValue {
-                    TripSpotPickerMap(
-                        items: items,
-                        leg: viewModel.leg,
-                        open: { detail = $0 },
-                        searchHere: { area in
-                            search.area = area
-                            tripFocus = nil
-                            Task { await reload() }
-                        },
-                    )
-                } else {
-                    list
+            content
+                .safeAreaInset(edge: .top, spacing: 0) { chips }
+                .searchable(text: $search.query, placement: .navigationBarDrawer(displayMode: .always),
+                            prompt: "Name, Kategorie oder Karten-Link")
+                .onSubmit(of: .search) { Task { await runQuery() } }
+                .task(id: search.query) {
+                    // Typing pauses before it searches, as everywhere in the app.
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard !Task.isCancelled else { return }
+                    await runQuery()
                 }
-            }
-            .safeAreaInset(edge: .top, spacing: 0) { chips }
-            .searchable(text: $search.query, placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "Name, Kategorie oder Karten-Link")
-            .onSubmit(of: .search) { Task { await runQuery() } }
-            .task(id: search.query) {
-                // Typing pauses before it searches, as everywhere in the app.
-                try? await Task.sleep(for: .milliseconds(400))
-                guard !Task.isCancelled else { return }
-                await runQuery()
-            }
-            .task {
-                if !search.didLoadHighlights { await search.loadHighlights() }
-                await suggest()
-            }
-            .onChange(of: items.map(\.id)) { _, _ in
-                Task { await suggest() }
-            }
-            .navigationTitle("Spot hinzufügen")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("Ansicht", selection: $layout) {
-                        Text("Liste").tag(Layout.list.rawValue)
-                        Text("Karte").tag(Layout.map.rawValue)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
+                .task {
+                    if !search.didLoadHighlights { await search.loadHighlights() }
+                    await suggest()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }
+                .task(id: votes) { if votes { await ballot.load() } }
+                .onChange(of: items.map(\.id)) { _, _ in
+                    Task { await suggest() }
                 }
-            }
-            .plannerErrorBanner(search.errorMessage ?? viewModel.errorMessage, dismiss: {
-                search.errorMessage = nil
-                viewModel.errorMessage = nil
-            })
-            .sheet(item: $detail) { item in
-                NavigationStack {
-                    TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot,
-                                       stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
-                                                                   osmRef: item.detail.osmRef,
-                                                                   startDate: viewModel.leg?.startDate),
-                                       onStayLightAccepted: { await viewModel.load() }) { close in
-                        TripSpotActionSections(actions: actions(item), close: close)
-                    }
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Schließen", systemImage: "xmark") { detail = nil }
+                .navigationTitle("Spot hinzufügen")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Picker("Ansicht", selection: $layout) {
+                            Text("Liste").tag(Layout.list.rawValue)
+                            Text("Karte").tag(Layout.map.rawValue)
                         }
+                        .pickerStyle(.segmented)
+                        .frame(width: 160)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Fertig") { dismiss() }
                     }
                 }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .opaqueSheetBackground()
+                .plannerErrorBanner(errorText, dismiss: {
+                    search.errorMessage = nil
+                    viewModel.errorMessage = nil
+                    ballot.errorMessage = nil
+                })
+                .sheet(item: $appointmentFor) { appointmentSheet($0) }
+                .sheet(item: $detail, onDismiss: runAfterDetail) { detailSheet($0) }
+        }
+    }
+
+    /// What the chip shows.
+    @ViewBuilder
+    private var content: some View {
+        if chip == .food, let leg = viewModel.leg {
+            food(leg)
+        } else if chip == .routes, let leg = viewModel.leg {
+            TripStayRoutesList(viewModel: viewModel, leg: leg)
+        } else if chip == .trips, let leg = viewModel.leg {
+            TripStayDayTripsList(planId: viewModel.planId, leg: leg) { focus, area in
+                await viewModel.load()
+                tripFocus = focus
+                search.area = area
+                chip = .highlights
+                search.forgetSuggestions()
+                await reload()
+            }
+        } else if layout == Layout.map.rawValue {
+            TripSpotPickerMap(
+                items: items,
+                leg: viewModel.leg,
+                open: { detail = $0 },
+                searchHere: { area in
+                    search.area = area
+                    tripFocus = nil
+                    Task { await reload() }
+                },
+            )
+        } else {
+            list
+        }
+    }
+
+    private var errorText: String? {
+        search.errorMessage ?? viewModel.errorMessage ?? ballot.errorMessage
+    }
+
+    @ViewBuilder
+    private func appointmentSheet(_ candidate: TripCandidate) -> some View {
+        if let leg = viewModel.leg {
+            TripFixpointSheet(
+                dayLabel: "Termin",
+                spots: leg.spotChoices,
+                presetSpot: TripSpotChoice(osmRef: candidate.osmRef, name: candidate.displayName,
+                                           plannedOn: nil),
+                days: leg.days.sorted { $0.dayIndex < $1.dayIndex }.map { day in
+                    TripDayChoice(dayIndex: day.dayIndex, label: TripStayPlan.dayTitle(day, leg: leg))
+                },
+                presetDayIndex: tripFocus?.dayIndex ?? search.suggestions[candidate.osmRef]?.dayIndex,
+            ) { draft in
+                await appoint(candidate, draft)
             }
         }
+    }
+
+    @ViewBuilder
+    private func detailSheet(_ item: TripPickerItem) -> some View {
+        NavigationStack {
+            TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot,
+                               stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
+                                                           osmRef: item.detail.osmRef,
+                                                           startDate: viewModel.leg?.startDate),
+                               onStayLightAccepted: { await viewModel.load() }) { close in
+                TripSpotActionSections(actions: actions(item, later: { afterDetail = $0 }), close: close)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Schließen", systemImage: "xmark") { detail = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .opaqueSheetBackground()
     }
 
     // MARK: - Chips
@@ -187,6 +234,9 @@ struct TripSpotPickerView: View {
 
     private var list: some View {
         List {
+            if let kept = viewModel.keptForNextTime {
+                Text(kept).font(.footnote).foregroundStyle(.secondary)
+            }
             if chip == .more && category == nil && search.query.isEmpty {
                 Section("Kategorien") {
                     ForEach(TripPlaceCategory.all) { option in
@@ -260,46 +310,57 @@ struct TripSpotPickerView: View {
                             .frame(width: 56, height: 56)
                             .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
                     }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(TripSpotName.line(item.title, local: item.localName))
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                        if let line = item.line {
-                            Text(line)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        HStack(spacing: 6) {
-                            if let minutes = item.dwellMinutes {
-                                Text(TripClock.duration(minutes))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if case .idea(let candidate) = item.source {
-                                TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
-                                              closedOn: candidate.closedOn ?? [],
-                                              openingHours: candidate.openingHours)
-                            } else if item.isIdea {
-                                Text("Idee").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        if let status = done[item.id] {
-                            Label(status, systemImage: "checkmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                    }
+                    rowText(item)
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
 
+            if let entry = voteEntry(item) {
+                TripVoteRing(ballot: ballot, entry: entry)
+            }
             addButton(item)
         }
         .contextMenu {
             TripSpotActionMenuItems(actions: actions(item))
+        }
+    }
+
+    private func rowText(_ item: TripPickerItem) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(TripSpotName.line(item.title, local: item.localName))
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            if let line = item.line {
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            HStack(spacing: 6) {
+                if let minutes = item.dwellMinutes {
+                    Text(TripClock.duration(minutes))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if case .idea(let candidate) = item.source {
+                    TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
+                                  closedOn: candidate.closedOn ?? [],
+                                  openingHours: candidate.openingHours)
+                } else if item.isIdea {
+                    Text("Idee").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let status = done[item.id] {
+                Label(status, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+            // Who said what, in names rather than a number (§6.1).
+            if let voices = voteEntry(item)?.voices {
+                Text(voices).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -351,9 +412,23 @@ struct TripSpotPickerView: View {
 
     // MARK: - Actions
 
+    /// The vote on an idea, when the trip votes.
+    private func voteEntry(_ item: TripPickerItem) -> TripBallotEntry? {
+        guard votes, item.isIdea else { return nil }
+        return ballot.entry(item.osmRef)
+    }
+
     /// What can be done with a row: the suggested day, every other day,
-    /// keeping it as an idea. One list for the long press and the details.
-    private func actions(_ item: TripPickerItem) -> [TripPinSheetAction] {
+    /// keeping it as an idea; for an idea also a fixed time, how much it
+    /// matters, the vote and taking it out. One list for the long press
+    /// and the details (CLAUDE.md, "Aktionen an Spots in der iOS-App").
+    ///
+    /// `later` runs what opens a sheet of its own once the details have
+    /// closed.
+    private func actions(
+        _ item: TripPickerItem,
+        later: @escaping @MainActor (@escaping @MainActor () -> Void) -> Void = { $0() },
+    ) -> [TripPinSheetAction] {
         guard let leg = viewModel.leg, !item.isPlanned else { return [] }
         let suggested = tripFocus?.dayIndex ?? search.suggestions[item.osmRef]?.dayIndex
         var out: [TripPinSheetAction] = leg.days.sorted { $0.dayIndex < $1.dayIndex }.map { day in
@@ -374,7 +449,54 @@ struct TripSpotPickerView: View {
                 await add(item, onDay: nil)
             })
         }
+        if case .idea(let candidate) = item.source {
+            // A ticket for it (§4.4): the idea goes to that day at that
+            // hour, and the order keeps it there.
+            out.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit …",
+                                          systemImage: "calendar.badge.clock") {
+                later { appointmentFor = candidate }
+            })
+            out.append(TripPinSheetAction(id: "keep", title: "Für später merken", systemImage: "tray.and.arrow.down",
+                                          footer: "Eine Kopie in den Ideenvorrat für eine andere Reise.",
+                                          closes: false) {
+                await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
+            })
+            out.append(contentsOf: TripIdeaPriority.actions(current: candidate.ideaPriority) { priority in
+                await viewModel.setPriority(osmRef: candidate.osmRef, priority)
+            })
+            if let entry = voteEntry(item) {
+                out.append(contentsOf: ballot.actions(entry))
+            }
+            out.append(TripPinSheetAction(
+                id: "drop",
+                title: "Aus den Ideen entfernen",
+                systemImage: "trash",
+                role: .destructive,
+                group: .remove,
+            ) {
+                await viewModel.drop(candidate)
+            })
+        }
         return out
+    }
+
+    private func runAfterDetail() {
+        let work = afterDetail
+        afterDetail = nil
+        work?()
+    }
+
+    /// A fixed time for an idea: on its day first, then the time. The
+    /// time alone would hold a spot that is still only an idea, and the
+    /// day would not show it.
+    private func appoint(_ candidate: TripCandidate, _ draft: TripFixpointSheet.Draft) async {
+        if let day = draft.dayIndex,
+           let target = viewModel.leg?.days.first(where: { $0.dayIndex == day }),
+           let block = TripSpotPicker.spotsBlock(of: target) {
+            guard await viewModel.place(osmRef: candidate.osmRef, inBlock: block.id, onDay: day) else { return }
+            done[candidate.osmRef] = "auf Tag \(day + 1)"
+        }
+        await viewModel.addFixpoint(draft, legIndex: legIndex)
     }
 
     /// Puts a place on a day, or only into the ideas when `day` is nil.

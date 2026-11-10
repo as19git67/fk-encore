@@ -14,6 +14,7 @@ import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
 import { nearbyRoutes, resolveKinds, takeRoute } from "./routes";
 import { addTraveller } from "./travellers";
+import { placeFromPool } from "./pool";
 
 vi.mock("~encore/auth", () => ({ getAuthData: vi.fn() }));
 
@@ -446,5 +447,25 @@ describe("who is coming, and what that does to the list (§3.5)", () => {
 
     const res = await takeRoute({ planId: p.id, osmRef: "relation:1" });
     expect(res.name).toBe("Panoramaweg Beispiel");
+  });
+});
+
+describe("routes on a trip of ideas (stage 7, step 4)", () => {
+  it("comes in as an idea and keeps its course on the day it is put on", async () => {
+    const { plan: p } = await createTripPlan({
+      startEmpty: true,
+      legs: [{ title: "Beispielstadt", anchor: ANCHOR, days: 2 }],
+    });
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1" })]);
+
+    await takeRoute({ planId: p.id, legIndex: 0, osmRef: "relation:1" });
+    const { plan: idea } = await getTripPlan({ planId: p.id });
+    expect(idea.legs[0].pool.map((c) => c.osmRef)).toContain("relation:1");
+
+    await placeFromPool({ planId: p.id, legIndex: 0, dayIndex: 1, osmRef: "relation:1" });
+    const { plan: after } = await getTripPlan({ planId: p.id });
+    const stop = after.legs[0].days[1].blocks.flatMap((b) => b.stops).find((s) => s.osmRef === "relation:1");
+    expect(stop?.dwellMinutes).toBe(210);
+    expect((stop as { extent?: { lengthM?: number } } | undefined)?.extent?.lengthM).toBe(10_000);
   });
 });

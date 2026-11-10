@@ -271,10 +271,10 @@ with `POST …/fixpoints/pin-reason` without a re-plan, rides through every
 re-plan, and goes when the spot is untied (`pin-reason.ts`). The day
 order needed nothing for pinned spots (every booked visit was already a
 hard time); food is no longer held in place. `TripStayPlanView` is
-reached from "Planen" on a stay in the itinerary and from the day's menu
-("Ganzen Aufenthalt planen"); it does not replace `TripPlanDayView` yet,
-which stays the screen of one day (band, order, breaks) that a day
-header opens. Cards carry the actions of `stopActions` behind "⋯", the
+the screen a trip opens on (2026-11-10): for a stay, `TripPlanDayView`
+shows it under the strip of stays and journeys, and a day header pushes
+the screen of one day (band, order, breaks); a transit leg keeps the day
+screen. "Planen" on a stay in the itinerary leads there too. Cards carry the actions of `stopActions` behind "⋯", the
 details on a tap, drag onto a card or a day through the move endpoint.
 The map variant lives in the stay view (chips: all days, one day, ideas;
 "+ Tag n" on a tapped marker) rather than in `TripDayMapView`.
@@ -503,9 +503,32 @@ stage 7 runs in this order, one PR each:
 4. **Routes.** A chip "Strecken" in the picker lists the signposted ways
    of `routes.ts`; in the day a route is a long card with length, climb
    and "Weg zum Start". "Strecke anlegen" stays for a way by hand.
+   **Built (2026-11-10).** No new endpoint: the chip lists `GET
+   …/routes` with `order=worth`, "+ Tag n" takes the way in as an idea
+   (`POST …/routes`, looked up again) and places it on the day
+   `suggest-day` offers, a long press offers every other day or "Als Idee
+   behalten", a tap shows the course (`TripRouteCourseView`). iOS:
+   `TripStayRoutes.swift` behind the chip in `TripSpotPickerView`, with
+   "Strecke von Hand anlegen" (`TripRouteEntryView`) under the list; the
+   card in `TripStayPlanView` shows length and climb and "Weg zum Start"
+   for a route.
 5. **Old search removed.** The region search and the day solver behind
    `startEmpty: false`, the tests that still build trips that way,
    `TripPoolView` and the old entry points of the four features.
+   **Built in part (2026-11-10), the app.** The spot picker carries what
+   the candidates list did for an idea: "Feste Zeit …" (puts the idea on
+   the day first, then the time), "Für später merken", the priority, the
+   vote ring with the names when the trip votes (`TripStayBallot`) and
+   "Aus den Ideen entfernen"; it opens on a chip (`TripSpotPickerView(…,
+   chip:)`). The stay sheet's ways in are rows into the picker ("Spot
+   hinzufügen", "Ideen (n)", "Ausflüge", "Strecken") and "Aus den Ideen
+   übernehmen". Gone: `TripPoolView` with `TripHiddenSpotsView` (an idea
+   is removed, not hidden), `TripNearbyRoutesView`, `TripDayTripView`,
+   `TripEveningLightView`, "Abendlicht" in the day's frame and "Aus den
+   Kandidaten" in a meal block. "Damit neu planen" and the fairness
+   account went with the list: both re-plan through the old solver.
+   Still open: the server side (region search, solver, the tests that
+   build trips with `startEmpty: false`).
 6. **New sources.** An idea more than 30 km from the stay asks "Ausflug
    daraus machen?"; a GPX file or a tour link through the share menu
    becomes a route.
