@@ -470,10 +470,36 @@ stage 7 runs in this order, one PR each:
 2. **Evening light.** The details of a spot marked for photos show the
    best light on each day of the stay; "+ Tag n am Abend" plans it as a
    fixed time with the reason "Licht".
+   **Built (2026-11-10).** `trip-planner/spot-light.ts`: a spot has a
+   light when it is a photo stop, a viewpoint or has a known facade;
+   `GET …/legs/:legIndex/spot-light?osmRef=` gives the evening golden
+   window (after 14:00, at least 15 min) on each day of the stay with the
+   mean cloud cover where a forecast reaches (cloudy from 75 %), and the
+   day to offer (the one it is on unless cloudy, else the clearest coming
+   day). `POST …/spot-light/accept` puts an idea on that day (or moves
+   the stop there), replaces an earlier light time of the spot and writes
+   the fixed time with `pinReason: "light"`, starting early enough that a
+   long visit ends in the light; a ticket or table already fixing the
+   spot refuses it. iOS: `TripStaySpotLight.swift`, a section in
+   `TripSpotDetailView` wherever the details of a stay's spot open (stay
+   planning, spot picker), long press for another day.
 3. **Day trips.** A chip "Ausflüge" in the spot picker lists places 30 min
    to 2 h away (the targets `day-trip.ts` already finds). Choosing one
    makes the day a day out with the way there and back, and the picker
    searches around the target for that day.
+   **Built (2026-11-10).** `trip-planner/day-trips.ts`: `GET
+   …/legs/:legIndex/day-trips` lists up to eight targets 30 min to 2 h
+   away that hold a day of ideas (600 min less both ways, at least three
+   spots; `dayTargetsWithin` in `day-trip.ts`, waved-away places left
+   out), with the day to offer (a coming day that is not a day trip
+   yet, the one with the fewest spots, the first and last only on a
+   short stay). `POST …/day-trips/accept` looks the target up again and
+   sets the day anchor (`setTripDayAnchor`). iOS: chip "Ausflüge" in
+   `TripSpotPickerView` (`TripStayDayTrips.swift`) with "+ Tag n", a long
+   press for another day or "Nicht mehr vorschlagen", and "Schon geplant"
+   for the stay's day trips; choosing one searches the highlights around
+   the target on foot and "+ Tag n" adds to that day until the chip
+   "Ausflug …" is closed.
 4. **Routes.** A chip "Strecken" in the picker lists the signposted ways
    of `routes.ts`; in the day a route is a long card with length, climb
    and "Weg zum Start". "Strecke anlegen" stays for a way by hand.

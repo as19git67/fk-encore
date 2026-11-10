@@ -230,7 +230,7 @@ function windowOf(day: StoredDay): { from: number; to: number } {
   };
 }
 
-function localToday(zone: string | null, now: Date): string {
+export function localToday(zone: string | null, now: Date): string {
   if (!zone) return now.toISOString().slice(0, 10);
   try {
     return new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(now);

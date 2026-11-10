@@ -27,6 +27,10 @@ struct TripSpotDetailView<Actions: View>: View {
     /// Whether this spot keeps the rain off (§7.2). Shown next to the
     /// light, because both answer "when should we go".
     let shelter: TripSpotShelter?
+    /// The evening light on the days of its stay, with "+ Tag n am
+    /// Abend" (stage 7, step 2); nil where the spot is not part of a stay.
+    let stayLight: TripStayLightRef?
+    let onStayLightAccepted: () async -> Void
     /// The extra actions, built with a way to close this screen.
     ///
     /// An action that removes the spot from the day — hiding it, putting
@@ -49,6 +53,8 @@ struct TripSpotDetailView<Actions: View>: View {
         onSave: ((TripSpotEdit) async -> Void)? = nil,
         light: TripSpotLight? = nil,
         shelter: TripSpotShelter? = nil,
+        stayLight: TripStayLightRef? = nil,
+        onStayLightAccepted: @escaping () async -> Void = {},
         onRoute: (() -> Void)? = nil,
         @ViewBuilder actions: @escaping (@escaping () -> Void) -> Actions,
     ) {
@@ -57,6 +63,8 @@ struct TripSpotDetailView<Actions: View>: View {
         self.onSave = onSave
         self.light = light
         self.shelter = shelter
+        self.stayLight = stayLight
+        self.onStayLightAccepted = onStayLightAccepted
         self.onRoute = onRoute
         self.actions = actions
     }
@@ -232,6 +240,10 @@ struct TripSpotDetailView<Actions: View>: View {
             } footer: {
                 Text("„Auf der Karte zeigen\u{201D} folgt der App aus den Einstellungen; "
                      + "die Route fragt, wenn dort „jedes Mal fragen\u{201D} steht.")
+            }
+
+            if let stayLight {
+                TripStaySpotLightSection(ref: stayLight, onAccepted: onStayLightAccepted)
             }
 
             actions({ dismiss() })

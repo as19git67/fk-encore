@@ -258,6 +258,18 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   trockeneren Tag alles drinnen ist. „Nur draußen verschieben“ legt nur
   die Spots draußen auf den trockeneren Tag. Beides lässt sich über die
   Leiste unten oder unter „Änderungen“ zurücknehmen.
+- **Abendlicht.** Die Details eines Spots mit Blick (Fotostopp,
+  Aussichtspunkt, Fassade mit bekannter Richtung) zeigen das beste Licht
+  an den Tagen des Aufenthalts und einen Tag mit Wolken. „+ Tag n am
+  Abend“ plant ihn fest am Abend mit dem Grund „Licht“, langes Drücken
+  wählt einen anderen Tag; ein späterer Abend ersetzt den früheren.
+- **Ausflüge.** Der Chip „Ausflüge“ in „Spot hinzufügen“ zeigt Orte eine
+  halbe bis zwei Stunden entfernt, die einen Tag tragen, mit Fahrzeit und
+  einigen Sehenswürdigkeiten. „+ Tag n“ macht den Tag zum Ausflug (Hin-
+  und Rückweg zählen mit), langes Drücken wählt einen anderen Tag oder
+  „Nicht mehr vorschlagen“. Danach sucht die Liste dort, und „+ Tag n“
+  legt auf den Ausflugstag, bis man den Chip „Ausflug …“ schließt. Unter
+  „Schon geplant“ stehen die Ausflüge des Aufenthalts mit „Dort suchen“.
 - Jede Idee hat eine Priorität: **Muss**, **Will** (Standard) oder **Wenn
   Zeit**. Langes Drücken auf „Zur Reise“ fragt sie beim Übernehmen, beim
   Teilen steht sie als Auswahl dabei; danach ändert man sie im Menü der

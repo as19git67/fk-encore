@@ -135,7 +135,7 @@ struct TripPickerItem: Identifiable, Sendable {
 
 /// The chips over the picker's list.
 enum TripPickerChip: String, CaseIterable, Identifiable, Sendable {
-    case all, ideas, highlights, food, more
+    case all, ideas, highlights, trips, food, more
 
     var id: String { rawValue }
 
@@ -144,6 +144,7 @@ enum TripPickerChip: String, CaseIterable, Identifiable, Sendable {
         case .all: "Alles"
         case .ideas: "Ideen"
         case .highlights: "Highlights"
+        case .trips: "Ausflüge"
         case .food: "Essen"
         case .more: "Mehr"
         }
@@ -183,7 +184,7 @@ enum TripSpotPicker {
             return text.isEmpty ? highlightRows : resultRows
         case .more:
             return resultRows
-        case .food:
+        case .food, .trips:
             return []
         case .all:
             if link != nil { return linkRows }

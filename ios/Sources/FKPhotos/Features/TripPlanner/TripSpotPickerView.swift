@@ -22,6 +22,9 @@ struct TripSpotPickerView: View {
     /// What became of a row, so the list says what it did.
     @State private var done: [String: String] = [:]
     @State private var busy: String?
+    /// After "Ausflüge": the day out the search is around, and the day
+    /// "+ Tag n" adds to.
+    @State private var tripFocus: TripDayTripFocus?
     @AppStorage("trip.spotPicker.layout") private var layout = Layout.list.rawValue
     @Environment(\.dismiss) private var dismiss
 
@@ -55,6 +58,15 @@ struct TripSpotPickerView: View {
             Group {
                 if chip == .food, let leg = viewModel.leg {
                     food(leg)
+                } else if chip == .trips, let leg = viewModel.leg {
+                    TripStayDayTripsList(planId: viewModel.planId, leg: leg) { focus, area in
+                        await viewModel.load()
+                        tripFocus = focus
+                        search.area = area
+                        chip = .highlights
+                        search.forgetSuggestions()
+                        await reload()
+                    }
                 } else if layout == Layout.map.rawValue {
                     TripSpotPickerMap(
                         items: items,
@@ -62,6 +74,7 @@ struct TripSpotPickerView: View {
                         open: { detail = $0 },
                         searchHere: { area in
                             search.area = area
+                            tripFocus = nil
                             Task { await reload() }
                         },
                     )
@@ -107,7 +120,11 @@ struct TripSpotPickerView: View {
             })
             .sheet(item: $detail) { item in
                 NavigationStack {
-                    TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot) { close in
+                    TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot,
+                                       stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
+                                                                   osmRef: item.detail.osmRef,
+                                                                   startDate: viewModel.leg?.startDate),
+                                       onStayLightAccepted: { await viewModel.load() }) { close in
                         TripSpotActionSections(actions: actions(item), close: close)
                     }
                     .toolbar {
@@ -146,9 +163,11 @@ struct TripSpotPickerView: View {
                 if search.area != nil {
                     Button {
                         search.area = nil
+                        tripFocus = nil
                         Task { await reload() }
                     } label: {
-                        Label("Kartenbereich", systemImage: "xmark.circle.fill")
+                        Label(tripFocus.map { "Ausflug \($0.name) · Tag \($0.dayIndex + 1)" } ?? "Kartenbereich",
+                              systemImage: "xmark.circle.fill")
                             .font(.subheadline)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
@@ -293,15 +312,16 @@ struct TripSpotPickerView: View {
                 .accessibilityLabel("Schon eingeplant")
         } else {
             let suggestion = search.suggestions[item.osmRef]
+            let focused = tripFocus?.dayIndex
             Button {
-                Task { await add(item, onDay: suggestion?.dayIndex) }
+                Task { await add(item, onDay: focused ?? suggestion?.dayIndex) }
             } label: {
                 if busy == item.id {
                     ProgressView()
                 } else {
-                    Text(TripSpotPicker.addLabel(suggestion))
+                    Text(focused.map { "+ Tag \($0 + 1)" } ?? TripSpotPicker.addLabel(suggestion))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(suggestion?.full == true ? Color.orange : Color.accentColor)
+                        .foregroundStyle(focused == nil && suggestion?.full == true ? Color.orange : Color.accentColor)
                 }
             }
             .buttonStyle(.bordered)
@@ -335,7 +355,7 @@ struct TripSpotPickerView: View {
     /// keeping it as an idea. One list for the long press and the details.
     private func actions(_ item: TripPickerItem) -> [TripPinSheetAction] {
         guard let leg = viewModel.leg, !item.isPlanned else { return [] }
-        let suggested = search.suggestions[item.osmRef]?.dayIndex
+        let suggested = tripFocus?.dayIndex ?? search.suggestions[item.osmRef]?.dayIndex
         var out: [TripPinSheetAction] = leg.days.sorted { $0.dayIndex < $1.dayIndex }.map { day in
             let title = TripStayPlan.dayTitle(day, leg: leg)
             return TripPinSheetAction(
