@@ -454,6 +454,19 @@ stage 7 runs in this order, one PR each:
    A sheet shows first which day gets what; fixed times stay with their
    day. On a trip of ideas the outdoor spots move to the drier day, never
    back to the ideas.
+   **Built (2026-11-10).** Rules in `trip-planner/stay-weather.ts` (pure:
+   a note for each day with rain and a movable outdoor spot; the drier
+   day is the driest other day of the stay at the same place, a full
+   class drier, nearest first; the swap only when that day holds nothing
+   outdoors; a spot with a fixpoint stays, `pinned` alone does not count
+   because every spot on a trip of ideas was put there by hand),
+   endpoints `GET …/legs/:legIndex/weather-notes` and `POST
+   …/weather-notes/apply` in `stay-weather-api.ts` (recomputes before it
+   moves; local hours from the stay's time zone; each apply is a journal
+   entry `move-stops`, undone by `POST …/ops/undo`, which moves back only
+   the spots still on the day they went to). iOS: `TripWeatherNote.swift`
+   (note card, sheet "Tage tauschen?"), shown in `TripStayPlanView` above
+   each day that is not over, with an undo bar.
 2. **Evening light.** The details of a spot marked for photos show the
    best light on each day of the stay; "+ Tag n am Abend" plans it as a
    fixed time with the reason "Licht".

@@ -41,6 +41,19 @@ struct TripStayPlanView: View {
     @AppStorage("trip.stayPlan.missedAnswered") private var missedAnswered = ""
     /// The sheet "Weg" (stage 6).
     @State private var wayRequest: TripWayRequest?
+    /// Rain over a day with spots outdoors (stage 7, step 1).
+    @State private var weatherNotes: [TripWeatherNote] = []
+    /// The note whose "Tage tauschen?" sheet is open.
+    @State private var swapping: TripWeatherNote?
+    /// The day whose note is being applied.
+    @State private var applyingNote: Int?
+    /// The last weather move, offered back.
+    @State private var undo: WeatherUndo?
+
+    private struct WeatherUndo: Equatable {
+        let sentence: String
+        let opId: Int
+    }
 
     private enum Layout: String { case list, map }
 
@@ -58,6 +71,12 @@ struct TripStayPlanView: View {
         }
         .task(id: viewModel.leg.map(diaryKey)) {
             if let leg = viewModel.leg { await loadDayData(leg) }
+        }
+        .task(id: viewModel.leg.map(notesKey)) {
+            weatherNotes = await TripWeatherAPI.notes(planId: viewModel.planId, legIndex: viewModel.legIndex)
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let undo { undoBar(undo) }
         }
         .navigationTitle(viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
@@ -94,6 +113,13 @@ struct TripStayPlanView: View {
                 },
             )
         }
+        .sheet(item: $swapping) { note in
+            if let leg = viewModel.leg {
+                TripWeatherSwapSheet(note: note, leg: leg) {
+                    Task { await applyNote(note, kind: "swap") }
+                }
+            }
+        }
         .sheet(item: $wayRequest) { request in
             TripWaySheet(viewModel: viewModel, request: request,
                          stayMode: viewModel.leg?.transportMode ?? .foot)
@@ -110,6 +136,60 @@ struct TripStayPlanView: View {
         }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() },
                             dismiss: { viewModel.errorMessage = nil })
+    }
+
+    // MARK: - Weather
+
+    /// What the notes depend on: the stay and which spot is on which day.
+    private func notesKey(_ leg: TripLeg) -> String {
+        let today = TripCalendar.isoDay(Date())
+        let days = leg.days.map { day in "\(day.dayIndex):\(TripStayPlan.stops(of: day).map(\.osmRef))" }
+        return "\(viewModel.legIndex)|\(today)|\(days)"
+    }
+
+    private func applyNote(_ note: TripWeatherNote, kind: String) async {
+        applyingNote = note.dayIndex
+        defer { applyingNote = nil }
+        do {
+            let response = try await TripWeatherAPI.apply(planId: viewModel.planId, legIndex: viewModel.legIndex,
+                                                          dayIndex: note.dayIndex, kind: kind)
+            await viewModel.load()
+            withAnimation { undo = WeatherUndo(sentence: response.sentence, opId: response.opId) }
+        } catch {
+            viewModel.errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    private func undoBar(_ offer: WeatherUndo) -> some View {
+        HStack {
+            Text(offer.sentence)
+                .font(.subheadline)
+                .lineLimit(2)
+            Spacer()
+            Button("Rückgängig") {
+                Task {
+                    do {
+                        try await TripWeatherAPI.undo(planId: viewModel.planId, opId: offer.opId)
+                        withAnimation { undo = nil }
+                        await viewModel.load()
+                    } catch {
+                        viewModel.errorMessage = TripErrorText.describe(error)
+                    }
+                }
+            }
+            .fontWeight(.semibold)
+            Button {
+                withAnimation { undo = nil }
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .accessibilityLabel("Schließen")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.regularMaterial, in: .rect(cornerRadius: 14))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
     }
 
     // MARK: - List
@@ -262,6 +342,12 @@ struct TripStayPlanView: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Öffnet den Tag")
+
+            if phase != .past, let note = weatherNotes.first(where: { $0.dayIndex == day.dayIndex }) {
+                TripWeatherNoteCard(note: note, leg: leg, busy: applyingNote == note.dayIndex,
+                                    swap: { swapping = note },
+                                    moveOutdoor: { Task { await applyNote(note, kind: "outdoor") } })
+            }
 
             if stops.isEmpty {
                 Button {

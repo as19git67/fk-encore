@@ -251,6 +251,13 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Tag, langes Drücken auf einen anderen Tag oder nur zu den Ideen; was
   schon dort ist, steht als „In der Reise“ oder „Schon eingeplant“ in der
   Liste.
+- **Regen.** Regnet es laut Vorhersage an einem Tag mit Spots draußen,
+  steht oben am Tag in der Planung des Aufenthalts ein Hinweis. „Mit Fr
+  tauschen“ zeigt erst ein Blatt, welcher Tag was bekommt und was mit
+  fester Zeit am Tag bleibt, und tauscht dann; angeboten nur, wenn am
+  trockeneren Tag alles drinnen ist. „Nur draußen verschieben“ legt nur
+  die Spots draußen auf den trockeneren Tag. Beides lässt sich über die
+  Leiste unten oder unter „Änderungen“ zurücknehmen.
 - Jede Idee hat eine Priorität: **Muss**, **Will** (Standard) oder **Wenn
   Zeit**. Langes Drücken auf „Zur Reise“ fragt sie beim Übernehmen, beim
   Teilen steht sie als Auswahl dabei; danach ändert man sie im Menü der
