@@ -373,7 +373,7 @@ private struct TripStayMarkerLabel: View {
                 .background(Circle().fill(Color(.systemBackground)))
                 .frame(width: 22, height: 22)
         case .stop:
-            Text(marker.number.map(String.init) ?? marker.dayIndex.map { "\($0 + 1)" } ?? "")
+            Text(marker.number.map { "\($0)" } ?? marker.dayIndex.map { "\($0 + 1)" } ?? "")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
