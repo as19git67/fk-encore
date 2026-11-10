@@ -22,6 +22,9 @@ export default defineConfig({
       // A plan built in a test must not reach Wikimedia for its ranking
       // (trip-planner/fame-client.ts); the tests that cover it set a fake.
       TRIP_SPOT_FAME: "0",
+      // A visit takes the weather of its hour (trip-planner/visit-weather.ts);
+      // the tests that cover it switch it on with a fake forecast.
+      TRIP_VISIT_WEATHER: "0",
       // Most trip tests were written for trips whose pool the region search
       // fills (trips from before the ideas plan keep that behaviour); the
       // tests of a trip that starts empty pass `startEmpty: true`.

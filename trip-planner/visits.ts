@@ -3,16 +3,18 @@
  *
  * Three signals arrive from the device — how long the group stayed, a
  * photo the POI matcher tied to the place, a payment in the window —
- * and this module turns them into one of two outcomes. That split is
- * the concept's, and it is the whole design:
+ * and this module turns them into one of two outcomes:
  *
- *   - **One signal is a suggestion** ("wart ihr hier? ✓ / ✗").
- *   - **Two signals set the status silently.**
+ *   - **A long enough stay sets the status by itself**
+ *     (reise-planen-und-unterwegs.md, stage 5): the group stood there
+ *     for the threshold below, and every check can be undone ("Doch
+ *     nicht", "Nicht besucht").
+ *   - **A photo or a payment alone is a suggestion** ("wart ihr hier?
+ *     ✓ / ✗"): either is taken from the pavement as easily as inside.
+ *   - **Two signals set the status silently**, as before.
  *
- * The asymmetry is deliberate and worth keeping in mind when changing
- * anything here: a wrong tick costs one swipe to undo, while a false
- * alarm interrupts a holiday. So the bar for acting without asking is
- * two independent signals, and the bar for asking is one.
+ * The asymmetry is deliberate: a wrong tick costs one tap to undo,
+ * while a false alarm interrupts a holiday.
  *
  * Everything is pure — minutes and signal names in, a verdict out. No
  * clock, no coordinates, no database. The position itself never reaches
@@ -44,7 +46,7 @@ export type VisitVerdict =
   | "none"
   /** Ask: "wart ihr hier?" */
   | "suggested"
-  /** Two signals agree; set it and say so quietly. */
+  /** A long enough stay, or two signals agreeing; set it and say so quietly. */
   | "confirmed";
 
 export interface DwellThresholdOptions {
@@ -114,8 +116,12 @@ export function assessVisit(
   // The traveller saying so outranks any amount of inference.
   if (evidence.manual) return { verdict: "confirmed", signals, thresholdMinutes };
 
+  // Standing there long enough is a visit on its own; a photo or a
+  // payment alone only asks.
   const verdict: VisitVerdict =
-    signals.length >= 2 ? "confirmed" : signals.length === 1 ? "suggested" : "none";
+    signals.length >= 2 || signals.includes("dwell")
+      ? "confirmed"
+      : signals.length === 1 ? "suggested" : "none";
   return { verdict, signals, thresholdMinutes };
 }
 

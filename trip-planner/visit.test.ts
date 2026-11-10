@@ -106,7 +106,9 @@ describe("POST /trip-planner/plans/:planId/visits", () => {
     expect((await listTripVisits({ planId: plan.id })).visits).toEqual([]);
   });
 
-  it("asks when one signal fired", async () => {
+  it("ticks a long enough stay by itself", async () => {
+    // reise-planen-und-unterwegs.md, stage 5: standing there for the
+    // threshold is a visit; "Doch nicht" undoes it.
     const { plan, stops } = await planWithStops();
     const res = await reportVisit({
       planId: plan.id,
@@ -115,9 +117,25 @@ describe("POST /trip-planner/plans/:planId/visits", () => {
       leftAt: "2026-09-05T11:00:00Z",
     });
 
+    expect(res.verdict).toBe("confirmed");
+    expect(res.visit?.sources).toEqual(["dwell"]);
+    const after = await getTripPlan({ planId: plan.id });
+    expect(after.plan.legs[0].days[0].blocks.flatMap((b) => b.stops)
+      .find((s) => s.rowId === stops[0].rowId)?.status).toBe("done");
+  });
+
+  it("only asks when a photo is all there is", async () => {
+    const { plan, stops } = await planWithStops();
+    const res = await reportVisit({
+      planId: plan.id,
+      stopId: stops[0].rowId,
+      arrivedAt: "2026-09-05T10:00:00Z",
+      hasMatchingPhoto: true,
+    });
+
     expect(res.verdict).toBe("suggested");
     expect(res.visit?.confirmed).toBe(false);
-    expect(res.visit?.sources).toEqual(["dwell"]);
+    expect(res.visit?.sources).toEqual(["photo"]);
   });
 
   it("acts quietly when two signals agree", async () => {
@@ -183,7 +201,7 @@ describe("POST /trip-planner/plans/:planId/visits", () => {
       leftAt: "2026-09-05T14:20:00Z",
     });
 
-    expect(res.verdict).toBe("suggested");
+    expect(res.verdict).toBe("confirmed");
     expect(res.visit?.stopId).toBeNull();
     expect(res.visit?.name).toBe("Unbekannter Hof");
     // Nothing was planned there, so the floor applies.
@@ -220,7 +238,7 @@ describe("POST /trip-planner/plans/:planId/visits", () => {
       planId: plan.id,
       stopId: stops[0].rowId,
       arrivedAt: "2026-09-05T10:00:00Z",
-      leftAt: "2026-09-05T11:00:00Z",
+      hasMatchingPhoto: true,
     });
     const res = await reportVisit({
       planId: plan.id,
@@ -290,7 +308,7 @@ describe('answering „wart ihr hier?“', () => {
       planId: plan.id,
       stopId: stops[0].rowId,
       arrivedAt: "2026-09-05T10:00:00Z",
-      leftAt: "2026-09-05T11:00:00Z",
+      hasMatchingPhoto: true,
     });
 
     const res = await answerTripVisit({ planId: plan.id, visitId: visit!.id, confirmed: true });
@@ -310,7 +328,7 @@ describe('answering „wart ihr hier?“', () => {
       planId: plan.id,
       stopId: stops[0].rowId,
       arrivedAt: "2026-09-05T10:00:00Z",
-      leftAt: "2026-09-05T11:00:00Z",
+      hasMatchingPhoto: true,
     });
 
     const res = await answerTripVisit({ planId: plan.id, visitId: visit!.id, confirmed: false });
@@ -325,7 +343,7 @@ describe('answering „wart ihr hier?“', () => {
       planId: plan.id,
       stopId: stops[0].rowId,
       arrivedAt: "2026-09-05T10:00:00Z",
-      leftAt: "2026-09-05T11:00:00Z",
+      hasMatchingPhoto: true,
     });
 
     const [other] = await db

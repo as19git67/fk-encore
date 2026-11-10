@@ -7,10 +7,11 @@
  * rather than a location history.
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { tripPlanVisits, tripPlans } from "../db/schema";
 import type { VisitSignal } from "./visits";
+import type { VisitWeather } from "./visit-weather";
 
 type Db = typeof dbDefault;
 
@@ -28,6 +29,8 @@ export interface StoredVisit {
   sources: VisitSignal[];
   confirmed: boolean;
   dismissed: boolean;
+  /** The weather of the hour it began; null without a forecast. */
+  weather: VisitWeather | null;
 }
 
 export interface RecordVisitInput {
@@ -82,7 +85,9 @@ export async function recordVisit(
       set: {
         left_at: input.leftAt ?? null,
         sources: [...input.sources],
-        confirmed: input.confirmed,
+        // A stay somebody said no to, or took back, stays taken back:
+        // the next sync of the same stay must not tick it again.
+        confirmed: sql`CASE WHEN ${tripPlanVisits.dismissed} THEN false ELSE ${input.confirmed} END`,
         stop_id: input.stopId ?? null,
       },
     })
@@ -145,6 +150,79 @@ export async function answerVisit(
   return toStoredVisit(row);
 }
 
+/** Keep the weather of a visit's hour on its row. */
+export async function setVisitWeather(
+  visitId: number,
+  weather: VisitWeather,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db.update(tripPlanVisits).set({ weather }).where(eq(tripPlanVisits.id, visitId));
+}
+
+/**
+ * Take a check back (reise-planen-und-unterwegs.md, stage 5): "Doch
+ * nicht", "Nicht besucht".
+ *
+ * A check by hand is gone with it — nothing would detect it again. One
+ * the device made is kept as dismissed, like a no to "wart ihr hier?",
+ * so the next sync does not tick the same stay once more.
+ *
+ * Returns the row as it was, or null when it is not the caller's.
+ */
+export async function undoVisit(
+  planId: number,
+  userId: number,
+  visitId: number,
+  db: Db = dbDefault,
+): Promise<StoredVisit | null> {
+  const [row] = await db
+    .select()
+    .from(tripPlanVisits)
+    .where(and(
+      eq(tripPlanVisits.id, visitId),
+      eq(tripPlanVisits.plan_id, planId),
+      eq(tripPlanVisits.user_id, userId),
+    ))
+    .limit(1);
+  if (!row) return null;
+  await forget([toStoredVisit(row)], db);
+  await touchPlan(planId, db);
+  return toStoredVisit(row);
+}
+
+/**
+ * Every confirmed visit of a stop taken back, whoever made it: the
+ * stop is the group's, and "not visited" on it is said for all.
+ */
+export async function undoVisitsOfStop(
+  planId: number,
+  stopId: number,
+  db: Db = dbDefault,
+): Promise<number> {
+  const rows = await db
+    .select()
+    .from(tripPlanVisits)
+    .where(and(
+      eq(tripPlanVisits.plan_id, planId),
+      eq(tripPlanVisits.stop_id, stopId),
+      eq(tripPlanVisits.confirmed, true),
+    ));
+  await forget(rows.map(toStoredVisit), db);
+  return rows.length;
+}
+
+async function forget(visits: readonly StoredVisit[], db: Db): Promise<void> {
+  const manual = visits.filter((v) => v.sources.includes("manual")).map((v) => v.id);
+  const sensed = visits.filter((v) => !v.sources.includes("manual")).map((v) => v.id);
+  if (manual.length > 0) await db.delete(tripPlanVisits).where(inArray(tripPlanVisits.id, manual));
+  if (sensed.length > 0) {
+    await db
+      .update(tripPlanVisits)
+      .set({ confirmed: false, dismissed: true })
+      .where(inArray(tripPlanVisits.id, sensed));
+  }
+}
+
 async function touchPlan(planId: number, db: Db): Promise<void> {
   await db
     .update(tripPlans)
@@ -166,5 +244,6 @@ function toStoredVisit(row: typeof tripPlanVisits.$inferSelect): StoredVisit {
     sources: (row.sources ?? []) as VisitSignal[],
     confirmed: row.confirmed,
     dismissed: row.dismissed,
+    weather: (row.weather ?? null) as VisitWeather | null,
   };
 }

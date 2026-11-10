@@ -27,11 +27,18 @@ import { loadPlan, saveMovedDays, type StoredDay, type StoredLeg, type StoredPla
 import type { CurrentBlock } from "./redistribute";
 import type { Coordinate } from "./travel";
 import { addDays } from "./leg-dates";
+import { suggestDay, type DaySuggestion } from "./suggest-day";
 
 export interface OrderTripDayRequest {
   planId: number;
   legIndex?: number;
   dayIndex: number;
+  /**
+   * "Neu ordnen" on the running day (reise-planen-und-unterwegs.md,
+   * stage 5): the local minute of now. What is still open starts no
+   * earlier than this; what is done stays where it is.
+   */
+  fromMinutes?: number;
 }
 
 export interface OrderTripDayResponse {
@@ -43,6 +50,12 @@ export interface OrderTripDayResponse {
    * "Will", by OSM reference. Never "Muss", never a booked visit.
    */
   toDrop: string[];
+  /**
+   * For each of `toDrop`, the other day it would go to — the first
+   * with room on which it is open, as "+ Tag n" offers it
+   * (`suggest-day.ts`); a null day means no other day is left.
+   */
+  elsewhere: DaySuggestion[];
 }
 
 export const orderTripDay = api(
@@ -51,6 +64,7 @@ export const orderTripDay = api(
     const userId = requireUser();
     const { plan, leg, day } = await dayOf(req.planId, req.legIndex ?? 0, req.dayIndex, userId);
     if (!day.detailed) throw APIError.failedPrecondition("dieser Tag ist noch nicht ausgeplant");
+    const fromMinutes = validMinute(req.fromMinutes);
 
     const date = leg.startDate ? addDays(leg.startDate, day.dayIndex) : null;
     const walk = dayWalkOfStored(leg.anchor, day);
@@ -85,7 +99,7 @@ export const orderTripDay = api(
       const result = orderDay({
         ...base,
         start: from,
-        startMinutes: past.endMinutes,
+        startMinutes: fromMinutes === null ? past.endMinutes : Math.max(past.endMinutes, fromMinutes),
         stops: open.map((s) => orderStopOf(s, frame.tickets)),
         breaks: breaks.map((b) => ({ ...b, position: Math.max(0, b.position - settled.length) })),
       });
@@ -101,7 +115,7 @@ export const orderTripDay = api(
 
     const updated = await loadPlan(plan.id, userId);
     if (!updated) throw APIError.internal("plan vanished while ordering a day");
-    return { plan: updated, overrunMinutes: overrun, toDrop };
+    return { plan: updated, overrunMinutes: overrun, toDrop, elsewhere: elsewhereOf(updated, leg, day, toDrop) };
   },
 );
 
@@ -200,6 +214,35 @@ async function reload(planId: number, userId: number): Promise<StoredPlan> {
   const plan = await loadPlan(planId, userId);
   if (!plan) throw APIError.internal("plan vanished while changing a break");
   return plan;
+}
+
+/** A minute of the day, or null when none was sent. */
+function validMinute(value: number | undefined): number | null {
+  if (value === undefined || value === null) return null;
+  if (!Number.isInteger(value) || value < 0 || value >= 24 * 60) {
+    throw APIError.invalidArgument("fromMinutes must be a minute of the day");
+  }
+  return value;
+}
+
+/** Another day for each stop that does not fit, from the plan as it now reads. */
+function elsewhereOf(plan: StoredPlan, leg: StoredLeg, day: StoredDay, refs: readonly string[]): DaySuggestion[] {
+  if (refs.length === 0) return [];
+  const now = plan.legs.find((l) => l.id === leg.id) ?? leg;
+  const others = now.days.filter((d) => d.dayIndex !== day.dayIndex);
+  const stops = new Map(day.blocks.flatMap((b) => b.stops).map((s) => [s.osmRef, s]));
+  const today = new Date().toISOString().slice(0, 10);
+  return refs.map((osmRef) => {
+    const stop = stops.get(osmRef);
+    return {
+      osmRef,
+      ...suggestDay(
+        others,
+        { dwellMinutes: stop?.dwellMinutes ?? 45, openingHours: stop?.openingHours ?? null },
+        { startDate: now.startDate, today },
+      ),
+    };
+  });
 }
 
 function requireUser(): number {

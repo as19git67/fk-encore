@@ -31,6 +31,13 @@ struct TripStayPlanView: View {
     @State private var detailPick: TripStayDetailPick?
     /// The spot picker (stage 4).
     @State private var picking = false
+    /// Days that are over, opened from their one line (stage 5).
+    @State private var expandedPast: Set<Int> = []
+    /// The done stop whose check mark was tapped: "Nicht besucht"?
+    @State private var unchecking: TripStop?
+    /// Missed stops already answered ("Lassen"), by row id, so the
+    /// question comes once (stage 5).
+    @AppStorage("trip.stayPlan.missedAnswered") private var missedAnswered = ""
 
     private enum Layout: String { case list, map }
 
@@ -45,6 +52,9 @@ struct TripStayPlanView: View {
             } else {
                 ContentUnavailableView("Kein Aufenthalt", systemImage: "map")
             }
+        }
+        .task(id: viewModel.leg.map(diaryKey)) {
+            if let leg = viewModel.leg { await loadDayData(leg) }
         }
         .navigationTitle(viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
@@ -74,6 +84,16 @@ struct TripStayPlanView: View {
                 actions: stopActions,
             )
         }
+        .confirmationDialog(unchecking?.displayName ?? "", isPresented: Binding(
+            get: { unchecking != nil },
+            set: { if !$0 { unchecking = nil } },
+        ), titleVisibility: .visible) {
+            if let stop = unchecking {
+                Button(stop.stopStatus == .done ? "Nicht besucht" : "Doch wieder offen") {
+                    Task { await viewModel.mark(stop, as: .planned) }
+                }
+            }
+        }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() },
                             dismiss: { viewModel.errorMessage = nil })
     }
@@ -81,10 +101,50 @@ struct TripStayPlanView: View {
     // MARK: - List
 
     private func list(_ leg: TripLeg) -> some View {
+        TimelineView(.everyMinute) { context in
+            list(leg, now: context.date)
+        }
+    }
+
+    /// What the diaries and forecasts depend on: the stay, its days and
+    /// what is ticked off on them.
+    private func diaryKey(_ leg: TripLeg) -> String {
+        let today = TripCalendar.isoDay(Date())
+        let done = leg.days.flatMap(TripStayPlan.stops(of:)).filter { $0.stopStatus != .planned }.map(\.rowId)
+        return "\(viewModel.legIndex)|\(today)|\(leg.days.map(\.dayIndex))|\(done)"
+    }
+
+    /// Weather and photos of the days that are over or being lived,
+    /// and the forecast of the days it reaches.
+    private func loadDayData(_ leg: TripLeg) async {
+        let today = TripCalendar.isoDay(Date())
+        for day in days(of: leg) {
+            let phase = TripOnTheRoad.phase(of: day.dayIndex, in: leg, today: today)
+            if phase == .past || phase == .running { await viewModel.loadDiary(dayIndex: day.dayIndex) }
+            if phase != .past, TripOnTheRoad.hasForecast(day.dayIndex, in: leg, today: today),
+               viewModel.stayForecast(dayIndex: day.dayIndex) == nil {
+                await viewModel.loadStayForecast(dayIndex: day.dayIndex)
+            }
+        }
+    }
+
+    private func list(_ leg: TripLeg, now: Date) -> some View {
+        let today = TripCalendar.isoDay(now)
+        let nowMinutes = TripDayTimeline.minutesOfDay(now)
+        let running = leg.days.first { TripOnTheRoad.phase(of: $0.dayIndex, in: leg, today: today) == .running }
+        return ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 ForEach(days(of: leg)) { day in
-                    daySection(day, leg: leg)
+                    let phase = TripOnTheRoad.phase(of: day.dayIndex, in: leg, today: today)
+                    Group {
+                        if phase == .past && !expandedPast.contains(day.dayIndex) {
+                            pastLine(day, leg: leg, today: today)
+                        } else {
+                            daySection(day, leg: leg, phase: phase, now: now, nowMinutes: nowMinutes, today: today)
+                        }
+                    }
+                    .id(day.dayIndex)
                 }
                 if !leg.pool.isEmpty {
                     Text(leg.pool.count == 1 ? "1 Idee wartet auf einen Tag"
@@ -97,10 +157,57 @@ struct TripStayPlanView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
+        // On the road the stay opens on the day being lived.
+        .onAppear {
+            if let running { proxy.scrollTo(running.dayIndex, anchor: .top) }
+        }
+        }
     }
 
-    private func daySection(_ day: TripDay, leg: TripLeg) -> some View {
+    /// A day that is over, as one line: visited, missed, photos.
+    private func pastLine(_ day: TripDay, leg: TripLeg, today: String) -> some View {
+        let missed = unanswered(TripOnTheRoad.missed(day, phase: .past, nowMinutes: 0))
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation { _ = expandedPast.insert(day.dayIndex) }
+            } label: {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(TripStayPlan.dayTitle(day, leg: leg))
+                            .font(.subheadline.weight(.semibold))
+                        Text(TripOnTheRoad.pastLine(day, diary: viewModel.diary(dayIndex: day.dayIndex)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Zeigt den Tag")
+            if !missed.isEmpty {
+                missedCard(missed, day: day, leg: leg, today: today)
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+    }
+
+    private func daySection(_ day: TripDay, leg: TripLeg, phase: TripDayPhase, now: Date,
+                            nowMinutes: Int, today: String) -> some View {
         let stops = TripStayPlan.stops(of: day)
+        let onTheRoad = phase == .running || phase == .past
+        let order = TripOnTheRoad.runningOrder(stops)
+        let next = phase == .running ? order.open.first : nil
+        let diary = viewModel.diary(dayIndex: day.dayIndex)
+        let behind = phase == .running ? TripOnTheRoad.behindMinutes(day, nowMinutes: nowMinutes) : nil
+        let advice = viewModel.reorderAdvice.flatMap {
+            $0.legIndex == viewModel.legIndex && $0.dayIndex == day.dayIndex ? $0 : nil
+        }
+        let missed = unanswered(TripOnTheRoad.missed(day, phase: phase, nowMinutes: nowMinutes))
         return VStack(alignment: .leading, spacing: 8) {
             Button {
                 openDay(day.dayIndex)
@@ -109,7 +216,21 @@ struct TripStayPlanView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(TripStayPlan.dayTitle(day, leg: leg))
                             .font(.headline)
+                        if phase == .running {
+                            Text("Heute")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.15), in: .capsule)
+                                .foregroundStyle(Color.accentColor)
+                        }
                         Spacer()
+                        if let weather = viewModel.stayForecast(dayIndex: day.dayIndex)?.overall {
+                            Label(weather.summary, systemImage: weather.symbolName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .labelStyle(.titleAndIcon)
+                        }
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
@@ -145,9 +266,50 @@ struct TripStayPlanView: View {
                             .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                             .foregroundStyle(targetedDay == day.dayIndex ? Color.accentColor : Color.secondary.opacity(0.5))
                     }
+            } else if onTheRoad {
+                if let behind, advice == nil {
+                    behindNotice(behind, day: day, nowMinutes: nowMinutes)
+                }
+                if let advice {
+                    adviceCard(advice, leg: leg)
+                }
+                ForEach(order.settled) { stop in
+                    card(stop, day: day, number: nil, mode: .settled(fresh: TripOnTheRoad.isFresh(stop, now: now)),
+                         diary: diary?.spot(stop.osmRef))
+                }
+                ForEach(diary?.unplanned ?? []) { stay in
+                    stayRow(stay, dayIndex: day.dayIndex)
+                }
+                if phase == .running {
+                    nowLine(nowMinutes)
+                }
+                ForEach(Array(order.open.enumerated()), id: \.element.id) { index, stop in
+                    card(stop, day: day, number: index + 1,
+                         mode: .open(isNext: stop.rowId == next?.rowId, canCheck: phase == .running),
+                         diary: nil)
+                        .draggable(TripStayPlan.dragId(stop)) {
+                            Text(stop.displayName)
+                                .font(.subheadline.weight(.semibold))
+                                .padding(8)
+                                .background(.regularMaterial, in: .rect(cornerRadius: 8))
+                        }
+                        .dropDestination(for: String.self) { items, _ in
+                            drop(items, onDay: day, before: stops.firstIndex { $0.rowId == stop.rowId })
+                        }
+                }
+                if !missed.isEmpty {
+                    missedCard(missed, day: day, leg: leg, today: today)
+                }
+                if phase == .past {
+                    Button("Einklappen") {
+                        withAnimation { _ = expandedPast.remove(day.dayIndex) }
+                    }
+                    .font(.footnote)
+                    .frame(maxWidth: .infinity)
+                }
             } else {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
-                    card(stop, day: day, number: index + 1)
+                    card(stop, day: day, number: index + 1, mode: .plan, diary: nil)
                         .draggable(TripStayPlan.dragId(stop)) {
                             Text(stop.displayName)
                                 .font(.subheadline.weight(.semibold))
@@ -178,57 +340,336 @@ struct TripStayPlanView: View {
         }
     }
 
-    private func card(_ stop: TripStop, day: TripDay, number: Int) -> some View {
+    /// How a card is drawn: planning ahead, still to come on the road
+    /// (with the check, and "Route" on the next one), or settled.
+    private enum CardMode: Equatable {
+        case plan
+        case open(isNext: Bool, canCheck: Bool)
+        case settled(fresh: Bool)
+    }
+
+    private func card(_ stop: TripStop, day: TripDay, number: Int?, mode: CardMode,
+                      diary: TripDiarySpot?) -> some View {
         let visit = viewModel.visit(holding: stop, onDay: day.dayIndex)
-        return HStack(alignment: .top, spacing: 10) {
-            Button {
-                detailPick = TripStayDetailPick(stop: stop, dayIndex: day.dayIndex)
-            } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    if let image = stop.image {
-                        TripSpotThumbnail(image: image, height: 56, width: 56)
-                    } else {
-                        Text("\(number)")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 56, height: 56)
-                            .background(Color.accentColor.opacity(0.7), in: .rect(cornerRadius: 8))
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(TripSpotName.line(stop.displayName, local: stop.localName))
-                            .font(.subheadline.weight(.semibold))
-                            .strikethrough(stop.stopStatus == .skipped)
-                            .lineLimit(2)
-                        Text(TripStayPlan.caption(stop))
-                            .font(.caption)
-                            .foregroundStyle(stop.outsideHours == true ? Color.red : Color.secondary)
-                        HStack(spacing: 6) {
-                            if let visit {
-                                TripPinChip(reason: visit.reason, startMinutes: visit.startMinutes)
-                            }
-                            TripIdeaChips(priority: stop.ideaPriority,
-                                          closedThatDay: stop.closedThatDay == true,
-                                          openingHours: stop.openingHours)
+        let isNext: Bool = {
+            if case .open(let next, _) = mode { return next }
+            return false
+        }()
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                checkControl(stop, mode: mode)
+                Button {
+                    detailPick = TripStayDetailPick(stop: stop, dayIndex: day.dayIndex)
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        if let image = stop.image {
+                            TripSpotThumbnail(image: image, height: 56, width: 56)
+                        } else {
+                            Text(number.map { "\($0)" } ?? "")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 56, height: 56)
+                                .background(Color.accentColor.opacity(0.7), in: .rect(cornerRadius: 8))
                         }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(TripSpotName.line(stop.displayName, local: stop.localName))
+                                .font(.subheadline.weight(.semibold))
+                                .strikethrough(stop.stopStatus == .skipped)
+                                .lineLimit(2)
+                            if case .settled = mode {
+                                settledLine(stop, diary: diary)
+                            } else {
+                                Text(TripStayPlan.caption(stop))
+                                    .font(.caption)
+                                    .foregroundStyle(stop.outsideHours == true ? Color.red : Color.secondary)
+                            }
+                            HStack(spacing: 6) {
+                                if let visit {
+                                    TripPinChip(reason: visit.reason, startMinutes: visit.startMinutes)
+                                }
+                                TripIdeaChips(priority: stop.ideaPriority,
+                                              closedThatDay: stop.closedThatDay == true,
+                                              openingHours: stop.openingHours)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
+                    .contentShape(.rect)
                 }
-                .contentShape(.rect)
+                .buttonStyle(.plain)
+
+                Menu {
+                    TripSpotActionMenuItems(actions: stopActions(stop))
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 32, height: 32)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("Aktionen für \(stop.displayName)")
+            }
+            if let photos = diary?.photos, !photos.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(photos) { photo in
+                        PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
+                            .frame(width: 44, height: 44)
+                            .clipShape(.rect(cornerRadius: 6))
+                    }
+                }
+                .accessibilityHidden(true)
+            }
+            if mode == .settled(fresh: true) {
+                HStack {
+                    Text("Gerade abgehakt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Doch nicht") {
+                        Task { await viewModel.mark(stop, as: .planned) }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+            if isNext {
+                Button {
+                    TripMapsOpen.route(.single(stop.coordinate, mode: viewModel.leg?.transportMode ?? .foot),
+                                       using: TripMapsPreference.load())
+                } label: {
+                    Label("Route", systemImage: "arrow.triangle.turn.up.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(Color(.systemBackground), in: .rect(cornerRadius: 10))
+        .overlay {
+            if isNext {
+                RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 2)
+            }
+        }
+        .opacity(stop.stopStatus == .skipped ? 0.6 : 1)
+    }
+
+    /// The check on a card on the road: an empty circle that ticks the
+    /// spot off by hand, a filled one that offers "Nicht besucht".
+    @ViewBuilder
+    private func checkControl(_ stop: TripStop, mode: CardMode) -> some View {
+        switch mode {
+        case .plan:
+            EmptyView()
+        case .open(_, let canCheck):
+            if canCheck {
+                Button {
+                    Task { await viewModel.mark(stop, as: .done) }
+                } label: {
+                    Image(systemName: "circle")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 56)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(stop.displayName) abhaken")
+            }
+        case .settled:
+            Button {
+                unchecking = stop
+            } label: {
+                Image(systemName: stop.stopStatus == .done ? "checkmark.circle.fill" : "xmark.circle")
+                    .font(.title2)
+                    .foregroundStyle(stop.stopStatus == .done ? Color.green : Color.secondary)
+                    .frame(width: 32, height: 56)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(stop.stopStatus == .done ? "Besucht, antippen für „Nicht besucht“"
+                                                         : "Übersprungen, antippen für „Doch wieder offen“")
+        }
+    }
 
+    /// "10:42 · 18° · 4 Fotos" on a visited card.
+    private func settledLine(_ stop: TripStop, diary: TripDiarySpot?) -> some View {
+        HStack(spacing: 6) {
+            if stop.stopStatus == .skipped {
+                Text("Übersprungen")
+            } else if let time = stop.doneTime {
+                Text(time)
+            }
+            if let weather = diary?.weather {
+                Label(weather.degrees, systemImage: weather.symbolName)
+                    .labelStyle(.titleAndIcon)
+            }
+            if let count = diary?.photoCount, count > 0 {
+                Label(count == 1 ? "1 Foto" : "\(count) Fotos", systemImage: "photo")
+                    .labelStyle(.titleAndIcon)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    /// A place the group stayed at without a plan.
+    private func stayRow(_ stay: TripDiaryStay, dayIndex: Int) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(stay.displayName)
+                    .font(.subheadline.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text("Ungeplant")
+                    if let time = stay.arrivalTime { Text(time) }
+                    if let weather = stay.weather {
+                        Label(weather.degrees, systemImage: weather.symbolName).labelStyle(.titleAndIcon)
+                    }
+                    if stay.photoCount > 0 {
+                        Label(stay.photoCount == 1 ? "1 Foto" : "\(stay.photoCount) Fotos", systemImage: "photo")
+                            .labelStyle(.titleAndIcon)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
             Menu {
-                TripSpotActionMenuItems(actions: stopActions(stop))
+                Button("Aus dem Tag entfernen", systemImage: "trash", role: .destructive) {
+                    Task { await viewModel.removeStay(stay, dayIndex: dayIndex) }
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: 32, height: 32)
                     .contentShape(.rect)
             }
-            .accessibilityLabel("Aktionen für \(stop.displayName)")
+            .accessibilityLabel("Aktionen für \(stay.displayName)")
         }
         .padding(10)
         .background(Color(.systemBackground), in: .rect(cornerRadius: 10))
-        .opacity(stop.stopStatus == .planned ? 1 : 0.6)
+    }
+
+    /// The line between what was and what is to come.
+    private func nowLine(_ nowMinutes: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("jetzt · \(TripClock.format(nowMinutes))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(height: 1.5)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Behind plan: what is left does not fit any more.
+    private func behindNotice(_ minutes: Int, day: TripDay, nowMinutes: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .foregroundStyle(.orange)
+            Text("Ab jetzt passt nicht mehr alles – \(TripClock.duration(minutes)) zu viel.")
+                .font(.subheadline)
+            Spacer(minLength: 0)
+            Button("Neu ordnen") {
+                Task { await viewModel.reorderFromNow(dayIndex: day.dayIndex, nowMinutes: nowMinutes) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 10))
+    }
+
+    /// After "Neu ordnen": what still does not fit, each with its other day.
+    private func adviceCard(_ advice: TripReorderAdvice, leg: TripLeg) -> some View {
+        let stops = leg.days.flatMap(TripStayPlan.stops(of:))
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Neu geordnet. Das passt heute nicht mehr:")
+                .font(.subheadline.weight(.semibold))
+            ForEach(advice.moves) { move in
+                if let stop = stops.first(where: { $0.osmRef == move.osmRef }) {
+                    HStack {
+                        Text(stop.displayName)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        Spacer()
+                        if let target = move.dayIndex, let blockId = move.blockId {
+                            Button("Auf Tag \(target + 1)") {
+                                Task {
+                                    _ = await viewModel.move(stop, toDayIndex: target, toBlockId: blockId)
+                                    viewModel.reorderAdvice = nil
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        Button("Zu den Ideen") {
+                            Task {
+                                await viewModel.returnToPool(stop)
+                                viewModel.reorderAdvice = nil
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+            Button("Lassen, wie es ist") { viewModel.reorderAdvice = nil }
+                .font(.footnote)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 10))
+    }
+
+    /// The evening question, once per spot: another day, or back to the ideas.
+    private func missedCard(_ stops: [TripStop], day: TripDay, leg: TripLeg, today: String) -> some View {
+        let later = TripOnTheRoad.laterDay(after: day.dayIndex, in: leg, today: today)
+        let target = later.flatMap { TripStayPlan.dropTarget(day: $0, before: nil) }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(stops.count == 1 ? "Nicht geschafft" : "\(stops.count) Spots nicht geschafft")
+                .font(.subheadline.weight(.semibold))
+            ForEach(stops) { stop in
+                HStack {
+                    Text(stop.displayName)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Spacer()
+                    if let later, let target {
+                        Button("Auf Tag \(later.dayIndex + 1)") {
+                            Task {
+                                _ = await viewModel.move(stop, toDayIndex: later.dayIndex, toBlockId: target.blockId)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    Button("Zu den Ideen") {
+                        Task { await viewModel.returnToPool(stop) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+            Button("Lassen") { answer(stops) }
+                .font(.footnote)
+        }
+        .padding(10)
+        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 10))
+    }
+
+    private func unanswered(_ stops: [TripStop]) -> [TripStop] {
+        let answered = Set(missedAnswered.split(separator: ",").compactMap { Int($0) })
+        return stops.filter { !answered.contains($0.rowId) }
+    }
+
+    private func answer(_ stops: [TripStop]) {
+        var answered = missedAnswered.split(separator: ",").map(String.init)
+        answered.append(contentsOf: stops.map { String($0.rowId) })
+        // The newest two hundred are enough to remember a trip by.
+        missedAnswered = answered.suffix(200).joined(separator: ",")
     }
 
     /// Moves the dragged stop onto `day`, before the card at `before`
@@ -250,7 +691,21 @@ struct TripStayPlanView: View {
     // MARK: - Map
 
     private func map(_ leg: TripLeg) -> some View {
-        let markers = TripStayPlan.markers(leg: leg, selectedDay: mapDay, ideas: showIdeasOnMap)
+        let today = TripCalendar.isoDay(Date())
+        let running = leg.days.first { TripOnTheRoad.phase(of: $0.dayIndex, in: leg, today: today) == .running }
+        // The day whose visits draw their line: the one chosen, else the one being lived.
+        let pathDay = mapDay.flatMap { index in leg.days.first { $0.dayIndex == index } } ?? running
+        let path = pathDay.map { TripOnTheRoad.visitPath($0, diary: viewModel.diary(dayIndex: $0.dayIndex)) } ?? []
+        let next = running.flatMap { TripOnTheRoad.next(TripStayPlan.stops(of: $0)) }
+        var photoCounts: [Int: Int] = [:]
+        for day in leg.days {
+            guard let diary = viewModel.diary(dayIndex: day.dayIndex) else { continue }
+            for stop in TripStayPlan.stops(of: day) {
+                if let count = diary.spot(stop.osmRef)?.photoCount, count > 0 { photoCounts[stop.rowId] = count }
+            }
+        }
+        let markers = TripStayPlan.markers(leg: leg, selectedDay: mapDay, ideas: showIdeasOnMap,
+                                           nextRowId: next?.rowId, photoCounts: photoCounts)
         return VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -266,6 +721,13 @@ struct TripStayPlanView: View {
             .background(.bar)
 
             Map {
+                UserAnnotation()
+                if path.count >= 2 {
+                    MapPolyline(coordinates: path.map {
+                        CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+                    })
+                    .stroke(Color.green, style: StrokeStyle(lineWidth: 3, dash: [6, 4]))
+                }
                 Annotation("Unterkunft", coordinate: CLLocationCoordinate2D(latitude: leg.anchor.lat,
                                                                            longitude: leg.anchor.lon)) {
                     Image(systemName: "bed.double.fill")
@@ -305,6 +767,11 @@ struct TripStayPlanView: View {
         ForEach(preferred.map { [$0] } ?? targets) { day in
             Button("+ Tag \(day.dayIndex + 1)") {
                 Task { await add(marker, to: day, leg: leg) }
+            }
+        }
+        if marker.isNext, case .stop(let rowId) = marker.kind, let stop = TripStayPlan.stop(rowId: rowId, in: leg) {
+            Button("Route") {
+                TripMapsOpen.route(.single(stop.coordinate, mode: leg.transportMode), using: TripMapsPreference.load())
             }
         }
         if let dayIndex = marker.dayIndex {
@@ -367,11 +834,22 @@ struct TripStayMarker: Identifiable {
     let number: Int?
     /// On another day than the one the map is showing.
     let faded: Bool
+    /// Visited (stage 5): drawn with a check.
+    var done: Bool = false
+    /// The next spot of the day being lived, which carries "Route".
+    var isNext: Bool = false
+    /// Photos taken there, from the day's diary.
+    var photoCount: Int = 0
 
     var accessibilityLabel: String {
         switch kind {
         case .idea: "Idee \(title)"
-        case .stop: dayIndex.map { "Tag \($0 + 1): \(title)" } ?? title
+        case .stop:
+            [dayIndex.map { "Tag \($0 + 1): \(title)" } ?? title,
+             done ? "besucht" : nil,
+             isNext ? "als Nächstes" : nil,
+             photoCount > 0 ? "\(photoCount) Fotos" : nil]
+                .compactMap { $0 }.joined(separator: ", ")
         }
     }
 }
@@ -388,13 +866,30 @@ private struct TripStayMarkerLabel: View {
                 .background(Circle().fill(Color(.systemBackground)))
                 .frame(width: 22, height: 22)
         case .stop:
-            Text(marker.number.map { "\($0)" } ?? marker.dayIndex.map { "\($0 + 1)" } ?? "")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(Color.accentColor, in: .circle)
-                .overlay(Circle().strokeBorder(.white, lineWidth: 2))
-                .opacity(marker.faded ? 0.35 : 1)
+            Group {
+                if marker.done {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                } else {
+                    Text(marker.number.map { "\($0)" } ?? marker.dayIndex.map { "\($0 + 1)" } ?? "")
+                        .font(.caption.weight(.bold))
+                }
+            }
+            .foregroundStyle(.white)
+            .frame(width: marker.isNext ? 34 : 28, height: marker.isNext ? 34 : 28)
+            .background(marker.done ? Color.green : Color.accentColor, in: .circle)
+            .overlay(Circle().strokeBorder(.white, lineWidth: marker.isNext ? 3 : 2))
+            .overlay(alignment: .topTrailing) {
+                if marker.photoCount > 0 {
+                    Text("\(marker.photoCount)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .background(Color.black.opacity(0.7), in: .capsule)
+                        .offset(x: 8, y: -6)
+                }
+            }
+            .opacity(marker.faded ? 0.35 : 1)
         }
     }
 }
@@ -478,7 +973,8 @@ enum TripStayPlan {
 
     /// The map's markers: the selected day numbered in its order, the
     /// other days faded, the ideas hollow when shown.
-    static func markers(leg: TripLeg, selectedDay: Int?, ideas: Bool) -> [TripStayMarker] {
+    static func markers(leg: TripLeg, selectedDay: Int?, ideas: Bool, nextRowId: Int? = nil,
+                        photoCounts: [Int: Int] = [:]) -> [TripStayMarker] {
         var out: [TripStayMarker] = []
         for day in leg.days.sorted(by: { $0.dayIndex < $1.dayIndex }) {
             for (index, stop) in stops(of: day).enumerated() {
@@ -491,6 +987,9 @@ enum TripStayPlan {
                     dayIndex: day.dayIndex,
                     number: onSelected ? index + 1 : nil,
                     faded: selectedDay != nil && !onSelected,
+                    done: stop.stopStatus == .done,
+                    isNext: stop.rowId == nextRowId,
+                    photoCount: photoCounts[stop.rowId] ?? 0,
                 ))
             }
         }
