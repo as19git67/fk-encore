@@ -385,11 +385,28 @@ function pickTarget(
   dayMinutes: number,
   refused: ReadonlySet<string>,
 ): DayTripTarget | null {
+  return dayTargetsWithin(targets, anchor, mode, dayMinutes, refused)[0] ?? null;
+}
+
+/**
+ * Every destination that would actually be a day, in the order the
+ * region ranked them. `minTravelMinutes` keeps out what is so close it
+ * is part of the stay anyway.
+ */
+export function dayTargetsWithin(
+  targets: readonly GeoDayTarget[],
+  anchor: Coordinate,
+  mode: TransportMode,
+  dayMinutes: number,
+  refused: ReadonlySet<string>,
+  minTravelMinutes = 0,
+): DayTripTarget[] {
+  const found: DayTripTarget[] = [];
   for (const target of targets) {
-    const key = keyFor(target);
+    const key = dayTargetKey(target);
     if (refused.has(key)) continue;
     const travelMinutes = travelLeg(anchor, target.at, mode).minutes;
-    if (travelMinutes > MAX_TRIP_TRAVEL_MINUTES) continue;
+    if (travelMinutes > MAX_TRIP_TRAVEL_MINUTES || travelMinutes < minTravelMinutes) continue;
     const dayAtTargetMinutes = dayMinutes - 2 * travelMinutes;
     if (dayAtTargetMinutes < MIN_DAY_AT_TARGET_MINUTES) continue;
     // Enough there to fill what is left of the day, and never fewer
@@ -401,7 +418,7 @@ function pickTarget(
     );
     if (target.spotCount < needed) continue;
 
-    return {
+    found.push({
       name: target.name,
       source: target.source,
       key,
@@ -413,9 +430,9 @@ function pickTarget(
       dayAtTargetMinutes,
       spotCount: target.spotCount,
       examples: target.examples,
-    };
+    });
   }
-  return null;
+  return found;
 }
 
 /**
@@ -427,12 +444,12 @@ function pickTarget(
  * which is the point: a "no" said on Tuesday has to still hold on
  * Friday, after the days have been rebuilt twice.
  */
-function keyFor(target: GeoDayTarget): string {
+export function dayTargetKey(target: GeoDayTarget): string {
   if (target.osmRef) return target.osmRef;
   return `at:${target.at.lat.toFixed(3)},${target.at.lon.toFixed(3)}`;
 }
 
-async function dismissedKeys(legId: number): Promise<ReadonlySet<string>> {
+export async function dismissedKeys(legId: number): Promise<ReadonlySet<string>> {
   const rows = await db
     .select({ key: tripPlanDayTripDismissals.target_key })
     .from(tripPlanDayTripDismissals)
@@ -484,7 +501,7 @@ function noteForUnreachable(mode: TransportMode): string {
  * time wanted, so the ring and the per-target arithmetic can never
  * disagree about what "two hours away" means.
  */
-function reachWithin(anchor: Coordinate, mode: TransportMode, minutes: number): number {
+export function reachWithin(anchor: Coordinate, mode: TransportMode, minutes: number): number {
   const PROBE_M = 100_000;
   const probe = { lat: anchor.lat + PROBE_M / 111_132, lon: anchor.lon };
   const probeMinutes = travelLeg(anchor, probe, mode).minutes;

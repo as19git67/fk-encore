@@ -111,6 +111,11 @@ struct TripStayPlanView: View {
                                                 request: makeWayRequest(to: stop, on: day, leg: leg, fromHere: false),
                                                 stayMode: leg.transportMode))
                 },
+                stayLight: { stop in
+                    TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
+                                     osmRef: stop.osmRef, startDate: viewModel.leg?.startDate)
+                },
+                onStayLightAccepted: { await viewModel.load() },
             )
         }
         .sheet(item: $swapping) { note in

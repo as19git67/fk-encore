@@ -17,6 +17,9 @@ struct TripSpotDetailPager: View {
     /// The sheet "Weg" for a spot, opened by "Route hierher" (stage 6);
     /// nil keeps the plain hand-over to the map app.
     let way: ((TripStop) -> AnyView?)?
+    /// The stay, so the details can show the evening light (stage 7, step 2).
+    let stayLight: ((TripStop) -> TripStayLightRef?)?
+    let onStayLightAccepted: () async -> Void
 
     @State private var selection: Int
     @State private var wayStop: TripStop?
@@ -25,12 +28,16 @@ struct TripSpotDetailPager: View {
     init(stops: [TripStop], selected: TripStop, mode: TripTransportMode,
          onSave: @escaping (TripSpotEdit) async -> Void,
          actions: @escaping (TripStop) -> [TripPinSheetAction],
-         way: ((TripStop) -> AnyView?)? = nil) {
+         way: ((TripStop) -> AnyView?)? = nil,
+         stayLight: ((TripStop) -> TripStayLightRef?)? = nil,
+         onStayLightAccepted: @escaping () async -> Void = {}) {
         self.stops = stops.isEmpty ? [selected] : stops
         self.mode = mode
         self.onSave = onSave
         self.actions = actions
         self.way = way
+        self.stayLight = stayLight
+        self.onStayLightAccepted = onStayLightAccepted
         _selection = State(initialValue: selected.rowId)
     }
 
@@ -39,6 +46,8 @@ struct TripSpotDetailPager: View {
             TabView(selection: $selection) {
                 ForEach(stops) { stop in
                     TripSpotDetailView(spot: TripSpotDetail(stop), mode: mode, onSave: onSave,
+                                       stayLight: stayLight?(stop),
+                                       onStayLightAccepted: onStayLightAccepted,
                                        onRoute: way == nil ? nil : { wayStop = stop }) { close in
                         TripSpotActionSections(
                             actions: actions(stop).filter { $0.group != .navigate },
