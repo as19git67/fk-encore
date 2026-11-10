@@ -3936,6 +3936,44 @@ export const tripPlanVisits = pgTable(
   ]
 );
 
+/**
+ * What the router answered for one pair of points and one mode
+ * (reise-planen-und-unterwegs.md, stage 6, migration 0307). A day map
+ * fetches only the segments a reorder made new.
+ */
+export const tripRouteCache = pgTable("trip_route_cache", {
+  /** `routeCacheKey` in trip-planner/ways.ts: both ends to ~1 m and the mode. */
+  key: text("key").primaryKey(),
+  mode: text("mode").notNull(),
+  minutes: integer("minutes").notNull(),
+  distance_m: integer("distance_m").notNull(),
+  /** Encoded polyline (precision 6); null when the router gave none. */
+  shape: text("shape"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A mode picked in "Weg" for one segment of a day, from a spot (or the
+ * start of the day, `from_ref = "start"`) to the next (migration 0307).
+ * It holds only while the two stand next to each other.
+ */
+export const tripPlanSegments = pgTable(
+  "trip_plan_segments",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    from_ref: text("from_ref").notNull(),
+    to_ref: text("to_ref").notNull(),
+    mode: text("mode").notNull(),
+    minutes: integer("minutes").notNull(),
+    distance_m: integer("distance_m").notNull(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("trip_plan_segments_pair_key").on(table.plan_id, table.from_ref, table.to_ref)]
+);
+
 export const tripPlanPool = pgTable(
   "trip_plan_pool",
   {

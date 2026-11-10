@@ -310,6 +310,17 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 
 - Plan offline laden, Dokumente der Reise, Reisebereit?-Checkliste,
   Strecken als GPX, nach der Reise „Danach“.
+- Am laufenden Tag zeigt die Aufenthaltsplanung oben das Besuchte, dann
+  eine „jetzt“-Linie und was noch kommt; ein Kreis hakt ab, „Doch nicht“
+  nimmt es zurück, „Neu ordnen“ plant den Rest ab jetzt.
+- „Weg“: zwischen zwei Spots steht eine Wegzeile („9 min zu Fuß ·
+  700 m“). Ein Tipp darauf, auf das Etikett eines Wegs auf der Tageskarte,
+  auf „Route“ am nächsten Spot oder auf „Route hierher“ in den Details
+  öffnet das Blatt mit Von und Nach (tauschbar), einer Dauer je
+  Verkehrsmittel, dem Weg auf einer kleinen Karte, der Ankunft gegen
+  Öffnungszeit und Ticket und „In der Karten-App starten“. Ein anderes
+  Verkehrsmittel gilt nur für diesen Abschnitt; der Tag rechnet mit
+  seiner Dauer weiter.
 - **Test:** –
 
 ---

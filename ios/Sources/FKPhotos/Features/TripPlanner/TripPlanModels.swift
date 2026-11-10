@@ -596,6 +596,8 @@ struct TripStop: Codable, Identifiable, Sendable {
     var waitMinutes: Int? = nil
     /// At this hour it is not open for the whole visit, or the ticket is missed.
     var outsideHours: Bool? = nil
+    /// The mode picked in "Weg" for the way here; nil for the stay's own.
+    var wayMode: String? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }

@@ -46,6 +46,8 @@ final class TripPlannerViewModel {
     private(set) var diaries: [String: TripDayDiary] = [:]
     /// The forecast of the stay's days within reach (stage 5), by `dayKey`.
     private(set) var stayForecasts: [String: TripDayForecast] = [:]
+    /// The ways of a day along the streets, by day and order (stage 6).
+    private(set) var dayWaysByKey: [String: [TripDayWay]] = [:]
     /// What the last "Neu ordnen" said no longer fits, with other days.
     var reorderAdvice: TripReorderAdvice?
     /// The weather's offer for this day, once it has been asked for
@@ -770,6 +772,80 @@ final class TripPlannerViewModel {
             plan = response.plan
             errorMessage = nil
             await loadDiary(dayIndex: dayIndex)
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// The way between two places in every mode, for the sheet "Weg";
+    /// with a check, the arrival against the spot's hours and booked time.
+    /// Nil when it could not be asked; the sheet then says so.
+    func way(_ request: TripWayRequest) async -> TripWayResponse? {
+        struct Check: Encodable {
+            let planId: Int
+            let legIndex: Int
+            let dayIndex: Int
+            let osmRef: String
+            let departMinutes: Int
+        }
+        struct Body: Encodable {
+            let from: TripCoordinate
+            let to: TripCoordinate
+            let check: Check?
+        }
+        let check = request.check.map {
+            Check(planId: planId, legIndex: legIndex, dayIndex: $0.dayIndex, osmRef: $0.osmRef,
+                  departMinutes: $0.departMinutes)
+        }
+        do {
+            let response: TripWayResponse = try await APIClient.shared.post(
+                "/trip-planner/routing/way",
+                body: Body(from: request.from.coordinate, to: request.to.coordinate, check: check))
+            return response
+        } catch {
+            return nil
+        }
+    }
+
+    /// The ways of one day along the streets, for its map. Kept by day
+    /// and order, so a reorder asks again and nothing else does; the
+    /// server only routes the segments it has not seen.
+    func dayWays(dayIndex: Int) -> [TripDayWay]? {
+        guard let key = dayWaysKey(dayIndex) else { return nil }
+        return dayWaysByKey[key]
+    }
+
+    func loadDayWays(dayIndex: Int) async {
+        guard let key = dayWaysKey(dayIndex), dayWaysByKey[key] == nil else { return }
+        let leg = legIndex
+        guard let response: TripDayWaysResponse = try? await APIClient.shared.get(
+            "/trip-planner/plans/\(planId)/legs/\(leg)/days/\(dayIndex)/ways") else { return }
+        dayWaysByKey[key] = response.ways
+    }
+
+    private func dayWaysKey(_ dayIndex: Int) -> String? {
+        guard let day = leg?.days.first(where: { $0.dayIndex == dayIndex }) else { return nil }
+        let stops = TripStayPlan.stops(of: day)
+        return "\(Self.dayKey(legIndex, dayIndex))|\(stops.map(\.osmRef))|\(stops.map { $0.wayMode ?? "" })"
+    }
+
+    /// Keep a mode for one segment of a day; nil goes back to the stay's.
+    func setSegmentMode(_ mode: TripTransportMode?, fromRef: String, toRef: String,
+                        from: TripCoordinate, to: TripCoordinate) async {
+        guard requireOnline() else { return }
+        struct Body: Encodable {
+            let fromRef: String
+            let toRef: String
+            let mode: String?
+            let from: TripCoordinate
+            let to: TripCoordinate
+        }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/segments",
+                body: Body(fromRef: fromRef, toRef: toRef, mode: mode?.rawValue, from: from, to: to))
+            plan = response.plan
+            errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)
         }

@@ -2143,6 +2143,13 @@
       "when": 1790500000000,
       "tag": "0306_trip_visit_weather",
       "breakpoints": true
+    },
+    {
+      "idx": 307,
+      "version": "7",
+      "when": 1790560000000,
+      "tag": "0307_trip_ways",
+      "breakpoints": true
     }
   ]
 }

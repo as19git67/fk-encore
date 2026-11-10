@@ -1,3 +1,4 @@
+import CoreLocation
 import MapKit
 import SwiftUI
 
@@ -38,6 +39,8 @@ struct TripStayPlanView: View {
     /// Missed stops already answered ("Lassen"), by row id, so the
     /// question comes once (stage 5).
     @AppStorage("trip.stayPlan.missedAnswered") private var missedAnswered = ""
+    /// The sheet "Weg" (stage 6).
+    @State private var wayRequest: TripWayRequest?
 
     private enum Layout: String { case list, map }
 
@@ -82,7 +85,18 @@ struct TripStayPlanView: View {
                 mode: viewModel.leg?.transportMode ?? .foot,
                 onSave: { await viewModel.saveNote($0) },
                 actions: stopActions,
+                way: { stop in
+                    guard let leg = viewModel.leg,
+                          let day = leg.days.first(where: { $0.dayIndex == pick.dayIndex }) else { return nil }
+                    return AnyView(TripWaySheet(viewModel: viewModel,
+                                                request: makeWayRequest(to: stop, on: day, leg: leg, fromHere: false),
+                                                stayMode: leg.transportMode))
+                },
             )
+        }
+        .sheet(item: $wayRequest) { request in
+            TripWaySheet(viewModel: viewModel, request: request,
+                         stayMode: viewModel.leg?.transportMode ?? .foot)
         }
         .confirmationDialog(unchecking?.displayName ?? "", isPresented: Binding(
             get: { unchecking != nil },
@@ -284,6 +298,7 @@ struct TripStayPlanView: View {
                     nowLine(nowMinutes)
                 }
                 ForEach(Array(order.open.enumerated()), id: \.element.id) { index, stop in
+                    wayLine(to: stop, on: day, leg: leg)
                     card(stop, day: day, number: index + 1,
                          mode: .open(isNext: stop.rowId == next?.rowId, canCheck: phase == .running),
                          diary: nil)
@@ -309,6 +324,7 @@ struct TripStayPlanView: View {
                 }
             } else {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
+                    wayLine(to: stop, on: day, leg: leg)
                     card(stop, day: day, number: index + 1, mode: .plan, diary: nil)
                         .draggable(TripStayPlan.dragId(stop)) {
                             Text(stop.displayName)
@@ -433,8 +449,7 @@ struct TripStayPlanView: View {
             }
             if isNext {
                 Button {
-                    TripMapsOpen.route(.single(stop.coordinate, mode: viewModel.leg?.transportMode ?? .foot),
-                                       using: TripMapsPreference.load())
+                    if let leg = viewModel.leg { wayRequest = makeWayRequest(to: stop, on: day, leg: leg, fromHere: true) }
                 } label: {
                     Label("Route", systemImage: "arrow.triangle.turn.up.right.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -706,6 +721,8 @@ struct TripStayPlanView: View {
         }
         let markers = TripStayPlan.markers(leg: leg, selectedDay: mapDay, ideas: showIdeasOnMap,
                                            nextRowId: next?.rowId, photoCounts: photoCounts)
+        // The streets are drawn for the chosen day only, one segment at a time.
+        let wayDay = mapDay.flatMap { index in leg.days.first { $0.dayIndex == index } }
         return VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -722,6 +739,11 @@ struct TripStayPlanView: View {
 
             Map {
                 UserAnnotation()
+                if let wayDay {
+                    ForEach(viewModel.dayWays(dayIndex: wayDay.dayIndex) ?? []) { way in
+                        dayWay(way, day: wayDay, leg: leg)
+                    }
+                }
                 if path.count >= 2 {
                     MapPolyline(coordinates: path.map {
                         CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
@@ -749,6 +771,9 @@ struct TripStayPlanView: View {
                 }
             }
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            .task(id: wayDay.map(wayKey)) {
+                if let wayDay { await viewModel.loadDayWays(dayIndex: wayDay.dayIndex) }
+            }
         }
         .confirmationDialog(picked?.marker.title ?? "", isPresented: Binding(
             get: { picked != nil },
@@ -771,12 +796,120 @@ struct TripStayPlanView: View {
         }
         if marker.isNext, case .stop(let rowId) = marker.kind, let stop = TripStayPlan.stop(rowId: rowId, in: leg) {
             Button("Route") {
-                TripMapsOpen.route(.single(stop.coordinate, mode: leg.transportMode), using: TripMapsPreference.load())
+                if let day = leg.days.first(where: { $0.dayIndex == marker.dayIndex }) {
+                    wayRequest = makeWayRequest(to: stop, on: day, leg: leg, fromHere: true)
+                }
             }
         }
         if let dayIndex = marker.dayIndex {
             Button("Tag \(dayIndex + 1) öffnen") { openDay(dayIndex) }
         }
+    }
+
+    /// What the day's ways depend on: its order and the modes picked.
+    private func wayKey(_ day: TripDay) -> String {
+        let stops = TripStayPlan.stops(of: day)
+        return "\(day.dayIndex)|\(stops.map(\.osmRef))|\(stops.map { $0.wayMode ?? "" })"
+    }
+
+    /// One segment of the chosen day on the map: along the streets where
+    /// it was routed, a dashed straight line where it was not (public
+    /// transport has no timetable), and its duration as a label that
+    /// opens "Weg".
+    @MapContentBuilder
+    private func dayWay(_ way: TripDayWay, day: TripDay, leg: TripLeg) -> some MapContent {
+        let points = TripWays.path(shape: way.shape, from: way.from, to: way.to)
+        MapPolyline(coordinates: points.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) })
+            .stroke(way.shape == nil ? Color.secondary : Color.accentColor.opacity(0.8),
+                    style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round,
+                                       dash: way.shape == nil ? [6, 5] : []))
+        if let middle = TripWays.midpoint(of: points),
+           let stop = TripStayPlan.stops(of: day).first(where: { $0.osmRef == way.toRef }) {
+            Annotation("", coordinate: CLLocationCoordinate2D(latitude: middle.lat, longitude: middle.lon)) {
+                Button {
+                    wayRequest = makeWayRequest(to: stop, on: day, leg: leg, fromHere: false)
+                } label: {
+                    Label(TripClock.duration(way.minutes), systemImage: way.doneBy.systemImage)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.regularMaterial, in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Weg nach \(stop.displayName), \(TripClock.duration(way.minutes)) \(way.doneBy.label)")
+            }
+        }
+    }
+
+    /// The line between two cards: how long the way to this spot takes
+    /// and by what. A tap opens "Weg" with both ends filled in.
+    @ViewBuilder
+    private func wayLine(to stop: TripStop, on day: TripDay, leg: TripLeg) -> some View {
+        let travel = stop.travelFromPrevious
+        if travel.minutes > 0 || travel.distanceM > 0 {
+            let mode = TripWays.mode(of: stop, leg: leg)
+            Button {
+                wayRequest = makeWayRequest(to: stop, on: day, leg: leg, fromHere: false)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: mode.systemImage)
+                        .frame(width: 20)
+                    Text(TripWays.line(minutes: travel.minutes, distanceM: travel.distanceM, by: mode))
+                    if stop.wayMode != nil {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .accessibilityLabel("für diesen Weg gewählt")
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 18)
+                .frame(minHeight: 28)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Zeigt den Weg")
+        }
+    }
+
+    /// What "Weg" opens with for a spot of a day: from here on the road
+    /// (where the phone knows it), else from the spot before it or the
+    /// start of the day, with the arrival checked on that day.
+    private func makeWayRequest(to stop: TripStop, on day: TripDay, leg: TripLeg, fromHere: Bool) -> TripWayRequest {
+        let stops = TripStayPlan.stops(of: day)
+        let to = TripWayRequest.End(name: stop.displayName, coordinate: stop.coordinate)
+        let mode = TripWays.mode(of: stop, leg: leg)
+        if fromHere, let here = CLLocationManager().location?.coordinate {
+            return TripWayRequest(
+                from: .init(name: "Mein Standort", coordinate: TripCoordinate(lat: here.latitude, lon: here.longitude),
+                            isHere: true),
+                to: to,
+                check: (dayIndex: day.dayIndex, osmRef: stop.osmRef, departMinutes: TripDayTimeline.minutesOfDay(Date())),
+                segment: nil,
+                currentMode: mode,
+            )
+        }
+        let index = stops.firstIndex { $0.rowId == stop.rowId }
+        let previous = index.flatMap { $0 > 0 ? stops[$0 - 1] : nil }
+        let from: TripWayRequest.End
+        if let previous {
+            from = .init(name: previous.displayName, coordinate: previous.coordinate)
+        } else if let anchor = day.anchor {
+            from = .init(name: anchor.label ?? "Start des Tages", coordinate: TripCoordinate(lat: anchor.lat, lon: anchor.lon))
+        } else {
+            from = .init(name: leg.anchorLabel ?? "Unterkunft", coordinate: leg.anchor)
+        }
+        let depart = stop.etaMinutes.map { max(0, $0 - stop.travelFromPrevious.minutes) }
+        return TripWayRequest(
+            from: from,
+            to: to,
+            check: depart.map { (dayIndex: day.dayIndex, osmRef: stop.osmRef, departMinutes: $0) },
+            segment: (fromRef: previous?.osmRef ?? TripWays.dayStart, toRef: stop.osmRef),
+            currentMode: mode,
+        )
     }
 
     private func add(_ marker: TripStayMarker, to day: TripDay, leg: TripLeg) async {
