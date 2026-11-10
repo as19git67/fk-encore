@@ -138,7 +138,8 @@ extension TripIdeaPriority {
     ) -> [TripPinSheetAction] {
         allCases.filter { $0 != current }.map { priority in
             TripPinSheetAction(id: "priority-\(priority.rawValue)", title: "Priorität: \(priority.label)",
-                               systemImage: priority.systemImage, closes: false, group: .plan) {
+                               systemImage: priority.systemImage, closes: false, group: .plan,
+                               submenu: .priority) {
                 await set(priority)
             }
         }

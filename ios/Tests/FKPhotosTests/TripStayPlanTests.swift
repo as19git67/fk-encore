@@ -78,6 +78,18 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertEqual(TripStayPlan.visitedLine(d), "0 von 2 besucht")
     }
 
+    func testTheThirdLineSaysWhyAPinnedSpotHasItsTimeOrWhenTheOthersCome() {
+        let d = day(0, [block("day", [stop(1, eta: 825), stop(2)])])
+        let stops = TripStayPlan.stops(of: d)
+        // "Will" is the ordinary case and says nothing.
+        XCTAssertEqual(TripStayPlan.timeLine(stops[0], pin: nil), "ca. 13:45")
+        XCTAssertEqual(TripStayPlan.timeLine(stops[1], pin: nil), "")
+        XCTAssertEqual(TripStayPlan.timeLine(stops[0], pin: (reason: .ticket, startMinutes: 930)),
+                       "Ticket 15:30 · gepinnt")
+        XCTAssertEqual(TripStayPlan.timeLine(stops[0], pin: (reason: nil, startMinutes: 600)),
+                       "Fest 10:00 · gepinnt")
+    }
+
     func testTheSliderFindsWhereThePlanHasYou() throws {
         let leg = try JSONDecoder().decode(TripLeg.self, from: Data("""
         { "id": 1, "position": 0, "title": "Beispielstadt", "anchor": { "lat": 48.0, "lon": 11.0 },

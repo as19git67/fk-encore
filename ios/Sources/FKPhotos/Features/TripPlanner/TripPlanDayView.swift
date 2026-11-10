@@ -1437,7 +1437,15 @@ struct TripPlanDayView: View {
 
     /// The fixed time that holds this stop in place, if any (§4.4, §7.3).
     private func visit(of stop: TripStop) -> TripFixpoint? {
-        viewModel.day?.fixpoints.first { $0.holdsSpot && $0.spotRef == stop.osmRef }
+        dayHolding(stop)?.fixpoints.first { $0.holdsSpot && $0.spotRef == stop.osmRef }
+    }
+
+    /// The day of the leg on screen that holds this stop; the selected
+    /// day when none does (a stop just moved, a list from elsewhere).
+    private func dayHolding(_ stop: TripStop) -> TripDay? {
+        viewModel.leg?.days.first { day in
+            day.blocks.contains { block in block.stops.contains { $0.rowId == stop.rowId } }
+        } ?? viewModel.day
     }
 
     /// How far a stop has pushed the day back (§4.7).
@@ -1762,17 +1770,28 @@ struct TripPlanDayView: View {
     ) -> [TripPinSheetAction] {
         let status = stop.stopStatus
         var actions: [TripPinSheetAction] = []
+        // The stay's planning view shows every day at once, so the day
+        // a stop is on is its own, not the one selected.
+        let day = dayHolding(stop)
+        let ideas = viewModel.plan?.isIdeasTrip == true
+        // Done or skipped only means something from the day itself on:
+        // a spot next month cannot have been visited yet.
+        let canSettle: Bool = {
+            guard let leg = viewModel.leg, let day else { return isTravelling }
+            let phase = TripOnTheRoad.phase(of: day.dayIndex, in: leg, today: TripCalendar.isoDay(Date()))
+            return phase == .running || phase == .past || (phase == .undated && isTravelling)
+        }()
 
         // Status first: it is what somebody standing at the place
         // reaches for. Both answers while it is open, the way back once
         // it is settled.
-        if status != .done {
+        if status != .done && canSettle {
             actions.append(TripPinSheetAction(id: "done", title: "Erledigt", systemImage: "checkmark",
                                               group: .status) {
                 await viewModel.mark(stop, as: .done)
             })
         }
-        if status != .skipped {
+        if status != .skipped && canSettle {
             actions.append(TripPinSheetAction(id: "skipped", title: "Übersprungen", systemImage: "xmark",
                                               group: .status) {
                 await viewModel.mark(stop, as: .skipped)
@@ -1806,12 +1825,15 @@ struct TripPlanDayView: View {
         // refuses the move, so it is not offered.
         // Nor one a fixed time holds at its hour (§4.4, §7.3): the server
         // refuses that move, and the way is to change the fixed time.
-        if status != .done, !isFramed(stop), let blockId = viewModel.day?.blocks.first(where: {
+        if status != .done, !isFramed(stop), let day, let blockId = day.blocks.first(where: {
             $0.stops.contains { $0.rowId == stop.rowId }
         })?.id {
             actions.append(TripPinSheetAction(id: "move", title: "Auf einen anderen Tag",
                                               systemImage: "calendar") {
-                later { moving = TripStopMove(stop: stop, blockId: blockId) }
+                later {
+                    viewModel.select(dayIndex: day.dayIndex)
+                    moving = TripStopMove(stop: stop, blockId: blockId)
+                }
             })
         }
         // A ticket for this spot (§4.4): the spot then stands at that
@@ -1829,27 +1851,35 @@ struct TripPlanDayView: View {
         }
         // Why a booked visit has its hour (stage 3): the same choice the
         // sheet offers when the time is made, changed without re-planning.
-        if let visit = viewModel.visit(holding: stop) {
+        if let visit = viewModel.visit(holding: stop, onDay: day?.dayIndex) {
             for reason in TripPinReason.allCases where reason != visit.reason {
                 actions.append(TripPinSheetAction(id: "pinReason-\(reason.rawValue)",
                                                   title: "Fest wegen: \(reason.label)",
-                                                  systemImage: reason.systemImage, closes: false) {
+                                                  systemImage: reason.systemImage, closes: false,
+                                                  submenu: .pinReason) {
                     await viewModel.setPinReason(visit, reason)
                 })
             }
         }
-        actions.append(TripPinSheetAction(id: "pin",
-                                          title: stop.pinned ? "Nicht mehr anheften" : "Anheften",
-                                          systemImage: stop.pinned ? "pin.slash" : "pin") {
-            await viewModel.setPinned(stop, !stop.pinned)
-        })
+        // Holding a stop in its slot when the planner plans again: a
+        // trip of ideas never plans again, and there "gepinnt" is a
+        // fixed time, which "Fester Termin …" sets.
+        if !ideas {
+            actions.append(TripPinSheetAction(id: "pin",
+                                              title: stop.pinned ? "Nicht mehr anheften" : "Anheften",
+                                              systemImage: stop.pinned ? "pin.slash" : "pin") {
+                await viewModel.setPinned(stop, !stop.pinned)
+            })
+        }
         // Not for the stop a frame placed (§7.3): "not today" is said by
         // taking the outing off the block, and the server refuses the
         // shortcut with the same sentence.
         if status == .planned && !isFramed(stop) {
             actions.append(TripPinSheetAction(
                 id: "toPool", title: "Zurück zu den Ideen", systemImage: "tray.and.arrow.down",
-                footer: "„Nicht heute“ — er bleibt im Rennen und kommt beim nächsten Planen wieder in Frage.",
+                footer: ideas
+                    ? "Er verlässt den Tag und bleibt bei den Ideen des Aufenthalts."
+                    : "„Nicht heute“ — er bleibt im Rennen und kommt beim nächsten Planen wieder in Frage.",
             ) {
                 await viewModel.returnToPool(stop)
             })
@@ -1861,18 +1891,34 @@ struct TripPlanDayView: View {
             await viewModel.keepForNextTime(osmRefs: [stop.osmRef])
         })
 
-        actions.append(TripPinSheetAction(
-            id: "hide", title: "Für diese Reise ausblenden", systemImage: "eye.slash",
-            role: .destructive,
-            footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim nächsten "
-                + "Neuplanen nicht. Rückgängig bei den Kandidaten unter „Ausgeblendet“.",
-            group: .remove,
-        ) {
-            await viewModel.hide(osmRef: stop.osmRef)
-        })
+        if ideas {
+            // A trip of ideas proposes nothing by itself, so there is
+            // nothing to hide a spot from: it is taken off the day and
+            // off the ideas.
+            if status == .planned && !isFramed(stop) {
+                actions.append(TripPinSheetAction(
+                    id: "remove", title: "Aus der Reise entfernen", systemImage: "trash",
+                    role: .destructive,
+                    footer: "Er verlässt den Tag und die Ideen. In der Spot-Auswahl lässt er sich wieder hinzufügen.",
+                    group: .remove,
+                ) {
+                    await viewModel.removeFromTrip(stop)
+                })
+            }
+        } else {
+            actions.append(TripPinSheetAction(
+                id: "hide", title: "Für diese Reise ausblenden", systemImage: "eye.slash",
+                role: .destructive,
+                footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim nächsten "
+                    + "Neuplanen nicht.",
+                group: .remove,
+            ) {
+                await viewModel.hide(osmRef: stop.osmRef)
+            })
+        }
         // How much it matters (ideas plan, stage 3): the same choice as
         // on the list of ideas, while the stop is still to come.
-        if viewModel.plan?.isIdeasTrip == true && status == .planned {
+        if ideas && status == .planned {
             actions.append(contentsOf: TripIdeaPriority.actions(current: stop.ideaPriority) { priority in
                 await viewModel.setPriority(osmRef: stop.osmRef, priority)
             })

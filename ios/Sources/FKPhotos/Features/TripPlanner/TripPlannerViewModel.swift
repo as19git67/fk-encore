@@ -627,6 +627,18 @@ final class TripPlannerViewModel {
     /// spots nobody could see or undo would be worse than the honest
     /// repeat.
     func drop(_ candidate: TripCandidate) async {
+        await drop(osmRef: candidate.osmRef)
+    }
+
+    /// Take a planned stop off its day and off the ideas (a trip of
+    /// ideas, where nothing is proposed that could be hidden instead).
+    func removeFromTrip(_ stop: TripStop) async {
+        await returnToPool(stop)
+        guard errorMessage == nil else { return }
+        await drop(osmRef: stop.osmRef)
+    }
+
+    private func drop(osmRef: String) async {
         guard requireOnline() else { return }
         struct Body: Encodable {
             let legIndex: Int
@@ -639,7 +651,7 @@ final class TripPlannerViewModel {
         do {
             let response: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/pool/drop",
-                body: Body(legIndex: legIndex, osmRef: candidate.osmRef),
+                body: Body(legIndex: legIndex, osmRef: osmRef),
             )
             plan = response.plan
             errorMessage = nil
