@@ -22,10 +22,7 @@ struct TripStayPlanView: View {
     /// The screen's title when it is the trip's first screen (the
     /// trip's name); otherwise the stay's.
     var title: String? = nil
-    /// Opens the stay's details ("Bearbeiten" in the mock).
-    var onEdit: (() -> Void)? = nil
 
-    @AppStorage("trip.stayPlan.layout") private var layout = Layout.list.rawValue
     /// The day the map shows numbered; nil is every day.
     @State private var mapDay: Int?
     @State private var showIdeasOnMap = true
@@ -64,16 +61,11 @@ struct TripStayPlanView: View {
         let opId: Int
     }
 
-    private enum Layout: String { case list, map }
 
     var body: some View {
         Group {
             if let leg = viewModel.leg {
-                if layout == Layout.map.rawValue {
-                    map(leg)
-                } else {
-                    list(leg)
-                }
+                list(leg)
             } else {
                 ContentUnavailableView("Kein Aufenthalt", systemImage: "map")
             }
@@ -89,27 +81,6 @@ struct TripStayPlanView: View {
         }
         .navigationTitle(title ?? viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Ansicht", selection: $layout) {
-                    Text("Liste").tag(Layout.list.rawValue)
-                    Text("Karte").tag(Layout.map.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 180)
-            }
-            if let onEdit {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Bearbeiten", action: onEdit)
-                }
-            }
-            // The list has its own big button; the map keeps the plus.
-            if layout == Layout.map.rawValue {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Ideen und Suche", systemImage: "plus") { picking = true }
-                }
-            }
-        }
         .sheet(isPresented: $picking) {
             TripSpotPickerView(viewModel: viewModel)
         }
@@ -275,9 +246,14 @@ struct TripStayPlanView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
-        // On the road the stay opens on the day being lived.
+        // On the road the stay opens on the day being lived; from a day
+        // row of the itinerary, on that day.
         .onAppear {
-            if let running { proxy.scrollTo(running.dayIndex, anchor: .top) }
+            if let running {
+                proxy.scrollTo(running.dayIndex, anchor: .top)
+            } else if viewModel.dayIndex > 0 {
+                proxy.scrollTo(viewModel.dayIndex, anchor: .top)
+            }
         }
         }
     }

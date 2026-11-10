@@ -51,9 +51,14 @@ struct TripPlanDayView: View {
     /// The trip's structure — legs and journeys — from the leg strip.
     @State private var editingStructure = false
     /// One day of a stay on its own screen (the band, the order, the
-    /// breaks), pushed from the stay's planning view, which is where a
-    /// trip opens (reise-planen-und-unterwegs.md, "Planning a stay").
+    /// breaks), pushed from the stay's planning view
+    /// (reise-planen-und-unterwegs.md, "Planning a stay").
     @State private var showingDay = false
+    /// A stay's planning view, pushed from the itinerary, which is where
+    /// a trip opens (reise-planen-und-unterwegs-design.md, "Der
+    /// Reiseverlauf"). A running trip pushes it at once, on today.
+    @State private var showingStay = false
+    @State private var openedRunningDay = false
     /// The spot picker (reise-planen-und-unterwegs.md, stage 4).
     @State private var pickingSpot = false
     /// The minute the screen is drawn for. Ticks while the day on
@@ -72,8 +77,8 @@ struct TripPlanDayView: View {
             if viewModel.isLoading && viewModel.plan == nil {
                 ProgressView("Plan wird geladen…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let leg = viewModel.leg, !leg.isTransit {
-                stayRoot
+            } else if viewModel.plan != nil, viewModel.leg?.isTransit != true {
+                itineraryRoot
             } else if let day = viewModel.day, let leg = viewModel.leg {
                 content(day: day, leg: leg)
             } else if let message = viewModel.errorMessage {
@@ -90,7 +95,7 @@ struct TripPlanDayView: View {
         .sheet(isPresented: $pickingSpot) {
             TripSpotPickerView(viewModel: viewModel)
         }
-        .navigationDestination(isPresented: $showingDay) { dayScreen }
+        .navigationDestination(isPresented: $showingStay) { stayRoot }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() }, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -224,7 +229,12 @@ struct TripPlanDayView: View {
                 }
             }
         }
-        .sheet(item: $itineraryFocus) { focus in
+        .sheet(item: $itineraryFocus, onDismiss: {
+            // "Aufenthalt planen" in it: the planning view is already
+            // the screen, on the stay it selected.
+            viewModel.wantsStayPlan = false
+            viewModel.wantsDayScreen = false
+        }) { focus in
             NavigationStack {
                 TripItineraryView(viewModel: viewModel, focus: focus)
             }
@@ -247,6 +257,7 @@ struct TripPlanDayView: View {
         }
         .task {
             await viewModel.load()
+            openRunningDay()
             watchStops()
             runPendingReplan()
             // The banners need permission; asked on the trip, where a
@@ -299,8 +310,30 @@ struct TripPlanDayView: View {
 
     // MARK: - The stay and its days
 
-    /// A stay opens as a whole, every day on one screen (stage 3); the
-    /// strip of stays and journeys stays on top.
+    /// The trip opens on its itinerary: the stays with their days on one
+    /// line, the journeys between them. A stay or one of its days opens
+    /// the stay's planning view on top, so "Zurück" leads back here.
+    private var itineraryRoot: some View {
+        TripItineraryView(viewModel: viewModel, onPlan: { _, _ in showingStay = true })
+            .onAppear {
+                // "Neue Reise" asked for the itinerary, and this is it.
+                viewModel.wantsItinerary = false
+            }
+    }
+
+    /// While the trip runs it opens straight on the day being lived, in
+    /// the planning view (design, "Unterwegs"): `apply` already chose
+    /// that stay and day. Once per screen, so coming back to the
+    /// itinerary stays there.
+    private func openRunningDay() {
+        guard !openedRunningDay, let plan = viewModel.plan else { return }
+        openedRunningDay = true
+        if plan.position(on: Date()) != nil, viewModel.leg?.isTransit == false {
+            showingStay = true
+        }
+    }
+
+    /// A stay opens as a whole, every day on one screen (stage 3).
     private var stayRoot: some View {
         TripStayPlanView(
             viewModel: viewModel,
@@ -309,10 +342,11 @@ struct TripPlanDayView: View {
                 viewModel.select(dayIndex: dayIndex)
                 showingDay = true
             },
-            title: screenTitle,
-            onEdit: viewModel.leg.map { leg in { itineraryFocus = .leg(leg.id) } },
+            // The stay's name heads the list in large; the bar only
+            // carries the way back to the itinerary.
+            title: "",
         )
-        .safeAreaInset(edge: .top, spacing: 0) { legPicker }
+        .navigationDestination(isPresented: $showingDay) { dayScreen }
     }
 
     /// One day on its own screen, from a day of the stay's planning view.
@@ -888,13 +922,12 @@ struct TripPlanDayView: View {
         .padding(.vertical, 6)
         .background(.bar)
         .sheet(isPresented: $editingStructure, onDismiss: {
-            if viewModel.wantsStayPlan {
+            // Only a journey's day has this strip; a stay picked in the
+            // itinerary opens its planning view over the itinerary.
+            if viewModel.wantsStayPlan || viewModel.wantsDayScreen {
                 viewModel.wantsStayPlan = false
-                showingDay = false
-            }
-            if viewModel.wantsDayScreen {
                 viewModel.wantsDayScreen = false
-                showingDay = viewModel.leg?.isTransit == false
+                showingStay = viewModel.leg?.isTransit == false
             }
         }) {
             NavigationStack {

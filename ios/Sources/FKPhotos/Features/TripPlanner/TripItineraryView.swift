@@ -26,6 +26,11 @@ struct TripItineraryView: View {
     /// What to open, when the screen was entered from a leg or from one
     /// of the times a journey wrote on a day.
     var focus: TripItineraryFocus? = nil
+    /// Set when the itinerary is the trip's own screen rather than a
+    /// sheet over it: a stay or a day row then opens the stay's
+    /// planning view through this, after selecting it, and there is no
+    /// "Fertig".
+    var onPlan: ((TripItineraryItem, Int?) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -112,8 +117,10 @@ struct TripItineraryView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Fertig") { dismiss() }
+            if onPlan == nil {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fertig") { dismiss() }
+                }
             }
             ToolbarItem(placement: .principal) {
                 Picker("Ansicht", selection: $layout) {
@@ -702,6 +709,10 @@ struct TripItineraryView: View {
         else { return }
         viewModel.select(leg: leg.position)
         if let day { viewModel.select(dayIndex: day) }
+        if let onPlan {
+            onPlan(stay, day)
+            return
+        }
         // "Planen" on a stay opens the stay as a whole (stage 3); a day
         // row opens that day.
         viewModel.wantsStayPlan = day == nil
