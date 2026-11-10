@@ -6599,7 +6599,7 @@ export async function getPhotoFacesLogic(
   const rows = await dbAll<{
     id: number; user_id: number; photo_id: number; bbox: string; embedding: string;
     person_id: number | null; person_name: string | null; quality: number | null; ignored: boolean;
-    created_at: string | null;
+    created_at: string | null; eye_aspect: number | null; eye_aspect_68: number | null;
   }>(
     db.select({
       id: faces.id,
@@ -6614,6 +6614,9 @@ export async function getPhotoFacesLogic(
       quality: faces.quality,
       ignored: userFaceAssignments.ignored,
       created_at: faces.created_at,
+      // Eyelid landmarks, read by the "Augen zu" hint of the compare view.
+      eye_aspect: faces.eye_aspect,
+      eye_aspect_68: faces.eye_aspect_68,
     })
     .from(faces)
     .innerJoin(userFaceAssignments, and(
@@ -6639,6 +6642,8 @@ export async function getPhotoFacesLogic(
       quality: r.quality ?? undefined,
       ignored: !!r.ignored,
       created_at: r.created_at ?? "",
+      eye_aspect: r.eye_aspect ?? null,
+      eye_aspect_68: r.eye_aspect_68 ?? null,
     })),
   };
 }
