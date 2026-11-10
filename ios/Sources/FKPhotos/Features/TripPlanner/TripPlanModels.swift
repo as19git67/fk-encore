@@ -498,8 +498,21 @@ enum TripCategory {
         "cafe": "Café",
         "essentials": "Alltägliches",
         "outdoors": "Park oder Natur",
+        "zoo": "Zoo oder Tierpark",
+        "bath": "Bad oder Therme",
+        "market": "Markt",
+        "producers": "Hofladen oder Erzeuger",
         // A spot whose way is the point (§4.7).
         "route": "Strecke",
+    ]
+
+    /// The kinds a person can give a spot afterwards, in the order the
+    /// menu lists them: what you go to see, then what you go to eat,
+    /// then what you only need. A route is not among them — its kind
+    /// belongs to its course (`idea-category.ts`).
+    static let pickable = [
+        "sight", "museum", "viewpoint", "worship", "theatre", "outdoors",
+        "zoo", "bath", "market", "producers", "food", "cafe", "essentials",
     ]
 
     static func label(_ id: String) -> String {
@@ -525,6 +538,10 @@ enum TripCategory {
         "cafe": "cup.and.saucer",
         "essentials": "cart",
         "outdoors": "tree",
+        "zoo": "pawprint",
+        "bath": "figure.pool.swim",
+        "market": "basket",
+        "producers": "leaf",
         "route": "figure.hiking",
     ]
 
@@ -686,6 +703,10 @@ struct TripSpotChoice: Identifiable, Hashable, Sendable {
 }
 
 struct TripCandidate: Codable, Identifiable, Sendable {
+    /// The reason the server gives every place somebody added
+    /// (`MANUAL_REASON` in trip-planner/candidates.ts).
+    static let manualReason = "von euch hinzugefügt"
+
     let osmRef: String
     let name: String?
     let lat: Double

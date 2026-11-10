@@ -1775,7 +1775,7 @@ struct TripPlanDayView: View {
         if status != .done, !isFramed(stop), let blockId = viewModel.day?.blocks.first(where: {
             $0.stops.contains { $0.rowId == stop.rowId }
         })?.id {
-            actions.append(TripPinSheetAction(id: "move", title: "In einen anderen Block",
+            actions.append(TripPinSheetAction(id: "move", title: "Auf einen anderen Tag",
                                               systemImage: "calendar") {
                 later { moving = TripStopMove(stop: stop, blockId: blockId) }
             })
@@ -1814,7 +1814,7 @@ struct TripPlanDayView: View {
         // shortcut with the same sentence.
         if status == .planned && !isFramed(stop) {
             actions.append(TripPinSheetAction(
-                id: "toPool", title: "Zurück zu den Kandidaten", systemImage: "tray.and.arrow.down",
+                id: "toPool", title: "Zurück zu den Ideen", systemImage: "tray.and.arrow.down",
                 footer: "„Nicht heute“ — er bleibt im Rennen und kommt beim nächsten Planen wieder in Frage.",
             ) {
                 await viewModel.returnToPool(stop)
@@ -1977,6 +1977,7 @@ struct TripPlanDayView: View {
                         spot: TripSpotDetail(stop),
                         mode: viewModel.leg?.transportMode ?? .foot,
                         onSave: { await viewModel.saveNote($0) },
+                        onCategory: { await viewModel.setCategory(osmRef: stop.osmRef, $0) },
                         light: viewModel.light?.hint(for: stop.osmRef),
                         shelter: viewModel.forecast?.shelter(for: stop.osmRef),
                     ) { closeDetail in

@@ -47,7 +47,12 @@ struct TripPickerItem: Identifiable, Sendable {
     /// One line under the name: why somebody wanted it, else what it is.
     var line: String? {
         switch source {
-        case .idea(let c): c.note ?? c.description?.text ?? c.reasons.first
+        // "von euch hinzugefügt" says nothing anybody here does not
+        // know: the note, else what the place is, else the first reason
+        // that tells something.
+        case .idea(let c):
+            c.note.flatMap { $0.isEmpty ? nil : $0 } ?? c.description?.text
+                ?? c.reasons.first { $0 != TripCandidate.manualReason }
         case .highlight(let h): h.reason ?? h.description?.text
         case .place(let p): p.distanceLabel.map { "\($0) von der Unterkunft" }
         }

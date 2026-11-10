@@ -119,6 +119,7 @@ struct TripStayPlanView: View {
                                      osmRef: stop.osmRef, startDate: viewModel.leg?.startDate)
                 },
                 onStayLightAccepted: { await viewModel.load() },
+                onCategory: { osmRef, category in await viewModel.setCategory(osmRef: osmRef, category) },
             )
         }
         .sheet(item: $swapping) { note in
@@ -875,7 +876,7 @@ struct TripStayPlanView: View {
                 ForEach(markers) { marker in
                     Annotation(marker.title, coordinate: marker.coordinate) {
                         Button {
-                            picked = TripStayMapPick(marker: marker)
+                            tap(marker, leg: leg)
                         } label: {
                             TripStayMarkerLabel(marker: marker)
                         }
@@ -896,6 +897,17 @@ struct TripStayPlanView: View {
             if let pick = picked {
                 pickActions(pick.marker, leg: leg)
             }
+        }
+    }
+
+    /// A stay of one day has nowhere else to put an idea: the tap puts
+    /// it there instead of asking which day.
+    private func tap(_ marker: TripStayMarker, leg: TripLeg) {
+        let all = days(of: leg)
+        if case .idea = marker.kind, all.count == 1, let only = all.first {
+            Task { await add(marker, to: only, leg: leg) }
+        } else {
+            picked = TripStayMapPick(marker: marker)
         }
     }
 

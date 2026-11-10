@@ -20,6 +20,8 @@ struct TripSpotDetailPager: View {
     /// The stay, so the details can show the evening light (stage 7, step 2).
     let stayLight: ((TripStop) -> TripStayLightRef?)?
     let onStayLightAccepted: () async -> Void
+    /// A new kind for a spot ("Art"), by its OSM reference.
+    let onCategory: ((String, String) async -> Void)?
 
     @State private var selection: Int
     @State private var wayStop: TripStop?
@@ -30,7 +32,8 @@ struct TripSpotDetailPager: View {
          actions: @escaping (TripStop) -> [TripPinSheetAction],
          way: ((TripStop) -> AnyView?)? = nil,
          stayLight: ((TripStop) -> TripStayLightRef?)? = nil,
-         onStayLightAccepted: @escaping () async -> Void = {}) {
+         onStayLightAccepted: @escaping () async -> Void = {},
+         onCategory: ((String, String) async -> Void)? = nil) {
         self.stops = stops.isEmpty ? [selected] : stops
         self.mode = mode
         self.onSave = onSave
@@ -38,6 +41,7 @@ struct TripSpotDetailPager: View {
         self.way = way
         self.stayLight = stayLight
         self.onStayLightAccepted = onStayLightAccepted
+        self.onCategory = onCategory
         _selection = State(initialValue: selected.rowId)
     }
 
@@ -46,6 +50,7 @@ struct TripSpotDetailPager: View {
             TabView(selection: $selection) {
                 ForEach(stops) { stop in
                     TripSpotDetailView(spot: TripSpotDetail(stop), mode: mode, onSave: onSave,
+                                       onCategory: onCategory.map { set in { await set(stop.osmRef, $0) } },
                                        stayLight: stayLight?(stop),
                                        onStayLightAccepted: onStayLightAccepted,
                                        onRoute: way == nil ? nil : { wayStop = stop }) { close in

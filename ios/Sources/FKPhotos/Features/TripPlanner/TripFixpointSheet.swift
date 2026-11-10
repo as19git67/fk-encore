@@ -150,7 +150,7 @@ struct TripFixpointSheet: View {
                     }
                 }
 
-                if !days.isEmpty {
+                if days.count > 1 {
                     Section {
                         Picker("Tag", selection: $dayIndex) {
                             ForEach(days) { day in

@@ -303,10 +303,17 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 
 ### IOS-PLN-02 Tag planen
 
-- Spots einplanen, in einen anderen Block schieben, feste Zeit setzen,
+- Spots einplanen, „Auf einen anderen Tag“ schieben, feste Zeit setzen,
   Fotostopp markieren, Abendlicht in den Details des Spots, Wetter prüfen, Route in der
   Karten-App öffnen („Ganzen Block in Karten öffnen“, „Route hierher“),
-  „Erledigt“ unterwegs, „Zurück zu den Kandidaten“.
+  „Erledigt“ unterwegs, „Zurück zu den Ideen“.
+- In den Details eines Spots stehen Art, Aufenthaltsdauer und die Namen
+  unter den Aktionen; die Art lässt sich dort ändern (nicht bei einer
+  Strecke). Die Ideenliste der Spot-Auswahl zeigt unter dem Namen die
+  Notiz, sonst die Beschreibung des Orts.
+- Hat ein Aufenthalt nur einen Tag, fragt die App nicht nach dem Tag: ein
+  Tipp auf eine Idee in der Karte legt sie auf diesen Tag, und das Blatt
+  für eine feste Zeit zeigt keine Tagauswahl.
 - Dieselben Aktionen in Liste, Detail („Alle Details“), Pin-Sheet und
   Karte.
 - Die Etappenleiste oben zeigt die Reise als Kette: Aufenthalte als

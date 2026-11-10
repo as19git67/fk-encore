@@ -13,21 +13,27 @@ struct TripSpotThumbnail: View {
     var width: CGFloat? = nil
 
     var body: some View {
-        AsyncImage(url: URL(string: image.thumbUrl)) { phase in
-            switch phase {
-            case .success(let picture):
-                picture.resizable().scaledToFill()
-            case .failure:
-                Image(systemName: "photo").foregroundStyle(.secondary)
-            default:
-                Color.clear
+        // The frame is a plain rectangle and the picture an overlay on
+        // it: a filled picture is wider than its frame, and laid out
+        // itself it pushed the text beside it out of place.
+        Rectangle()
+            .fill(.quaternary)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil)
+            .overlay {
+                AsyncImage(url: URL(string: image.thumbUrl)) { phase in
+                    switch phase {
+                    case .success(let picture):
+                        picture.resizable().scaledToFill()
+                    case .failure:
+                        Image(systemName: "photo").foregroundStyle(.secondary)
+                    default:
+                        Color.clear
+                    }
+                }
             }
-        }
-        .frame(width: width, height: height)
-        .frame(maxWidth: width == nil ? .infinity : nil)
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: width == nil ? 0 : 8))
-        .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: width == nil ? 0 : 8))
+            .contentShape(RoundedRectangle(cornerRadius: width == nil ? 0 : 8))
     }
 }
 

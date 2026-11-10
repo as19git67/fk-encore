@@ -170,6 +170,8 @@ struct TripSpotPickerView: View {
     private func detailSheet(_ item: TripPickerItem) -> some View {
         NavigationStack {
             TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot,
+                               onCategory: item.isIdea || item.isPlanned
+                                   ? { await viewModel.setCategory(osmRef: item.osmRef, $0) } : nil,
                                stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
                                                            osmRef: item.detail.osmRef,
                                                            startDate: viewModel.leg?.startDate),
@@ -311,7 +313,7 @@ struct TripSpotPickerView: View {
                             .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
                     }
                     rowText(item)
-                    Spacer(minLength: 0)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .contentShape(.rect)
             }
