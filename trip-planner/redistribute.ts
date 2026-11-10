@@ -26,6 +26,7 @@
  * it is needed.
  */
 
+import type { PlacedBy } from "./placed-by";
 import type { PlannedBlockShape } from "./blocks";
 import { solveDay, type Candidate, type PlannedBlock, type PlannedStop } from "./solver";
 import { leaveFrom } from "./extent";
@@ -66,6 +67,12 @@ export interface CurrentStop extends PlannedStop {
    * deletes.
    */
   origin?: string;
+  /**
+   * Who put it on this day (stage 8): "hand" is a person and the stop
+   * stays; "fill" is "Tag füllen", a soft stop that goes back to the
+   * open spots when the day ends without it. Absent reads as "hand".
+   */
+  placedBy?: PlacedBy;
 }
 
 export interface CurrentBlock extends Omit<PlannedBlock, "stops"> {

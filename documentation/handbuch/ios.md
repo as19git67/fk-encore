@@ -233,7 +233,8 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - „Neue Reise“ öffnet den leeren Reiseverlauf; das Plus „Aufenthalt
   hinzufügen“ fragt Wo, Von (optional), Wie lange, Vor Ort und ob schon
   etwas gebucht ist. „Hinzufügen“ legt die Reise an und öffnet den
-  Reiseverlauf mit einem Namensvorschlag; dort weitere Aufenthalte und die
+  Reiseverlauf mit einem Namensvorschlag (ändern über Koffer ›
+  Einstellungen); dort weitere Aufenthalte und die
   Weiterreisen dazwischen. Ein Plus unter einer Schiffsfahrt fügt einen
   Hafen ein.
 - Das Blatt einer Weiterreise hat Verkehrsmittel, Abfahrt und Ankunft,

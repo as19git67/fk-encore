@@ -66,3 +66,13 @@ export function zoneShiftMinutes(
   if (a === null || b === null) return null;
   return b - a;
 }
+
+/** Today's date where `zone` is, "YYYY-MM-DD"; UTC without a zone. */
+export function localDateIn(zone: string | null, now: Date): string {
+  if (!zone) return now.toISOString().slice(0, 10);
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(now);
+  } catch {
+    return now.toISOString().slice(0, 10);
+  }
+}

@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 6 built; stage 7 in part; stage 8 (open spots, decided 2026-11-10) planned.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 6 built; stage 7 in part; stage 8 (open spots, decided 2026-11-10): step 1 built (`placed-by.ts`, `open-return.ts`, `open-capacity.ts`).
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -56,7 +56,7 @@ What is still wrong is the shape of the app around it:
   journey inserts a port and splits the journey; the end of the trip stays
   where it was.
 - **Trip name.** Not asked for. When empty, the local model proposes one
-  from stays and dates; tapping the title changes it.
+  from stays and dates; it is changed under the suitcase › Einstellungen, not by tapping the title (Anton, 10.11.).
 - **Home** stays as built (`trip_user_homes`).
 - **Reordering stays** by drag only while the trip has no date. Deleting a
   stay by swiping left, with undo; the two neighbouring journeys merge.
