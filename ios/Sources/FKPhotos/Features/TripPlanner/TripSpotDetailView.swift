@@ -549,7 +549,7 @@ struct TripSpotDetailBarView: View {
             button("Karte", systemImage: "map", action: map)
             if let primary = bar.primary {
                 button(bar.primaryTitle ?? primary.title, systemImage: primary.systemImage) { run(primary) }
-                    .disabled(running != nil)
+                    .disabled(running != nil || primary.disabled)
             }
             Menu {
                 ForEach(TripSpotActionGroup.allCases, id: \.self) { group in
@@ -560,6 +560,7 @@ struct TripSpotDetailBarView: View {
                                 Button(role: action.role) { run(action) } label: {
                                     Label(action.title, systemImage: action.systemImage)
                                 }
+                                .disabled(action.disabled)
                             }
                         }
                     }

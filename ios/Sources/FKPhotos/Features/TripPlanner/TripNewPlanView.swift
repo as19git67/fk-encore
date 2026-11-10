@@ -36,8 +36,13 @@ struct TripNewPlanView: View {
                     addingStay = true
                 } label: {
                     HStack(spacing: 12) {
-                        TimelineGutter(node: .plus, isFirst: true, isLast: true)
+                        // Centred on the text: the timeline's gutter sits
+                        // its node at the top of a taller row.
+                        Image(systemName: "plus.circle")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
                             .frame(width: 24)
+                            .accessibilityHidden(true)
                         Text("Aufenthalt hinzufügen")
                             .font(.headline)
                             .foregroundStyle(.tint)

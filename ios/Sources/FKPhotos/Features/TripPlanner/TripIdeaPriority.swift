@@ -130,16 +130,19 @@ enum TripOpeningHours {
 }
 
 extension TripIdeaPriority {
-    /// The other two priorities as actions, for every way of looking at
-    /// an idea: its row, its detail, the map's sheet (one list, §8.4).
+    /// The three priorities as actions, for every way of looking at an
+    /// idea: its row, its detail, the map's sheet (one list, §8.4). The
+    /// current one carries the tick and is dimmed, so the submenu looks
+    /// the same whatever is chosen.
     static func actions(
         current: TripIdeaPriority,
         set: @escaping @MainActor (TripIdeaPriority) async -> Void,
     ) -> [TripPinSheetAction] {
-        allCases.filter { $0 != current }.map { priority in
+        allCases.map { priority in
             TripPinSheetAction(id: "priority-\(priority.rawValue)", title: "Priorität: \(priority.label)",
-                               systemImage: priority.systemImage, closes: false, group: .plan,
-                               submenu: .priority) {
+                               systemImage: priority == current ? "checkmark" : priority.systemImage,
+                               closes: false, group: .plan, submenu: .priority,
+                               disabled: priority == current) {
                 await set(priority)
             }
         }

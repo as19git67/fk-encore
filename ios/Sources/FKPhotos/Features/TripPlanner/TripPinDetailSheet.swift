@@ -30,6 +30,10 @@ struct TripPinSheetAction: Identifiable {
     /// menu, so the menu stays a list of things to do. A list of
     /// sections draws them flat.
     var submenu: TripSpotActionSubmenu?
+    /// Shown but not for now: the menu of a spot keeps the same items
+    /// in every state, and what the state does not allow is dimmed
+    /// rather than missing (Apple's menus do the same; Anton, 10.11.).
+    var disabled: Bool = false
     let run: @MainActor () async -> Void
 
     init(
@@ -41,9 +45,11 @@ struct TripPinSheetAction: Identifiable {
         closes: Bool = true,
         group: TripSpotActionGroup = .plan,
         submenu: TripSpotActionSubmenu? = nil,
+        disabled: Bool = false,
         run: @escaping @MainActor () async -> Void,
     ) {
         self.submenu = submenu
+        self.disabled = disabled
         self.id = id
         self.title = title
         self.systemImage = systemImage
@@ -100,6 +106,7 @@ struct TripSpotActionMenuItems: View {
                         } label: {
                             Label(submenu.title, systemImage: submenu.systemImage)
                         }
+                        .disabled(members.filter { $0.submenu == submenu }.allSatisfy(\.disabled))
                     }
                 }
             }
@@ -114,6 +121,7 @@ extension TripSpotActionMenuItems {
         } label: {
             Label(action.title, systemImage: action.systemImage)
         }
+        .disabled(action.disabled)
     }
 
     /// The submenus of a group, in the order their first action comes.
@@ -174,7 +182,7 @@ struct TripSpotActionSections: View {
                             }
                         }
                     }
-                    .disabled(running != nil)
+                    .disabled(running != nil || action.disabled)
                 }
             }
         }

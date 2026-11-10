@@ -16,7 +16,7 @@ struct TripFixpointSheet: View {
     /// The spots an appointment can be for — the leg's planned stops and
     /// candidates. Empty hides the choice.
     var spots: [TripSpotChoice] = []
-    /// Opened from a spot ("Fester Termin …"): that spot is chosen and
+    /// Opened from a spot ("Feste Zeit eintragen …"): that spot is chosen and
     /// the appointment is called after it.
     var presetSpot: TripSpotChoice? = nil
     /// Opened away from a day (from the candidates): which days the

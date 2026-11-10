@@ -70,7 +70,7 @@ enum TripPlannerPreviewData {
     static let actions: [TripPinSheetAction] = [
         TripPinSheetAction(id: "done", title: "Erledigt", systemImage: "checkmark", group: .status) {},
         TripPinSheetAction(id: "move", title: "Auf einen anderen Tag", systemImage: "calendar") {},
-        TripPinSheetAction(id: "toPool", title: "Zurück zu den Ideen", systemImage: "tray.and.arrow.down") {},
+        TripPinSheetAction(id: "delete", title: "Löschen", systemImage: "trash", role: .destructive, group: .remove) {},
     ]
 }
 

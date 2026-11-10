@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A stay planned as a whole (reise-planen-und-unterwegs.md, stage 3):
 /// every day of it on one screen, each with what it holds as cards —
@@ -35,7 +36,9 @@ struct TripStayPlanView: View {
     /// The hour the map's slider is at; nil until it is moved.
     @State private var sliderMinutes: Int?
     /// The card being dragged, so the day it hovers over can say so.
-    @State private var targetedDay: Int?
+    /// Where a dragged card would land: the day, and the card it would
+    /// go in front of (nil is the end of the day). Drawn as a line.
+    @State private var dropSlot: TripDropSlot?
     /// The card whose details are open, as a sheet over the days (stage 4).
     @State private var detailPick: TripStayDetailPick?
     /// The spot picker (stage 4).
@@ -516,7 +519,7 @@ struct TripStayPlanView: View {
                     .background {
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-                            .foregroundStyle(targetedDay == day.dayIndex ? Color.accentColor : Color.secondary.opacity(0.5))
+                            .foregroundStyle(dropSlot?.dayIndex == day.dayIndex ? Color.accentColor : Color.secondary.opacity(0.5))
                     }
             } else if onTheRoad {
                 if let behind, advice == nil {
@@ -536,20 +539,16 @@ struct TripStayPlanView: View {
                     nowLine(nowMinutes)
                 }
                 ForEach(Array(order.open.enumerated()), id: \.element.id) { index, stop in
+                    let slot = TripDropSlot(dayIndex: day.dayIndex, before: stops.firstIndex { $0.rowId == stop.rowId })
+                    insertionLine(slot)
                     wayLine(to: stop, on: day, leg: leg)
                     card(stop, day: day, number: index + 1,
                          mode: .open(isNext: stop.rowId == next?.rowId, canCheck: phase == .running),
                          diary: nil)
-                        .draggable(TripStayPlan.dragId(stop)) {
-                            Text(stop.displayName)
-                                .font(.subheadline.weight(.semibold))
-                                .padding(8)
-                                .background(.regularMaterial, in: .rect(cornerRadius: 8))
-                        }
-                        .dropDestination(for: String.self) { items, _ in
-                            drop(items, onDay: day, before: stops.firstIndex { $0.rowId == stop.rowId })
-                        }
+                        .modifier(swipeToDelete(stop))
+                        .modifier(reorderable(stop, slot: slot, day: day))
                 }
+                insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
                 if !missed.isEmpty {
                     missedCard(missed, day: day, leg: leg, today: today)
                 }
@@ -562,36 +561,52 @@ struct TripStayPlanView: View {
                 }
             } else {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
+                    let slot = TripDropSlot(dayIndex: day.dayIndex, before: index)
+                    insertionLine(slot)
                     wayLine(to: stop, on: day, leg: leg)
                     card(stop, day: day, number: index + 1, mode: .plan, diary: nil)
-                        .draggable(TripStayPlan.dragId(stop)) {
-                            Text(stop.displayName)
-                                .font(.subheadline.weight(.semibold))
-                                .padding(8)
-                                .background(.regularMaterial, in: .rect(cornerRadius: 8))
-                        }
-                        .dropDestination(for: String.self) { items, _ in
-                            drop(items, onDay: day, before: index)
-                        }
+                        .modifier(swipeToDelete(stop))
+                        .modifier(reorderable(stop, slot: slot, day: day))
                 }
+                insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
             }
         }
         // The day is a heading over its cards, not a box around them.
         .padding(.vertical, 4)
-        .overlay {
-            if targetedDay == day.dayIndex {
-                RoundedRectangle(cornerRadius: 14).strokeBorder(Color.accentColor, lineWidth: 2)
-                    .padding(-6)
-            }
+        .onDrop(of: [.plainText], delegate: TripStopDropDelegate(
+            slot: TripDropSlot(dayIndex: day.dayIndex, before: nil), current: $dropSlot,
+        ) { ids in
+            drop(ids, onDay: day, before: nil)
+        })
+    }
+
+    /// Dragging a card to another place (the system's lift, a line where
+    /// it would land, and a move, not the green "+" of a copy).
+    private func reorderable(_ stop: TripStop, slot: TripDropSlot, day: TripDay) -> TripReorderable {
+        TripReorderable(id: TripStayPlan.dragId(stop), name: stop.displayName, slot: slot, current: $dropSlot) { ids in
+            drop(ids, onDay: day, before: slot.before)
         }
-        .dropDestination(for: String.self) { items, _ in
-            drop(items, onDay: day, before: nil)
-        } isTargeted: { targeted in
-            if targeted {
-                targetedDay = day.dayIndex
-            } else if targetedDay == day.dayIndex {
-                targetedDay = nil
-            }
+    }
+
+    /// Swiping a card to the left deletes it, as in every list on iOS
+    /// (Anton, 10.11.): the same "Löschen" as at the bottom of its menu.
+    private func swipeToDelete(_ stop: TripStop) -> TripSwipeToDelete {
+        let delete = stopActions(stop).first { $0.id == "delete" && !$0.disabled }
+        return TripSwipeToDelete(enabled: delete != nil) {
+            if let delete { Task { await delete.run() } }
+        }
+    }
+
+    /// The line where a dragged card would go, as lists draw it.
+    @ViewBuilder
+    private func insertionLine(_ slot: TripDropSlot) -> some View {
+        if dropSlot == slot {
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(height: 3)
+                .padding(.vertical, 2)
+                .transition(.opacity)
+                .accessibilityHidden(true)
         }
     }
 
@@ -617,13 +632,15 @@ struct TripStayPlanView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
                 if mode == .plan {
-                    // The pin of the mock: filled while a fixed time
-                    // holds the spot, empty while the app may move it.
-                    Image(systemName: visit != nil ? "pin.fill" : "pin")
-                        .font(.body)
-                        .foregroundStyle(visit != nil ? Color.accentColor : Color.secondary)
-                        .frame(width: 22)
-                        .accessibilityLabel(visit != nil ? "Gepinnt" : "Nicht gepinnt")
+                    // A pin only where a fixed time holds the spot: on
+                    // every other card it said nothing (Anton, 10.11.).
+                    if visit != nil {
+                        Image(systemName: "pin.fill")
+                            .font(.body)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 22)
+                            .accessibilityLabel("Feste Zeit")
+                    }
                 } else {
                     checkControl(stop, mode: mode)
                 }
@@ -661,14 +678,10 @@ struct TripStayPlanView: View {
                             }
                         }
                         Spacer(minLength: 0)
+                        // A picture only where there is one: no grey box
+                        // in its place (Anton, 10.11.).
                         if let image = stop.image {
-                            TripSpotThumbnail(image: image, height: 56, width: 56)
-                        } else if let number {
-                            Text("\(number)")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 56, height: 56)
-                                .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+                            TripSpotThumbnail(image: image, height: 56, width: 56, placeholder: false)
                         }
                     }
                     .contentShape(.rect)
@@ -962,7 +975,7 @@ struct TripStayPlanView: View {
     /// Moves the dragged stop onto `day`, before the card at `before`
     /// (counted among the day's stops) or to the end.
     private func drop(_ items: [String], onDay day: TripDay, before: Int?) -> Bool {
-        targetedDay = nil
+        dropSlot = nil
         guard let leg = viewModel.leg,
               let rowId = items.first.flatMap(TripStayPlan.rowId(fromDragId:)),
               let stop = TripStayPlan.stop(rowId: rowId, in: leg),
@@ -1622,4 +1635,144 @@ enum TripStayDayAction {
     case pause(TripBreakPreset)
     case fixedTime
     case dayTrip
+}
+
+/// Where a dragged card would land in the stay's planning view.
+struct TripDropSlot: Equatable {
+    let dayIndex: Int
+    /// The index of the card it goes in front of; nil is the day's end.
+    let before: Int?
+}
+
+/// A card that can be dragged and dropped on: lifts with its name,
+/// takes a drop in front of itself.
+struct TripReorderable: ViewModifier {
+    let id: String
+    let name: String
+    let slot: TripDropSlot
+    @Binding var current: TripDropSlot?
+    let perform: ([String]) -> Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onDrag {
+                NSItemProvider(object: id as NSString)
+            } preview: {
+                Text(name)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(8)
+                    .background(.regularMaterial, in: .rect(cornerRadius: 8))
+            }
+            .onDrop(of: [.plainText], delegate: TripStopDropDelegate(slot: slot, current: $current, perform: perform))
+    }
+}
+
+/// A drop on the stay's planning view: says "move" (no "+" badge),
+/// keeps the line where the card would go, and hands the dragged id on.
+struct TripStopDropDelegate: DropDelegate {
+    let slot: TripDropSlot
+    @Binding var current: TripDropSlot?
+    let perform: ([String]) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.plainText])
+    }
+
+    func dropEntered(info: DropInfo) {
+        withAnimation(.easeOut(duration: 0.12)) { current = slot }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        if current != slot { current = slot }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if current == slot { withAnimation(.easeOut(duration: 0.12)) { current = nil } }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let providers = info.itemProviders(for: [.plainText])
+        guard let provider = providers.first else {
+            current = nil
+            return false
+        }
+        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+            let id = (object as? NSString).map { String($0) }
+            Task { @MainActor in
+                current = nil
+                if let id { _ = perform([id]) }
+            }
+        }
+        return true
+    }
+}
+
+/// A card swiped to the left shows "Löschen" behind it; a long swipe or
+/// a tap on it deletes. The cards stand in a scroll view, not a `List`,
+/// so `swipeActions` is not there to use; this is the same gesture.
+struct TripSwipeToDelete: ViewModifier {
+    let enabled: Bool
+    let perform: () -> Void
+
+    @State private var offset: CGFloat = 0
+    @State private var open = false
+    private let button: CGFloat = 88
+
+    func body(content: Content) -> some View {
+        if !enabled {
+            content
+        } else {
+            content
+                .offset(x: offset)
+                .background(alignment: .trailing) {
+                    if offset < 0 {
+                        Button(role: .destructive) {
+                            withAnimation(.snappy) { offset = 0; open = false }
+                            perform()
+                        } label: {
+                            Label("Löschen", systemImage: "trash")
+                                .labelStyle(.iconOnly)
+                                .font(.title3)
+                                .foregroundStyle(.white)
+                                .frame(width: max(button, -offset), alignment: .center)
+                                .frame(maxHeight: .infinity)
+                                .background(Color.red, in: .rect(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Löschen")
+                    }
+                }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 20)
+                        .onChanged { value in
+                            // Only a sideways drag; a vertical one scrolls.
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            let base: CGFloat = open ? -button : 0
+                            offset = min(0, base + value.translation.width)
+                        }
+                        .onEnded { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) else {
+                                withAnimation(.snappy) { offset = open ? -button : 0 }
+                                return
+                            }
+                            let width = value.translation.width + (open ? -button : 0)
+                            withAnimation(.snappy) {
+                                if width < -240 {
+                                    offset = 0
+                                    open = false
+                                    perform()
+                                } else if width < -button / 2 {
+                                    offset = -button
+                                    open = true
+                                } else {
+                                    offset = 0
+                                    open = false
+                                }
+                            }
+                        },
+                )
+                .accessibilityAction(named: "Löschen", perform)
+        }
+    }
 }
