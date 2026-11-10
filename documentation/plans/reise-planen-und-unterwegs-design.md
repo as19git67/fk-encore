@@ -124,9 +124,9 @@ Jede der Ansichten oben hat eine Karte, umgeschaltet oben rechts mit „Liste | 
 
 ![Routen: Wege auf der Tageskarte (links) und das Blatt „Weg“ (rechts)](reise-planen-und-unterwegs/10-routen.svg)
 
-## Vorschlag: Wetter, Abendlicht, Ausflüge und Strecken (noch nicht entschieden)
+## Wetter, Abendlicht, Ausflüge und Strecken (entschieden 10.11.2026)
 
-Diese vier Funktionen setzen heute auf den alten Tagesplaner auf, der auf einer Reise mit Ideen nichts mehr selbst auf einen Tag legt. Der Mock zeigt, wie sie auf einer Reise mit Ideen aussehen könnten: Die App schlägt vor, ihr bestätigt, alles lässt sich rückgängig machen. Welche davon so kommen, ist noch offen (Etappe 7, Teil 2).
+Diese vier Funktionen setzen heute auf den alten Tagesplaner auf, der auf einer Reise mit Ideen nichts mehr selbst auf einen Tag legt. Der Mock zeigt, wie sie auf einer Reise mit Ideen aussehen: Die App schlägt vor, ihr bestätigt, alles lässt sich rückgängig machen. Alle vier bleiben so (Entscheidung 10.11.2026); die zwei neuen Quellen unten kommen als eigene Etappe.
 
 ![Vorschlag: Wetter (1), Abendlicht (2), Tagesausflug (3), Strecken (4) und woher Ausflüge und Strecken kommen](reise-planen-und-unterwegs/11-vorschlaege-ideen-reise.svg)
 
