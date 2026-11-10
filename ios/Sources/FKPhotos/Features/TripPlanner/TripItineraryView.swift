@@ -454,6 +454,12 @@ struct TripItineraryView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        if let note = journey.note, !note.isEmpty {
+                            Text(note)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                     Spacer(minLength: 6)
                     if let shift = TripItineraryText.zoneShift(journey.zoneShiftMinutes) {

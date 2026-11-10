@@ -46,6 +46,8 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
     var arriveAt: String?
     /// Calendar days between setting off and arriving. Zero by default.
     var nights: Int?
+    /// What to keep in mind on the way: the flight number, the seat.
+    var note: String?
 
     // What the server derived, read only.
     var startDate: String?
@@ -59,7 +61,7 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case kind, legId, title, anchor, anchorLabel, anchorRadiusM, mode, days, radiusM
-        case quartersAboard, tenderPort, departAt, arriveAt, nights, startDate, endDate
+        case quartersAboard, tenderPort, departAt, arriveAt, nights, note, startDate, endDate
         case timeZone, zoneShiftMinutes
     }
 
@@ -83,6 +85,7 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
         departAt = try c.decodeIfPresent(String.self, forKey: .departAt)
         arriveAt = try c.decodeIfPresent(String.self, forKey: .arriveAt)
         nights = try c.decodeIfPresent(Int.self, forKey: .nights)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
         startDate = try c.decodeIfPresent(String.self, forKey: .startDate)
         endDate = try c.decodeIfPresent(String.self, forKey: .endDate)
         timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
@@ -116,6 +119,8 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
             try c.encode(departAt, forKey: .departAt)
             try c.encode(arriveAt, forKey: .arriveAt)
             try c.encode(nights ?? 0, forKey: .nights)
+            let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+            try c.encode(trimmed?.isEmpty == false ? trimmed : nil, forKey: .note)
         }
     }
 
@@ -469,6 +474,28 @@ struct TripItineraryDraft: Equatable {
             items.remove(at: i)
         }
         normalise()
+    }
+
+    /// Take what was said about a journey off: its mode, times, nights
+    /// and note. Between two stays the journey itself stays — something
+    /// has to bring the group from one to the next — and with home the
+    /// way there and the way home do too; they only go back to "Zeiten
+    /// noch offen".
+    mutating func clearJourney(id: TripItineraryItem.ID) {
+        guard let i = index(of: id), items[i].isJourney else { return }
+        var cleared = TripItineraryItem.newJourney(from: stay(before: id), to: stay(after: id))
+        cleared.id = items[i].id
+        cleared.legId = items[i].legId
+        items[i] = cleared
+    }
+
+    /// Whether anything about this journey is kept: a time, nights on
+    /// the way or a note. Its mode alone is not; without times the
+    /// server keeps no row for it.
+    func hasDetails(_ id: TripItineraryItem.ID) -> Bool {
+        guard let journey = self[id] else { return false }
+        return journey.departAt != nil || journey.arriveAt != nil || (journey.nights ?? 0) != 0
+            || !(journey.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Reorder the stays as a list does. The journeys keep their

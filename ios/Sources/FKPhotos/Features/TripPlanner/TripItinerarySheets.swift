@@ -299,6 +299,7 @@ struct TripJourneySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var saving = false
     @State private var error: String?
+    @State private var confirmingClear = false
 
     /// The modes a journey offers, in the order people name them.
     private static let modes: [TripTransportMode] = [.plane, .transit, .car, .ship, .bike, .foot]
@@ -392,6 +393,14 @@ struct TripJourneySheet: View {
                 Text("Nachtzug, Fähre, Flug über Nacht oder Seetage.")
             }
 
+            Section("Notiz") {
+                TextField("z. B. Flugnummer, Sitzplatz", text: Binding(
+                    get: { journey.note ?? "" },
+                    set: { value in update { $0.note = value.isEmpty ? nil : value } },
+                ), axis: .vertical)
+                .lineLimit(1...4)
+            }
+
             if journey.transportMode == .ship, draft.stay(before: journeyId) != nil,
                draft.stay(after: journeyId) != nil, let onInsertPort {
                 Section {
@@ -412,6 +421,29 @@ struct TripJourneySheet: View {
                         .foregroundStyle(.red)
                 }
             }
+
+            if draft.hasDetails(journeyId) {
+                Section {
+                    Button("\(draft.name(of: journey)) entfernen", role: .destructive) {
+                        confirmingClear = true
+                    }
+                    .frame(maxWidth: .infinity)
+                } footer: {
+                    Text(clearFooter)
+                }
+            }
+        }
+        .confirmationDialog("\(draft.name(of: journey)) entfernen?", isPresented: $confirmingClear,
+                            titleVisibility: .visible) {
+            Button("Entfernen", role: .destructive) {
+                var next = draft
+                next.clearJourney(id: journeyId)
+                draft = next
+                Task { await save() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text(clearFooter)
         }
         .navigationTitle(draft.name(of: journey))
         .navigationBarTitleDisplayMode(.inline)
@@ -449,6 +481,13 @@ struct TripJourneySheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// What "entfernen" leaves behind: the journey is the link between
+    /// two places, so it stays, only without what was said about it.
+    private var clearFooter: String {
+        "Verkehrsmittel, Zeiten, Nächte und Notiz werden entfernt. Im Verlauf bleibt die Verbindung "
+            + "mit offenen Zeiten; der Tag rechnet dann mit den Vorgaben."
     }
 
     static func chipLabel(_ mode: TripTransportMode) -> String {

@@ -236,6 +236,11 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Reiseverlauf mit einem Namensvorschlag; dort weitere Aufenthalte und die
   Weiterreisen dazwischen. Ein Plus unter einer Schiffsfahrt fügt einen
   Hafen ein.
+- Das Blatt einer Weiterreise hat Verkehrsmittel, Abfahrt und Ankunft,
+  Nächte unterwegs und eine Notiz (Flugnummer, Sitzplatz), die auch auf
+  ihrer Karte im Verlauf steht. „‹Weiterreise› entfernen“ nimmt
+  Verkehrsmittel, Zeiten, Nächte und Notiz weg; die Verbindung zwischen
+  den Aufenthalten bleibt mit offenen Zeiten.
 - Die Planung eines Aufenthalts beginnt mit seinem Namen, darunter Tage,
   Daten und Unterkunft (unterwegs „Tag n von m · heute“ und das Wetter),
   „Bearbeiten“ oben öffnet die Details des Aufenthalts, und der Knopf

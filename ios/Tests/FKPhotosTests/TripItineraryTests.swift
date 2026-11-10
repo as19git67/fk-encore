@@ -333,6 +333,48 @@ final class TripItineraryTests: XCTestCase {
         let undated = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.request)) as? [String: Any])
         XCTAssertTrue(undated["startDate"] is NSNull)
     }
+
+    // MARK: - The journey sheet
+
+    func testAJourneysNoteGoesOverTheWireTrimmedOrAsNull() throws {
+        var draft = twoStays
+        var trip = draft.items[1]
+        trip.note = "  Zug 123, Wagen 4  "
+        draft[trip.id] = trip
+        var items = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.request))
+            as? [String: Any])["items"] as? [[String: Any]]
+        XCTAssertEqual(items?[1]["note"] as? String, "Zug 123, Wagen 4")
+
+        trip.note = "   "
+        draft[trip.id] = trip
+        items = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.request))
+            as? [String: Any])["items"] as? [[String: Any]]
+        XCTAssertTrue(items?[1]["note"] is NSNull)
+        // A stay carries no note.
+        XCTAssertNil(items?[0]["note"])
+    }
+
+    func testRemovingAJourneyKeepsTheLinkWithoutWhatWasSaid() {
+        var draft = twoStays
+        var trip = draft.items[1]
+        trip.note = "Platz am Fenster"
+        trip.nights = 1
+        draft[trip.id] = trip
+        XCTAssertTrue(draft.hasDetails(trip.id))
+
+        draft.clearJourney(id: trip.id)
+        let cleared = draft.items[1]
+        XCTAssertEqual(draft.items.map(\.kind), [.stay, .journey, .stay])
+        XCTAssertEqual(cleared.id, trip.id)
+        XCTAssertEqual(cleared.legId, 2)
+        XCTAssertNil(cleared.departAt)
+        XCTAssertNil(cleared.arriveAt)
+        XCTAssertNil(cleared.note)
+        XCTAssertEqual(cleared.nights, 0)
+        XCTAssertFalse(draft.hasDetails(trip.id))
+        // The next stay moves back to the day after the first.
+        XCTAssertEqual(draft.dated(timeZone: berlin).last?.startDate, "2027-06-05")
+    }
 }
 
 /// Which of a day's fixed times are a journey's, and so lead into the

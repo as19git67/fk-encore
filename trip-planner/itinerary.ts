@@ -38,6 +38,7 @@ import {
   loadPlan,
   removeLeg,
   replanPlan,
+  setJourneyNotes,
   setLegPositions,
   setLegsAwaitingRegion,
   updateLegFrames,
@@ -68,6 +69,8 @@ import { zoneAt, zoneShiftMinutes } from "./time-zone";
 const MAX_STAYS = 20;
 /** Mirrors `plans.ts`: a stay longer than this is two stays. */
 const MAX_STAY_DAYS = 14;
+/** How long a note on a journey may be: a booking, not a diary. */
+const MAX_JOURNEY_NOTE = 500;
 /** A journey longer than this is a stay of its own. */
 const MAX_JOURNEY_NIGHTS = 6;
 /**
@@ -123,6 +126,8 @@ export interface ItineraryItem {
   arriveAt?: string | null;
   /** Calendar days between setting off and arriving. Zero by default. */
   nights?: number;
+  /** What to keep in mind on the way: the flight number, the seat. */
+  note?: string | null;
 }
 
 /** An item as the trip reads it back: with the dates the chain gives it. */
@@ -365,6 +370,7 @@ async function applyChain(
   restore?: ReadonlyMap<ItineraryItem, CreateDayInput[]>,
 ): Promise<{ planned: Planned; rebuilt: StoredLeg[] }> {
   const frames = deriveFrames(chain, { home: plan.home !== null, homeLabel: plan.home?.label ?? "Zuhause" });
+  const notes = journeyNotes(chain.items);
   const slots = resolveSlots(plan, frames);
   if (restore) {
     for (const slot of slots.slots) {
@@ -402,6 +408,7 @@ async function applyChain(
     }
   }
   await writeSlots(plan, slots, planned);
+  await setJourneyNotes(plan.id, notes);
   if (restore) await dropPlannedFromManualPool(plan);
 
   const rebuilt = [
@@ -454,9 +461,19 @@ export function itineraryOf(plan: Pick<StoredPlan, "legs" | "home">): {
       continue;
     }
     if (pendingJourney) {
-      items.push(journeyFromTransit(pendingJourney));
+      items.push(withNote(journeyFromTransit(pendingJourney), previousStay?.departureNote ?? leg.arrivalNote));
     } else if (previousStay) {
-      items.push(implicitJourney(previousStay, leg));
+      items.push(withNote(implicitJourney(previousStay, leg), previousStay.departureNote));
+    } else if (plan.home && leg.arrivalNote) {
+      // The way there from home with its times open has no row; with a
+      // note it is still a journey somebody wrote something on.
+      items.push({
+        kind: "journey",
+        departAt: null,
+        arriveAt: leg.arriveMinutes === null ? null : formatMinutes(leg.arriveMinutes),
+        nights: 0,
+        note: leg.arrivalNote,
+      });
     }
     items.push({
       kind: "stay",
@@ -477,9 +494,53 @@ export function itineraryOf(plan: Pick<StoredPlan, "legs" | "home">): {
     previousStay = leg;
     pendingJourney = null;
   }
-  if (pendingJourney) items.push(journeyFromTransit(pendingJourney));
+  if (pendingJourney) {
+    items.push(withNote(journeyFromTransit(pendingJourney), previousStay?.departureNote));
+  } else if (plan.home && previousStay?.departureNote) {
+    const departure = journeyDepartureOf(previousStay);
+    items.push({
+      kind: "journey",
+      departAt: departure === null ? null : formatMinutes(departure.startMinutes),
+      arriveAt: null,
+      nights: 0,
+      note: previousStay.departureNote,
+    });
+  }
 
   return { startDate: legs[0]?.startDate ?? null, items };
+}
+
+function withNote(item: ItineraryItem, note: string | null | undefined): ItineraryItem {
+  return note ? { ...item, note } : item;
+}
+
+/**
+ * The notes of the chain's journeys, one entry per stay in order: the
+ * journey that leaves the stay, and on the first stay the way there
+ * from home (`setJourneyNotes`).
+ */
+export function journeyNotes(items: readonly ItineraryItem[]): Array<{ departure: string | null; arrival: string | null }> {
+  const notes: Array<{ departure: string | null; arrival: string | null }> = [];
+  for (const [index, item] of items.entries()) {
+    if (item.kind !== "stay") continue;
+    const before = items[index - 1];
+    const after = items[index + 1];
+    notes.push({
+      departure: after ? noteOf(after.note, index + 1) : null,
+      arrival: notes.length === 0 && before ? noteOf(before.note, index - 1) : null,
+    });
+  }
+  return notes;
+}
+
+function noteOf(value: string | null | undefined, index: number): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw APIError.invalidArgument(`items[${index}].note must be text`);
+  const note = value.trim();
+  if (note.length > MAX_JOURNEY_NOTE) {
+    throw APIError.invalidArgument(`items[${index}].note: höchstens ${MAX_JOURNEY_NOTE} Zeichen`);
+  }
+  return note || null;
 }
 
 function journeyFromTransit(leg: StoredLeg): ItineraryItem {
