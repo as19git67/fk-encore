@@ -50,7 +50,7 @@ struct TripWeatherNotesResponse: Codable, Sendable {
     let degraded: Bool
 }
 
-struct TripWeatherApplyResponse: Decodable, Sendable {
+struct TripWeatherNoteApplyResponse: Decodable, Sendable {
     let plan: TripPlan
     let sentence: String
     let opId: Int
@@ -223,7 +223,7 @@ enum TripWeatherAPI {
         return response?.notes ?? []
     }
 
-    static func apply(planId: Int, legIndex: Int, dayIndex: Int, kind: String) async throws -> TripWeatherApplyResponse {
+    static func apply(planId: Int, legIndex: Int, dayIndex: Int, kind: String) async throws -> TripWeatherNoteApplyResponse {
         struct Body: Encodable {
             let dayIndex: Int
             let kind: String
