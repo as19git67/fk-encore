@@ -344,8 +344,9 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Umsortieren: eine Karte lange drücken und ziehen; eine Linie zeigt, wo
   sie landet, auch auf einem anderen Tag. Setzt man einem Spot eine feste
   Zeit, rückt ein Spot davor, der sonst in die feste Zeit liefe, dahinter.
-- Ein Pin steht nur an einer Karte mit fester Zeit; „Feste Zeit
-  entfernen“ im „⋯“ nimmt sie wieder weg. Ohne Foto zeigt die Karte kein
+- Ein Pin steht nur an einer Karte mit fester Zeit. Im „⋯“ steht ein
+  Eintrag dafür: „Feste Zeit eintragen …“ ohne feste Zeit, „Feste Zeit
+  entfernen“ mit; der Grund wird beim Eintragen gewählt. Ohne Foto zeigt die Karte kein
   Bild und keinen Platzhalter.
 - Die Details eines Spots sind ein Blatt: oben die Bilder (das Bild des
   Orts groß, weitere von Wikimedia Commons kleiner daneben, seitlich zum

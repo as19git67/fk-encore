@@ -1011,33 +1011,6 @@ final class TripPlannerViewModel {
         }
     }
 
-    /// Say why a booked visit has its time, or that it has none (stage
-    /// 3). The hour stays, so nothing is re-planned.
-    func setPinReason(_ fixpoint: TripFixpoint, _ reason: TripPinReason?) async {
-        guard requireOnline() else { return }
-        struct Body: Encodable {
-            let fixpointId: Int
-            let pinReason: String?
-
-            func encode(to encoder: Encoder) throws {
-                var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encode(fixpointId, forKey: .fixpointId)
-                try container.encode(pinReason, forKey: .pinReason)
-            }
-
-            enum CodingKeys: String, CodingKey { case fixpointId, pinReason }
-        }
-        do {
-            let response: TripPlanResponse = try await APIClient.shared.post(
-                "/trip-planner/plans/\(planId)/fixpoints/pin-reason",
-                body: Body(fixpointId: fixpoint.rowId, pinReason: reason?.rawValue),
-            )
-            apply(response)
-        } catch {
-            errorMessage = TripErrorText.describe(error)
-        }
-    }
-
     /// The booked visit that holds this stop at its hour, if any: on the
     /// given day, or on any day of the leg (a spot is on one day only).
     func visit(holding stop: TripStop, onDay dayIndex: Int? = nil) -> TripFixpoint? {
