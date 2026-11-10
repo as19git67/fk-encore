@@ -230,8 +230,23 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 
 ### IOS-PLN-01 Reise anlegen und Aufenthalte planen
 
-- „Neue Reise“ (Name, Unterkunft, Länge, Datum) → „Planen“ öffnet den
-  Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen.
+- „Neue Reise“ öffnet den leeren Reiseverlauf; das Plus „Aufenthalt
+  hinzufügen“ fragt Wo, Von (optional), Wie lange, Vor Ort und ob schon
+  etwas gebucht ist. „Hinzufügen“ legt die Reise an und öffnet den
+  Reiseverlauf mit einem Namensvorschlag; dort weitere Aufenthalte und die
+  Weiterreisen dazwischen. Ein Plus unter einer Schiffsfahrt fügt einen
+  Hafen ein.
+- Die Planung eines Aufenthalts beginnt mit seinem Namen, darunter Tage,
+  Daten und Unterkunft (unterwegs „Tag n von m · heute“ und das Wetter),
+  „Bearbeiten“ oben öffnet die Details des Aufenthalts, und der Knopf
+  „Ideen (n) und Suche“ öffnet die Spot-Auswahl. Jeder Tag zeigt im Kopf
+  Ankunft bzw. Abfahrt und rechts „verplant von verfügbar“, unterwegs
+  „n von m besucht“; jede Karte nennt Art und Dauer, darunter die
+  geschätzte Uhrzeit. Ein Tipp auf eine Markierung der Karte öffnet ein
+  kleines Blatt mit Details, Route und Aktionen, bei einer Idee „+ Tag n“.
+  Ist ein Tag gewählt, zeigt ein Regler unter der Karte, wo man nach Plan
+  zu einer Uhrzeit wäre. Ein Ausflugstag trägt oben die Zeile „Ausflug
+  nach …“ mit Hin- und Rückweg, „Weg zeigen“ und „Fahrt ändern“.
 - Öffnet man eine Reise, steht oben die Leiste der Aufenthalte und
   darunter die Planung des gewählten Aufenthalts mit allen Tagen auf einem
   Bildschirm. Ein Tipp auf einen Tag öffnet diesen Tag für sich (Zeitband,
@@ -307,8 +322,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Fotostopp markieren, Abendlicht in den Details des Spots, Wetter prüfen, Route in der
   Karten-App öffnen („Ganzen Block in Karten öffnen“, „Route hierher“),
   „Erledigt“ unterwegs, „Zurück zu den Ideen“.
+- Die Details eines Spots sind ein Blatt: oben Bild, Name, Art und
+  Entfernung zur Unterkunft mit den Chips für feste Zeit, Priorität und
+  Dauer, darunter Ticket, Öffnungszeiten, „Geplant“ und Notiz, dann
+  Beschreibung, Bilder und Karte. Unten stehen immer „Route“, „Karte“,
+  „Anderer Tag“ (in der Spot-Auswahl „+ Tag n“) und „Mehr“ mit allen
+  übrigen Aktionen. Die Spot-Auswahl gliedert sich in „Eure Ideen“ und
+  „Highlights in der Nähe“; Eingeplantes zeigt „✓ Tag n“.
 - In den Details eines Spots stehen Art, Aufenthaltsdauer und die Namen
-  unter den Aktionen; die Art lässt sich dort ändern (nicht bei einer
+  weiter unten; die Art lässt sich dort ändern (nicht bei einer
   Strecke). Die Ideenliste der Spot-Auswahl zeigt unter dem Namen die
   Notiz, sonst die Beschreibung des Orts.
 - Hat ein Aufenthalt nur einen Tag, fragt die App nicht nach dem Tag: ein

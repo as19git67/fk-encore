@@ -298,6 +298,12 @@ struct TripItineraryView: View {
             // there from home has its own row above.
             if position > 0, let before = draft.journey(before: stay.id) {
                 journeyRow(before, dated: dated[index - 1], in: draft)
+                // A plus on the ship puts a port in and splits the
+                // voyage; the end of the trip stays (mock "Ablauf 3").
+                if before.transportMode == .ship {
+                    plusRow("Hafen in diese Fahrt einfügen") { sheet = .port(before.id) }
+                        .disabled(!draft.canAddStay)
+                }
             }
             onLine(node: .stay) {
                 stayCard(stay, dated: dated[index], in: draft)

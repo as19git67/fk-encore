@@ -90,6 +90,13 @@ struct TripPickerItem: Identifiable, Sendable {
         }
     }
 
+    /// One of the stay's ideas as a row of its own (not a highlight
+    /// that happens to be one).
+    var isOwnIdea: Bool {
+        if case .idea = source { return true }
+        return false
+    }
+
     /// Already one of the stay's ideas.
     var isIdea: Bool {
         switch source {

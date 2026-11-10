@@ -22,6 +22,14 @@ final class TripIdeaPriorityTests: XCTestCase {
         XCTAssertFalse(TripOpeningHours.isReadable(""))
     }
 
+    func testHoursReadInGermanInTheDetails() {
+        XCTAssertEqual(TripOpeningHours.display("Tu-Su 10:00-18:00; Mo off"), "Di–So 10–18 · Mo geschlossen")
+        XCTAssertEqual(TripOpeningHours.display("Mo-Fr 09:00-12:00,14:30-18:00"), "Mo–Fr 9–12, 14:30–18")
+        XCTAssertEqual(TripOpeningHours.display("24/7"), "immer geöffnet")
+        // What the app cannot read stays as OpenStreetMap wrote it.
+        XCTAssertEqual(TripOpeningHours.display("Mo-Fr sunrise-sunset"), "Mo-Fr sunrise-sunset")
+    }
+
     func testAClosedDateReadsAsADay() {
         XCTAssertEqual(TripIdeaChips.shortDate("2026-09-07"), "Mo 7.9.")
     }

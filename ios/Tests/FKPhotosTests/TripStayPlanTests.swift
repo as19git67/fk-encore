@@ -60,8 +60,8 @@ final class TripStayPlanTests: XCTestCase {
     }
 
     func testTheHeaderSaysPlannedOfAvailable() {
-        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 200)), "3 h 20 von 9 h verplant")
-        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 0)), "noch frei · 9 h")
+        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 200)), "3 h 20 von 9 h")
+        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 0)), "noch frei")
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 600, over: 60)), "1 h zu viel")
         XCTAssertNil(TripStayPlan.fillLine(day(0, [])))
         XCTAssertEqual(TripStayPlan.fill(day(0, [], planned: 270)) ?? 0, 0.5, accuracy: 1e-9)
@@ -70,8 +70,40 @@ final class TripStayPlanTests: XCTestCase {
     func testTheCardSaysWhenAndHowLong() {
         let d = day(0, [block("day", [stop(1, eta: 630, dwell: 90), stop(2, dwell: 45)])])
         let stops = TripStayPlan.stops(of: d)
-        XCTAssertEqual(TripStayPlan.caption(stops[0]), "ca. 10:30 · 1 h 30")
-        XCTAssertEqual(TripStayPlan.caption(stops[1]), "45 min")
+        XCTAssertEqual(TripStayPlan.caption(stops[0]), "ca. 10:30")
+        XCTAssertEqual(TripStayPlan.caption(stops[1]), "")
+        // The kind and the length stand on the line above the time.
+        XCTAssertEqual(TripStayPlan.kindLine(stops[0]), "\(TripCategory.label("museum")) · 1 h 30")
+        XCTAssertNil(TripStayPlan.visitedLine(day(1, [])))
+        XCTAssertEqual(TripStayPlan.visitedLine(d), "0 von 2 besucht")
+    }
+
+    func testTheSliderFindsWhereThePlanHasYou() throws {
+        let leg = try JSONDecoder().decode(TripLeg.self, from: Data("""
+        { "id": 1, "position": 0, "title": "Beispielstadt", "anchor": { "lat": 48.0, "lon": 11.0 },
+          "anchorRadiusM": null, "anchorLabel": null, "arriveMinutes": null, "mode": "foot",
+          "regionDb": "nom_beispiel", "startDate": null, "days": [], "pool": [] }
+        """.utf8))
+        // One stop at 48.37 / 10.9 from 10:30 for 90 minutes; the day starts at 09:00.
+        let d = day(0, [block("day", [stop(1, eta: 630, dwell: 90)])], planned: 90)
+        let start = try XCTUnwrap(TripStayPlan.position(at: 540, day: d, leg: leg))
+        XCTAssertEqual(start.lat, 48.0, accuracy: 1e-9)
+        let halfway = try XCTUnwrap(TripStayPlan.position(at: 585, day: d, leg: leg))
+        XCTAssertEqual(halfway.lat, 48.185, accuracy: 1e-9)
+        let there = try XCTUnwrap(TripStayPlan.position(at: 700, day: d, leg: leg))
+        XCTAssertEqual(there.lat, 48.37, accuracy: 1e-9)
+        XCTAssertNil(TripStayPlan.position(at: 600, day: day(0, [block("day", [stop(2)])]), leg: leg))
+    }
+
+    func testADayTripSaysTheWayThereAndBack() throws {
+        func anchor(_ times: String) throws -> TripDayAnchor {
+            try JSONDecoder().decode(TripDayAnchor.self, from: Data("""
+            {"lat":48.2,"lon":11.1,"label":"Beispielheim","radiusM":null,"travelMinutes":45\(times)}
+            """.utf8))
+        }
+        XCTAssertEqual(TripStayPlan.dayTripLine(try anchor(",\"departMinutes\":540,\"returnMinutes\":1050")),
+                       "hin 09:00 bis 09:45 · zurück ab 17:30")
+        XCTAssertEqual(TripStayPlan.dayTripLine(try anchor("")), "je 45 min hin und zurück")
     }
 
     func testAPinReasonReadsBackAndAnUnknownOneIsNone() throws {

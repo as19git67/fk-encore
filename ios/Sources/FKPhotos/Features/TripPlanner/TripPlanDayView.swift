@@ -310,6 +310,7 @@ struct TripPlanDayView: View {
                 showingDay = true
             },
             title: screenTitle,
+            onEdit: viewModel.leg.map { leg in { itineraryFocus = .leg(leg.id) } },
         )
         .safeAreaInset(edge: .top, spacing: 0) { legPicker }
     }
@@ -1973,24 +1974,23 @@ struct TripPlanDayView: View {
                 // that, and why is it on the list" is one question, and
                 // answering it twice is how two screens drift apart.
                 NavigationLink {
+                    // The same actions as the row's menu and the map's
+                    // sheet (§8.4), as the bar under the details.
+                    // Anything that settles or removes the stop closes
+                    // this screen, which would otherwise go on
+                    // describing the stop as it was.
                     TripSpotDetailView(
-                        spot: TripSpotDetail(stop),
+                        spot: TripSpotDetailContext.detail(stop, dayIndex: viewModel.day?.dayIndex,
+                                                           leg: viewModel.leg,
+                                                           pin: viewModel.visit(holding: stop,
+                                                                                onDay: viewModel.day?.dayIndex)),
                         mode: viewModel.leg?.transportMode ?? .foot,
                         onSave: { await viewModel.saveNote($0) },
                         onCategory: { await viewModel.setCategory(osmRef: stop.osmRef, $0) },
                         light: viewModel.light?.hint(for: stop.osmRef),
                         shelter: viewModel.forecast?.shelter(for: stop.osmRef),
-                    ) { closeDetail in
-                        // The same actions as the row's menu and the
-                        // map's sheet (§8.4). Anything that settles or
-                        // removes the stop closes this screen, which
-                        // would otherwise go on describing the stop as
-                        // it was. The screen has its own way there.
-                        TripSpotActionSections(
-                            actions: stopActions(stop).filter { $0.group != .navigate },
-                            close: closeDetail,
-                        )
-                    }
+                        bar: .planned(stopActions(stop)),
+                    ) { _ in EmptyView() }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         // The readable name, with the one on the
