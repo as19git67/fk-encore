@@ -1,6 +1,7 @@
 /**
- * The local model's order of one stay's pool (plan
- * `kandidaten-ranking.md`, stage 3).
+ * The local model's order of one stay's places (plan
+ * `kandidaten-ranking.md`, stage 3; since reise-planen-und-unterwegs.md
+ * stage 7 only the highlights of a stay ask for it).
  *
  * What the measurement of §11.0 found and this builds, and nothing
  * beyond it: given the pool, the interests and the group in the
@@ -8,8 +9,9 @@
  * and says in one sentence why each belongs on this trip.
  *
  * Pure: the prompt, the gate the answer passes, and the arithmetic of
- * "has the pool changed enough to ask again". The job that asks lives
- * in `curation-job.ts`.
+ * "has the list changed enough to ask again". The job that asks lives
+ * in `highlights-job.ts`, the model and the stay's description in
+ * `highlights-model.ts`.
  *
  * The gate is the point (§10.4). The model may order and explain what
  * the pool holds; it may not add a place, and it may not add a fact.

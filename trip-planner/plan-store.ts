@@ -48,7 +48,6 @@ import { travelClassFor, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
 import { imagesFor, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
-import { curationStatusOf, markCurationDue, type CurationStatus } from "./curation-job";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 import { storedPinReason, type PinReason } from "./pin-reason";
 
@@ -117,12 +116,6 @@ export interface StoredLeg {
    * once the import lands reads exactly this — see migration 0168.
    */
   awaitingRegion: boolean;
-  /**
-   * Where the local model's order of this stay's pool stands (stage 3):
-   * `pending` or `running` is "wird noch sortiert", null when it was
-   * never asked (a journey, a pool too small to order).
-   */
-  curation?: CurationStatus | null;
   /**
    * The quarters travel along (§21.3, migration 0223): a port day on a
    * cruise. Its departure is "Alle an Bord" with an hour in hand; a
@@ -500,7 +493,6 @@ export async function insertLeg(
         opening_hours: c.openingHours ?? null,
       })),
     );
-    await markCurationDue(leg.id, db);
   }
   return leg.id;
 }
@@ -1229,8 +1221,6 @@ export async function loadPlan(
   const images = await imagesFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
   // What each place is, with its source (stage 4).
   const descriptions = await descriptionsFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
-  // Whether the local model is still ordering a stay (stage 3).
-  const curation = await curationStatusOf(legRows.map((l) => l.id), db);
 
   const stopsByBlock = new Map<number, StoredStop[]>();
   for (const row of stopRows) {
@@ -1403,7 +1393,6 @@ export async function loadPlan(
       arriveMinutes: l.arrive_minutes,
       regionDb: l.region_db,
       awaitingRegion: l.awaiting_region,
-      curation: curation.get(l.id) ?? null,
       quartersAboard: l.quarters_aboard,
       tenderPort: l.tender_port,
       startDate: l.start_date,
@@ -1575,7 +1564,6 @@ async function rewriteDay(
       }),
     );
   }
-  await markCurationDue(legId, db);
 
   await db.update(tripPlans).set({ updated_at: new Date().toISOString() }).where(eq(tripPlans.id, planId));
 }
@@ -1646,11 +1634,6 @@ export async function replanPlan(
           opening_hours: c.openingHours ?? null,
         })),
       );
-    }
-    // The model orders what the search found; a list of ideas the
-    // travellers made themselves has nothing for it to do.
-    if (leg.pool.some((c) => ((c as { origin?: string }).origin ?? "search") === "search")) {
-      await markCurationDue(leg.legId, db);
     }
   }
 }

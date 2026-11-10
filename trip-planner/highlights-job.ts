@@ -29,7 +29,7 @@ import {
   type CurationEntry,
   type CurationSignature,
 } from "./curation";
-import { askCurationModel, leadsFor } from "./curation-job";
+import { askCurationModel, leadsFor } from "./highlights-model";
 import { LlmServiceUnavailableError } from "./llm-client";
 import { parseArticleUrl } from "./wikipedia-client";
 

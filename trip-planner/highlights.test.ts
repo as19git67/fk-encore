@@ -14,7 +14,7 @@ import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
 import { tripHighlights, orderBy } from "./highlights";
 import { tickHighlights } from "./highlights-job";
-import { resetCurationAsker, setCurationAsker } from "./curation-job";
+import { resetCurationAsker, setCurationAsker } from "./highlights-model";
 import { searchPlaces } from "./search";
 import { addFind } from "./add-find";
 import { LlmServiceUnavailableError } from "./llm-client";

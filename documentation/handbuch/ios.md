@@ -225,7 +225,7 @@ Jemanden eintragen, Planen mit (Teilnehmer, „Rolle übergeben“, „Reise
 verlassen“), Dokumente, Reisebereit?, Unterwegs ohne Netz („Plan fürs
 Gerät laden“, „Vom Gerät löschen“), Änderungen (Journal), Danach
 (Rückblick „Ja, waren wir“), Einstellungen der Reise, Karten-App (Apple
-Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
+Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 übernehmen (aus der Share-Extension).
 
 ### IOS-PLN-01 Reise anlegen und Aufenthalte planen
@@ -233,21 +233,24 @@ Karten / Google Maps), Ort suchen, Ort bearbeiten, Gefunden / Fund
 - „Neue Reise“ (Name, Unterkunft, Länge, Datum) → „Planen“ öffnet den
   Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen.
 - Eine neue Reise beginnt je Aufenthalt mit einer leeren Liste „Ideen“:
-  die App sucht und plant nichts selbst. Ideen kommen über „Ort suchen“,
+  die App sucht und plant nichts selbst. Ideen kommen über „Spot hinzufügen“,
   „Hier, wo ich bin“, Entdecken („Gegend wählen“, „Andere Gegend…“), Teilen
   aus Apple Karten oder Google Maps und „Aus den Ideen übernehmen“; von dort
   legt man sie auf einen Tag. Wird die Reise neu geplant (Einstellung,
   fester Termin, Reiseverlauf), bleiben die Stopps auf ihren Tagen; fällt
-  ein Tag weg, gehen seine Stopps zurück zu den Ideen. Reisen von vorher
-  behalten ihre Kandidaten.
-- „Ort suchen“ hat drei Reiter: **Highlights** zeigt, wofür die Gegend um
-  den Aufenthalt bekannt ist (Bild, eine Zeile dazu, Entfernung zur
-  Unterkunft; „Mehr“ blättert weiter), solange das lokale Modell noch
-  sortiert nach Bekanntheit mit dem Hinweis „wird noch sortiert“.
-  **Suche** findet einen Ort nach Namen, **Kategorien** zeigt mit einem
-  Tipp alle Orte einer Art (Museen, Aussichtspunkte, Märkte …). „Zur Reise“
-  legt einen Treffer zu den Ideen; was schon dort ist, steht als „In der
-  Reise“ oder „Schon eingeplant“ in der Liste.
+  ein Tag weg, gehen seine Stopps zurück zu den Ideen. Auch Reisen von
+  vorher sind seit dem Umbau Reisen mit Ideen: ihre Tage, Stopps und
+  eigenen Funde bleiben, die gesuchten Kandidaten nicht.
+- „Spot hinzufügen“ (im Aufenthalt, am Tag und in der Planung des
+  Aufenthalts) ist der eine Weg hinein: ein Suchfeld für einen Namen oder
+  einen Karten-Link, darunter die Chips Alles, Ideen, Highlights, Essen
+  und Mehr. **Highlights** zeigt, wofür die Gegend um den Aufenthalt
+  bekannt ist (Bild, eine Zeile dazu, Entfernung zur Unterkunft), solange
+  das lokale Modell noch ordnet nach Bekanntheit mit dem Hinweis „wird
+  noch sortiert“. „+ Tag n“ legt einen Treffer auf den vorgeschlagenen
+  Tag, langes Drücken auf einen anderen Tag oder nur zu den Ideen; was
+  schon dort ist, steht als „In der Reise“ oder „Schon eingeplant“ in der
+  Liste.
 - Jede Idee hat eine Priorität: **Muss**, **Will** (Standard) oder **Wenn
   Zeit**. Langes Drücken auf „Zur Reise“ fragt sie beim Übernehmen, beim
   Teilen steht sie als Auswahl dabei; danach ändert man sie im Menü der

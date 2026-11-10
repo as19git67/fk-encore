@@ -62,16 +62,6 @@ struct TripLegSheet: View {
                         Label("Spot hinzufügen", systemImage: "plus.circle")
                     }
                 }
-                // The way into the candidates that needs nothing else —
-                // no share sheet, no map app, no model (§9.2, case 4).
-                NavigationLink {
-                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position,
-                                        ideas: viewModel.plan?.isIdeasTrip == true) {
-                        Task { await viewModel.load() }
-                    }
-                } label: {
-                    Label("Ort suchen", systemImage: "magnifyingglass")
-                }
                 // A spot whose way is the point (§4.7): the import knows
                 // only points, so it comes by hand.
                 NavigationLink {

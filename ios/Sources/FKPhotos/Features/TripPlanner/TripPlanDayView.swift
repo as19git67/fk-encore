@@ -1700,43 +1700,17 @@ struct TripPlanDayView: View {
         .padding(.leading, 4)
     }
 
-    /// The way into a block, on the block (§8.4). Straight into the
-    /// candidates with this block already chosen, or into the search
-    /// when there are none yet.
+    /// The way into a block, on the block (§8.4): the one way in since
+    /// every trip is a trip of ideas — ideas, highlights, a name, food,
+    /// with "+ Tag n" (reise-planen-und-unterwegs.md, stages 4 and 7).
     @ViewBuilder
     private func addStopRow(_ block: TripBlock) -> some View {
-        if let leg = viewModel.leg {
-            if viewModel.plan?.isIdeasTrip == true {
-                // One way in on a trip of ideas (stage 4): ideas,
-                // highlights, a name, food, with "+ Tag n".
-                Button {
-                    pickingSpot = true
-                } label: {
-                    Label("Spot hinzufügen", systemImage: "plus.circle")
-                        .font(.footnote)
-                }
-            } else if leg.pool.isEmpty {
-                NavigationLink {
-                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position,
-                                        ideas: viewModel.plan?.isIdeasTrip == true) {
-                        Task { await viewModel.load() }
-                    }
-                } label: {
-                    Label("Ort suchen", systemImage: "magnifyingglass")
-                        .font(.footnote)
-                }
-            } else {
-                NavigationLink {
-                    TripPoolView(
-                        viewModel: viewModel,
-                        legIndex: leg.position,
-                        placeInto: TripPoolTarget(dayIndex: viewModel.dayIndex,
-                                                  blockId: block.id, label: block.label),
-                    )
-                } label: {
-                    Label("Stopp hinzufügen", systemImage: "plus.circle")
-                        .font(.footnote)
-                }
+        if viewModel.leg != nil {
+            Button {
+                pickingSpot = true
+            } label: {
+                Label("Spot hinzufügen", systemImage: "plus.circle")
+                    .font(.footnote)
             }
         }
     }

@@ -5851,7 +5851,7 @@ The distribution of the former menu items:
 | Einstellungen, Planen mit, Reisegruppe | Trip | Menu „Reise" |
 | Dokumente, Änderungen, Reisebereit?, Danach, Unterwegs ohne Netz | Trip | Menu „Reise" (and as before the trip list) |
 | Kandidaten (with the wishes since 2026-11-06), Tagesausflug | Stage | Stage sheet, „Vorrat" |
-| Ort suchen, Strecke anlegen, Strecken in der Nähe, Aus den Ideen übernehmen | Stage | Stage sheet, „Hinzufügen" |
+| Ort suchen, Strecke anlegen, Strecken in der Nähe, Aus den Ideen übernehmen | Stage | Stage sheet, „Hinzufügen" („Ort suchen" since 2026-11-10 inside „Spot hinzufügen", see `plans/reise-planen-und-unterwegs.md`, stage 7) |
 | Abendlicht | Day | Frame of the day |
 
 A day of the onward journey into which nothing is planned — at sea, on the

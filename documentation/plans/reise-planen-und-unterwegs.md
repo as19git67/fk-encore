@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 6 built.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 6 built; stage 7 in part.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -425,6 +425,21 @@ creation for ideas trips (now all trips), `curation-job.ts` and the cron
 `trip-planner-curation` for candidates (the highlights ordering stays), the
 voting UI and endpoints if no trip uses them after the migration.
 `documentation/ios-urlaubsplanung.md` and the handbook follow.
+
+**Built in part (2026-11-10).** The candidates' curation is gone:
+`curation-job.ts` with `markCurationDue`, the leg's `curation` status and
+the curated order on a re-plan. What the highlights share with it (the
+model, `SHAREABLE_REASON`, the stay's description, the Wikipedia intros)
+is in `highlights-model.ts`; the cron `trip-planner-curation` keeps its
+name and only ticks the highlights. The table `trip_leg_curation` stays
+for now, because migration 0304 and its test still empty it. iOS:
+`TripPlaceSearchView` and "Ort suchen" are gone; "Spot hinzufügen" is the
+one way in on the stay sheet and on a block. Voting stays: the switch in
+the settings can turn it back on, and nothing here can tell whether a
+trip did. Still open: the old region search and the day solver behind
+`startEmpty: false`, which the test suite still builds most trips with
+(52 test files), and with them `TripPoolView` once its actions
+(priority, fixed time, remove, vote ring) live in the picker.
 
 ## Testing
 
