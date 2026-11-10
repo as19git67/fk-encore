@@ -441,6 +441,36 @@ trip did. Still open: the old region search and the day solver behind
 (52 test files), and with them `TripPoolView` once its actions
 (priority, fixed time, remove, vote ring) live in the picker.
 
+**Decided 2026-11-10 (Anton): all four stay.** Weather, evening light,
+day trips and routes run on the old solver and its screens today
+(`TripLegSheet`, the day's frame menu). They move into the new screens as
+the mock `reise-planen-und-unterwegs/11-vorschlaege-ideen-reise.svg` shows
+(design doc, section "Wetter, Abendlicht, Ausflüge und Strecken"): the app
+suggests, the travellers confirm, everything can be undone. The rest of
+stage 7 runs in this order, one PR each:
+
+1. **Weather.** Over a day of the stay planning with outdoor spots and
+   rain, a note with "Mit ‹Tag› tauschen" and "Nur draußen verschieben".
+   A sheet shows first which day gets what; fixed times stay with their
+   day. On a trip of ideas the outdoor spots move to the drier day, never
+   back to the ideas.
+2. **Evening light.** The details of a spot marked for photos show the
+   best light on each day of the stay; "+ Tag n am Abend" plans it as a
+   fixed time with the reason "Licht".
+3. **Day trips.** A chip "Ausflüge" in the spot picker lists places 30 min
+   to 2 h away (the targets `day-trip.ts` already finds). Choosing one
+   makes the day a day out with the way there and back, and the picker
+   searches around the target for that day.
+4. **Routes.** A chip "Strecken" in the picker lists the signposted ways
+   of `routes.ts`; in the day a route is a long card with length, climb
+   and "Weg zum Start". "Strecke anlegen" stays for a way by hand.
+5. **Old search removed.** The region search and the day solver behind
+   `startEmpty: false`, the tests that still build trips that way,
+   `TripPoolView` and the old entry points of the four features.
+6. **New sources.** An idea more than 30 km from the stay asks "Ausflug
+   daraus machen?"; a GPX file or a tour link through the share menu
+   becomes a route.
+
 ## Testing
 
 Each stage keeps `npm run test` green. Backend rules get unit tests beside
