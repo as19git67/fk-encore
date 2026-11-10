@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 4 built.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 5 built.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -342,6 +342,37 @@ and `TripPlaceSearchView` stay until stage 7.
   the own location, checks, a line through the visits in order (from the
   visit rows; no GPS track is stored), photo counts and the next spot with
   "Route".
+
+**Built (2026-11-10).** A dwell above `dwellThresholdMinutes` now confirms
+on its own (`assessVisit` in `visits.ts`); a photo or a payment alone still
+asks. "Erledigt" by hand (`POST …/stops/status`) records a visit with source
+`manual`; setting a stop open or skipped takes every check of it back
+(`noteStatusByHand` in `visit.ts`, `undoVisitsOfStop`): a manual one is
+deleted, a sensed one kept as dismissed, and the upsert in `recordVisit`
+keeps a dismissed stay dismissed, so the next sync does not tick it again.
+`DELETE …/visits/:visitId` (`undoTripVisit`) takes one visit back, also an
+unplanned stay. `POST …/days/:dayIndex/order` takes `fromMinutes`: the open
+stops start no earlier than now, and every `toDrop` comes back in
+`elsewhere` with the day `suggestDay` would give it. The weather of a
+visit's hour goes on the row (`weather jsonb`, migration 0306,
+`visit-weather.ts`, off in tests with `TRIP_VISIT_WEATHER=0`). `GET
+…/legs/:legIndex/days/:dayIndex/diary` (`day-diary.ts`) gives per spot the
+visit's weather and the photos taken there that day — matched by POI or
+within 100 m, filtered with `accessiblePhotoCondition` — and the unplanned
+stays. iOS: `TripStayPlanView` shows the running day as visited (in the
+order of `doneAt`), unplanned stays, a "jetzt" line, then the open stops
+with a check circle; the next one is outlined and carries "Route"; a fresh
+check says "Gerade abgehakt" with "Doch nicht", a tap on the check mark
+offers "Nicht besucht"; "Neu ordnen" when what is left does not fit, then
+"Auf Tag n" / "Zu den Ideen" per spot; past days are one line until opened;
+from 20:00 and on past days the open stops are asked about once (another
+day, the ideas, or "Lassen"); days within a week show their forecast; the
+view scrolls to the running day. The map shows the own location, checks,
+photo counts, a line through the day's visits and "Route" on the next spot.
+Rules in `TripOnTheRoad.swift`. Differences from the text above: the
+missed-spot question is computed on the device, not by a cron; the check is
+a button on the card, not a swipe (the stay's days are a scroll view with
+drag and drop, where a swipe would fight both).
 
 ### Stage 6 — route sheet (backend + iOS)
 

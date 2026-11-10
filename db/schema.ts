@@ -3918,6 +3918,9 @@ export const tripPlanVisits = pgTable(
     confirmed: boolean("confirmed").notNull().default(false),
     // Set when the traveller answered no, so the stay is not offered again.
     dismissed: boolean("dismissed").notNull().default(false),
+    // The weather of the hour it began (reise-planen-und-unterwegs.md,
+    // stage 5), from the cached forecast; null without one.
+    weather: jsonb("weather"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

@@ -16,6 +16,7 @@
  * `redistribute.ts`); these endpoints only load, call, and save.
  */
 
+import { noteStatusByHand } from "./visit";
 import { carryStops } from "./carry-stops";
 import { isIdeasTrip, votingOn } from "./ideas-mode";
 import { api, APIError } from "encore.dev/api";
@@ -1147,6 +1148,11 @@ export const setTripStopStatus = api(
     const changed = await setStopStatus(req.planId, userId, req.stopId, req.status);
     if (!changed) throw APIError.notFound("stop not found in this plan");
 
+    const before = await loadPlan(req.planId, userId);
+    if (!before) throw APIError.notFound("plan not found");
+    // A tick by hand is a visit too, and taking it back takes the
+    // visits back (reise-planen-und-unterwegs.md, stage 5).
+    await noteStatusByHand(before, userId, req.stopId, req.status);
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
     return { plan, droppedBlocks: [] };

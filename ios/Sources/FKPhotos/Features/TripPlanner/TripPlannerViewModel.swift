@@ -40,6 +40,14 @@ final class TripPlannerViewModel {
     /// The day's weather (§7.2). Reported, never acted on: nothing in
     /// this build reorders a block because it rained.
     private(set) var forecast: TripDayForecast?
+    /// What each day of the stay left behind (reise-planen-und-unterwegs.md,
+    /// stage 5): weather and photos per spot, stays nobody planned. By
+    /// `dayKey`.
+    private(set) var diaries: [String: TripDayDiary] = [:]
+    /// The forecast of the stay's days within reach (stage 5), by `dayKey`.
+    private(set) var stayForecasts: [String: TripDayForecast] = [:]
+    /// What the last "Neu ordnen" said no longer fits, with other days.
+    var reorderAdvice: TripReorderAdvice?
     /// The weather's offer for this day, once it has been asked for
     /// (§7.1). Nil means nothing is on offer and nothing is on screen.
     var weatherProposal: TripWeatherProposal?
@@ -675,6 +683,93 @@ final class TripPlannerViewModel {
                 overrunMinutes: response.overrunMinutes, toDrop: response.toDrop,
             )
             errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    // MARK: - On the road (reise-planen-und-unterwegs.md, stage 5)
+
+    static func dayKey(_ legIndex: Int, _ dayIndex: Int) -> String { "\(legIndex)-\(dayIndex)" }
+
+    func diary(dayIndex: Int) -> TripDayDiary? { diaries[Self.dayKey(legIndex, dayIndex)] }
+
+    func stayForecast(dayIndex: Int) -> TripDayForecast? { stayForecasts[Self.dayKey(legIndex, dayIndex)] }
+
+    /// Weather and photos of a day of the stay on screen. Quiet on
+    /// failure: the day reads the same without them.
+    func loadDiary(dayIndex: Int) async {
+        let leg = legIndex
+        guard let diary: TripDayDiary = try? await APIClient.shared.get(
+            "/trip-planner/plans/\(planId)/legs/\(leg)/days/\(dayIndex)/diary") else { return }
+        diaries[Self.dayKey(leg, dayIndex)] = diary
+    }
+
+    /// The forecast of one day of the stay, for its header. Only asked
+    /// for days the forecast reaches; quiet when there is none.
+    func loadStayForecast(dayIndex: Int) async {
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            let utcOffsetMinutes: Int
+        }
+        let leg = legIndex
+        guard let forecast: TripDayForecast = try? await APIClient.shared.post(
+            "/trip-planner/plans/\(planId)/weather",
+            body: Body(legIndex: leg, dayIndex: dayIndex, utcOffsetMinutes: TimeZone.current.secondsFromGMT() / 60),
+        ), forecast.available else { return }
+        stayForecasts[Self.dayKey(leg, dayIndex)] = forecast
+    }
+
+    /// "Neu ordnen" on the running day: only what is still open is
+    /// ordered, starting now; what no longer fits comes back with the
+    /// day it would go to instead.
+    func reorderFromNow(dayIndex: Int, nowMinutes: Int) async {
+        guard requireOnline() else { return }
+        struct Body: Encodable {
+            let legIndex: Int
+            let fromMinutes: Int
+        }
+        struct Elsewhere: Decodable {
+            let osmRef: String
+            let dayIndex: Int?
+            let blockId: String?
+        }
+        struct Response: Decodable {
+            let plan: TripPlan
+            let overrunMinutes: Int
+            let toDrop: [String]
+            let elsewhere: [Elsewhere]?
+        }
+        let leg = legIndex
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/days/\(dayIndex)/order",
+                body: Body(legIndex: leg, fromMinutes: max(0, min(24 * 60 - 1, nowMinutes))),
+            )
+            plan = response.plan
+            reorderAdvice = response.overrunMinutes > 0
+                ? TripReorderAdvice(
+                    legIndex: leg, dayIndex: dayIndex, overrunMinutes: response.overrunMinutes,
+                    moves: (response.elsewhere ?? response.toDrop.map { Elsewhere(osmRef: $0, dayIndex: nil, blockId: nil) })
+                        .map { TripReorderAdvice.Move(osmRef: $0.osmRef, dayIndex: $0.dayIndex, blockId: $0.blockId) },
+                )
+                : nil
+            errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Takes an unplanned stay out of the diary.
+    func removeStay(_ stay: TripDiaryStay, dayIndex: Int) async {
+        guard requireOnline() else { return }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.delete(
+                "/trip-planner/plans/\(planId)/visits/\(stay.visitId)")
+            plan = response.plan
+            errorMessage = nil
+            await loadDiary(dayIndex: dayIndex)
         } catch {
             errorMessage = TripErrorText.describe(error)
         }

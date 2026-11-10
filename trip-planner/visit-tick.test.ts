@@ -179,7 +179,7 @@ describe("a visit the device saw", () => {
       planId: plan.id,
       stopId: other.rowId,
       arrivedAt: localInstant(first.startMinutes! + 5),
-      leftAt: localInstant(first.startMinutes! + 65),
+      hasMatchingPhoto: true,
     });
     expect(pending?.confirmed).toBe(false);
 
@@ -222,7 +222,7 @@ describe("a visit the device saw", () => {
       planId: plan.id,
       stopId: target.rowId,
       arrivedAt,
-      leftAt: localInstant(first.startMinutes! + 80),
+      hasMatchingPhoto: true,
     });
     expect(visit?.confirmed).toBe(false);
 

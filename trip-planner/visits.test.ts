@@ -61,8 +61,8 @@ describe("weighing the evidence", () => {
     expect(signals).toEqual([]);
   });
 
-  it("asks when one signal fired", () => {
-    expect(assessVisit({ dwellMinutes: 40 }, museum).verdict).toBe("suggested");
+  it("ticks a long enough stay by itself, and only asks for a photo or a payment", () => {
+    expect(assessVisit({ dwellMinutes: 40 }, museum).verdict).toBe("confirmed");
     expect(assessVisit({ hasMatchingPhoto: true }, museum).verdict).toBe("suggested");
     expect(assessVisit({ hasPayment: true }, museum).verdict).toBe("suggested");
   });

@@ -18,8 +18,17 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { dayWalkOfStored } from "./day-walk";
 import { MoveError, moveStop } from "./move";
-import { loadPlan, saveMovedDays, setStopStatus } from "./plan-store";
-import { answerVisit, listVisits, recordVisit, type StoredVisit } from "./visit-store";
+import { loadPlan, saveMovedDays, setStopStatus, type StoredPlan } from "./plan-store";
+import {
+  answerVisit,
+  listVisits,
+  recordVisit,
+  setVisitWeather,
+  undoVisit,
+  undoVisitsOfStop,
+  type StoredVisit,
+} from "./visit-store";
+import { visitWeather } from "./visit-weather";
 import { placeVisitedStop } from "./visit-place";
 import { assessVisit, isOnTheWay, type VisitVerdict } from "./visits";
 
@@ -133,11 +142,12 @@ export const reportVisit = api(
       sources: assessment.signals,
       confirmed: assessment.verdict === "confirmed",
     });
+    await keepWeather(visit);
 
     // "Zwei Signale setzen den Status stumm" (§6.4) — the second half
     // of that sentence. The diary row alone left the stop "planned",
     // so a visit two signals agreed on still had to be ticked by hand.
-    if (assessment.verdict === "confirmed" && stop) {
+    if (assessment.verdict === "confirmed" && stop && visit.confirmed) {
       await tickVisited(req.planId, userId, stop.stop.rowId, arrivedAt, offset);
     }
 
@@ -194,6 +204,85 @@ export const answerTripVisit = api(
     return { visit: await reread(req.planId, userId, visit) };
   },
 );
+
+export interface UndoVisitResponse {
+  plan: StoredPlan;
+}
+
+/**
+ * Take a check back (reise-planen-und-unterwegs.md, stage 5): "Doch
+ * nicht" right after an automatic one, "Nicht besucht" later, or an
+ * unplanned stay out of the diary.
+ *
+ * A check by hand is deleted; one the device made is kept as
+ * dismissed, so the same stay is not ticked again on the next sync.
+ * The stop goes back to open unless somebody else's visit still holds
+ * it.
+ */
+export const undoTripVisit = api(
+  { expose: true, method: "DELETE", path: "/trip-planner/plans/:planId/visits/:visitId", auth: true },
+  async ({ planId, visitId }: { planId: number; visitId: number }): Promise<UndoVisitResponse> => {
+    const userId = requireUser();
+    const plan = await loadPlan(planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+    const visit = await undoVisit(planId, userId, visitId);
+    if (!visit) throw APIError.notFound("visit not found");
+
+    if (visit.stopId !== null) {
+      const others = (await listVisits(planId, plan.ownerId)) ?? [];
+      const held = others.some((v) => v.stopId === visit.stopId && v.confirmed && !v.dismissed);
+      if (!held) await setStopStatus(planId, userId, visit.stopId, "planned");
+    }
+    const updated = await loadPlan(planId, userId);
+    if (!updated) throw APIError.notFound("plan not found");
+    return { plan: updated };
+  },
+);
+
+/**
+ * What a status set by hand means for the diary (stage 5): "Erledigt"
+ * is a visit with the source `manual`, at this moment; open again or
+ * skipped takes every check of the stop back.
+ */
+export async function noteStatusByHand(
+  plan: StoredPlan,
+  userId: number,
+  stopId: number,
+  status: string,
+  now: Date = new Date(),
+): Promise<void> {
+  if (status !== "done") {
+    await undoVisitsOfStop(plan.id, stopId);
+    return;
+  }
+  const found = findStop(plan, stopId);
+  if (!found) return;
+  // Already ticked by a visit: a second tap adds nothing.
+  const visits = (await listVisits(plan.id, plan.ownerId)) ?? [];
+  if (visits.some((v) => v.stopId === stopId && v.confirmed && !v.dismissed)) return;
+  const visit = await recordVisit({
+    planId: plan.id,
+    userId,
+    stopId,
+    osmRef: found.stop.osmRef,
+    name: found.stop.name,
+    lat: found.stop.lat,
+    lon: found.stop.lon,
+    arrivedAt: now.toISOString(),
+    sources: ["manual"],
+    confirmed: true,
+  });
+  await keepWeather(visit, now);
+}
+
+/** The weather of the visit's hour, kept on its row when there is a forecast. */
+async function keepWeather(visit: StoredVisit, now: Date = new Date()): Promise<void> {
+  if (visit.weather) return;
+  const weather = await visitWeather({ lat: visit.lat, lon: visit.lon }, new Date(visit.arrivedAt), now);
+  if (!weather) return;
+  await setVisitWeather(visit.id, weather);
+  visit.weather = weather;
+}
 
 /**
  * Tick a stop the device saw visited, at the moment it was visited,
@@ -300,7 +389,7 @@ function dwellMinutes(
 
 /** The stop, plus the day's walking order, which the threshold needs. */
 function findStop(
-  plan: Awaited<ReturnType<typeof loadPlan>>,
+  plan: StoredPlan | null,
   stopId: number,
 ): { stop: { rowId: number; osmRef: string; name: string | null; lat: number; lon: number; dwellMinutes: number }; dayRefs: string[] } | null {
   for (const leg of plan?.legs ?? []) {
