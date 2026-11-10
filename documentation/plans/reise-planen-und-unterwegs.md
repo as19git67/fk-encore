@@ -503,6 +503,15 @@ stage 7 runs in this order, one PR each:
 4. **Routes.** A chip "Strecken" in the picker lists the signposted ways
    of `routes.ts`; in the day a route is a long card with length, climb
    and "Weg zum Start". "Strecke anlegen" stays for a way by hand.
+   **Built (2026-11-10).** No new endpoint: the chip lists `GET
+   …/routes` with `order=worth`, "+ Tag n" takes the way in as an idea
+   (`POST …/routes`, looked up again) and places it on the day
+   `suggest-day` offers, a long press offers every other day or "Als Idee
+   behalten", a tap shows the course (`TripRouteCourseView`). iOS:
+   `TripStayRoutes.swift` behind the chip in `TripSpotPickerView`, with
+   "Strecke von Hand anlegen" (`TripRouteEntryView`) under the list; the
+   card in `TripStayPlanView` shows length and climb and "Weg zum Start"
+   for a route.
 5. **Old search removed.** The region search and the day solver behind
    `startEmpty: false`, the tests that still build trips that way,
    `TripPoolView` and the old entry points of the four features.

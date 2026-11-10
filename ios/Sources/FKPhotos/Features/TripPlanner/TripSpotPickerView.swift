@@ -58,6 +58,8 @@ struct TripSpotPickerView: View {
             Group {
                 if chip == .food, let leg = viewModel.leg {
                     food(leg)
+                } else if chip == .routes, let leg = viewModel.leg {
+                    TripStayRoutesList(viewModel: viewModel, leg: leg)
                 } else if chip == .trips, let leg = viewModel.leg {
                     TripStayDayTripsList(planId: viewModel.planId, leg: leg) { focus, area in
                         await viewModel.load()

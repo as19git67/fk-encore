@@ -270,6 +270,14 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   „Nicht mehr vorschlagen“. Danach sucht die Liste dort, und „+ Tag n“
   legt auf den Ausflugstag, bis man den Chip „Ausflug …“ schließt. Unter
   „Schon geplant“ stehen die Ausflüge des Aufenthalts mit „Dort suchen“.
+- **Strecken.** Der Chip „Strecken“ in „Spot hinzufügen“ zeigt die
+  ausgeschilderten Wander- und Radwege in der Nähe, die lohnendsten
+  zuerst, mit geschätzter Dauer, Länge und Anstieg. Ein Tipp zeigt den
+  Verlauf auf der Karte, „+ Tag n“ legt die Strecke auf den Tag, langes
+  Drücken wählt einen anderen Tag oder „Als Idee behalten“. Am Tag ist
+  sie eine Karte mit Länge, Anstieg und „Weg zum Start“. „Strecke von
+  Hand anlegen“ unter der Liste bleibt für einen Weg, den die Karte nicht
+  kennt.
 - Jede Idee hat eine Priorität: **Muss**, **Will** (Standard) oder **Wenn
   Zeit**. Langes Drücken auf „Zur Reise“ fragt sie beim Übernehmen, beim
   Teilen steht sie als Auswahl dabei; danach ändert man sie im Menü der

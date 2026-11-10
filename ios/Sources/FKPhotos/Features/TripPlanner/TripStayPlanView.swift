@@ -462,6 +462,10 @@ struct TripStayPlanView: View {
             if case .open(let next, _) = mode { return next }
             return false
         }()
+        let isSettled: Bool = {
+            if case .settled = mode { return true }
+            return false
+        }()
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
                 checkControl(stop, mode: mode)
@@ -489,6 +493,11 @@ struct TripStayPlanView: View {
                                 Text(TripStayPlan.caption(stop))
                                     .font(.caption)
                                     .foregroundStyle(stop.outsideHours == true ? Color.red : Color.secondary)
+                                if let extent = stop.extent {
+                                    Label(extent.summary, systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             HStack(spacing: 6) {
                                 if let visit {
@@ -546,6 +555,17 @@ struct TripStayPlanView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else if stop.extent != nil && !isSettled {
+                // A route is a long card: it starts somewhere, and
+                // getting there is a way of its own.
+                Button {
+                    if let leg = viewModel.leg { wayRequest = makeWayRequest(to: stop, on: day, leg: leg, fromHere: true) }
+                } label: {
+                    Label("Weg zum Start", systemImage: "arrow.triangle.turn.up.right.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
                 .controlSize(.small)
             }
         }
