@@ -135,6 +135,22 @@ Jede der Ansichten oben hat eine Karte, umgeschaltet oben rechts mit „Liste | 
 
 ![Routen: Wege auf der Tageskarte (links) und das Blatt „Weg“ (rechts)](reise-planen-und-unterwegs/10-routen.svg)
 
+## Offene Spots: nicht jeden Tag vorab planen
+
+Entschieden am 10.11.2026. Ein Tag trägt vorab nur, was fest ist: einen Spot mit fester Zeit (Ticket, Reservierung, Licht, Ereignis, Abfahrt) oder einen, den man selbst auf den Tag gelegt hat. Alle anderen Ideen des Aufenthalts bleiben „noch offen“, mit Muss, Will oder Wenn Zeit. Über ihnen steht, ob es passt: „ca. Muss 7 h · Will 5 h · frei 16 h“.
+
+„Tag füllen“ an einem Tag schlägt einen Tag vor: was an dem Tag geöffnet hat, zum Wetter passt und nah an den festen Punkten liegt, Muss vor Will vor Wenn Zeit, mit dem Grund an jedem Spot. Geschrieben wird erst mit „Übernehmen“. So gelegte Spots sind „von der App“: was der Tag nicht erreicht, ist nach dem Tag von selbst wieder offen. Was man von Hand legt, bleibt liegen.
+
+Unterwegs zeigt der laufende Tag „Als Nächstes“: offene Spots, die jetzt geöffnet sind und vor den nächsten festen Punkt passen, die nächsten zuerst. Vor einem Ticket rücken die Spots auf dem Weg dorthin nach oben, danach die in seiner Nähe. Ein Besuch an einem offenen Spot zählt von selbst und steht dann auf dem Tag, mit „Doch nicht“. Der Standort bleibt auf dem Gerät; sortiert wird dort.
+
+![Vorab: offene Spots über den Tagen, „Tag füllen“ als Vorschlag](reise-planen-und-unterwegs/13-offene-spots-vorab.svg)
+
+![Unterwegs: „Als Nächstes“ läuft mit, ein Besuch ohne Plan zählt](reise-planen-und-unterwegs/14-offene-spots-unterwegs.svg)
+
+Neu ist dabei nur ein Blatt, „Tag füllen“. A, C und D zeigen den bestehenden Bildschirm „Aufenthalt planen“ vor der Reise und am laufenden Tag.
+
+![Navigation: was sich durch offene Spots ändert](reise-planen-und-unterwegs/15-offene-spots-navigation.svg)
+
 ## Navigation
 
 Eine Reise öffnet sich im Reiseverlauf, unterwegs gleich in „Aufenthalt planen“ am laufenden Tag. Bildschirme stehen in einem Stapel und „Zurück“ führt zum vorigen; alles Übrige sind Blätter von unten oder Menüs, die über dem Bildschirm liegen, von dem aus sie geöffnet wurden.
@@ -156,5 +172,6 @@ Vieles davon gibt es schon: die Kette mit `GET` und `PUT …/itinerary`, Ideen m
 5. **Unterwegs.** Laufender Tag in der Planungsansicht, Abhaken nach 10 Minuten und von Hand, Rückgängig, Fotos nach Zugriffsrechten, Wetter je Spot, „Neu ordnen“ ab jetzt, vergangene Tage zugeklappt.
 6. **Weg zeigen** vor und während der Reise.
 7. **Aufräumen.** Regen, Abendlicht, Ausflüge und Strecken in die neuen Bildschirme; alte Bildschirme, Kandidatensuche und ihre Kuratierung; Doku und Handbuch.
+8. **Offene Spots.** Weiche und feste Stopps mit Kapazitätszeile, „Tag füllen“, „Noch offen“ auf dem Aufenthalt, „Als Nächstes“ unterwegs, Besuche an offenen Spots.
 
 Den genauen Plan je Etappe führt [reise-planen-und-unterwegs.md](reise-planen-und-unterwegs.md).
