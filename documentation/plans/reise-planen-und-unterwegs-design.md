@@ -73,13 +73,24 @@ Die Planungsansicht zeigt alle Tage eines Aufenthalts auf einem Bildschirm (Mock
 
 **Essen** wird eingeplant wie jeder andere Spot, etwa ein Restaurant, auf das man sich freut; eine Tischreservierung pinnt es.
 
+**Strecken.** Eine Wanderung oder Radtour ist ein Spot mit Länge: im Tag eine lange Karte mit Länge, Dauer, Höhenmetern und „Weg zum Start“.
+
+**Regen.** Die Vorhersage reicht etwa eine Woche. Regnet es an einem Tag mit Spots draußen, steht oben am Tag ein Hinweis mit zwei Knöpfen. „Mit Fr tauschen“ tauscht die Spots mit einem trockeneren Tag, an dem alles drinnen ist; ein Blatt zeigt vorher, welcher Tag was bekommt. „Nur draußen verschieben“ legt nur die Spots draußen auf den trockeneren Tag. Gepinnte Spots und Spots mit Termin bleiben an ihrem Datum, das Blatt nennt sie. Nichts verschiebt sich von selbst, und jede Übernahme lässt sich unter „Änderungen“ rückgängig machen.
+
 ![Spot-Auswahl und Spot-Details · Blatt von unten, halbe und volle Höhe](reise-planen-und-unterwegs/03-spot-auswahl-details.svg)
 
 **Spot-Auswahl.** Das Plus „Ideen und Suche“ öffnet ein großes Blatt mit einem Suchfeld (Name, Kategorie oder eingefügter Karten-Link) und Chips für Ideen, Highlights, Essen und mehr. Ohne Suchwort stehen zuerst die eigenen Ideen, dann die Highlights in der Nähe nach Bekanntheit. „+ Tag 3“ legt einen Spot in den vorgeschlagenen Tag, den ersten mit Platz, an dem er offen ist; lang drücken wählt einen anderen Tag oder „Nur merken“. Das Blatt bleibt offen, bis man „Fertig“ tippt, so lassen sich mehrere Spots hintereinander einplanen.
 
+- **Ausflüge** zeigt Orte 30 Minuten bis 2 Stunden von der Unterkunft mit mindestens drei Sehenswürdigkeiten, aus der Karte der Region. Gewählt wird der Tag zum Ausflugstag mit Hin- und Rückweg als Zeile, und die Auswahl sucht an diesem Tag um das Ziel. Eine Idee, die mehr als 30 km von der Unterkunft liegt, fragt „Ausflug daraus machen?“. Von Hand geht es weiter über „Ausflug planen“ am Tag.
+- **Strecken** zeigt die ausgeschilderten Wander- und Radwege der Karte in der Nähe. Eine eigene Strecke (Name, Start, Ende, Dauer) legt man über „Mehr“ an.
+
 **Spot-Details.** Tippen auf eine Karte oder eine Zeile der Auswahl öffnet ein Blatt von unten auf halber Höhe; der Tag bleibt darüber sichtbar. Nach oben ziehen zeigt alles: Bilder, Beschreibung mit Quelle, Öffnungszeiten der Woche, Ticket, Notiz, Kontakt. Zu geht es mit einem Wisch nach unten, einem Tipp auf den Tag darüber, mit ✕ oder „Fertig“. Seitlich wischen blättert zum nächsten Spot des Tags. Es gibt keinen Seitenwechsel und keinen Zurück-Knopf.
 
-**Geteilte Links.** Ein Ort, der aus der Karten-App oder Safari geteilt wird, kommt als Idee zum nächstgelegenen Aufenthalt. Liegt er mehr als 50 km von allen entfernt, fragt die App, wohin.
+**Abendlicht.** Ein Spot mit Blick (Aussichtspunkt, Fassade nach Westen) zeigt in den Details das beste Licht an den Tagen des Aufenthalts, etwa „16:05 bis 16:40“, mit dem Hinweis, an welchem Tag Wolken erwartet werden. „+ Tag 3 am Abend“ plant ihn als Spot mit fester Zeit und dem Grund „Licht“. Kippt das Wetter an diesem Tag, fragt der Regen-Hinweis nach einem anderen Tag.
+
+![Regen am Tag (1), Abendlicht in den Details (2), Ausflüge (3) und Strecken (4) in der Spot-Auswahl](reise-planen-und-unterwegs/11-vorschlaege-ideen-reise.svg)
+
+**Geteilte Links.** Ein Ort, der aus der Karten-App oder Safari geteilt wird, kommt als Idee zum nächstgelegenen Aufenthalt. Liegt er mehr als 50 km von allen entfernt, fragt die App, wohin. Eine geteilte GPX-Datei oder ein Tourenlink (etwa von Komoot oder Outdooractive) wird zur Strecke.
 
 ## Abläufe Schritt für Schritt
 
@@ -124,19 +135,6 @@ Jede der Ansichten oben hat eine Karte, umgeschaltet oben rechts mit „Liste | 
 
 ![Routen: Wege auf der Tageskarte (links) und das Blatt „Weg“ (rechts)](reise-planen-und-unterwegs/10-routen.svg)
 
-## Wetter, Abendlicht, Ausflüge und Strecken (entschieden 10.11.2026)
-
-Diese vier Funktionen setzen heute auf den alten Tagesplaner auf, der auf einer Reise mit Ideen nichts mehr selbst auf einen Tag legt. Der Mock zeigt, wie sie auf einer Reise mit Ideen aussehen: Die App schlägt vor, ihr bestätigt, alles lässt sich rückgängig machen. Alle vier bleiben so (Entscheidung 10.11.2026); die zwei neuen Quellen unten kommen als eigene Etappe.
-
-![Vorschlag: Wetter (1), Abendlicht (2), Tagesausflug (3), Strecken (4) und woher Ausflüge und Strecken kommen](reise-planen-und-unterwegs/11-vorschlaege-ideen-reise.svg)
-
-- **Wetter.** Regnet es an einem Tag mit Spots draußen, steht über dem Tag ein Hinweis mit „Mit Fr tauschen“ oder „Nur draußen verschieben“. Ein Blatt zeigt vorher, welcher Tag was bekommt; feste Zeiten bleiben an ihrem Tag.
-- **Abendlicht.** Die Details eines Aussichtspunkts zeigen das beste Licht an den Tagen der Reise. „+ Tag 3 am Abend“ legt ihn als feste Zeit mit Grund „Licht“ ans Ende des Tags.
-- **Tagesausflug.** Der Chip „Ausflüge“ in der Spot-Auswahl zeigt Orte in 30 min bis 2 h Entfernung. Gewählt wird der Tag zum Ausflugstag mit Hin- und Rückweg, und die Auswahl sucht an diesem Tag um das Ziel.
-- **Strecken.** Der Chip „Strecken“ zeigt Wander- und Radwege. Im Tag ist eine Strecke eine lange Karte mit Länge, Höhenmetern und „Weg zum Start“.
-
-**Woher sie kommen.** Ausflüge aus der Karte der Region (Orte mit mindestens drei Sehenswürdigkeiten, heute schon in `day-trip.ts`), von Hand als Ort des Tags (heute schon) oder neu aus einer Idee, die über 30 km entfernt liegt. Strecken aus den ausgeschilderten Wegen des OSM-Imports (heute schon in `routes.ts`), von Hand angelegt (heute schon) oder neu als GPX-Datei oder Tourenlink über das Teilen-Menü.
-
 ## Bestehende Reisen
 
 Reisen, die schon angelegt sind, gehen mit ihren Aufenthalten, Weiterreisen und Tagen in das neue Modell über. Ihre Ideen bleiben, ebenso die Ideen ohne Reise und die schon in Tage eingeplanten Spots. Gesuchte Kandidaten, Strecken und Wünsche (Abstimmungen) entfallen.
@@ -151,6 +149,6 @@ Vieles davon gibt es schon: die Kette mit `GET` und `PUT …/itinerary`, Ideen m
 4. **Spot-Auswahl und Spot-Details** als Blätter, geteilte Links zum nächsten Aufenthalt.
 5. **Unterwegs.** Laufender Tag in der Planungsansicht, Abhaken nach 10 Minuten und von Hand, Rückgängig, Fotos nach Zugriffsrechten, Wetter je Spot, „Neu ordnen“ ab jetzt, vergangene Tage zugeklappt.
 6. **Weg zeigen** vor und während der Reise.
-7. **Aufräumen.** Alte Bildschirme, Kandidatensuche und ihre Kuratierung; Doku und Handbuch.
+7. **Aufräumen.** Regen, Abendlicht, Ausflüge und Strecken in die neuen Bildschirme; alte Bildschirme, Kandidatensuche und ihre Kuratierung; Doku und Handbuch.
 
 Den genauen Plan je Etappe führt [reise-planen-und-unterwegs.md](reise-planen-und-unterwegs.md).
