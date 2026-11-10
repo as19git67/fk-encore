@@ -72,7 +72,7 @@ final class TripPlannerViewModel {
     /// is re-read.
     private var ideasOfferDismissals = 0
     @ObservationIgnored private let ideasOfferMemory = TripIdeasOfferMemory()
-    /// What the last "für später merken" did, in words.
+    /// What the last "für andere Reisen merken" did, in words.
     var keptForNextTime: String?
     /// Set while a hard time is being written or removed (§4.4): both
     /// re-plan the trip, which is not instant.
@@ -627,6 +627,10 @@ final class TripPlannerViewModel {
     /// spots nobody could see or undo would be worse than the honest
     /// repeat.
     func drop(_ candidate: TripCandidate) async {
+        await drop(osmRef: candidate.osmRef)
+    }
+
+    private func drop(osmRef: String) async {
         guard requireOnline() else { return }
         struct Body: Encodable {
             let legIndex: Int
@@ -639,7 +643,7 @@ final class TripPlannerViewModel {
         do {
             let response: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/pool/drop",
-                body: Body(legIndex: legIndex, osmRef: candidate.osmRef),
+                body: Body(legIndex: legIndex, osmRef: osmRef),
             )
             plan = response.plan
             errorMessage = nil
@@ -1255,7 +1259,7 @@ final class TripPlannerViewModel {
             keptForNextTime = response.sentence
             errorMessage = nil
         } catch {
-            errorMessage = "Das ließ sich nicht für später merken."
+            errorMessage = "Das ließ sich nicht für andere Reisen merken."
         }
     }
 

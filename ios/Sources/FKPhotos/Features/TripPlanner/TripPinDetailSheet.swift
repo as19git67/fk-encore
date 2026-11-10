@@ -25,6 +25,11 @@ struct TripPinSheetAction: Identifiable {
     /// sections in the detail screen and in the map's sheet — one list,
     /// so no way of looking at a spot can do less than another (§8.4).
     var group: TripSpotActionGroup = .plan
+    /// Actions that are one choice between several values (the
+    /// priority, the reason of a fixed time) share a submenu in a
+    /// menu, so the menu stays a list of things to do. A list of
+    /// sections draws them flat.
+    var submenu: TripSpotActionSubmenu?
     let run: @MainActor () async -> Void
 
     init(
@@ -35,8 +40,10 @@ struct TripPinSheetAction: Identifiable {
         footer: String? = nil,
         closes: Bool = true,
         group: TripSpotActionGroup = .plan,
+        submenu: TripSpotActionSubmenu? = nil,
         run: @escaping @MainActor () async -> Void,
     ) {
+        self.submenu = submenu
         self.id = id
         self.title = title
         self.systemImage = systemImage
@@ -46,6 +53,15 @@ struct TripPinSheetAction: Identifiable {
         self.group = group
         self.run = run
     }
+}
+
+/// The submenu a choice sits in: its title and symbol.
+struct TripSpotActionSubmenu: Equatable, Sendable {
+    let title: String
+    let systemImage: String
+
+    static let priority = TripSpotActionSubmenu(title: "Priorität", systemImage: "star")
+    static let pinReason = TripSpotActionSubmenu(title: "Grund der festen Zeit", systemImage: "pin")
 }
 
 /// What an action is about, in the order a menu shows them.
@@ -73,16 +89,40 @@ struct TripSpotActionMenuItems: View {
             let members = actions.filter { $0.group == group }
             if !members.isEmpty {
                 Section {
-                    ForEach(members) { action in
-                        Button(role: action.role) {
-                            Task { await action.run() }
+                    ForEach(members.filter { $0.submenu == nil }) { action in
+                        button(action)
+                    }
+                    ForEach(Self.submenus(of: members), id: \.title) { submenu in
+                        Menu {
+                            ForEach(members.filter { $0.submenu == submenu }) { action in
+                                button(action)
+                            }
                         } label: {
-                            Label(action.title, systemImage: action.systemImage)
+                            Label(submenu.title, systemImage: submenu.systemImage)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+extension TripSpotActionMenuItems {
+    private func button(_ action: TripPinSheetAction) -> some View {
+        Button(role: action.role) {
+            Task { await action.run() }
+        } label: {
+            Label(action.title, systemImage: action.systemImage)
+        }
+    }
+
+    /// The submenus of a group, in the order their first action comes.
+    static func submenus(of actions: [TripPinSheetAction]) -> [TripSpotActionSubmenu] {
+        var seen: [TripSpotActionSubmenu] = []
+        for submenu in actions.compactMap(\.submenu) where !seen.contains(submenu) {
+            seen.append(submenu)
+        }
+        return seen
     }
 }
 

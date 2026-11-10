@@ -214,7 +214,7 @@ Bildschirme (je Titel ein Bildschirm): Neue Reise, Reise, Reiseverlauf
 (Aufenthalte und Weiterreisen als eine Kette, Zuhause an beiden Enden,
 Plus auf der Linie, Umsortieren, ein Datum im Kopf), Spot hinzufügen (Suche, Chips
 Alles, Ideen, Highlights, Ausflüge, Strecken, Essen, Mehr; Abstimmungs-Ring je Idee,
-Feste Zeit, Für später merken, Priorität, Aus den Ideen entfernen), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
+Feste Zeit, Für andere Reisen merken, Priorität, Aus den Ideen entfernen), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
 Wetter, „Ab hier umplanen“, „Umräumen“, „Gruppe trennen“ /
 „Wieder zusammen“), Ausflug, Karte, Strecken (anlegen,
 auf der Karte, Als GPX exportieren), Reisezeiten prüfen,
@@ -243,19 +243,18 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   den Aufenthalten bleibt mit offenen Zeiten.
 - Die Planung eines Aufenthalts beginnt mit seinem Namen, darunter Tage,
   Daten und Unterkunft (unterwegs „Tag n von m · heute“ und das Wetter),
-  „Bearbeiten“ oben öffnet die Details des Aufenthalts, und der Knopf
-  „Ideen (n) und Suche“ öffnet die Spot-Auswahl. Jeder Tag zeigt im Kopf
+  und der Knopf „Ideen (n) und Suche“ öffnet die Spot-Auswahl. Oben steht
+  nur der Weg zurück in den Reiseverlauf. Jeder Tag zeigt im Kopf
   Ankunft bzw. Abfahrt und rechts „verplant von verfügbar“, unterwegs
   „n von m besucht“; jede Karte nennt Art und Dauer, darunter die
-  geschätzte Uhrzeit. Ein Tipp auf eine Markierung der Karte öffnet ein
-  kleines Blatt mit Details, Route und Aktionen, bei einer Idee „+ Tag n“.
-  Ist ein Tag gewählt, zeigt ein Regler unter der Karte, wo man nach Plan
-  zu einer Uhrzeit wäre. Ein Ausflugstag trägt oben die Zeile „Ausflug
+  geschätzte Uhrzeit. Ein Ausflugstag trägt oben die Zeile „Ausflug
   nach …“ mit Hin- und Rückweg, „Weg zeigen“ und „Fahrt ändern“.
-- Öffnet man eine Reise, steht oben die Leiste der Aufenthalte und
-  darunter die Planung des gewählten Aufenthalts mit allen Tagen auf einem
-  Bildschirm. Ein Tipp auf einen Tag öffnet diesen Tag für sich (Zeitband,
-  Reihenfolge, Pausen); eine Weiterreise zeigt direkt ihren Tag.
+- Eine Reise öffnet sich mit ihrem Reiseverlauf. Ein Tipp auf einen
+  Aufenthalt oder eine seiner Tageszeilen öffnet die Planung des
+  Aufenthalts mit allen Tagen auf einem Bildschirm, „Zurück“ führt in den
+  Verlauf. Unterwegs öffnet sich die Reise gleich in der Planung, am
+  laufenden Tag. Ein Tipp auf einen Tag öffnet diesen Tag für sich
+  (Zeitband, Reihenfolge, Pausen); eine Weiterreise zeigt direkt ihren Tag.
 - Eine neue Reise beginnt je Aufenthalt mit einer leeren Liste „Ideen“:
   die App sucht und plant nichts selbst. Ideen kommen über „Spot hinzufügen“,
   „Hier, wo ich bin“, Entdecken („Gegend wählen“, „Andere Gegend…“), Teilen

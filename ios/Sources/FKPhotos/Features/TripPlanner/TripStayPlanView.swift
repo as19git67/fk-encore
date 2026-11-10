@@ -22,10 +22,7 @@ struct TripStayPlanView: View {
     /// The screen's title when it is the trip's first screen (the
     /// trip's name); otherwise the stay's.
     var title: String? = nil
-    /// Opens the stay's details ("Bearbeiten" in the mock).
-    var onEdit: (() -> Void)? = nil
 
-    @AppStorage("trip.stayPlan.layout") private var layout = Layout.list.rawValue
     /// The day the map shows numbered; nil is every day.
     @State private var mapDay: Int?
     @State private var showIdeasOnMap = true
@@ -64,16 +61,11 @@ struct TripStayPlanView: View {
         let opId: Int
     }
 
-    private enum Layout: String { case list, map }
 
     var body: some View {
         Group {
             if let leg = viewModel.leg {
-                if layout == Layout.map.rawValue {
-                    map(leg)
-                } else {
-                    list(leg)
-                }
+                list(leg)
             } else {
                 ContentUnavailableView("Kein Aufenthalt", systemImage: "map")
             }
@@ -89,27 +81,6 @@ struct TripStayPlanView: View {
         }
         .navigationTitle(title ?? viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Ansicht", selection: $layout) {
-                    Text("Liste").tag(Layout.list.rawValue)
-                    Text("Karte").tag(Layout.map.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 180)
-            }
-            if let onEdit {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Bearbeiten", action: onEdit)
-                }
-            }
-            // The list has its own big button; the map keeps the plus.
-            if layout == Layout.map.rawValue {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Ideen und Suche", systemImage: "plus") { picking = true }
-                }
-            }
-        }
         .sheet(isPresented: $picking) {
             TripSpotPickerView(viewModel: viewModel)
         }
@@ -275,9 +246,14 @@ struct TripStayPlanView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
-        // On the road the stay opens on the day being lived.
+        // On the road the stay opens on the day being lived; from a day
+        // row of the itinerary, on that day.
         .onAppear {
-            if let running { proxy.scrollTo(running.dayIndex, anchor: .top) }
+            if let running {
+                proxy.scrollTo(running.dayIndex, anchor: .top)
+            } else if viewModel.dayIndex > 0 {
+                proxy.scrollTo(viewModel.dayIndex, anchor: .top)
+            }
         }
         }
     }
@@ -417,9 +393,6 @@ struct TripStayPlanView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
-                    if let fill = TripStayPlan.fill(day) {
-                        TripDayFillMark(fill: fill)
-                    }
                 }
                 .contentShape(.rect)
             }
@@ -511,11 +484,12 @@ struct TripStayPlanView: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        // The day is a heading over its cards, not a box around them.
+        .padding(.vertical, 4)
         .overlay {
             if targetedDay == day.dayIndex {
                 RoundedRectangle(cornerRadius: 14).strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(-6)
             }
         }
         .dropDestination(for: String.self) { items, _ in
@@ -549,21 +523,22 @@ struct TripStayPlanView: View {
             return false
         }()
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                checkControl(stop, mode: mode)
+            HStack(alignment: .center, spacing: 10) {
+                if mode == .plan {
+                    // The pin of the mock: filled while a fixed time
+                    // holds the spot, empty while the app may move it.
+                    Image(systemName: visit != nil ? "pin.fill" : "pin")
+                        .font(.body)
+                        .foregroundStyle(visit != nil ? Color.accentColor : Color.secondary)
+                        .frame(width: 22)
+                        .accessibilityLabel(visit != nil ? "Gepinnt" : "Nicht gepinnt")
+                } else {
+                    checkControl(stop, mode: mode)
+                }
                 Button {
                     detailPick = TripStayDetailPick(stop: stop, dayIndex: day.dayIndex)
                 } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        if let image = stop.image {
-                            TripSpotThumbnail(image: image, height: 56, width: 56)
-                        } else {
-                            Text(number.map { "\($0)" } ?? "")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 56, height: 56)
-                                .background(Color.accentColor.opacity(0.7), in: .rect(cornerRadius: 8))
-                        }
+                    HStack(alignment: .center, spacing: 10) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(TripSpotName.line(stop.displayName, local: stop.localName))
                                 .font(.subheadline.weight(.semibold))
@@ -575,28 +550,34 @@ struct TripStayPlanView: View {
                                 Text(TripStayPlan.kindLine(stop))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                let caption = TripStayPlan.caption(stop)
-                                if !caption.isEmpty {
-                                    Text(caption)
+                                let line = TripStayPlan.timeLine(
+                                    stop, pin: visit.map { (reason: $0.reason, startMinutes: $0.startMinutes) })
+                                if !line.isEmpty {
+                                    Text(line)
                                         .font(.caption)
-                                        .foregroundStyle(stop.outsideHours == true ? Color.red : Color.secondary)
+                                        .foregroundStyle(stop.outsideHours == true ? Color.red : Color.primary)
                                 }
                                 if let extent = stop.extent {
                                     Label(extent.summary, systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-                            }
-                            HStack(spacing: 6) {
-                                if let visit {
-                                    TripPinChip(reason: visit.reason, startMinutes: visit.startMinutes)
-                                }
-                                TripIdeaChips(priority: stop.ideaPriority,
+                                // Only what is wrong: closed that day, hours nobody can read.
+                                TripIdeaChips(priority: .want,
                                               closedThatDay: stop.closedThatDay == true,
                                               openingHours: stop.openingHours)
                             }
                         }
                         Spacer(minLength: 0)
+                        if let image = stop.image {
+                            TripSpotThumbnail(image: image, height: 56, width: 56)
+                        } else if let number {
+                            Text("\(number)")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 56, height: 56)
+                                .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+                        }
                     }
                     .contentShape(.rect)
                 }
@@ -657,12 +638,12 @@ struct TripStayPlanView: View {
                 .controlSize(.small)
             }
         }
-        .padding(10)
-        .background(Color(.systemBackground), in: .rect(cornerRadius: 10))
+        .padding(12)
+        // A card of its own, with a frame (mock "Den Aufenthalt planen").
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
         .overlay {
-            if isNext {
-                RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 2)
-            }
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(isNext ? Color.accentColor : Color(.separator), lineWidth: isNext ? 2 : 1)
         }
         .opacity(stop.stopStatus == .skipped ? 0.6 : 1)
     }
@@ -1431,6 +1412,20 @@ enum TripStayPlan {
     /// how long it takes ("Kirche · 1 h").
     static func kindLine(_ stop: TripStop) -> String {
         "\(TripCategory.label(stop.category)) · \(TripClock.duration(stop.dwellMinutes))"
+    }
+
+    /// The card's third line (mock "Den Aufenthalt planen"): a spot a
+    /// fixed time holds says why and when ("Ticket 15:30 · gepinnt"),
+    /// any other its estimated time and how much it matters
+    /// ("ca. 13:45 · Muss"); "Will" is the ordinary case and says
+    /// nothing.
+    static func timeLine(_ stop: TripStop, pin: (reason: TripPinReason?, startMinutes: Int)?) -> String {
+        if let pin {
+            return "\(pin.reason?.label ?? "Fest") \(TripClock.format(pin.startMinutes)) · gepinnt"
+        }
+        var parts = [caption(stop)].filter { !$0.isEmpty }
+        if stop.ideaPriority != .want { parts.append(stop.ideaPriority.label) }
+        return parts.joined(separator: " · ")
     }
 
     /// "3 h 20 von 9 h", "40 min zu viel", "noch frei", or nil for a

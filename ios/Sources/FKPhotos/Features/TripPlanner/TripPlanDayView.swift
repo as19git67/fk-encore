@@ -51,9 +51,14 @@ struct TripPlanDayView: View {
     /// The trip's structure — legs and journeys — from the leg strip.
     @State private var editingStructure = false
     /// One day of a stay on its own screen (the band, the order, the
-    /// breaks), pushed from the stay's planning view, which is where a
-    /// trip opens (reise-planen-und-unterwegs.md, "Planning a stay").
+    /// breaks), pushed from the stay's planning view
+    /// (reise-planen-und-unterwegs.md, "Planning a stay").
     @State private var showingDay = false
+    /// A stay's planning view, pushed from the itinerary, which is where
+    /// a trip opens (reise-planen-und-unterwegs-design.md, "Der
+    /// Reiseverlauf"). A running trip pushes it at once, on today.
+    @State private var showingStay = false
+    @State private var openedRunningDay = false
     /// The spot picker (reise-planen-und-unterwegs.md, stage 4).
     @State private var pickingSpot = false
     /// The minute the screen is drawn for. Ticks while the day on
@@ -72,8 +77,8 @@ struct TripPlanDayView: View {
             if viewModel.isLoading && viewModel.plan == nil {
                 ProgressView("Plan wird geladen…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let leg = viewModel.leg, !leg.isTransit {
-                stayRoot
+            } else if viewModel.plan != nil, viewModel.leg?.isTransit != true {
+                itineraryRoot
             } else if let day = viewModel.day, let leg = viewModel.leg {
                 content(day: day, leg: leg)
             } else if let message = viewModel.errorMessage {
@@ -90,7 +95,7 @@ struct TripPlanDayView: View {
         .sheet(isPresented: $pickingSpot) {
             TripSpotPickerView(viewModel: viewModel)
         }
-        .navigationDestination(isPresented: $showingDay) { dayScreen }
+        .navigationDestination(isPresented: $showingStay) { stayRoot }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() }, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -224,7 +229,12 @@ struct TripPlanDayView: View {
                 }
             }
         }
-        .sheet(item: $itineraryFocus) { focus in
+        .sheet(item: $itineraryFocus, onDismiss: {
+            // "Aufenthalt planen" in it: the planning view is already
+            // the screen, on the stay it selected.
+            viewModel.wantsStayPlan = false
+            viewModel.wantsDayScreen = false
+        }) { focus in
             NavigationStack {
                 TripItineraryView(viewModel: viewModel, focus: focus)
             }
@@ -247,6 +257,7 @@ struct TripPlanDayView: View {
         }
         .task {
             await viewModel.load()
+            openRunningDay()
             watchStops()
             runPendingReplan()
             // The banners need permission; asked on the trip, where a
@@ -299,8 +310,30 @@ struct TripPlanDayView: View {
 
     // MARK: - The stay and its days
 
-    /// A stay opens as a whole, every day on one screen (stage 3); the
-    /// strip of stays and journeys stays on top.
+    /// The trip opens on its itinerary: the stays with their days on one
+    /// line, the journeys between them. A stay or one of its days opens
+    /// the stay's planning view on top, so "Zurück" leads back here.
+    private var itineraryRoot: some View {
+        TripItineraryView(viewModel: viewModel, onPlan: { _, _ in showingStay = true })
+            .onAppear {
+                // "Neue Reise" asked for the itinerary, and this is it.
+                viewModel.wantsItinerary = false
+            }
+    }
+
+    /// While the trip runs it opens straight on the day being lived, in
+    /// the planning view (design, "Unterwegs"): `apply` already chose
+    /// that stay and day. Once per screen, so coming back to the
+    /// itinerary stays there.
+    private func openRunningDay() {
+        guard !openedRunningDay, let plan = viewModel.plan else { return }
+        openedRunningDay = true
+        if plan.position(on: Date()) != nil, viewModel.leg?.isTransit == false {
+            showingStay = true
+        }
+    }
+
+    /// A stay opens as a whole, every day on one screen (stage 3).
     private var stayRoot: some View {
         TripStayPlanView(
             viewModel: viewModel,
@@ -309,10 +342,11 @@ struct TripPlanDayView: View {
                 viewModel.select(dayIndex: dayIndex)
                 showingDay = true
             },
-            title: screenTitle,
-            onEdit: viewModel.leg.map { leg in { itineraryFocus = .leg(leg.id) } },
+            // The stay's name heads the list in large; the bar only
+            // carries the way back to the itinerary.
+            title: "",
         )
-        .safeAreaInset(edge: .top, spacing: 0) { legPicker }
+        .navigationDestination(isPresented: $showingDay) { dayScreen }
     }
 
     /// One day on its own screen, from a day of the stay's planning view.
@@ -888,13 +922,12 @@ struct TripPlanDayView: View {
         .padding(.vertical, 6)
         .background(.bar)
         .sheet(isPresented: $editingStructure, onDismiss: {
-            if viewModel.wantsStayPlan {
+            // Only a journey's day has this strip; a stay picked in the
+            // itinerary opens its planning view over the itinerary.
+            if viewModel.wantsStayPlan || viewModel.wantsDayScreen {
                 viewModel.wantsStayPlan = false
-                showingDay = false
-            }
-            if viewModel.wantsDayScreen {
                 viewModel.wantsDayScreen = false
-                showingDay = viewModel.leg?.isTransit == false
+                showingStay = viewModel.leg?.isTransit == false
             }
         }) {
             NavigationStack {
@@ -1404,7 +1437,15 @@ struct TripPlanDayView: View {
 
     /// The fixed time that holds this stop in place, if any (§4.4, §7.3).
     private func visit(of stop: TripStop) -> TripFixpoint? {
-        viewModel.day?.fixpoints.first { $0.holdsSpot && $0.spotRef == stop.osmRef }
+        dayHolding(stop)?.fixpoints.first { $0.holdsSpot && $0.spotRef == stop.osmRef }
+    }
+
+    /// The day of the leg on screen that holds this stop; the selected
+    /// day when none does (a stop just moved, a list from elsewhere).
+    private func dayHolding(_ stop: TripStop) -> TripDay? {
+        viewModel.leg?.days.first { day in
+            day.blocks.contains { block in block.stops.contains { $0.rowId == stop.rowId } }
+        } ?? viewModel.day
     }
 
     /// How far a stop has pushed the day back (§4.7).
@@ -1729,17 +1770,28 @@ struct TripPlanDayView: View {
     ) -> [TripPinSheetAction] {
         let status = stop.stopStatus
         var actions: [TripPinSheetAction] = []
+        // The stay's planning view shows every day at once, so the day
+        // a stop is on is its own, not the one selected.
+        let day = dayHolding(stop)
+        let ideas = viewModel.plan?.isIdeasTrip == true
+        // Done or skipped only means something from the day itself on:
+        // a spot next month cannot have been visited yet.
+        let canSettle: Bool = {
+            guard let leg = viewModel.leg, let day else { return isTravelling }
+            let phase = TripOnTheRoad.phase(of: day.dayIndex, in: leg, today: TripCalendar.isoDay(Date()))
+            return phase == .running || phase == .past || (phase == .undated && isTravelling)
+        }()
 
         // Status first: it is what somebody standing at the place
         // reaches for. Both answers while it is open, the way back once
         // it is settled.
-        if status != .done {
+        if status != .done && canSettle {
             actions.append(TripPinSheetAction(id: "done", title: "Erledigt", systemImage: "checkmark",
                                               group: .status) {
                 await viewModel.mark(stop, as: .done)
             })
         }
-        if status != .skipped {
+        if status != .skipped && canSettle {
             actions.append(TripPinSheetAction(id: "skipped", title: "Übersprungen", systemImage: "xmark",
                                               group: .status) {
                 await viewModel.mark(stop, as: .skipped)
@@ -1773,12 +1825,17 @@ struct TripPlanDayView: View {
         // refuses the move, so it is not offered.
         // Nor one a fixed time holds at its hour (§4.4, §7.3): the server
         // refuses that move, and the way is to change the fixed time.
-        if status != .done, !isFramed(stop), let blockId = viewModel.day?.blocks.first(where: {
+        // Nor on a stay of one day: there is no other day to go to.
+        if status != .done, !isFramed(stop), (viewModel.leg?.days.count ?? 0) > 1,
+           let day, let blockId = day.blocks.first(where: {
             $0.stops.contains { $0.rowId == stop.rowId }
         })?.id {
             actions.append(TripPinSheetAction(id: "move", title: "Auf einen anderen Tag",
                                               systemImage: "calendar") {
-                later { moving = TripStopMove(stop: stop, blockId: blockId) }
+                later {
+                    viewModel.select(dayIndex: day.dayIndex)
+                    moving = TripStopMove(stop: stop, blockId: blockId)
+                }
             })
         }
         // A ticket for this spot (§4.4): the spot then stands at that
@@ -1796,50 +1853,56 @@ struct TripPlanDayView: View {
         }
         // Why a booked visit has its hour (stage 3): the same choice the
         // sheet offers when the time is made, changed without re-planning.
-        if let visit = viewModel.visit(holding: stop) {
+        if let visit = viewModel.visit(holding: stop, onDay: day?.dayIndex) {
             for reason in TripPinReason.allCases where reason != visit.reason {
                 actions.append(TripPinSheetAction(id: "pinReason-\(reason.rawValue)",
                                                   title: "Fest wegen: \(reason.label)",
-                                                  systemImage: reason.systemImage, closes: false) {
+                                                  systemImage: reason.systemImage, closes: false,
+                                                  submenu: .pinReason) {
                     await viewModel.setPinReason(visit, reason)
                 })
             }
         }
-        actions.append(TripPinSheetAction(id: "pin",
-                                          title: stop.pinned ? "Nicht mehr anheften" : "Anheften",
-                                          systemImage: stop.pinned ? "pin.slash" : "pin") {
-            await viewModel.setPinned(stop, !stop.pinned)
-        })
+        // Holding a stop in its slot when the planner plans again: a
+        // trip of ideas never plans again, and there "gepinnt" is a
+        // fixed time, which "Fester Termin …" sets.
+        if !ideas {
+            actions.append(TripPinSheetAction(id: "pin",
+                                              title: stop.pinned ? "Nicht mehr anheften" : "Anheften",
+                                              systemImage: stop.pinned ? "pin.slash" : "pin") {
+                await viewModel.setPinned(stop, !stop.pinned)
+            })
+        }
         // Not for the stop a frame placed (§7.3): "not today" is said by
         // taking the outing off the block, and the server refuses the
         // shortcut with the same sentence.
         if status == .planned && !isFramed(stop) {
             actions.append(TripPinSheetAction(
                 id: "toPool", title: "Zurück zu den Ideen", systemImage: "tray.and.arrow.down",
-                footer: "„Nicht heute“ — er bleibt im Rennen und kommt beim nächsten Planen wieder in Frage.",
+                footer: ideas
+                    ? "Er verlässt den Tag und bleibt bei den Ideen des Aufenthalts."
+                    : "„Nicht heute“ — er bleibt im Rennen und kommt beim nächsten Planen wieder in Frage.",
             ) {
                 await viewModel.returnToPool(stop)
             })
         }
-        // "Beim nächsten Mal" (§20.3): the same as in the pool — a copy
-        // into the collection, the stop stays where it is.
-        actions.append(TripPinSheetAction(id: "keep", title: "Für später merken", systemImage: "lightbulb",
-                                          closes: false) {
-            await viewModel.keepForNextTime(osmRefs: [stop.osmRef])
-        })
-
-        actions.append(TripPinSheetAction(
-            id: "hide", title: "Für diese Reise ausblenden", systemImage: "eye.slash",
-            role: .destructive,
-            footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim nächsten "
-                + "Neuplanen nicht. Rückgängig bei den Kandidaten unter „Ausgeblendet“.",
-            group: .remove,
-        ) {
-            await viewModel.hide(osmRef: stop.osmRef)
-        })
+        // On a day the card only leaves the day: keeping it for another
+        // trip and taking it out of the trip are actions of an idea, in
+        // the spot picker (Anton, 10.11.).
+        if !ideas {
+            actions.append(TripPinSheetAction(
+                id: "hide", title: "Für diese Reise ausblenden", systemImage: "eye.slash",
+                role: .destructive,
+                footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim nächsten "
+                    + "Neuplanen nicht.",
+                group: .remove,
+            ) {
+                await viewModel.hide(osmRef: stop.osmRef)
+            })
+        }
         // How much it matters (ideas plan, stage 3): the same choice as
         // on the list of ideas, while the stop is still to come.
-        if viewModel.plan?.isIdeasTrip == true && status == .planned {
+        if ideas && status == .planned {
             actions.append(contentsOf: TripIdeaPriority.actions(current: stop.ideaPriority) { priority in
                 await viewModel.setPriority(osmRef: stop.osmRef, priority)
             })

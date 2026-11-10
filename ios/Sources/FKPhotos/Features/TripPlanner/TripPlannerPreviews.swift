@@ -78,7 +78,7 @@ enum TripPlannerPreviewData {
     if let plan = TripPlannerPreviewData.plan {
         NavigationStack {
             TripStayPlanView(viewModel: .preview(plan), stopActions: { _ in TripPlannerPreviewData.actions },
-                             openDay: { _ in }, onEdit: {})
+                             openDay: { _ in })
         }
     } else {
         Text("Beispieldaten passen nicht mehr zum Modell")

@@ -482,7 +482,7 @@ struct TripSpotPickerView: View {
                                           systemImage: "calendar.badge.clock") {
                 later { appointmentFor = candidate }
             })
-            out.append(TripPinSheetAction(id: "keep", title: "Für später merken", systemImage: "tray.and.arrow.down",
+            out.append(TripPinSheetAction(id: "keep", title: "Für andere Reisen merken", systemImage: "lightbulb",
                                           footer: "Eine Kopie in den Ideenvorrat für eine andere Reise.",
                                           closes: false) {
                 await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
