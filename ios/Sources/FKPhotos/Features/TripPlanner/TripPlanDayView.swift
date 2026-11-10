@@ -679,7 +679,7 @@ struct TripPlanDayView: View {
         }
         .buttonStyle(.plain)
         .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 12))
-        .accessibilityHint("Hinzufügen, Kandidaten und Einstellungen dieses Aufenthalts")
+        .accessibilityHint("Ideen, Ausflüge und Strecken dieses Aufenthalts")
         .sheet(isPresented: $editingLeg) {
             NavigationStack {
                 TripLegSheet(viewModel: viewModel, leg: leg)
@@ -1071,7 +1071,7 @@ struct TripPlanDayView: View {
             // Where the day happens comes first: the outing is what the
             // whole day is planned around, and the hard times below
             // are hours inside it. It used to sit between the hard
-            // times and "Abendlicht", under the row that adds a hard
+            // times and the evening light, under the row that adds a hard
             // time, which read as one list in no order.
             if let outing = day.anchor {
                 outingRow(outing)
@@ -1153,29 +1153,12 @@ struct TripPlanDayView: View {
                         systemImage: "clock.badge.exclamationmark") {
                 addingFixpoint = true
             }
-            Divider()
             if day.anchor == nil {
+                Divider()
                 frameAction("Ausflug planen", systemImage: "car") {
                     settingDayAnchor = true
                 }
-                Divider()
             }
-            // When the light is good, after the planned day is over
-            // (§7.3) — a thing of this day, so it sits with the day's
-            // frame rather than in a menu (§25).
-            NavigationLink {
-                TripEveningLightView(
-                    planId: viewModel.planId,
-                    legIndex: viewModel.legIndex,
-                    dayIndex: viewModel.dayIndex,
-                ) { Task { await viewModel.load() } }
-            } label: {
-                Label("Abendlicht", systemImage: "sun.horizon")
-                    .font(.subheadline)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -1534,19 +1517,6 @@ struct TripPlanDayView: View {
                               systemImage: "fork.knife")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                    }
-                    if let leg = viewModel.leg, leg.pool.contains(where: { TripBlockTargets.mealCategories.contains($0.category) }) {
-                        NavigationLink {
-                            TripPoolView(
-                                viewModel: viewModel,
-                                legIndex: leg.position,
-                                placeInto: TripPoolTarget(dayIndex: viewModel.dayIndex,
-                                                          blockId: block.id, label: block.label),
-                            )
-                        } label: {
-                            Label("Aus den Kandidaten", systemImage: "tray.full")
-                                .font(.footnote)
-                        }
                     }
                     if let leg = viewModel.leg {
                         NavigationLink {

@@ -515,6 +515,20 @@ stage 7 runs in this order, one PR each:
 5. **Old search removed.** The region search and the day solver behind
    `startEmpty: false`, the tests that still build trips that way,
    `TripPoolView` and the old entry points of the four features.
+   **Built in part (2026-11-10), the app.** The spot picker carries what
+   the candidates list did for an idea: "Feste Zeit …" (puts the idea on
+   the day first, then the time), "Für später merken", the priority, the
+   vote ring with the names when the trip votes (`TripStayBallot`) and
+   "Aus den Ideen entfernen"; it opens on a chip (`TripSpotPickerView(…,
+   chip:)`). The stay sheet's ways in are rows into the picker ("Spot
+   hinzufügen", "Ideen (n)", "Ausflüge", "Strecken") and "Aus den Ideen
+   übernehmen". Gone: `TripPoolView` with `TripHiddenSpotsView` (an idea
+   is removed, not hidden), `TripNearbyRoutesView`, `TripDayTripView`,
+   `TripEveningLightView`, "Abendlicht" in the day's frame and "Aus den
+   Kandidaten" in a meal block. "Damit neu planen" and the fairness
+   account went with the list: both re-plan through the old solver.
+   Still open: the server side (region search, solver, the tests that
+   build trips with `startEmpty: false`).
 6. **New sources.** An idea more than 30 km from the stay asks "Ausflug
    daraus machen?"; a GPX file or a tour link through the share menu
    becomes a route.

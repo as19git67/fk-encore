@@ -5,7 +5,7 @@ import SwiftUI
 // screen of its own for it — every row of the candidate list carries
 // the vote as a ring, and the sections about the stay as a whole
 // (fairness, who has not said anything, "Damit neu planen") stand at
-// the head of that list (`TripPoolView`).
+// the head of that list (since stage 7 of reise-planen-und-unterwegs.md the spot picker, `TripStayBallot`).
 
 enum TripVote: String, CaseIterable, Sendable {
     case want
