@@ -341,6 +341,9 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Hat ein Aufenthalt nur einen Tag, fragt die App nicht nach dem Tag: ein
   Tipp auf eine Idee in der Karte legt sie auf diesen Tag, und das Blatt
   für eine feste Zeit zeigt keine Tagauswahl.
+- „Fester Termin …“ an einem Spot fragt nur Uhrzeit, Tag, Grund (Ticket,
+  Licht, Reservierung, Ereignis, Abfahrt) und Dauer; Ort und Weg sind die
+  des Spots.
 - Dieselben Aktionen in Liste, Detail („Alle Details“), Pin-Sheet und
   Karte.
 - Die Etappenleiste oben zeigt die Reise als Kette: Aufenthalte als
