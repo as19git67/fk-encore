@@ -103,6 +103,30 @@ enum TripOpeningHours {
         }
         return true
     }
+
+    /// "Di–So 10–18 · Mo geschlossen" from "Tu-Su 10:00-18:00; Mo off",
+    /// in German day names. Hours it cannot read come back as written.
+    static func display(_ spec: String) -> String {
+        let text = spec.trimmingCharacters(in: .whitespaces)
+        if text == "24/7" { return "immer geöffnet" }
+        guard isReadable(text) else { return text }
+        let days = ["Mo": "Mo", "Tu": "Di", "We": "Mi", "Th": "Do", "Fr": "Fr", "Sa": "Sa", "Su": "So", "PH": "Feiertag"]
+        return text.split(separator: ";").map { part in
+            var piece = part.trimmingCharacters(in: .whitespaces)
+            for (english, german) in days {
+                piece = piece.replacingOccurrences(of: english, with: german, options: .caseInsensitive)
+            }
+            piece = piece.replacingOccurrences(of: "off", with: "geschlossen", options: .caseInsensitive)
+            piece = piece.replacingOccurrences(of: "closed", with: "geschlossen", options: .caseInsensitive)
+            piece = piece.replacingOccurrences(of: ":00", with: "")
+            piece = piece.replacingOccurrences(of: "(^|[\\s,-])0(\\d)", with: "$1$2", options: .regularExpression)
+            piece = piece.replacingOccurrences(of: "\\s*-\\s*", with: "–", options: .regularExpression)
+            piece = piece.replacingOccurrences(of: ",", with: ", ")
+            return piece
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    }
 }
 
 extension TripIdeaPriority {

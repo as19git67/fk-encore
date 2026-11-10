@@ -87,7 +87,7 @@ struct TripSpotPickerView: View {
                 .onChange(of: items.map(\.id)) { _, _ in
                     Task { await suggest() }
                 }
-                .navigationTitle("Spot hinzufügen")
+                .navigationTitle(viewModel.leg.map { "Spots für \($0.displayTitle)" } ?? "Spots")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .principal) {
@@ -169,15 +169,14 @@ struct TripSpotPickerView: View {
     @ViewBuilder
     private func detailSheet(_ item: TripPickerItem) -> some View {
         NavigationStack {
-            TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot,
+            TripSpotDetailView(spot: pickerDetail(item), mode: viewModel.leg?.transportMode ?? .foot,
                                onCategory: item.isIdea || item.isPlanned
                                    ? { await viewModel.setCategory(osmRef: item.osmRef, $0) } : nil,
                                stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
                                                            osmRef: item.detail.osmRef,
                                                            startDate: viewModel.leg?.startDate),
-                               onStayLightAccepted: { await viewModel.load() }) { close in
-                TripSpotActionSections(actions: actions(item, later: { afterDetail = $0 }), close: close)
-            }
+                               onStayLightAccepted: { await viewModel.load() },
+                               bar: detailBar(item)) { _ in EmptyView() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen", systemImage: "xmark") { detail = nil }
@@ -267,10 +266,26 @@ struct TripSpotPickerView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(items) { item in
-                    row(item)
+                let all = items
+                let ideas = all.filter(\.isOwnIdea)
+                let found = all.filter { !$0.isOwnIdea }
+                if !ideas.isEmpty {
+                    Section {
+                        ForEach(ideas) { item in row(item) }
+                    } header: {
+                        Text(ideas.count == 1 ? "Eure Ideen · 1 noch ohne Tag"
+                                              : "Eure Ideen · \(ideas.count) noch ohne Tag")
+                    }
                 }
-                if items.isEmpty {
+                if !found.isEmpty {
+                    Section {
+                        ForEach(found) { item in row(item) }
+                    } header: {
+                        Text(search.query.isEmpty && chip != .more
+                             ? "Highlights in der Nähe · nach Bekanntheit" : "Treffer")
+                    }
+                }
+                if all.isEmpty {
                     emptyRow
                 }
                 if chip != .ideas && search.query.isEmpty && search.highlightsHaveMore {
@@ -369,10 +384,12 @@ struct TripSpotPickerView: View {
     @ViewBuilder
     private func addButton(_ item: TripPickerItem) -> some View {
         if item.isPlanned || done[item.id]?.hasPrefix("auf Tag") == true {
-            Image(systemName: "checkmark")
+            let day = plannedDay(item.osmRef)
+            Label(day.map { "Tag \($0 + 1)" } ?? "eingeplant", systemImage: "checkmark")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 44, minHeight: 32)
-                .accessibilityLabel("Schon eingeplant")
+                .accessibilityLabel(day.map { "Schon eingeplant, Tag \($0 + 1)" } ?? "Schon eingeplant")
         } else {
             let suggestion = search.suggestions[item.osmRef]
             let focused = tripFocus?.dayIndex
@@ -394,6 +411,13 @@ struct TripSpotPickerView: View {
                                ? "Der Tag ist schon voll"
                                : "Lange drücken für einen anderen Tag")
         }
+    }
+
+    /// The day a place is planned on in this stay, for "✓ Tag 1".
+    private func plannedDay(_ osmRef: String) -> Int? {
+        viewModel.leg?.days.first { day in
+            TripStayPlan.stops(of: day).contains { $0.osmRef == osmRef }
+        }?.dayIndex
     }
 
     // MARK: - Food
@@ -480,6 +504,26 @@ struct TripSpotPickerView: View {
             })
         }
         return out
+    }
+
+    /// The details with how far the place is from the bed.
+    private func pickerDetail(_ item: TripPickerItem) -> TripSpotDetail {
+        var detail = item.detail
+        if let leg = viewModel.leg { detail.distance = TripSpotDetailContext.distance(to: detail.coordinate, in: leg) }
+        return detail
+    }
+
+    /// The details' bar: "+ Tag n" for the suggested day next to Route
+    /// and Karte, the other days and the rest under "Mehr" (mock
+    /// "Spot-Auswahl und Spot-Details").
+    private func detailBar(_ item: TripPickerItem) -> TripSpotDetailBar {
+        let all = actions(item, later: { afterDetail = $0 })
+        let suggested = tripFocus?.dayIndex ?? search.suggestions[item.osmRef]?.dayIndex
+            ?? viewModel.leg?.days.map(\.dayIndex).min()
+        let primary = all.first { $0.id == "day-\(suggested ?? -1)" }
+        return TripSpotDetailBar(primary: primary,
+                                 primaryTitle: suggested.map { "+ Tag \($0 + 1)" },
+                                 more: all.filter { $0.id != primary?.id })
     }
 
     private func runAfterDetail() {

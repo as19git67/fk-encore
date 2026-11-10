@@ -131,6 +131,15 @@ final class TripPlannerViewModel {
         self.planId = planId
     }
 
+    #if DEBUG
+    /// A model holding a made-up plan, for Xcode's previews.
+    static func preview(_ plan: TripPlan) -> TripPlannerViewModel {
+        let model = TripPlannerViewModel(planId: plan.id)
+        model.plan = plan
+        return model
+    }
+    #endif
+
     // MARK: - One per plan (plan item X10)
 
     /// The view models in use, by plan id.

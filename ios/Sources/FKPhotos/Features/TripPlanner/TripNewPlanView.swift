@@ -1,64 +1,116 @@
 import SwiftUI
 
-/// A new trip (§4.2, §25, plan "Reiseverlauf" stage 3): only what it
-/// needs to exist.
+/// A new trip (reise-planen-und-unterwegs, "Ablauf 1"): the empty
+/// itinerary with its plus, and "Neuer Aufenthalt" behind it.
 ///
-/// A name, the first place, how long and from when. Everything else —
-/// the way there, further stays and the journeys between them, how the
-/// group gets about, who comes along, the pace, what counts — is done
-/// afterwards exactly as it is changed later: in the itinerary, which
-/// "Planen" opens next, and in the trip's settings. The form once asked
-/// for all of it at once, plus a sentence a model would read; a trip
-/// that could be created in four fields took a screenful, and the
-/// screenful was not where anybody changed those things afterwards.
+/// Only the first stay is asked: where, from when, how long, how you
+/// get about there and whether anything is booked. The name is not
+/// asked — the itinerary, which opens next, suggests one. Further
+/// stays, the journeys and home are added there, exactly as they are
+/// changed later.
 struct TripNewPlanView: View {
     @State private var model = TripNewPlanViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var confirmCancel = false
+    /// "Neuer Aufenthalt", opened by the plus (mock "Ablauf 1").
+    @State private var addingStay = false
 
     /// Handed the new plan's id, so the caller can open it.
     let onCreated: (Int) -> Void
 
+    /// The empty itinerary: the trip has no stay, no date and no name
+    /// yet, and the plus is the way in (reise-planen-und-unterwegs,
+    /// "Ablauf 1"). The name is not asked: the itinerary suggests one
+    /// once there is a stay.
     var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("noch ohne Datum")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowSeparator(.hidden)
+
+                Button {
+                    addingStay = true
+                } label: {
+                    HStack(spacing: 12) {
+                        TimelineGutter(node: .plus, isFirst: true, isLast: true)
+                            .frame(width: 24)
+                        Text("Aufenthalt hinzufügen")
+                            .font(.headline)
+                            .foregroundStyle(.tint)
+                        Spacer()
+                    }
+                    .frame(minHeight: 56)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .listRowSeparator(.hidden)
+            } footer: {
+                Text("Ist Zuhause gesetzt, bietet der Reiseverlauf danach auch die Anreise an.")
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("Neue Reise")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Abbrechen") { dismiss() }
+            }
+        }
+        .sheet(isPresented: $addingStay) {
+            NavigationStack {
+                stayForm
+            }
+        }
+    }
+
+    /// "Neuer Aufenthalt": Wo, Von, Wie lange, Bis, Vor Ort, Übernachtung.
+    private var stayForm: some View {
         Form {
-            // Only what a trip needs to exist (§25): a name, the first
-            // place, how long. The way there, further stays, the
-            // journeys, how the group gets about — all of that is done
-            // afterwards exactly as it is changed later, in the
-            // itinerary this screen leads into.
-            nameSection
             placeSection
             lengthSection
+            Section {
+                Picker("Vor Ort", selection: $model.draft.stay.mode) {
+                    ForEach(TripTransportMode.forPlaces, id: \.self) { mode in
+                        Label(mode.label, systemImage: mode.systemImage).tag(mode)
+                    }
+                }
+            }
+            lodgingSection
             if !model.draft.isPlannable {
                 Section {
                     EmptyView()
                 } footer: {
-                    // Why "Planen" is grey — said, not left to be guessed.
-                    Label("Einen Ort aus der Suche antippen, dann lässt sich planen.",
+                    // Why "Hinzufügen" is grey — said, not left to be guessed.
+                    Label("Einen Ort aus der Suche antippen, dann lässt er sich hinzufügen.",
                           systemImage: "info.circle")
                 }
             }
         }
-        .navigationTitle("Neue Reise")
+        .navigationTitle("Neuer Aufenthalt")
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         // A filled form is not thrown away by a swipe or a mis-tap.
         .interactiveDismissDisabled(model.isDirty)
         .confirmationDialog("Eingaben verwerfen?", isPresented: $confirmCancel,
                             titleVisibility: .visible) {
-            Button("Verwerfen", role: .destructive) { dismiss() }
+            Button("Verwerfen", role: .destructive) { addingStay = false }
             Button("Weiter bearbeiten", role: .cancel) {}
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Abbrechen") {
-                    if model.isDirty { confirmCancel = true } else { dismiss() }
+                    if model.isDirty { confirmCancel = true } else { addingStay = false }
                 }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     Task {
                         if let id = await model.create() {
+                            addingStay = false
                             onCreated(id)
                             dismiss()
                         }
@@ -67,25 +119,11 @@ struct TripNewPlanView: View {
                     if model.isCreating {
                         ProgressView()
                     } else {
-                        Text("Planen")
+                        Text("Hinzufügen")
                     }
                 }
                 .disabled(!model.draft.isPlannable || model.isCreating)
             }
-        }
-    }
-
-    // MARK: - Name
-
-    /// The trip's own name, first. It sat under "Wie lange?", which is
-    /// not where anybody looks for it.
-    private var nameSection: some View {
-        Section {
-            TextField("Name der Reise (optional)", text: $model.draft.title)
-        } header: {
-            Text("Name")
-        } footer: {
-            Text("Ohne Namen heißt die Reise nach ihrem ersten Aufenthalt.")
         }
     }
 
@@ -104,17 +142,10 @@ struct TripNewPlanView: View {
             TripPlaceFinderRows(model: model.finder, picked: model.draft.anchor) { place in
                 model.pick(place)
             }
-            if model.draft.anchor != nil {
-                TextField("Name des Aufenthalts (optional)", text: $model.draft.stay.title)
-                    .textInputAutocapitalization(.words)
-                anchorZoneRows
-            }
         } header: {
-            Text("Wo? Die Unterkunft des ersten Aufenthalts")
+            Text("Wo?")
         } footer: {
-            Text("Hotel, Campingplatz oder Adresse — hier fängt jeder Tag an und hier endet "
-                 + "er, und von hier aus werden die Wege gerechnet. Eine Stadt geht auch; "
-                 + "dann plant der Planer um deren Mitte herum.")
+            Text("Ein Ort oder gleich die Unterkunft. Hier fängt jeder Tag an und hört auf.")
         }
     }
 
@@ -125,14 +156,16 @@ struct TripNewPlanView: View {
     /// and the endpoint has always taken it. It simply had nowhere to
     /// be said. Saying it keeps the plan from claiming a precision it
     /// does not have.
-    @ViewBuilder
-    private var anchorZoneRows: some View {
-        Toggle("Noch nichts gebucht", isOn: $model.draft.stay.anchorIsApproximate)
-        if model.draft.stay.anchorIsApproximate {
-            TripRadiusPicker(metres: $model.draft.stay.anchorRadiusM)
-            Text("Der Planer rechnet mit der Mitte und zeigt die Unterkunft nicht als Adresse an.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private var lodgingSection: some View {
+        Section {
+            Toggle("Noch nichts gebucht", isOn: $model.draft.stay.anchorIsApproximate)
+        } header: {
+            Text("Übernachtung")
+        } footer: {
+            Text(model.draft.stay.anchorIsApproximate
+                 ? "Ohne Unterkunft ist die Mitte des Orts der Ausgangspunkt, und die App sucht "
+                    + "im Umkreis von 15 km."
+                 : "Die Unterkunft ist der Ort oben. Steht noch nichts fest, hier einschalten.")
         }
     }
 
@@ -140,26 +173,28 @@ struct TripNewPlanView: View {
 
     private var lengthSection: some View {
         Section {
+            Toggle("Von: Datum steht fest", isOn: $model.draft.isDated)
+            if model.draft.isDated {
+                DatePicker("Von", selection: $model.draft.startDate, displayedComponents: .date)
+            }
             Stepper(value: $model.draft.days,
                     in: TripNewPlanDraft.minDays...TripNewPlanDraft.maxDays) {
-                Text(model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage")
+                LabeledContent("Wie lange?", value: TripItineraryText.stayLength(days: model.draft.days))
             }
-            Toggle("Termin steht fest", isOn: $model.draft.isDated)
             if model.draft.isDated {
-                DatePicker("Erster Tag", selection: $model.draft.startDate,
-                           displayedComponents: .date)
+                LabeledContent("Bis") {
+                    Text(lastDay.formatted(.dateTime.weekday(.abbreviated).day().month(.twoDigits).year()))
+                        .foregroundStyle(.secondary)
+                }
             }
-        } header: {
-            Text("Wie lange?")
         } footer: {
-            // Where the rest is: "Planen" opens the itinerary, and the
-            // arrival, the way there and how the group gets about are
-            // said there, on the chain they belong to — not as a first
-            // copy here and a second one later.
-            Text("Nach „Planen“ öffnet sich der Reiseverlauf: dort stehen Anreise und "
-                 + "Ankunft, weitere Aufenthalte und Weiterreisen und wie ihr vor Ort "
-                 + "unterwegs seid. Tempo, Begleitung und wonach gesucht wird stehen in "
-                 + "den Einstellungen der Reise.")
+            Text("Das „Von“ ist der Beginn der Reise; „Bis“ ist gerechnet. Ohne Datum heißen die "
+                 + "Tage „Tag 1“ bis „Tag n“, ein Datum lässt sich jederzeit nachtragen.")
         }
+    }
+
+    private var lastDay: Date {
+        Calendar.current.date(byAdding: .day, value: max(0, model.draft.days - 1), to: model.draft.startDate)
+            ?? model.draft.startDate
     }
 }

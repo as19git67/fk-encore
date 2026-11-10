@@ -45,6 +45,9 @@ struct TripSpotDetailView<Actions: View>: View {
     @Environment(\.dismiss) private var dismiss
     /// Opens the sheet "Weg" instead of handing the route straight to a map app (stage 6).
     let onRoute: (() -> Void)?
+    /// The actions as a bar under the sheet (Route · Karte · the one for
+    /// the day · Mehr). Nil draws them as rows in the list instead.
+    let bar: TripSpotDetailBar?
     @State private var routeChoice: TripMapsChoice?
     @State private var editing: TripSpotEdit?
     /// The kind just picked, shown until the caller hands a new spot.
@@ -61,8 +64,10 @@ struct TripSpotDetailView<Actions: View>: View {
         stayLight: TripStayLightRef? = nil,
         onStayLightAccepted: @escaping () async -> Void = {},
         onRoute: (() -> Void)? = nil,
+        bar: TripSpotDetailBar? = nil,
         @ViewBuilder actions: @escaping (@escaping () -> Void) -> Actions,
     ) {
+        self.bar = bar
         self.spot = spot
         self.mode = mode
         self.onSave = onSave
@@ -77,27 +82,23 @@ struct TripSpotDetailView<Actions: View>: View {
 
     var body: some View {
         List {
-            // What it looks like, before anything else: a name and a
-            // category do not make anybody want to go (candidate
-            // ranking, stage 2). The place's own picture, and under it
-            // what its Commons category holds besides.
-            if spot.image != nil {
-                Section {
-                    TripSpotPictures(osmRef: spot.osmRef, image: spot.image)
-                        .listRowInsets(EdgeInsets())
-                }
-            }
+            header
+
+            // What you need to decide about going (reise-planen-und-unterwegs,
+            // mock "Spot-Details"): the ticket, whether it is open, when it
+            // is planned, and why somebody saved it.
+            planFacts
 
             // What the place is, where Wikipedia is thin too (stage 4).
             if let description = spot.description {
                 TripSpotDescriptionSection(description: description)
             }
 
-            // Why it was saved beats what it is called, when you are
-            // deciding what to do with an afternoon (§9.2).
-            if let note = spot.note, !note.isEmpty {
-                Section("Notiz") {
-                    Text(note)
+            // Everything there is to look at, once the sheet is pulled up.
+            if spot.image != nil {
+                Section("Bilder") {
+                    TripSpotPictures(osmRef: spot.osmRef, image: spot.image)
+                        .listRowInsets(EdgeInsets())
                 }
             }
 
@@ -109,29 +110,7 @@ struct TripSpotDetailView<Actions: View>: View {
                     .listRowInsets(EdgeInsets())
             }
 
-            if let article = spot.wikipediaUrl, let articleURL = URL(string: article) {
-                Section {
-                    // In the app, with pictures (§25, stage C): the
-                    // German article where one exists, otherwise the
-                    // local one and its translation.
-                    NavigationLink {
-                        TripArticleView(url: articleURL, placeName: spot.displayName)
-                    } label: {
-                        Label("Artikel lesen", systemImage: "book")
-                    }
-                } header: {
-                    Text("Wikipedia")
-                } footer: {
-                    // Said before the tap, not after it (§10.4): the
-                    // link is to the local article; whether German
-                    // exists the server finds out, and translates
-                    // where it does not.
-                    if let language = TripArticleLanguage.name(of: articleURL) {
-                        Text("Der Artikel ist auf \(language); gibt es ihn auf Deutsch, "
-                             + "wird der gezeigt, sonst übersetzt.")
-                    }
-                }
-            }
+            contactSection
 
             if let light, let window = light.best {
                 Section {
@@ -162,45 +141,14 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
             }
 
-            Section {
-                // Only show a source link when it adds information: a maps
-                // URL from Apple or Google Maps opens the same place as
-                // "Auf der Karte zeigen" and is therefore redundant.
-                if let source = spot.sourceUrl,
-                   let url = URL(string: source),
-                   !Self.isMapsURL(url) {
-                    Link(destination: url) {
-                        Label(url.host() ?? source, systemImage: "link")
-                    }
-                }
-                Button {
-                    TripMapsOpen.pin(spot.coordinate, name: spot.name, using: preference)
-                } label: {
-                    Label("Auf der Karte zeigen", systemImage: "mappin.circle")
-                }
-                Button {
-                    // Explicitly the other app, not the preference: this
-                    // button exists precisely for "I want to look at it
-                    // over there".
-                    TripMapsOpen.pin(spot.coordinate, name: spot.name, using: .google)
-                } label: {
-                    Label("In Google Maps öffnen", systemImage: "globe")
-                }
-                Button {
-                    offerRoute()
-                } label: {
-                    Label("Route hierher", systemImage: "arrow.triangle.turn.up.right.circle")
-                }
-            } footer: {
-                Text("„Auf der Karte zeigen\u{201D} folgt der App aus den Einstellungen; "
-                     + "die Route fragt, wenn dort „jedes Mal fragen\u{201D} steht.")
-            }
-
             if let stayLight {
                 TripStaySpotLightSection(ref: stayLight, onAccepted: onStayLightAccepted)
             }
 
-            actions({ dismiss() })
+            if bar == nil {
+                mapLinksSection
+                actions({ dismiss() })
+            }
 
             factsSection
 
@@ -215,6 +163,18 @@ struct TripSpotDetailView<Actions: View>: View {
                         Text(reason).font(.callout)
                     }
                 }
+            }
+        }
+        // The actions stay at hand at both heights of the sheet, as in
+        // the mock: Route, Karte, the one for the day, and the rest
+        // under "Mehr".
+        .safeAreaInset(edge: .bottom) {
+            if let bar {
+                TripSpotDetailBarView(bar: bar, close: { dismiss() }, route: { offerRoute() }, map: {
+                    TripMapsOpen.pin(spot.coordinate, name: spot.name, using: preference)
+                }, google: {
+                    TripMapsOpen.pin(spot.coordinate, name: spot.name, using: .google)
+                })
             }
         }
         .navigationTitle(spot.displayName)
@@ -260,6 +220,156 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
                 Button("Abbrechen", role: .cancel) {}
             }
+        }
+    }
+
+    // MARK: - Parts
+
+    /// Picture, name, what it is and how far, and the chips: what the
+    /// half-height sheet leads with.
+    private var header: some View {
+        Section {
+            HStack(alignment: .top, spacing: 12) {
+                if let image = spot.image {
+                    TripSpotThumbnail(image: image, height: 76, width: 76)
+                } else {
+                    Image(systemName: TripCategory.symbol(spot.category))
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 76, height: 76)
+                        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(TripSpotName.line(spot.displayName, local: spot.localName))
+                        .font(.title3.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    chips
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// "Museum · 1,2 km von Hotel Beispiel".
+    private var subtitle: String {
+        [TripCategory.label(shownCategory ?? spot.category), spot.distance]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+
+    private var chips: some View {
+        HStack(spacing: 6) {
+            if let pin = spot.pin {
+                TripPinChip(reason: pin.reason, startMinutes: pin.startMinutes)
+            }
+            if let priority = spot.priority {
+                chip(priority.label, tint: priority == .must ? .orange : .secondary)
+            }
+            chip(TripClock.duration(spot.dwellMinutes), tint: .secondary)
+        }
+    }
+
+    private func chip(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .overlay(Capsule().strokeBorder(tint.opacity(0.5)))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var planFacts: some View {
+        let today = spot.openingHours.flatMap { $0.isEmpty ? nil : TripOpeningHours.display($0) }
+        if spot.ticket != nil || spot.planned != nil || today != nil || !(spot.note ?? "").isEmpty {
+            Section {
+                if let ticket = spot.ticket {
+                    LabeledContent("Ticket", value: ticket)
+                }
+                if let today {
+                    LabeledContent("Geöffnet") {
+                        Text(today).multilineTextAlignment(.trailing)
+                    }
+                }
+                if let planned = spot.planned {
+                    LabeledContent("Geplant", value: "\(planned) · \(TripClock.duration(spot.dwellMinutes))")
+                }
+                // Why it was saved beats what it is called, when you are
+                // deciding what to do with an afternoon (§9.2).
+                if let note = spot.note, !note.isEmpty {
+                    LabeledContent("Notiz") {
+                        Text(note).multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The place's own website, its article and where the idea came
+    /// from ("Notiz und Kontakt" in the mock).
+    @ViewBuilder
+    private var contactSection: some View {
+        let source = spot.sourceUrl.flatMap(URL.init(string:)).flatMap { Self.isMapsURL($0) ? nil : $0 }
+        let article = spot.wikipediaUrl.flatMap(URL.init(string:))
+        if source != nil || article != nil {
+            Section {
+                if let article {
+                    // In the app, with pictures (§25, stage C): the
+                    // German article where one exists, otherwise the
+                    // local one and its translation.
+                    NavigationLink {
+                        TripArticleView(url: article, placeName: spot.displayName)
+                    } label: {
+                        Label("Wikipedia-Artikel lesen", systemImage: "book")
+                    }
+                }
+                if let source {
+                    Link(destination: source) {
+                        Label(source.host() ?? source.absoluteString, systemImage: "link")
+                    }
+                }
+            } header: {
+                Text("Mehr dazu")
+            } footer: {
+                // Said before the tap, not after it (§10.4).
+                if let article, let language = TripArticleLanguage.name(of: article) {
+                    Text("Der Artikel ist auf \(language); gibt es ihn auf Deutsch, "
+                         + "wird der gezeigt, sonst übersetzt.")
+                }
+            }
+        }
+    }
+
+    /// The map links as rows, for a screen without the bar.
+    private var mapLinksSection: some View {
+        Section {
+            Button {
+                TripMapsOpen.pin(spot.coordinate, name: spot.name, using: preference)
+            } label: {
+                Label("Auf der Karte zeigen", systemImage: "mappin.circle")
+            }
+            Button {
+                // Explicitly the other app, not the preference: this
+                // button exists precisely for "I want to look at it
+                // over there".
+                TripMapsOpen.pin(spot.coordinate, name: spot.name, using: .google)
+            } label: {
+                Label("In Google Maps öffnen", systemImage: "globe")
+            }
+            Button {
+                offerRoute()
+            } label: {
+                Label("Route hierher", systemImage: "arrow.triangle.turn.up.right.circle")
+            }
+        } footer: {
+            Text("„Auf der Karte zeigen\u{201D} folgt der App aus den Einstellungen; "
+                 + "die Route fragt, wenn dort „jedes Mal fragen\u{201D} steht.")
         }
     }
 
@@ -404,6 +514,104 @@ extension TripSpotDetailView where Actions == EmptyView {
     }
 }
 
+/// The actions under a spot's details: one for the day next to Route
+/// and Karte, everything else under "Mehr". The same list the row's
+/// menu shows (CLAUDE.md, "Aktionen an Spots in der iOS-App").
+struct TripSpotDetailBar {
+    var primary: TripPinSheetAction?
+    /// The short label in the bar ("Anderer Tag", "+ Tag 3").
+    var primaryTitle: String?
+    var more: [TripPinSheetAction]
+
+    /// A planned stop: "Auf einen anderen Tag" goes in the bar. The
+    /// navigate group is the bar's own Route and Karte.
+    static func planned(_ actions: [TripPinSheetAction]) -> TripSpotDetailBar {
+        let shown = actions.filter { $0.group != .navigate }
+        let primary = shown.first { $0.id == "move" }
+        return TripSpotDetailBar(primary: primary, primaryTitle: primary == nil ? nil : "Anderer Tag",
+                                 more: shown.filter { $0.id != primary?.id })
+    }
+}
+
+/// The bar itself: four equal buttons on the sheet's bottom edge.
+struct TripSpotDetailBarView: View {
+    let bar: TripSpotDetailBar
+    let close: @MainActor () -> Void
+    let route: () -> Void
+    let map: () -> Void
+    let google: () -> Void
+
+    @State private var running: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            button("Route", systemImage: "arrow.triangle.turn.up.right.circle", action: route)
+            button("Karte", systemImage: "map", action: map)
+            if let primary = bar.primary {
+                button(bar.primaryTitle ?? primary.title, systemImage: primary.systemImage) { run(primary) }
+                    .disabled(running != nil)
+            }
+            Menu {
+                ForEach(TripSpotActionGroup.allCases, id: \.self) { group in
+                    let members = bar.more.filter { $0.group == group }
+                    if !members.isEmpty {
+                        Section {
+                            ForEach(members) { action in
+                                Button(role: action.role) { run(action) } label: {
+                                    Label(action.title, systemImage: action.systemImage)
+                                }
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Button(action: google) {
+                        Label("In Google Maps öffnen", systemImage: "globe")
+                    }
+                }
+            } label: {
+                label("Mehr", systemImage: "ellipsis")
+            }
+            .buttonStyle(.bordered)
+            .disabled(running != nil)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private func button(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            label(title, systemImage: systemImage)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private func label(_ title: String, systemImage: String) -> some View {
+        VStack(spacing: 3) {
+            if running != nil && title == bar.primaryTitle {
+                ProgressView()
+            } else {
+                Image(systemName: systemImage)
+            }
+            Text(title)
+                .font(.caption)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, minHeight: 40)
+    }
+
+    private func run(_ action: TripPinSheetAction) {
+        running = action.id
+        Task {
+            await action.run()
+            running = nil
+            if action.closes { close() }
+        }
+    }
+}
+
 /// A spot, flattened out of whichever thing it came from.
 ///
 /// Deliberately a value rather than a protocol over `TripStop` and
@@ -438,6 +646,18 @@ struct TripSpotDetail: Identifiable, Sendable {
     var image: TripRoutePhoto? = nil
     /// What the place is, with its source (candidate ranking, stage 4).
     var description: TripSpotDescription? = nil
+    /// Muss / Will / Wenn Zeit, for an idea or a planned stop.
+    var priority: TripIdeaPriority? = nil
+    /// OpenStreetMap's opening_hours, unverified.
+    var openingHours: String? = nil
+    /// "Mo 7.9. 14:00" when a booked visit holds it.
+    var ticket: String? = nil
+    /// "Tag 1 · ca. 15:30 bis 17:00", set by the screen that knows the day.
+    var planned: String? = nil
+    /// The fixed time that holds it, set by the screen that knows the day.
+    var pin: TripSpotDetailPin? = nil
+    /// "1,2 km vom Hotel", set by the screen that knows the stay.
+    var distance: String? = nil
 
     var id: String { osmRef }
     /// A title the group gave it wins over the map's name: they chose
@@ -467,6 +687,9 @@ struct TripSpotDetail: Identifiable, Sendable {
         extent = candidate.extent
         image = candidate.image
         description = candidate.description
+        priority = candidate.ideaPriority
+        openingHours = candidate.openingHours
+        ticket = candidate.ticket
     }
 
     /// A place the browse turned up (§9.2, case 4 widened).
@@ -540,6 +763,50 @@ struct TripSpotDetail: Identifiable, Sendable {
         extent = stop.extent
         image = stop.image
         description = stop.description
+        priority = stop.ideaPriority
+        openingHours = stop.openingHours
+    }
+}
+
+/// The fixed time a spot has on its day, for the chip in the details.
+struct TripSpotDetailPin: Sendable {
+    let reason: TripPinReason?
+    let startMinutes: Int
+}
+
+/// What a stay says about a spot that the spot itself cannot know:
+/// which day it is on, when, how far from the bed, and what holds it.
+enum TripSpotDetailContext {
+    /// "Tag 1 · ca. 15:30 bis 17:00".
+    static func planned(_ stop: TripStop, dayIndex: Int) -> String {
+        var line = "Tag \(dayIndex + 1)"
+        if let eta = stop.etaMinutes {
+            line += " · ca. \(TripClock.format(eta)) bis \(TripClock.format(eta + stop.dwellMinutes))"
+        }
+        return line
+    }
+
+    /// "1,2 km vom Hotel Beispiel", "800 m vom Zentrum".
+    static func distance(to coordinate: TripCoordinate, in leg: TripLeg) -> String {
+        let metres = Int(TripAppleMapsLookup.distance(from: leg.anchor, to: coordinate).rounded())
+        let from: String
+        if leg.anchorRadiusM != nil {
+            from = "vom Zentrum"
+        } else if let label = leg.anchorLabel, !label.isEmpty {
+            from = "von \(label)"
+        } else {
+            from = "von der Unterkunft"
+        }
+        return "\(TripWays.distance(metres)) \(from)"
+    }
+
+    /// The stop as the stay's details show it.
+    static func detail(_ stop: TripStop, dayIndex: Int?, leg: TripLeg?, pin: TripFixpoint?) -> TripSpotDetail {
+        var detail = TripSpotDetail(stop)
+        if let dayIndex { detail.planned = planned(stop, dayIndex: dayIndex) }
+        if let leg { detail.distance = distance(to: stop.coordinate, in: leg) }
+        if let pin { detail.pin = TripSpotDetailPin(reason: pin.reason, startMinutes: pin.startMinutes) }
+        return detail
     }
 }
 

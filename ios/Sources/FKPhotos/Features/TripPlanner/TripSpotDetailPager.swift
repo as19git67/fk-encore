@@ -22,6 +22,8 @@ struct TripSpotDetailPager: View {
     let onStayLightAccepted: () async -> Void
     /// A new kind for a spot ("Art"), by its OSM reference.
     let onCategory: ((String, String) async -> Void)?
+    /// The stop with what its stay knows about it: day, time, distance, pin.
+    let detailOf: (TripStop) -> TripSpotDetail
 
     @State private var selection: Int
     @State private var wayStop: TripStop?
@@ -33,7 +35,9 @@ struct TripSpotDetailPager: View {
          way: ((TripStop) -> AnyView?)? = nil,
          stayLight: ((TripStop) -> TripStayLightRef?)? = nil,
          onStayLightAccepted: @escaping () async -> Void = {},
-         onCategory: ((String, String) async -> Void)? = nil) {
+         onCategory: ((String, String) async -> Void)? = nil,
+         detailOf: @escaping (TripStop) -> TripSpotDetail = { TripSpotDetail($0) }) {
+        self.detailOf = detailOf
         self.stops = stops.isEmpty ? [selected] : stops
         self.mode = mode
         self.onSave = onSave
@@ -49,16 +53,12 @@ struct TripSpotDetailPager: View {
         NavigationStack {
             TabView(selection: $selection) {
                 ForEach(stops) { stop in
-                    TripSpotDetailView(spot: TripSpotDetail(stop), mode: mode, onSave: onSave,
+                    TripSpotDetailView(spot: detailOf(stop), mode: mode, onSave: onSave,
                                        onCategory: onCategory.map { set in { await set(stop.osmRef, $0) } },
                                        stayLight: stayLight?(stop),
                                        onStayLightAccepted: onStayLightAccepted,
-                                       onRoute: way == nil ? nil : { wayStop = stop }) { close in
-                        TripSpotActionSections(
-                            actions: actions(stop).filter { $0.group != .navigate },
-                            close: close,
-                        )
-                    }
+                                       onRoute: way == nil ? nil : { wayStop = stop },
+                                       bar: .planned(actions(stop))) { _ in EmptyView() }
                     .tag(stop.rowId)
                 }
             }
@@ -68,7 +68,7 @@ struct TripSpotDetailPager: View {
                     Button("Schließen", systemImage: "xmark") { dismiss() }
                 }
                 if stops.count > 1, let index = stops.firstIndex(where: { $0.rowId == selection }) {
-                    ToolbarItem(placement: .bottomBar) {
+                    ToolbarItem(placement: .principal) {
                         Text("\(index + 1) von \(stops.count) an diesem Tag")
                             .font(.caption)
                             .foregroundStyle(.secondary)
