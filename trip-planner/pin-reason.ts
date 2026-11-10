@@ -13,8 +13,10 @@
 
 import { APIError } from "encore.dev/api";
 
-export const PIN_REASONS = ["ticket", "light", "reservation", "event", "departure"] as const;
-export type PinReason = (typeof PIN_REASONS)[number];
+// Spelled out rather than derived from the list: Encore's parser cannot
+// read an indexed access type such as `(typeof PIN_REASONS)[number]`.
+export type PinReason = "ticket" | "light" | "reservation" | "event" | "departure";
+export const PIN_REASONS: readonly PinReason[] = ["ticket", "light", "reservation", "event", "departure"];
 
 /** The reason as sent, or null; anything else is refused. */
 export function parsePinReason(value: string | null | undefined): PinReason | null {
