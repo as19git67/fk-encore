@@ -19,6 +19,9 @@ struct TripStayPlanView: View {
     let stopActions: (TripStop) -> [TripPinSheetAction]
     /// Opens the day on its own screen (the band, the order, the breaks).
     let openDay: (Int) -> Void
+    /// The screen's title when it is the trip's first screen (the
+    /// trip's name); otherwise the stay's.
+    var title: String? = nil
 
     @AppStorage("trip.stayPlan.layout") private var layout = Layout.list.rawValue
     /// The day the map shows numbered; nil is every day.
@@ -78,7 +81,7 @@ struct TripStayPlanView: View {
         .safeAreaInset(edge: .bottom) {
             if let undo { undoBar(undo) }
         }
-        .navigationTitle(viewModel.leg?.displayTitle ?? "Aufenthalt")
+        .navigationTitle(title ?? viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {

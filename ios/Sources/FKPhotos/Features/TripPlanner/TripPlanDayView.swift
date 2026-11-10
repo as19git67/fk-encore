@@ -50,8 +50,10 @@ struct TripPlanDayView: View {
     @State private var editingLeg = false
     /// The trip's structure — legs and journeys — from the leg strip.
     @State private var editingStructure = false
-    /// The stay planned as a whole, all its days on one screen (stage 3).
-    @State private var planningStay = false
+    /// One day of a stay on its own screen (the band, the order, the
+    /// breaks), pushed from the stay's planning view, which is where a
+    /// trip opens (reise-planen-und-unterwegs.md, "Planning a stay").
+    @State private var showingDay = false
     /// The spot picker (reise-planen-und-unterwegs.md, stage 4).
     @State private var pickingSpot = false
     /// The minute the screen is drawn for. Ticks while the day on
@@ -70,6 +72,8 @@ struct TripPlanDayView: View {
             if viewModel.isLoading && viewModel.plan == nil {
                 ProgressView("Plan wird geladen…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let leg = viewModel.leg, !leg.isTransit {
+                stayRoot
             } else if let day = viewModel.day, let leg = viewModel.leg {
                 content(day: day, leg: leg)
             } else if let message = viewModel.errorMessage {
@@ -86,49 +90,19 @@ struct TripPlanDayView: View {
         .sheet(isPresented: $pickingSpot) {
             TripSpotPickerView(viewModel: viewModel)
         }
-        .navigationDestination(isPresented: $planningStay) {
-            TripStayPlanView(
-                viewModel: viewModel,
-                stopActions: { stop in stopActions(stop) },
-                openDay: { dayIndex in
-                    viewModel.select(dayIndex: dayIndex)
-                    planningStay = false
-                },
-            )
-        }
+        .navigationDestination(isPresented: $showingDay) { dayScreen }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() }, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let day = viewModel.day, let leg = viewModel.leg {
-                // The map is the one thing reached often enough to earn
-                // a button of its own; the rest live in a menu, because
-                // five icons across a title bar is a puzzle.
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        TripDayMapView(day: day,
-                                       anchor: TripMapAnchor.of(day: day, legAnchor: leg.anchor),
-                                       light: viewModel.light,
-                                       isRunning: leg.schedule(on: Date()).isRunning,
-                                       // The same list the rows and the
-                                       // detail screen offer (§8.4).
-                                       stopActions: { stop, later in stopActions(stop, later: later) },
-                                       onSave: { await viewModel.saveNote($0) },
-                                       shelter: { viewModel.forecast?.shelter(for: $0) },
-                                       mode: leg.transportMode)
-                    } label: {
-                        Label("Karte", systemImage: "map")
-                    }
-                }
+            if let day = viewModel.day, let leg = viewModel.leg, leg.isTransit {
+                dayMapItem(day: day, leg: leg)
+            }
+            if viewModel.day != nil, viewModel.leg != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     // Only what belongs to the whole trip (§25). What
                     // belongs to the leg is behind its header, what
                     // belongs to the day is on the day.
                     Menu {
-                        Button {
-                            planningStay = true
-                        } label: {
-                            Label("Ganzen Aufenthalt planen", systemImage: "square.stack")
-                        }
                         Button {
                             showSettings = true
                         } label: {
@@ -319,6 +293,55 @@ struct TripPlanDayView: View {
             Task {
                 await viewModel.loadLight()
                 await viewModel.loadForecast()
+            }
+        }
+    }
+
+    // MARK: - The stay and its days
+
+    /// A stay opens as a whole, every day on one screen (stage 3); the
+    /// strip of stays and journeys stays on top.
+    private var stayRoot: some View {
+        TripStayPlanView(
+            viewModel: viewModel,
+            stopActions: { stop in stopActions(stop) },
+            openDay: { dayIndex in
+                viewModel.select(dayIndex: dayIndex)
+                showingDay = true
+            },
+            title: screenTitle,
+        )
+        .safeAreaInset(edge: .top, spacing: 0) { legPicker }
+    }
+
+    /// One day on its own screen, from a day of the stay's planning view.
+    @ViewBuilder
+    private var dayScreen: some View {
+        if let day = viewModel.day, let leg = viewModel.leg {
+            content(day: day, leg: leg)
+                .navigationTitle(dayLabel())
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { dayMapItem(day: day, leg: leg) }
+        }
+    }
+
+    /// The day's map: the one thing on a day reached often enough to
+    /// earn a button of its own.
+    private func dayMapItem(day: TripDay, leg: TripLeg) -> some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            NavigationLink {
+                TripDayMapView(day: day,
+                               anchor: TripMapAnchor.of(day: day, legAnchor: leg.anchor),
+                               light: viewModel.light,
+                               isRunning: leg.schedule(on: Date()).isRunning,
+                               // The same list the rows and the
+                               // detail screen offer (§8.4).
+                               stopActions: { stop, later in stopActions(stop, later: later) },
+                               onSave: { await viewModel.saveNote($0) },
+                               shelter: { viewModel.forecast?.shelter(for: $0) },
+                               mode: leg.transportMode)
+            } label: {
+                Label("Karte", systemImage: "map")
             }
         }
     }
@@ -866,7 +889,11 @@ struct TripPlanDayView: View {
         .sheet(isPresented: $editingStructure, onDismiss: {
             if viewModel.wantsStayPlan {
                 viewModel.wantsStayPlan = false
-                planningStay = true
+                showingDay = false
+            }
+            if viewModel.wantsDayScreen {
+                viewModel.wantsDayScreen = false
+                showingDay = viewModel.leg?.isTransit == false
             }
         }) {
             NavigationStack {

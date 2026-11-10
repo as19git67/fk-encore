@@ -68,109 +68,123 @@ struct TripSpotPickerView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if chip == .food, let leg = viewModel.leg {
-                    food(leg)
-                } else if chip == .routes, let leg = viewModel.leg {
-                    TripStayRoutesList(viewModel: viewModel, leg: leg)
-                } else if chip == .trips, let leg = viewModel.leg {
-                    TripStayDayTripsList(planId: viewModel.planId, leg: leg) { focus, area in
-                        await viewModel.load()
-                        tripFocus = focus
-                        search.area = area
-                        chip = .highlights
-                        search.forgetSuggestions()
-                        await reload()
-                    }
-                } else if layout == Layout.map.rawValue {
-                    TripSpotPickerMap(
-                        items: items,
-                        leg: viewModel.leg,
-                        open: { detail = $0 },
-                        searchHere: { area in
-                            search.area = area
-                            tripFocus = nil
-                            Task { await reload() }
-                        },
-                    )
-                } else {
-                    list
+            content
+                .safeAreaInset(edge: .top, spacing: 0) { chips }
+                .searchable(text: $search.query, placement: .navigationBarDrawer(displayMode: .always),
+                            prompt: "Name, Kategorie oder Karten-Link")
+                .onSubmit(of: .search) { Task { await runQuery() } }
+                .task(id: search.query) {
+                    // Typing pauses before it searches, as everywhere in the app.
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard !Task.isCancelled else { return }
+                    await runQuery()
                 }
-            }
-            .safeAreaInset(edge: .top, spacing: 0) { chips }
-            .searchable(text: $search.query, placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "Name, Kategorie oder Karten-Link")
-            .onSubmit(of: .search) { Task { await runQuery() } }
-            .task(id: search.query) {
-                // Typing pauses before it searches, as everywhere in the app.
-                try? await Task.sleep(for: .milliseconds(400))
-                guard !Task.isCancelled else { return }
-                await runQuery()
-            }
-            .task {
-                if !search.didLoadHighlights { await search.loadHighlights() }
-                await suggest()
-            }
-            .task(id: votes) { if votes { await ballot.load() } }
-            .onChange(of: items.map(\.id)) { _, _ in
-                Task { await suggest() }
-            }
-            .navigationTitle("Spot hinzufügen")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("Ansicht", selection: $layout) {
-                        Text("Liste").tag(Layout.list.rawValue)
-                        Text("Karte").tag(Layout.map.rawValue)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
+                .task {
+                    if !search.didLoadHighlights { await search.loadHighlights() }
+                    await suggest()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }
+                .task(id: votes) { if votes { await ballot.load() } }
+                .onChange(of: items.map(\.id)) { _, _ in
+                    Task { await suggest() }
                 }
-            }
-            .plannerErrorBanner(search.errorMessage ?? viewModel.errorMessage ?? ballot.errorMessage, dismiss: {
-                search.errorMessage = nil
-                viewModel.errorMessage = nil
-                ballot.errorMessage = nil
-            })
-            .sheet(item: $appointmentFor) { candidate in
-                if let leg = viewModel.leg {
-                    TripFixpointSheet(
-                        dayLabel: "Termin",
-                        spots: leg.spotChoices,
-                        presetSpot: TripSpotChoice(osmRef: candidate.osmRef, name: candidate.displayName,
-                                                   plannedOn: nil),
-                        days: leg.days.sorted { $0.dayIndex < $1.dayIndex }.map { day in
-                            TripDayChoice(dayIndex: day.dayIndex, label: TripStayPlan.dayTitle(day, leg: leg))
-                        },
-                        presetDayIndex: tripFocus?.dayIndex ?? search.suggestions[candidate.osmRef]?.dayIndex,
-                    ) { draft in
-                        await appoint(candidate, draft)
-                    }
-                }
-            }
-            .sheet(item: $detail, onDismiss: runAfterDetail) { item in
-                NavigationStack {
-                    TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot,
-                                       stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
-                                                                   osmRef: item.detail.osmRef,
-                                                                   startDate: viewModel.leg?.startDate),
-                                       onStayLightAccepted: { await viewModel.load() }) { close in
-                        TripSpotActionSections(actions: actions(item, later: { afterDetail = $0 }), close: close)
-                    }
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Schließen", systemImage: "xmark") { detail = nil }
+                .navigationTitle("Spot hinzufügen")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Picker("Ansicht", selection: $layout) {
+                            Text("Liste").tag(Layout.list.rawValue)
+                            Text("Karte").tag(Layout.map.rawValue)
                         }
+                        .pickerStyle(.segmented)
+                        .frame(width: 160)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Fertig") { dismiss() }
                     }
                 }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .opaqueSheetBackground()
+                .plannerErrorBanner(errorText, dismiss: {
+                    search.errorMessage = nil
+                    viewModel.errorMessage = nil
+                    ballot.errorMessage = nil
+                })
+                .sheet(item: $appointmentFor) { appointmentSheet($0) }
+                .sheet(item: $detail, onDismiss: runAfterDetail) { detailSheet($0) }
+        }
+    }
+
+    /// What the chip shows.
+    @ViewBuilder
+    private var content: some View {
+        if chip == .food, let leg = viewModel.leg {
+            food(leg)
+        } else if chip == .routes, let leg = viewModel.leg {
+            TripStayRoutesList(viewModel: viewModel, leg: leg)
+        } else if chip == .trips, let leg = viewModel.leg {
+            TripStayDayTripsList(planId: viewModel.planId, leg: leg) { focus, area in
+                await viewModel.load()
+                tripFocus = focus
+                search.area = area
+                chip = .highlights
+                search.forgetSuggestions()
+                await reload()
+            }
+        } else if layout == Layout.map.rawValue {
+            TripSpotPickerMap(
+                items: items,
+                leg: viewModel.leg,
+                open: { detail = $0 },
+                searchHere: { area in
+                    search.area = area
+                    tripFocus = nil
+                    Task { await reload() }
+                },
+            )
+        } else {
+            list
+        }
+    }
+
+    private var errorText: String? {
+        search.errorMessage ?? viewModel.errorMessage ?? ballot.errorMessage
+    }
+
+    @ViewBuilder
+    private func appointmentSheet(_ candidate: TripCandidate) -> some View {
+        if let leg = viewModel.leg {
+            TripFixpointSheet(
+                dayLabel: "Termin",
+                spots: leg.spotChoices,
+                presetSpot: TripSpotChoice(osmRef: candidate.osmRef, name: candidate.displayName,
+                                           plannedOn: nil),
+                days: leg.days.sorted { $0.dayIndex < $1.dayIndex }.map { day in
+                    TripDayChoice(dayIndex: day.dayIndex, label: TripStayPlan.dayTitle(day, leg: leg))
+                },
+                presetDayIndex: tripFocus?.dayIndex ?? search.suggestions[candidate.osmRef]?.dayIndex,
+            ) { draft in
+                await appoint(candidate, draft)
             }
         }
+    }
+
+    @ViewBuilder
+    private func detailSheet(_ item: TripPickerItem) -> some View {
+        NavigationStack {
+            TripSpotDetailView(spot: item.detail, mode: viewModel.leg?.transportMode ?? .foot,
+                               stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
+                                                           osmRef: item.detail.osmRef,
+                                                           startDate: viewModel.leg?.startDate),
+                               onStayLightAccepted: { await viewModel.load() }) { close in
+                TripSpotActionSections(actions: actions(item, later: { afterDetail = $0 }), close: close)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Schließen", systemImage: "xmark") { detail = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .opaqueSheetBackground()
     }
 
     // MARK: - Chips
@@ -296,40 +310,7 @@ struct TripSpotPickerView: View {
                             .frame(width: 56, height: 56)
                             .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
                     }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(TripSpotName.line(item.title, local: item.localName))
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                        if let line = item.line {
-                            Text(line)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        HStack(spacing: 6) {
-                            if let minutes = item.dwellMinutes {
-                                Text(TripClock.duration(minutes))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if case .idea(let candidate) = item.source {
-                                TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
-                                              closedOn: candidate.closedOn ?? [],
-                                              openingHours: candidate.openingHours)
-                            } else if item.isIdea {
-                                Text("Idee").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        if let status = done[item.id] {
-                            Label(status, systemImage: "checkmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                        // Who said what, in names rather than a number (§6.1).
-                        if let voices = voteEntry(item)?.voices {
-                            Text(voices).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    rowText(item)
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
@@ -343,6 +324,43 @@ struct TripSpotPickerView: View {
         }
         .contextMenu {
             TripSpotActionMenuItems(actions: actions(item))
+        }
+    }
+
+    private func rowText(_ item: TripPickerItem) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(TripSpotName.line(item.title, local: item.localName))
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            if let line = item.line {
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            HStack(spacing: 6) {
+                if let minutes = item.dwellMinutes {
+                    Text(TripClock.duration(minutes))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if case .idea(let candidate) = item.source {
+                    TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
+                                  closedOn: candidate.closedOn ?? [],
+                                  openingHours: candidate.openingHours)
+                } else if item.isIdea {
+                    Text("Idee").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let status = done[item.id] {
+                Label(status, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+            // Who said what, in names rather than a number (§6.1).
+            if let voices = voteEntry(item)?.voices {
+                Text(voices).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

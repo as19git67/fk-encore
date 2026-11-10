@@ -232,6 +232,10 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 
 - „Neue Reise“ (Name, Unterkunft, Länge, Datum) → „Planen“ öffnet den
   Reiseverlauf; dort weitere Aufenthalte und die Weiterreisen dazwischen.
+- Öffnet man eine Reise, steht oben die Leiste der Aufenthalte und
+  darunter die Planung des gewählten Aufenthalts mit allen Tagen auf einem
+  Bildschirm. Ein Tipp auf einen Tag öffnet diesen Tag für sich (Zeitband,
+  Reihenfolge, Pausen); eine Weiterreise zeigt direkt ihren Tag.
 - Eine neue Reise beginnt je Aufenthalt mit einer leeren Liste „Ideen“:
   die App sucht und plant nichts selbst. Ideen kommen über „Spot hinzufügen“,
   „Hier, wo ich bin“, Entdecken („Gegend wählen“, „Andere Gegend…“), Teilen

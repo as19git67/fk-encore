@@ -271,10 +271,10 @@ with `POST …/fixpoints/pin-reason` without a re-plan, rides through every
 re-plan, and goes when the spot is untied (`pin-reason.ts`). The day
 order needed nothing for pinned spots (every booked visit was already a
 hard time); food is no longer held in place. `TripStayPlanView` is
-reached from "Planen" on a stay in the itinerary and from the day's menu
-("Ganzen Aufenthalt planen"); it does not replace `TripPlanDayView` yet,
-which stays the screen of one day (band, order, breaks) that a day
-header opens. Cards carry the actions of `stopActions` behind "⋯", the
+the screen a trip opens on (2026-11-10): for a stay, `TripPlanDayView`
+shows it under the strip of stays and journeys, and a day header pushes
+the screen of one day (band, order, breaks); a transit leg keeps the day
+screen. "Planen" on a stay in the itinerary leads there too. Cards carry the actions of `stopActions` behind "⋯", the
 details on a tap, drag onto a card or a day through the move endpoint.
 The map variant lives in the stay view (chips: all days, one day, ideas;
 "+ Tag n" on a tapped marker) rather than in `TripDayMapView`.
