@@ -18,6 +18,7 @@
 
 import { withIdeaHints } from "./idea-hints";
 import { withDayTimes, type DayBreak, type DayWindow } from "./day-times";
+import { loadSegmentChoices } from "./segments";
 import { isIdeasTrip } from "./ideas-mode";
 import { DEFAULT_PRIORITY, priorityOf } from "./priority";
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
@@ -297,6 +298,8 @@ export interface StoredStop extends CurrentStop {
   waitMinutes?: number;
   /** At this hour it is not open for the whole visit, or the ticket is missed. */
   outsideHours?: boolean;
+  /** The mode picked in "Weg" for the way here (stage 6); absent for the stay's own. */
+  wayMode?: TransportMode;
   /** What the group calls it, when they have renamed it (§10.4). */
   title?: string | null;
   /** The picture on the card (ranking plan, stage 2), from `trip_spot_fame`. */
@@ -1161,6 +1164,7 @@ export async function loadPlan(
   const poolRows = legIds.length
     ? await db.select().from(tripPlanPool).where(inArray(tripPlanPool.leg_id, legIds))
     : [];
+  const segments = await loadSegmentChoices(planId, db);
 
   // What people wrote about individual places on these legs (§9.2).
   // Applied on the way out rather than stored on the rows, because a
@@ -1423,6 +1427,7 @@ export async function loadPlan(
             startDate: l.start_date,
             anchor: { lat: l.anchor_lat, lon: l.anchor_lon },
             mode: l.mode as TransportMode,
+            segments,
           },
         ),
         poolByLeg.get(l.id) ?? [],

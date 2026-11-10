@@ -19,7 +19,8 @@ import { resolveFixpoints, type Fixpoint } from "./fixpoints";
 import type { BlockedSpan } from "./day-timing";
 import type { StoredBlock, StoredDay, StoredStop } from "./plan-store";
 import { leaveFrom } from "./extent";
-import type { Coordinate, TransportMode } from "./travel";
+import { travelClassFor, travelLeg, type Coordinate, type TransportMode, type TravelLeg } from "./travel";
+import { DAY_START, segmentKey, type SegmentChoice } from "./segments";
 
 /** A break on the day: a label and minutes, no venue (migration 0303). */
 export interface DayBreak {
@@ -96,12 +97,20 @@ export function orderBreaksOf(breaks: readonly DayBreak[] | undefined, blockId: 
  */
 export function withDayTimes(
   days: StoredDay[],
-  opts: { ideas: boolean; startDate: string | null; anchor: Coordinate; mode: TransportMode },
+  opts: {
+    ideas: boolean;
+    startDate: string | null;
+    anchor: Coordinate;
+    mode: TransportMode;
+    /** Modes picked in "Weg" for single segments (stage 6), by `segmentKey`. */
+    segments?: ReadonlyMap<string, SegmentChoice>;
+  },
 ): StoredDay[] {
   if (!opts.ideas) return days;
   return days.map((day) => {
     const date = opts.startDate ? addDays(opts.startDate, day.dayIndex) : null;
     let position: Coordinate = day.anchor ? { lat: day.anchor.lat, lon: day.anchor.lon } : opts.anchor;
+    const chosen = chosenSegments(day, position, opts.segments);
     let windowStart: number | null = null;
     let windowEnd: number | null = null;
     let planned = 0;
@@ -122,6 +131,7 @@ export function withDayTimes(
         mode: opts.mode,
         date,
         blocked: frame.blocked,
+        ...(chosen.size > 0 ? { travel: travelWith(chosen) } : {}),
       };
       const stops = block.stops.map((s) => orderStopOf(s, frame.tickets));
       const line = lineOf(input, stops, orderBreaksOf(day.breaks, block.id));
@@ -141,8 +151,19 @@ export function withDayTimes(
         stops: block.stops.map((stop) => {
           const entry = byRef.get(stop.osmRef);
           if (!entry) return stop;
+          const choice = chosen.get(stop.osmRef)?.choice;
           return {
             ...stop,
+            ...(choice
+              ? {
+                travelFromPrevious: {
+                  minutes: choice.minutes,
+                  distanceM: choice.distanceM,
+                  travelClass: travelClassFor(choice.minutes, choice.mode),
+                },
+                wayMode: choice.mode,
+              }
+              : {}),
             etaMinutes: entry.startMinutes,
             ...(entry.waitMinutes > 0 ? { waitMinutes: entry.waitMinutes } : {}),
             ...(entry.outsideHours || entry.lateMinutes > 0 ? { outsideHours: true } : {}),
@@ -164,4 +185,53 @@ export function withDayTimes(
       overrunMinutes: overrun,
     };
   });
+}
+
+/** A picked mode in force on this day: the segment's start and the choice, by its end. */
+type Chosen = Map<string, { from: Coordinate; choice: SegmentChoice }>;
+
+/**
+ * The picked modes whose two ends stand next to each other on this day,
+ * walked in the order the day times walk it: from the start of the day,
+ * then from wherever each spot is left.
+ */
+function chosenSegments(
+  day: StoredDay,
+  start: Coordinate,
+  segments: ReadonlyMap<string, SegmentChoice> | undefined,
+): Chosen {
+  const out: Chosen = new Map();
+  if (!segments || segments.size === 0) return out;
+  let fromRef = DAY_START;
+  let from = start;
+  for (const block of day.blocks) {
+    for (const stop of block.stops) {
+      const choice = segments.get(segmentKey(fromRef, stop.osmRef));
+      if (choice) out.set(stop.osmRef, { from, choice });
+      fromRef = stop.osmRef;
+      from = leaveFrom(stop);
+    }
+  }
+  return out;
+}
+
+/**
+ * The estimate, except on a segment with a picked mode, which takes the
+ * minutes the router gave for it. Matched by the spot it goes to and
+ * the point it leaves from, so the same spot reached from elsewhere is
+ * estimated as usual.
+ */
+function travelWith(chosen: Chosen): (from: Coordinate, to: Coordinate, mode: TransportMode) => TravelLeg {
+  return (from, to, mode) => {
+    const ref = (to as Coordinate & { ref?: string }).ref;
+    const hit = ref ? chosen.get(ref) : undefined;
+    if (hit && Math.abs(hit.from.lat - from.lat) < 1e-9 && Math.abs(hit.from.lon - from.lon) < 1e-9) {
+      return {
+        minutes: hit.choice.minutes,
+        distanceM: hit.choice.distanceM,
+        travelClass: travelClassFor(hit.choice.minutes, hit.choice.mode),
+      };
+    }
+    return travelLeg(from, to, mode);
+  };
 }

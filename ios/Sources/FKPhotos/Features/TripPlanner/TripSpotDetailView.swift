@@ -37,6 +37,8 @@ struct TripSpotDetailView<Actions: View>: View {
     @ViewBuilder var actions: (@escaping () -> Void) -> Actions
 
     @Environment(\.dismiss) private var dismiss
+    /// Opens the sheet "Weg" instead of handing the route straight to a map app (stage 6).
+    let onRoute: (() -> Void)?
     @State private var routeChoice: TripMapsChoice?
     @State private var editing: TripSpotEdit?
     @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
@@ -47,6 +49,7 @@ struct TripSpotDetailView<Actions: View>: View {
         onSave: ((TripSpotEdit) async -> Void)? = nil,
         light: TripSpotLight? = nil,
         shelter: TripSpotShelter? = nil,
+        onRoute: (() -> Void)? = nil,
         @ViewBuilder actions: @escaping (@escaping () -> Void) -> Actions,
     ) {
         self.spot = spot
@@ -54,6 +57,7 @@ struct TripSpotDetailView<Actions: View>: View {
         self.onSave = onSave
         self.light = light
         self.shelter = shelter
+        self.onRoute = onRoute
         self.actions = actions
     }
 
@@ -294,6 +298,10 @@ struct TripSpotDetailView<Actions: View>: View {
     }
 
     private func offerRoute() {
+        if let onRoute {
+            onRoute()
+            return
+        }
         let choice = TripMapsChoice.single(spot.coordinate, mode: mode)
         let availability = TripMapsAvailability(
             preference: preference, googleAppInstalled: TripMapsOpen.googleInstalled)

@@ -14,17 +14,23 @@ struct TripSpotDetailPager: View {
     let mode: TripTransportMode
     let onSave: (TripSpotEdit) async -> Void
     let actions: (TripStop) -> [TripPinSheetAction]
+    /// The sheet "Weg" for a spot, opened by "Route hierher" (stage 6);
+    /// nil keeps the plain hand-over to the map app.
+    let way: ((TripStop) -> AnyView?)?
 
     @State private var selection: Int
+    @State private var wayStop: TripStop?
     @Environment(\.dismiss) private var dismiss
 
     init(stops: [TripStop], selected: TripStop, mode: TripTransportMode,
          onSave: @escaping (TripSpotEdit) async -> Void,
-         actions: @escaping (TripStop) -> [TripPinSheetAction]) {
+         actions: @escaping (TripStop) -> [TripPinSheetAction],
+         way: ((TripStop) -> AnyView?)? = nil) {
         self.stops = stops.isEmpty ? [selected] : stops
         self.mode = mode
         self.onSave = onSave
         self.actions = actions
+        self.way = way
         _selection = State(initialValue: selected.rowId)
     }
 
@@ -32,7 +38,8 @@ struct TripSpotDetailPager: View {
         NavigationStack {
             TabView(selection: $selection) {
                 ForEach(stops) { stop in
-                    TripSpotDetailView(spot: TripSpotDetail(stop), mode: mode, onSave: onSave) { close in
+                    TripSpotDetailView(spot: TripSpotDetail(stop), mode: mode, onSave: onSave,
+                                       onRoute: way == nil ? nil : { wayStop = stop }) { close in
                         TripSpotActionSections(
                             actions: actions(stop).filter { $0.group != .navigate },
                             close: close,
@@ -57,6 +64,9 @@ struct TripSpotDetailPager: View {
                     Button("Fertig") { dismiss() }
                 }
             }
+        }
+        .sheet(item: $wayStop) { stop in
+            if let sheet = way?(stop) { sheet }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)

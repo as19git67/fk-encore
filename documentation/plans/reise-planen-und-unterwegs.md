@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 5 built.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 6 built.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -395,6 +395,28 @@ only (`mode` on the segment, default the stay's mode) and the day times use
 its duration. The sheet checks the arrival against opening hours and a
 pinned time. Journeys in the itinerary are drawn, not routed (arc for a
 flight, line for ferry and train).
+
+**Built (2026-11-10).** `trip-planner/ways.ts`: `POST
+/trip-planner/routing/way` answers for every mode at once (foot, bike,
+transit, car: minutes, metres, polyline, `routed`; a transit hop that is
+quicker on foot says `by: "foot"` and is routed as a walk), with `check` it
+adds the arrival and whether it fits the opening hours of that day and a
+booked time (`arrivalFit`). `GET …/legs/:legIndex/days/:dayIndex/ways`
+routes every segment of a day from its start (`segmentsOfDay`); answers are
+kept in `trip_route_cache` (migration 0307, both ends to ~1 m and the mode,
+90 days), so a reorder only routes the new pairs. `POST
+/trip-planner/plans/:planId/segments` keeps a mode for one segment
+(`trip_plan_segments`, keyed by `from_ref`/`to_ref`, `start` for the day's
+start; `segments.ts`); it holds while the two stand next to each other, and
+`withDayTimes` uses its minutes and sets `travelFromPrevious` and `wayMode`
+on the stop. iOS: `TripWaySheet` (from/to with swap, a duration per mode,
+small map, arrival line, "In der Karten-App starten" via Apple Maps, "… für
+diesen Abschnitt" and back to the stay's mode), rules and models in
+`TripWay.swift`; the way line between two cards, the day map's segments
+along the streets (dashed and straight where not routed) with a duration
+label, "Route" on the next spot (from the phone's position) and "Route
+hierher" in the spot details open it. The itinerary's journeys were
+already drawn rather than routed (geodesic for a flight).
 
 ### Stage 7 — clean-up
 
