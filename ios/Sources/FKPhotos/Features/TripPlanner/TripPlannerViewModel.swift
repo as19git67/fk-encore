@@ -950,6 +950,8 @@ final class TripPlannerViewModel {
             let spotRef: String?
             /// Why it has that hour (stage 3); only with `spotRef`.
             let pinReason: String?
+            /// The fixed time this one replaces, when it was changed.
+            let replaces: Int?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -970,6 +972,7 @@ final class TripPlannerViewModel {
                     lon: draft.place?.longitude,
                     spotRef: draft.spotRef,
                     pinReason: draft.spotRef == nil ? nil : draft.pinReason?.rawValue,
+                    replaces: draft.replaces,
                 ),
             )
             apply(response)

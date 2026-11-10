@@ -85,6 +85,13 @@ export interface AddFixpointRequest {
    * "reservation", "event", "departure". Only with `spotRef`.
    */
   pinReason?: string;
+  /**
+   * The fixed time this one takes the place of — the sheet "Feste Zeit"
+   * changes an existing one this way (Anton, 10.11.). It goes in the
+   * same call, so the trip is re-planned once, and only after the new
+   * time has passed every check: a refused change leaves the old one.
+   */
+  replaces?: number;
 }
 
 export interface RemoveFixpointRequest {
@@ -120,7 +127,7 @@ export const addTripFixpoint = api(
       throw APIError.invalidArgument("label may be at most 120 characters");
     }
 
-    await addFixpoint(day.id, {
+    const fixpoint = {
       id: `${day.id}-${Date.now()}`,
       label,
       kind,
@@ -133,7 +140,14 @@ export const addTripFixpoint = api(
       ...place(req.lat, req.lon),
       spotRef: spot?.osmRef ?? null,
       pinReason: spot ? parsePinReason(req.pinReason) : null,
-    });
+    };
+
+    if (req.replaces !== undefined) {
+      refuseJourneyEnd(plan, req.replaces);
+      const removed = await removeFixpoint(req.planId, userId, req.replaces);
+      if (!removed) throw APIError.notFound("diese feste Zeit gehört nicht zu dieser Reise");
+    }
+    await addFixpoint(day.id, fixpoint);
 
     // Re-planned from the trip as it is *now*: the re-planner reads each
     // leg back as the request that would produce it, fixpoints included,
@@ -183,18 +197,7 @@ export const removeTripFixpoint = api(
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
 
-    // A journey's departure and arrival are its frame, not a time put
-    // on the day: the re-plan below would write them straight back.
-    for (const leg of plan.legs) {
-      for (const day of leg.days) {
-        const fix = day.fixpoints.find((f) => f.rowId === req.fixpointId);
-        if (fix && isJourneyEnd({ ...leg, dayCount: leg.days.length }, day.dayIndex, fix)) {
-          throw APIError.failedPrecondition(
-            "Abfahrt und Ankunft gehören zur Weiterreise — sie werden dort geändert",
-          );
-        }
-      }
-    }
+    refuseJourneyEnd(plan, req.fixpointId);
 
     const removed = await removeFixpoint(req.planId, userId, req.fixpointId);
     if (!removed) throw APIError.notFound("diese feste Zeit gehört nicht zu dieser Reise");
@@ -296,6 +299,24 @@ export const setTripFixpointPinReason = api(
     return { plan };
   },
 );
+
+/**
+ * A journey's departure and arrival are its frame, not a time put on
+ * the day: a re-plan would write them straight back, so they are
+ * changed on the journey, never here.
+ */
+function refuseJourneyEnd(plan: { legs: StoredLeg[] }, fixpointId: number): void {
+  for (const leg of plan.legs) {
+    for (const day of leg.days) {
+      const fix = day.fixpoints.find((f) => f.rowId === fixpointId);
+      if (fix && isJourneyEnd({ ...leg, dayCount: leg.days.length }, day.dayIndex, fix)) {
+        throw APIError.failedPrecondition(
+          "Abfahrt und Ankunft gehören zur Weiterreise — sie werden dort geändert",
+        );
+      }
+    }
+  }
+}
 
 /**
  * The spot of this leg a reference names — a candidate or a planned

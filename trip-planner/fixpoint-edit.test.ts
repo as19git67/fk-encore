@@ -180,6 +180,35 @@ describe("saying when the last train goes", () => {
     expect(afternoon(lastDay(after))!.budgetMinutes).toBe(before);
   });
 
+  it("changes a fixed time in place and keeps the old one when the change is refused", async () => {
+    const plan = await trip();
+    const { plan: framed } = await addTripFixpoint({
+      planId: plan.id,
+      dayIndex: lastDay(plan).dayIndex,
+      label: "Letzter Zug",
+      at: "17:45",
+      kind: "departure",
+    });
+    const old = lastDay(framed).fixpoints[0];
+
+    await expect(addTripFixpoint({
+      planId: plan.id, dayIndex: lastDay(plan).dayIndex, label: "Letzter Zug", at: "später",
+      kind: "departure", replaces: old.rowId,
+    })).rejects.toThrow(/17:45/);
+    const { plan: kept } = await getTripPlan({ planId: plan.id });
+    expect(lastDay(kept).fixpoints.map((f) => f.startMinutes)).toEqual([17 * 60 + 45]);
+
+    const { plan: after } = await addTripFixpoint({
+      planId: plan.id,
+      dayIndex: lastDay(plan).dayIndex,
+      label: "Letzter Zug",
+      at: "18:30",
+      kind: "departure",
+      replaces: old.rowId,
+    });
+    expect(lastDay(after).fixpoints.map((f) => f.startMinutes)).toEqual([18 * 60 + 30]);
+  });
+
   it("survives the next re-plan", async () => {
     // A fixpoint is the frame, and the frame is what a re-plan keeps.
     const plan = await trip();

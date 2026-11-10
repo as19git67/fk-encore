@@ -38,6 +38,8 @@ struct TripPlanDayView: View {
     /// The spot the hard time is for, when it was opened from a spot
     /// ("Feste Zeit eintragen …").
     @State private var fixpointPreset: TripSpotChoice?
+    /// The spot's fixed time being changed in that sheet, if it has one.
+    @State private var editingFixpoint: TripFixpoint?
     /// The appointment whose spot is being chosen (§4.4).
     @State private var linkingFixpoint: TripFixpoint?
     @State private var settingDayAnchor = false
@@ -188,11 +190,16 @@ struct TripPlanDayView: View {
                 await viewModel.setDayAnchor(draft)
             }
         }
-        .sheet(isPresented: $addingFixpoint, onDismiss: { fixpointPreset = nil }) {
+        .sheet(isPresented: $addingFixpoint, onDismiss: {
+            fixpointPreset = nil
+            editingFixpoint = nil
+        }) {
             TripFixpointSheet(
                 dayLabel: dayLabel(),
                 spots: viewModel.leg?.spotChoices ?? [],
                 presetSpot: fixpointPreset,
+                existing: editingFixpoint,
+                onRemove: editingFixpoint.map { fixed -> () async -> Void in { await viewModel.removeFixpoint(fixed) } },
             ) { draft in
                 await viewModel.addFixpoint(draft)
             }
@@ -489,25 +496,19 @@ struct TripPlanDayView: View {
             }
         })
         // A ticket for this spot (§4.4): the spot then stands at that
-        // hour, and on no other day. One entry whose title follows the
-        // state (Anton, 10.11.): without a fixed time it enters one, the
-        // reason chosen in that sheet; with one it takes it off again.
-        if let fixed {
-            actions.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit entfernen",
-                                              systemImage: "calendar.badge.minus") {
-                await viewModel.removeFixpoint(fixed)
-            })
-        } else {
-            actions.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit eintragen …",
-                                              systemImage: "calendar.badge.clock",
-                                              disabled: status != .planned) {
-                later {
-                    if let day { viewModel.select(dayIndex: day.dayIndex) }
-                    fixpointPreset = TripSpotChoice(osmRef: stop.osmRef, name: stop.displayName, plannedOn: nil)
-                    addingFixpoint = true
-                }
-            })
-        }
+        // hour, and on no other day. One entry, "Feste Zeit …" (Anton,
+        // 10.11.): its sheet enters a time with its reason, or changes
+        // the one there is, or takes it off.
+        actions.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit …",
+                                          systemImage: fixed == nil ? "calendar.badge.clock" : "calendar.badge.checkmark",
+                                          disabled: status != .planned && fixed == nil) {
+            later {
+                if let day { viewModel.select(dayIndex: day.dayIndex) }
+                fixpointPreset = TripSpotChoice(osmRef: stop.osmRef, name: stop.displayName, plannedOn: nil)
+                editingFixpoint = fixed
+                addingFixpoint = true
+            }
+        })
         // Holding a stop in its slot when the planner plans again: a
         // trip of ideas never plans again, and there "gepinnt" is a
         // fixed time.

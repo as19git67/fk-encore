@@ -24,6 +24,13 @@ struct TripFixpointSheet: View {
     /// for, named by `dayLabel`.
     var days: [TripDayChoice] = []
     var presetDayIndex: Int? = nil
+    /// The fixed time being changed, when the spot already has one: the
+    /// sheet opens with its values, saving replaces it, and the sheet
+    /// offers to take it off (Anton, 10.11.: one entry "Feste Zeit …"
+    /// in the menu, everything else here).
+    var existing: TripFixpoint? = nil
+    /// Takes `existing` off the day; shown only with it.
+    var onRemove: (() async -> Void)? = nil
     let onSave: (Draft) async -> Void
 
     /// What the sheet hands back.
@@ -49,6 +56,9 @@ struct TripFixpointSheet: View {
         /// The day, when the sheet offered a choice; nil for the day it
         /// was opened on.
         var dayIndex: Int? = nil
+        /// The fixed time this one replaces, when an existing one was
+        /// changed.
+        var replaces: Int? = nil
     }
 
     @State private var finder = TripPlaceFinderModel()
@@ -65,6 +75,7 @@ struct TripFixpointSheet: View {
     @State private var pinReason: TripPinReason = .ticket
     @State private var dayIndex = 0
     @State private var seeded = false
+    @State private var confirmingRemove = false
     @Environment(\.dismiss) private var dismiss
 
     /// What "Sichern" saves as the name: the one typed, or the spot's.
@@ -144,6 +155,23 @@ struct TripFixpointSheet: View {
             Text("Dauer")
         } footer: {
             Text("Wie lange ihr dort seid.")
+        }
+        removeSection
+    }
+
+    /// "Feste Zeit entfernen", at the bottom and red as every destructive
+    /// action, asked once more before it goes.
+    @ViewBuilder
+    private var removeSection: some View {
+        if existing != nil, onRemove != nil {
+            Section {
+                Button("Feste Zeit entfernen", role: .destructive) {
+                    confirmingRemove = true
+                }
+                .disabled(saving)
+            } footer: {
+                Text("Der Spot bleibt auf dem Tag, ohne Uhrzeit.")
+            }
         }
     }
 
@@ -328,6 +356,7 @@ struct TripFixpointSheet: View {
                                 spotRef: kind == .appointment ? spot?.osmRef : nil,
                                 pinReason: kind == .appointment && spot != nil ? pinReason : nil,
                                 dayIndex: days.isEmpty ? nil : dayIndex,
+                                replaces: existing?.rowId,
                             ))
                             saving = false
                             dismiss()
@@ -338,6 +367,20 @@ struct TripFixpointSheet: View {
                     .disabled(saving || effectiveLabel.isEmpty)
                 }
             }
+            .confirmationDialog("Feste Zeit entfernen?", isPresented: $confirmingRemove,
+                                titleVisibility: .visible) {
+                Button("Feste Zeit entfernen", role: .destructive) {
+                    saving = true
+                    Task {
+                        await onRemove?()
+                        saving = false
+                        dismiss()
+                    }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text(existing.map { "\($0.label) um \($0.startsAt)" } ?? "")
+            }
             .onAppear {
                 guard !seeded else { return }
                 seeded = true
@@ -345,6 +388,17 @@ struct TripFixpointSheet: View {
                     spot = presetSpot
                     kind = .appointment
                     time = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? time
+                }
+                if let existing {
+                    kind = existing.isDeparture ? .departure : .appointment
+                    time = Calendar.current.date(bySettingHour: existing.startMinutes / 60,
+                                                 minute: existing.startMinutes % 60,
+                                                 second: 0, of: Date()) ?? time
+                    durationMinutes = existing.durationMinutes
+                    travelMinutes = existing.travelMinutes
+                    if let reason = existing.reason { pinReason = reason }
+                    // The name it was given, unless it is just the spot's.
+                    if existing.label != presetSpot?.name { label = existing.label }
                 }
                 dayIndex = presetDayIndex ?? days.first?.dayIndex ?? 0
             }
