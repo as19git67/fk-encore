@@ -13,7 +13,7 @@
  * (`refillSpotFame`, every 30 minutes) for the next build.
  */
 
-import { inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import log from "encore.dev/log";
 import db from "../db/database";
 import { tripSpotFame } from "../db/schema";
@@ -314,6 +314,44 @@ export async function imagesFor(osmRefs: readonly string[]): Promise<Map<string,
   for (const row of rows) if (row.image) out.set(row.osmRef, row.image as SpotImage);
   return out;
 }
+
+/** Lookups `finishLookups` has running, so a second request does not start them again. */
+const finishing = new Set<string>();
+
+/**
+ * The places among these whose lookup a pool build or a highlights
+ * page could not finish within its budget (a row without `fetched_at`),
+ * looked up now in the background instead of waiting for the half-hourly
+ * refill: the picker shows the highlights at once and their pictures a
+ * few seconds later. Returns whether any was still open.
+ */
+export async function finishLookups(
+  osmRefs: readonly string[],
+  anchor: { lat: number; lon: number },
+  opts: { client?: FameClient; wait?: boolean } = {},
+): Promise<boolean> {
+  if (osmRefs.length === 0) return false;
+  const rows = await db.select().from(tripSpotFame)
+    .where(and(inArray(tripSpotFame.osm_ref, [...new Set(osmRefs)]), isNull(tripSpotFame.fetched_at)));
+  if (rows.length === 0) return false;
+  const todo = rows.filter((row) => !finishing.has(row.osm_ref));
+  if (todo.length > 0) {
+    for (const row of todo) finishing.add(row.osm_ref);
+    const run = fameFor(todo.map((row) => ({
+      osmRef: row.osm_ref, name: row.name, lat: row.lat, lon: row.lon,
+      wikidataQid: row.wikidata_qid, wikipedia: row.wikipedia, website: row.website,
+    })), anchor, { client: opts.client, budgetMs: FINISH_BUDGET_MS })
+      .catch((err) => {
+        log.warn("trip spot fame: finishing lookups failed", { error: err instanceof Error ? err.message : String(err) });
+      })
+      .finally(() => { for (const row of todo) finishing.delete(row.osm_ref); });
+    if (opts.wait) await run;
+  }
+  return true;
+}
+
+/** How long a background lookup of one highlights page may take. */
+const FINISH_BUDGET_MS = 30_000;
 
 /** The answer, or undefined when it failed or the deadline passed first. */
 async function within<T>(deadline: number, ask: () => Promise<T>): Promise<T | undefined> {

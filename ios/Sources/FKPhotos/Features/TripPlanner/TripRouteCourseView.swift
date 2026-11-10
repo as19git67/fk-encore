@@ -34,13 +34,14 @@ struct TripRouteCourseView: View {
     /// the list was searched in. Nil lets the server choose.
     var radiusM: Int? = nil
 
-    @State private var isTaking = false
     @State private var isExporting = false
     @State private var exported: ExportedFile?
     @State private var errorMessage: String?
     @State private var photos: [TripRoutePhoto] = []
     @State private var photosLoaded = false
     @State private var shownPhoto: TripRoutePhoto?
+    @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
+    @Environment(\.dismiss) private var dismissSheet
 
     /// A downloaded file, kept whole so the sheet can be `item`-bound:
     /// a `URL` alone is not `Identifiable`.
@@ -152,42 +153,27 @@ struct TripRouteCourseView: View {
                 }
             }
 
-            Section {
-                Button {
-                    Task { await export() }
-                } label: {
-                    HStack {
-                        Label("Als GPX exportieren", systemImage: "square.and.arrow.up")
-                        Spacer()
-                        if isExporting { ProgressView() }
-                    }
-                }
-                .disabled(isExporting || !route.hasCourse)
-            } footer: {
-                Text(route.hasCourse
-                     ? "Die Datei enthält den vollständigen Verlauf — feiner als die Linie "
-                       + "oben — und lässt sich in Komoot, Organic Maps, Outdooractive oder "
-                       + "auf ein Garmin übernehmen."
-                     : "Ohne zusammenhängenden Verlauf gibt es nichts zu exportieren.")
-            }
-
-            if let onTake {
+            if isExporting {
                 Section {
-                    Button {
-                        Task {
-                            isTaking = true
-                            await onTake()
-                            isTaking = false
-                        }
-                    } label: {
-                        HStack {
-                            Label("Zu den Kandidaten", systemImage: "plus.circle")
-                            Spacer()
-                            if isTaking { ProgressView() }
-                        }
-                    }
-                    .disabled(isTaking)
+                    HStack { ProgressView(); Text("GPX wird erstellt…").foregroundStyle(.secondary) }
                 }
+            }
+        }
+        // The same bar as a spot's details (Anton, 10.11.): Route to the
+        // start, Karte, "+" and the rest — the GPX file — under "Mehr".
+        .safeAreaInset(edge: .bottom) {
+            if let start = route.start ?? route.mapPoints.first {
+                TripSpotDetailBarView(bar: bar, close: { dismissSheet() }, route: {
+                    let choice = TripMapsChoice.single(start, mode: .foot)
+                    let availability = TripMapsAvailability(
+                        preference: TripMapsApp(rawValue: mapsPreference) ?? .apple,
+                        googleAppInstalled: TripMapsOpen.googleInstalled)
+                    TripMapsOpen.route(choice, using: availability.resolved ?? .apple)
+                }, map: {
+                    TripMapsOpen.pin(start, name: route.name, using: TripMapsApp(rawValue: mapsPreference) ?? .apple)
+                }, google: {
+                    TripMapsOpen.pin(start, name: route.name, using: .google)
+                })
             }
         }
         .navigationTitle(route.name)
@@ -200,6 +186,21 @@ struct TripRouteCourseView: View {
             TripRoutePhotoView(photo: photo)
         }
         .task { await loadPhotos() }
+    }
+
+    /// "+" takes the way in (dimmed when it is in already), "Mehr"
+    /// holds the GPX file for Komoot, Organic Maps, Outdooractive or a
+    /// Garmin: the full course, finer than the line on the map.
+    private var bar: TripSpotDetailBar {
+        let take = TripPinSheetAction(id: "take", title: "Hinzufügen", systemImage: "plus.circle",
+                                      disabled: onTake == nil) {
+            await onTake?()
+        }
+        let gpx = TripPinSheetAction(id: "gpx", title: "Als GPX exportieren", systemImage: "square.and.arrow.up",
+                                     closes: false, disabled: !route.hasCourse || isExporting) {
+            await export()
+        }
+        return TripSpotDetailBar(primary: take, primaryTitle: "Hinzufügen", more: [gpx])
     }
 
     // MARK: - The pictures

@@ -659,6 +659,12 @@ struct TripStayPlanView: View {
                                 Text(TripStayPlan.kindLine(stop))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if let summary = stop.summary {
+                                    Text(summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                                 let line = TripStayPlan.timeLine(
                                     stop, pin: visit.map { (reason: $0.reason, startMinutes: $0.startMinutes) })
                                 if !line.isEmpty {

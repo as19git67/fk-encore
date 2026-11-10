@@ -65,12 +65,12 @@ final class TripSpotPickerTests: XCTestCase {
         XCTAssertTrue(items[0].osmRef.hasPrefix("link:"))
     }
 
-    func testTheButtonNamesTheSuggestedDay() {
-        XCTAssertEqual(TripSpotPicker.addLabel(nil), "Zur Reise")
+    func testTheButtonTellsVoiceOverTheSuggestedDay() {
+        XCTAssertEqual(TripSpotPicker.addLabel(nil), "Hinzufügen")
         XCTAssertEqual(TripSpotPicker.addLabel(
-            TripDaySuggestion(osmRef: "x", dayIndex: 1, blockId: "b", full: false)), "+ Tag 2")
+            TripDaySuggestion(osmRef: "x", dayIndex: 1, blockId: "b", full: false)), "Auf Tag 2 legen")
         XCTAssertEqual(TripSpotPicker.addLabel(
-            TripDaySuggestion(osmRef: "x", dayIndex: nil, blockId: nil, full: false)), "Zur Reise")
+            TripDaySuggestion(osmRef: "x", dayIndex: nil, blockId: nil, full: false)), "Hinzufügen")
     }
 
     func testTheSearchRadiusIsHalfTheVisibleMap() {

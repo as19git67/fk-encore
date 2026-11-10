@@ -593,6 +593,9 @@ struct TripStop: Codable, Identifiable, Sendable {
     var image: TripRoutePhoto? = nil
     /// What the place is, with its source (candidate ranking, stage 4).
     var description: TripSpotDescription? = nil
+    /// One short German sentence about it, made from the description;
+    /// nil until the server made one, and from an older server.
+    var summary: String? = nil
     /// What this stop walks past on its way (§4.7): spots that lie on a
     /// route and are therefore seen without being planned. Nil or empty
     /// for every ordinary stop.
@@ -743,6 +746,9 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     var image: TripRoutePhoto? = nil
     /// What the place is, with its source (candidate ranking, stage 4).
     var description: TripSpotDescription? = nil
+    /// One short German sentence about it, made from the description;
+    /// nil until the server made one, and from an older server.
+    var summary: String? = nil
 
     /// Muss / Will / Wenn Zeit (ideas plan, stage 3).
     var priority: String? = nil

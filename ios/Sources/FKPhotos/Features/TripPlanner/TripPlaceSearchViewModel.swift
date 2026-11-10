@@ -54,6 +54,8 @@ struct TripHighlight: Codable, Identifiable, Sendable {
     let reason: String?
     let picture: TripRoutePhoto?
     let description: TripSpotDescription?
+    /// One short German sentence about it; nil until the server made one.
+    var summary: String? = nil
     let wikipediaUrl: String?
     let inPool: Bool
     let planned: Bool
@@ -76,6 +78,9 @@ struct TripHighlightsResponse: Codable, Sendable {
     /// The model has not ordered this stay yet; the list is by fame until then.
     let sorting: Bool
     let unavailable: Bool
+    /// Some places are still being looked up: their pictures come with
+    /// the next answer. Nil from an older server.
+    var picturesPending: Bool? = nil
 }
 
 /// The three ways to look (ideas plan, stage 2).
@@ -161,6 +166,9 @@ struct TripSuggestSpot: Encodable, Hashable, Sendable {
 /// app inventing a number.
 @Observable @MainActor
 final class TripPlaceSearchViewModel {
+    /// How often the highlights were asked again for their pictures.
+    @ObservationIgnored private var pictureRetries = 0
+    private static let maxPictureRetries = 4
     var query = ""
     var mode: TripPlaceSearchMode
     private(set) var results: [TripSearchedPlace] = []
@@ -227,6 +235,20 @@ final class TripPlaceSearchViewModel {
             highlightsSorting = response.sorting
             highlightsUnavailable = response.unavailable
             errorMessage = nil
+            // The server finishes the lookups it could not wait for; ask
+            // again a few times so the pictures arrive without leaving
+            // the screen (Anton, 10.11.). Only the first page: a reload
+            // would drop the ones paged in.
+            if response.picturesPending == true, !more, highlights.count == response.results.count,
+               pictureRetries < Self.maxPictureRetries {
+                pictureRetries += 1
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(6))
+                    await self?.loadHighlights()
+                }
+            } else if response.picturesPending != true {
+                pictureRetries = 0
+            }
         } catch {
             errorMessage = TripErrorText.describe(error)
         }

@@ -49,6 +49,10 @@ struct TripSpotDetailView<Actions: View>: View {
     /// the day · Mehr). Nil draws them as rows in the list instead.
     let bar: TripSpotDetailBar?
     @State private var routeChoice: TripMapsChoice?
+    /// The pictures of the spot `galleryRef` names: the details can
+    /// page to the next spot, and its pictures are not this one's.
+    @State private var gallery: [TripRoutePhoto] = []
+    @State private var galleryRef: String?
     @State private var editing: TripSpotEdit?
     /// The kind just picked, shown until the caller hands a new spot.
     @State private var shownCategory: String?
@@ -82,6 +86,10 @@ struct TripSpotDetailView<Actions: View>: View {
 
     var body: some View {
         List {
+            // The pictures first, as in the mock (Ablauf 2, step 3): one
+            // large, smaller ones beside it, swiped sideways for more.
+            TripSpotGallery(photos: galleryRef == spot.osmRef ? gallery : (spot.image.map { [$0] } ?? []))
+
             header
 
             // What you need to decide about going (reise-planen-und-unterwegs,
@@ -89,25 +97,20 @@ struct TripSpotDetailView<Actions: View>: View {
             // is planned, and why somebody saved it.
             planFacts
 
-            // What the place is, where Wikipedia is thin too (stage 4).
-            if let description = spot.description {
-                TripSpotDescriptionSection(description: description)
-            }
-
-            // Everything there is to look at, once the sheet is pulled up.
-            if spot.image != nil {
-                Section("Bilder") {
-                    TripSpotPictures(osmRef: spot.osmRef, image: spot.image)
-                        .listRowInsets(EdgeInsets())
-                }
-            }
-
+            // Bilder, Karte, then the text: the order of a way's details,
+            // so a spot and a route read alike (Anton, 10.11.).
             Section {
                 // Zooms in place, and opens the maps app from its
                 // corner (§25, stage B).
                 TripSpotMapSnippet(coordinate: spot.coordinate, title: spot.displayName, name: spot.name,
                                    symbolName: TripCategory.symbol(spot.category))
                     .listRowInsets(EdgeInsets())
+            }
+
+            // The whole text, where the short sentence above is not all
+            // of it (stage 4).
+            if let description = spot.description, description.text != spot.summary {
+                TripSpotDescriptionSection(description: description)
             }
 
             contactSection
@@ -180,6 +183,13 @@ struct TripSpotDetailView<Actions: View>: View {
         .navigationTitle(spot.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: spot.osmRef) { shownCategory = nil }
+        .task(id: spot.osmRef) {
+            let ref = spot.osmRef
+            let photos = await TripSpotGallery.load(osmRef: ref, image: spot.image)
+            guard ref == spot.osmRef else { return }
+            gallery = photos
+            galleryRef = ref
+        }
         .onChange(of: spot.category) { shownCategory = nil }
         .toolbar {
             if onSave != nil {
@@ -225,34 +235,58 @@ struct TripSpotDetailView<Actions: View>: View {
 
     // MARK: - Parts
 
-    /// Picture, name, what it is and how far, and the chips: what the
+    /// Name, what it is and how far, the short sentence and the facts: what the
     /// half-height sheet leads with.
     private var header: some View {
         Section {
-            HStack(alignment: .top, spacing: 12) {
-                if let image = spot.image {
-                    TripSpotThumbnail(image: image, height: 76, width: 76)
-                } else {
-                    Image(systemName: TripCategory.symbol(spot.category))
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 76, height: 76)
-                        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
-                        .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(TripSpotName.line(spot.displayName, local: spot.localName))
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                // The short sentence, and whose text it was made from.
+                if let summary = spot.summary {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(summary)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let description = spot.description {
+                            Text(description.shortSourceLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(TripSpotName.line(spot.displayName, local: spot.localName))
-                        .font(.title3.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(subtitle)
-                        .font(.subheadline)
+                HStack(spacing: 6) {
+                    if let pin = spot.pin {
+                        TripPinChip(reason: pin.reason, startMinutes: pin.startMinutes)
+                    }
+                    Text(metaLine)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
-                    chips
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
         }
+    }
+
+    /// "Offen 6–22 · 60 min · Will": the hours only where they fit on
+    /// the line; longer ones stand under "Geöffnet" below.
+    private var metaLine: String {
+        [shortHours.map { "Offen \($0)" }, TripClock.duration(spot.dwellMinutes), spot.priority?.label]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+
+    private var shortHours: String? {
+        guard let spec = spot.openingHours, !spec.isEmpty else { return nil }
+        let text = TripOpeningHours.display(spec)
+        return text.count <= 18 && !text.contains("\n") ? text : nil
     }
 
     /// "Museum · 1,2 km von Hotel Beispiel".
@@ -262,37 +296,16 @@ struct TripSpotDetailView<Actions: View>: View {
             .joined(separator: " · ")
     }
 
-    private var chips: some View {
-        HStack(spacing: 6) {
-            if let pin = spot.pin {
-                TripPinChip(reason: pin.reason, startMinutes: pin.startMinutes)
-            }
-            if let priority = spot.priority {
-                chip(priority.label, tint: priority == .must ? .orange : .secondary)
-            }
-            chip(TripClock.duration(spot.dwellMinutes), tint: .secondary)
-        }
-    }
-
-    private func chip(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .overlay(Capsule().strokeBorder(tint.opacity(0.5)))
-            .foregroundStyle(tint)
-            .lineLimit(1)
-    }
-
     @ViewBuilder
     private var planFacts: some View {
         let today = spot.openingHours.flatMap { $0.isEmpty ? nil : TripOpeningHours.display($0) }
-        if spot.ticket != nil || spot.planned != nil || today != nil || !(spot.note ?? "").isEmpty {
+        let hoursBelow = shortHours == nil ? today : nil
+        if spot.ticket != nil || spot.planned != nil || hoursBelow != nil || !(spot.note ?? "").isEmpty {
             Section {
                 if let ticket = spot.ticket {
                     LabeledContent("Ticket", value: ticket)
                 }
-                if let today {
+                if let today = hoursBelow {
                     LabeledContent("Geöffnet") {
                         Text(today).multilineTextAlignment(.trailing)
                     }
@@ -521,6 +534,8 @@ struct TripSpotDetailBar {
     var primary: TripPinSheetAction?
     /// The short label in the bar ("Anderer Tag", "+ Tag 3").
     var primaryTitle: String?
+    /// Its symbol in the bar, where it differs from the menu's.
+    var primaryImage: String? = nil
     var more: [TripPinSheetAction]
 
     /// A planned stop: "Auf einen anderen Tag" goes in the bar. The
@@ -548,7 +563,7 @@ struct TripSpotDetailBarView: View {
             button("Route", systemImage: "arrow.triangle.turn.up.right.circle", action: route)
             button("Karte", systemImage: "map", action: map)
             if let primary = bar.primary {
-                button(bar.primaryTitle ?? primary.title, systemImage: primary.systemImage) { run(primary) }
+                button(bar.primaryTitle ?? primary.title, systemImage: bar.primaryImage ?? primary.systemImage) { run(primary) }
                     .disabled(running != nil || primary.disabled)
             }
             Menu {
@@ -647,6 +662,8 @@ struct TripSpotDetail: Identifiable, Sendable {
     var image: TripRoutePhoto? = nil
     /// What the place is, with its source (candidate ranking, stage 4).
     var description: TripSpotDescription? = nil
+    /// One short German sentence about it, made from the description.
+    var summary: String? = nil
     /// Muss / Will / Wenn Zeit, for an idea or a planned stop.
     var priority: TripIdeaPriority? = nil
     /// OpenStreetMap's opening_hours, unverified.
@@ -688,6 +705,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         extent = candidate.extent
         image = candidate.image
         description = candidate.description
+        summary = candidate.summary
         priority = candidate.ideaPriority
         openingHours = candidate.openingHours
         ticket = candidate.ticket
@@ -764,6 +782,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         extent = stop.extent
         image = stop.image
         description = stop.description
+        summary = stop.summary
         priority = stop.ideaPriority
         openingHours = stop.openingHours
     }

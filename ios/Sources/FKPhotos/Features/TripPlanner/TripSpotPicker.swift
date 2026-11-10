@@ -50,11 +50,22 @@ struct TripPickerItem: Identifiable, Sendable {
         // "von euch hinzugefügt" says nothing anybody here does not
         // know: the note, else what the place is, else the first reason
         // that tells something.
+        // The description only where no short sentence says it.
         case .idea(let c):
-            c.note.flatMap { $0.isEmpty ? nil : $0 } ?? c.description?.text
+            c.note.flatMap { $0.isEmpty ? nil : $0 } ?? (c.summary == nil ? c.description?.text : nil)
                 ?? c.reasons.first { $0 != TripCandidate.manualReason }
-        case .highlight(let h): h.reason ?? h.description?.text
+        case .highlight(let h): h.reason ?? (h.summary == nil ? h.description?.text : nil)
         case .place(let p): p.distanceLabel.map { "\($0) von der Unterkunft" }
+        }
+    }
+
+    /// One short German sentence about what the place is, made on the
+    /// server from its description; nil until there is one.
+    var summary: String? {
+        switch source {
+        case .idea(let c): c.summary
+        case .highlight(let h): h.summary
+        case .place: nil
         }
     }
 
@@ -218,10 +229,11 @@ enum TripSpotPicker {
         )
     }
 
-    /// "+ Tag 2", or "Zur Reise" while no day is known.
+    /// What VoiceOver says for the "+" of a row: the day it goes to,
+    /// which the button itself no longer shows (Anton, 10.11.).
     static func addLabel(_ suggestion: TripDaySuggestion?) -> String {
-        guard let day = suggestion?.dayIndex else { return "Zur Reise" }
-        return "+ Tag \(day + 1)"
+        guard let day = suggestion?.dayIndex else { return "Hinzufügen" }
+        return "Auf Tag \(day + 1) legen"
     }
 
     /// The block a place goes into on a day of the stay.
@@ -279,6 +291,7 @@ extension TripSpotDetail {
         extent = nil
         image = highlight.picture
         description = highlight.description
+        summary = highlight.summary
     }
 
     /// A search result: what OpenStreetMap knows and nothing more.

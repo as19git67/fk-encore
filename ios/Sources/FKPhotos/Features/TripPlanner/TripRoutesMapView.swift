@@ -30,6 +30,9 @@ struct TripRoutesMapView: View {
     let planId: Int
     let legIndex: Int
     let routes: [TripNearbyRoute]
+    /// Where a tapped pin goes instead of this view's own sheet — the
+    /// picker's, which can take the way in.
+    var onSelect: ((TripNearbyRoute) -> Void)? = nil
 
     @State private var selected: TripNearbyRoute?
 
@@ -46,7 +49,7 @@ struct TripRoutesMapView: View {
                 if let start = route.mapPoints.first {
                     Annotation(route.name, coordinate: start.clCoordinate) {
                         Button {
-                            selected = route
+                            if let onSelect { onSelect(route) } else { selected = route }
                         } label: {
                             Image(systemName: route.symbolName)
                                 .font(.caption2)

@@ -4275,6 +4275,12 @@ export const tripSpotFame = pgTable("trip_spot_fame", {
    * none was found; a Wikivoyage line needs none, it is read directly.
    */
   description: jsonb("description"),
+  /**
+   * One short German sentence for the picker row and the day card,
+   * `{ text, key }` with the key of the description it was made from
+   * (`trip-planner/spot-summary.ts`); `text` null when it did not hold.
+   */
+  summary: jsonb("summary"),
   /** When a description was last looked for, found or not. */
   described_at: timestamp("described_at", { mode: "string", withTimezone: true }),
   fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true }),

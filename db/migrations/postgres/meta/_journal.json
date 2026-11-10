@@ -2164,6 +2164,13 @@
       "when": 1790680000000,
       "tag": "0309_trip_stop_placed_by",
       "breakpoints": true
+    },
+    {
+      "idx": 310,
+      "version": "7",
+      "when": 1790690000000,
+      "tag": "0310_trip_spot_summary",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,4 @@
+import MapKit
 import SwiftUI
 
 // Day trips as a chip of the spot picker (reise-planen-und-unterwegs.md,
@@ -38,8 +39,11 @@ struct TripStayDayTripsList: View {
     let planId: Int
     let leg: TripLeg
     /// After a day became a day out (or one was picked): search there.
+    /// "Karte" at the top of the picker: the destinations on a map.
+    var showsMap = false
     let choose: (TripDayTripFocus, TripSearchArea) async -> Void
 
+    @State private var shownTarget: TripDayTripTarget?
     @State private var response: TripStayDayTripsResponse?
     @State private var loading = false
     @State private var busy: String?
@@ -48,6 +52,55 @@ struct TripStayDayTripsList: View {
     private var radius: Double { response?.searchRadiusM ?? 3_000 }
 
     var body: some View {
+        Group {
+            if showsMap, let response {
+                map(response)
+            } else {
+                list
+            }
+        }
+        .task(id: leg.position) { await load() }
+    }
+
+    /// The bed and every destination; a tapped one shows its row, "+"
+    /// included, at the bottom.
+    private func map(_ response: TripStayDayTripsResponse) -> some View {
+        Map(initialPosition: .automatic) {
+            Annotation("Unterkunft", coordinate: CLLocationCoordinate2D(latitude: leg.anchor.lat,
+                                                                       longitude: leg.anchor.lon)) {
+                Image(systemName: "bed.double.fill")
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Color.secondary, in: .circle)
+            }
+            ForEach(response.targets) { target in
+                Annotation(target.name, coordinate: CLLocationCoordinate2D(latitude: target.lat, longitude: target.lon)) {
+                    Button {
+                        shownTarget = target
+                    } label: {
+                        Image(systemName: target.symbolName)
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(shownTarget?.key == target.key ? Color.orange : Color.accentColor, in: .circle)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(target.name)
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let target = shownTarget {
+                row(target, suggested: response.suggestedDayIndex)
+                    .padding(12)
+                    .background(.regularMaterial, in: .rect(cornerRadius: 14))
+                    .padding(12)
+            }
+        }
+    }
+
+    private var list: some View {
         List {
             let planned = TripStayDayTripText.plannedDays(leg)
             if !planned.isEmpty {
@@ -98,7 +151,6 @@ struct TripStayDayTripsList: View {
             }
         }
         .listStyle(.insetGrouped)
-        .task(id: leg.position) { await load() }
     }
 
     private func row(_ target: TripDayTripTarget, suggested: Int?) -> some View {
@@ -123,20 +175,10 @@ struct TripStayDayTripsList: View {
             }
             Spacer(minLength: 0)
             if let day = suggested {
-                Button {
+                TripAddButton(running: busy == target.key, full: false, label: "Tag \(day + 1) zum Ausflug machen") {
                     Task { await accept(target, day: day) }
-                } label: {
-                    if busy == target.key {
-                        ProgressView()
-                    } else {
-                        Text("+ Tag \(day + 1)")
-                            .font(.subheadline.weight(.semibold))
-                    }
                 }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
                 .disabled(busy != nil)
-                .accessibilityHint("Lange drücken für einen anderen Tag")
             }
         }
         .contextMenu {

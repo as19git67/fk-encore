@@ -17,7 +17,7 @@
  *
  * Kept per place in `trip_spot_fame`, like the picture, and looked for
  * in the background (`describeSpots`, every 30 minutes) for the places
- * that sit in a pool or on a day. Never on a request path, and never a
+ * that sit in a pool or on a day, or among highlights looked at lately. Never on a request path, and never a
  * search: a blog comes in the way §9.3 built, shared from the phone.
  */
 
@@ -31,6 +31,7 @@ import { getFameClient } from "./fame-client";
 import { askForJson, LlmServiceUnavailableError } from "./llm-client";
 import { fetchSharedPage } from "./page-fetch";
 import { articleOf } from "./spot-fame";
+import { RECENT_DAYS } from "./spot-summary";
 
 export type DescriptionSource = "wikivoyage" | "wikipedia" | "website";
 
@@ -153,8 +154,12 @@ export async function describeSpots(
   const deps = { ...defaultDeps, ...opts.deps };
   const now = opts.now ?? new Date();
   const staleBefore = new Date(now.getTime() - DESCRIBE_VALID_DAYS * 86_400_000).toISOString();
+  // A highlight looked at lately counts too: its row in the picker
+  // shows the short sentence made from this description.
+  const recent = new Date(now.getTime() - RECENT_DAYS * 86_400_000).toISOString();
   const inUse = sql`(${tripSpotFame.osm_ref} IN (SELECT ${tripPlanPool.osm_ref} FROM ${tripPlanPool})
-    OR ${tripSpotFame.osm_ref} IN (SELECT ${tripPlanStops.osm_ref} FROM ${tripPlanStops}))`;
+    OR ${tripSpotFame.osm_ref} IN (SELECT ${tripPlanStops.osm_ref} FROM ${tripPlanStops})
+    OR ${tripSpotFame.requested_at} > ${recent})`;
   const rows = await db.select().from(tripSpotFame)
     .where(and(
       // Wikivoyage already says it; a place not looked up yet waits for its lookup.
