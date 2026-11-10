@@ -435,6 +435,9 @@ export interface Face {
   quality?: number
   ignored: boolean
   created_at: string
+  /** Eye openness from the eyelid landmarks; null without a measurement. */
+  eye_aspect?: number | null
+  eye_aspect_68?: number | null
   photo?: Photo
 }
 

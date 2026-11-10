@@ -473,6 +473,11 @@ export interface Face {
   quality?: number;
   ignored: boolean;
   created_at: string;
+  /** Eye openness from the eyelid landmarks (`photo/face-eyes.ts`); null
+   *  when the face is too small or has no landmarks yet. Only set by
+   *  `GET /photos/:id/faces`. */
+  eye_aspect?: number | null;
+  eye_aspect_68?: number | null;
   photo?: PhotoWithCuration;
 }
 

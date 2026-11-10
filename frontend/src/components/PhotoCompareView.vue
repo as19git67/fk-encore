@@ -35,6 +35,7 @@ import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compare
 import { mergeFreshScore, type FreshScore } from '../utils/comparePhotoScore'
 import { allowedDuel, bestPerSide, hasBothOrientations } from '../utils/orientationVariants'
 import { qualityComparisonRows } from '../utils/compareQualityDetails'
+import { closedEyesTooltip, closedEyesVerdict, type EyesVerdict } from '../utils/compareEyes'
 import {
   computeBboxZoom,
   computeSyncBboxZoom,
@@ -205,41 +206,34 @@ function qualityBarWidth(value: number | null): string {
 }
 
 // ── Eyes-closed hint (Track N / #81) ─────────────────────────────────────
-// The `eyes_open` AI signal is weak — the score sits in a narrow band
-// (roughly 0.35–0.67 in the user's library, see documentation/ai-auto-pick.md). An
-// absolute threshold would flag photos with obviously open eyes whenever
-// their score happens to land at 0.45. We therefore surface the hint only
-// when there's a meaningful RELATIVE gap: in the compare-phase against
-// the partner photo of the pair, in the review-grid against the
-// best-eyes photo of the whole group.
-const EYES_DELTA_THRESHOLD = 0.15
-
+// Landmarks first, CLIP only as fallback — rules and thresholds in
+// utils/compareEyes.ts. The badge is relative to the partner photo of the
+// current pair, never an absolute threshold.
 function eyesOpenScore(photoId: number): number | null {
   const v = getPhotoById(photoId)?.ai_quality_details?.eyes_open
   return typeof v === 'number' ? v : null
 }
 
-/** Compare-phase variant: badge fires when the OTHER photo of the
- *  current pair has eyes_open notably higher than this photo. */
-function hasClosedEyesVsPartner(photoId: number): boolean {
-  if (!currentPair.value) return false
+function eyesVerdict(photoId: number): EyesVerdict {
+  if (!currentPair.value) return { closed: false }
   const [a, b] = currentPair.value
   const otherId = photoId === a ? b : a
-  const my = eyesOpenScore(photoId)
-  const other = eyesOpenScore(otherId)
-  if (my === null || other === null) return false
-  return other - my > EYES_DELTA_THRESHOLD
+  return closedEyesVerdict({
+    mineFaces: facesCache.value.get(photoId),
+    partnerFaces: facesCache.value.get(otherId),
+    mineClip: eyesOpenScore(photoId),
+    partnerClip: eyesOpenScore(otherId),
+  })
+}
+
+/** Compare-phase variant: badge fires when the OTHER photo of the
+ *  current pair shows the eyes clearly more open than this photo. */
+function hasClosedEyesVsPartner(photoId: number): boolean {
+  return eyesVerdict(photoId).closed
 }
 
 function eyesClosedTooltip(photoId: number): string {
-  const s = eyesOpenScore(photoId)
-  const pct = s !== null ? `${Math.round(s * 100)}%` : '?'
-  if (!currentPair.value) return `Augen wirken geschlossen (${pct})`
-  const [a, b] = currentPair.value
-  const otherId = photoId === a ? b : a
-  const otherScore = eyesOpenScore(otherId)
-  const otherPct = otherScore !== null ? `${Math.round(otherScore * 100)}%` : '?'
-  return `Augen wirken geschlossen (${pct}) — das andere Foto liegt bei ${otherPct}.`
+  return closedEyesTooltip(eyesVerdict(photoId))
 }
 
 /**
@@ -839,6 +833,18 @@ async function ensureBboxData(photoId: number): Promise<{ faces: Face[] }> {
   }
   return { faces: facesCache.value.get(photoId) ?? [] }
 }
+
+// The eye verdict reads the landmark measurements from the faces of both
+// photos, so load them for every pair — not only when focus peaking or
+// zoom-to-face asks for them.
+watch(
+  () => currentPair.value,
+  (pair) => {
+    if (!pair) return
+    for (const id of pair) void ensureBboxData(id)
+  },
+  { immediate: true },
+)
 
 function resetZoom() {
   if (zoomByPhoto.value.size === 0) return
