@@ -20,6 +20,9 @@ struct TripPlanSettingsView: View {
     /// screen with its own request — it does not go through the
     /// settings save.
     private let planId: Int
+    /// A trip of ideas: its day is one window, and nothing is searched
+    /// but the highlights (ideen-statt-pool.md).
+    private let ideas: Bool
 
     /// Called after a successful save, so the day screen reloads.
     let onSaved: () -> Void
@@ -34,7 +37,21 @@ struct TripPlanSettingsView: View {
         _model = State(initialValue: TripPlanSettingsViewModel(
             planId: planId, constraints: constraints, title: title, startDate: startDate))
         self.planId = planId
+        self.ideas = constraints?.ideas == true
         self.onSaved = onSaved
+    }
+
+    /// What the interest toggles do, said for the kind of trip.
+    private var interestsFooter: String {
+        if ideas {
+            return "Die Highlights eines Aufenthalts zeigen nur, was angekreuzt ist. "
+                + "„Alles andere“ steht für Orte, die zu keinem der Themen gehören."
+        }
+        return "Gesucht wird nur, was angekreuzt ist. „Alles andere“ steht für "
+            + "Orte, die zu keinem der Themen gehören — alles an heißt alles, "
+            + "was die Karte kennt. Die Liste ist kurz, weil sie nur enthält, was "
+            + "OpenStreetMap wirklich unterscheidet: „Burgen“ kann die Karte "
+            + "beantworten, „Barock“ nicht.\n\nSpeichern plant die Tage neu."
     }
 
     var body: some View {
@@ -77,18 +94,22 @@ struct TripPlanSettingsView: View {
                      + "über die Priorität jeder Idee.")
             }
 
-            Section {
-                Button {
-                    editingDayShape = true
-                } label: {
-                    Label("Tagesablauf ändern", systemImage: "list.bullet.indent")
+            // A trip of ideas has no Vormittag or Nachmittag to change:
+            // its day is one window (ideen-statt-pool.md, stage 4).
+            if !ideas {
+                Section {
+                    Button {
+                        editingDayShape = true
+                    } label: {
+                        Label("Tagesablauf ändern", systemImage: "list.bullet.indent")
+                    }
+                } footer: {
+                    // §4.1: the four-part day is a default, not a fixed
+                    // set — this is where it stops being fixed.
+                    Text("Vormittag, Mittagspause, Nachmittag, Abend sind ein Vorschlag. "
+                         + "Blöcke lassen sich umbenennen, verlängern, verschieben und "
+                         + "streichen — die Mittagspause zum Beispiel.")
                 }
-            } footer: {
-                // §4.1: the four-part day is a default, not a fixed
-                // set — this is where it stops being fixed.
-                Text("Vormittag, Mittagspause, Nachmittag, Abend sind ein Vorschlag. "
-                     + "Blöcke lassen sich umbenennen, verlängern, verschieben und "
-                     + "streichen — die Mittagspause zum Beispiel.")
             }
 
             if !model.options.isEmpty {
@@ -103,16 +124,12 @@ struct TripPlanSettingsView: View {
                         ))
                     }
                 } header: {
-                    Text("Wonach gesucht wird")
+                    Text(ideas ? "Was die Highlights zeigen" : "Wonach gesucht wird")
                 } footer: {
                     // A filter, not a bonus (2026-10-04): what it does,
                     // what the last line is for, and why the list is
                     // short (§4, interests.ts).
-                    Text("Gesucht wird nur, was angekreuzt ist. „Alles andere“ steht für "
-                         + "Orte, die zu keinem der Themen gehören — alles an heißt alles, "
-                         + "was die Karte kennt. Die Liste ist kurz, weil sie nur enthält, was "
-                         + "OpenStreetMap wirklich unterscheidet: „Burgen“ kann die Karte "
-                         + "beantworten, „Barock“ nicht.\n\nSpeichern plant die Tage neu.")
+                    Text(interestsFooter)
                 }
             }
 

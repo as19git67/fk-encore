@@ -135,6 +135,64 @@ export function orderBlocks(
   return { blocks: ordered, overrunMinutes: overrun, toDrop };
 }
 
+/**
+ * Make room in front of a booked visit: while the visit is reached too
+ * late in the day's order, the last spot still to come in front of it
+ * moves to just behind it. The rest keeps its order — this is not
+ * "Reihenfolge vorschlagen", only the spot in the ticket's way steps
+ * aside (Anton, 10.11.). Nothing is written; `moved` says whether
+ * anything changed.
+ */
+export function fitAroundTicket(
+  leg: StoredLeg,
+  day: StoredDay,
+  osmRef: string,
+): { blocks: CurrentBlock[]; moved: string[] } {
+  const date = leg.startDate ? addDays(leg.startDate, day.dayIndex) : null;
+  const walk = dayWalkOfStored(leg.anchor, day);
+  let position: Coordinate = walk.start;
+  const moved: string[] = [];
+  const blocks: CurrentBlock[] = day.blocks.map((block) => {
+    const start = position;
+    if (block.stops.length > 0) position = leaveFrom(block.stops[block.stops.length - 1]);
+    const frame = block.kind === "spots" ? frameOf(block, day.fixpoints) : null;
+    if (!frame || !frame.tickets.has(osmRef) || !block.stops.some((s) => s.osmRef === osmRef)) {
+      return { ...block, stops: [...block.stops] };
+    }
+    const input = {
+      start,
+      startMinutes: frame.window.startMinutes,
+      endMinutes: frame.window.endMinutes,
+      stops: [],
+      mode: leg.mode,
+      date,
+      blocked: frame.blocked,
+    };
+    const breaks = orderBreaksOf(day.breaks, block.id);
+    let stops = [...block.stops];
+    for (let guard = 0; guard < block.stops.length; guard += 1) {
+      const line = lineOf(input, stops.map((s) => orderStopOf(s, frame.tickets)), breaks);
+      const entry = line.entries.find((e) => e.ref === osmRef);
+      if (!entry || entry.lateMinutes <= 0) break;
+      const at = stops.findIndex((s) => s.osmRef === osmRef);
+      let before = -1;
+      for (let i = at - 1; i >= 0; i -= 1) {
+        if (stops[i].status === "planned" && !frame.tickets.has(stops[i].osmRef)) {
+          before = i;
+          break;
+        }
+      }
+      if (before < 0) break;
+      const [stop] = stops.splice(before, 1);
+      stops.splice(stops.findIndex((s) => s.osmRef === osmRef) + 1, 0, stop);
+      moved.push(stop.osmRef);
+    }
+    return { ...block, stops };
+  });
+  if (moved.length > 0) recomputeDay(blocks, walk, leg.mode);
+  return { blocks, moved };
+}
+
 export interface AddTripBreakRequest {
   planId: number;
   legIndex?: number;

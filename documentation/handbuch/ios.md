@@ -329,7 +329,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Spots einplanen, „Auf einen anderen Tag“ schieben, feste Zeit setzen,
   Fotostopp markieren, Abendlicht in den Details des Spots, Wetter prüfen, Route in der
   Karten-App öffnen („Ganzen Block in Karten öffnen“, „Route hierher“),
-  „Erledigt“ unterwegs, „Zurück zu den Ideen“.
+  „Erledigt“ unterwegs, „Löschen“ (ganz unten im „⋯“ oder nach links
+  wischen; der Spot kommt zurück zu den Ideen). Das „⋯“ eines Spots hat
+  immer dieselben Einträge; was gerade nicht geht, ist ausgegraut.
+- Umsortieren: eine Karte lange drücken und ziehen; eine Linie zeigt, wo
+  sie landet, auch auf einem anderen Tag. Setzt man einem Spot eine feste
+  Zeit, rückt ein Spot davor, der sonst in die feste Zeit liefe, dahinter.
+- Ein Pin steht nur an einer Karte mit fester Zeit; „Feste Zeit
+  entfernen“ im „⋯“ nimmt sie wieder weg. Ohne Foto zeigt die Karte kein
+  Bild und keinen Platzhalter.
 - Die Details eines Spots sind ein Blatt: oben Bild, Name, Art und
   Entfernung zur Unterkunft mit den Chips für feste Zeit, Priorität und
   Dauer, darunter Ticket, Öffnungszeiten, „Geplant“ und Notiz, dann
@@ -344,7 +352,7 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Hat ein Aufenthalt nur einen Tag, fragt die App nicht nach dem Tag: ein
   Tipp auf eine Idee in der Karte legt sie auf diesen Tag, und das Blatt
   für eine feste Zeit zeigt keine Tagauswahl.
-- „Fester Termin …“ an einem Spot fragt nur Uhrzeit, Tag, Grund (Ticket,
+- „Feste Zeit eintragen …“ an einem Spot fragt nur Uhrzeit, Tag, Grund (Ticket,
   Licht, Reservierung, Ereignis, Abfahrt) und Dauer; Ort und Weg sind die
   des Spots.
 - Dieselben Aktionen in Liste, Detail („Alle Details“), Pin-Sheet und

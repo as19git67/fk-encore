@@ -1427,9 +1427,15 @@ kann die Liste auch, und umgekehrt.
   `TripSpotActionMenuItems` (Menü) oder `TripSpotActionSections`
   (Pin-Sheet, Detailansicht). Keine Oberfläche baut eigene Knöpfe daneben.
 - Unterschiede kommen nur aus dem **Zustand** des Spots, nie aus dem Weg
-  dorthin: „Erledigt“ nur solange offen, „Auf einen anderen Tag“ nicht für
-  Erledigtes, „Zurück zu den Ideen“ nur für eingeplante, „Einplanen“ nur
-  für Kandidaten.
+  dorthin, und sie lassen das Menü gleich: was der Zustand nicht erlaubt,
+  steht ausgegraut da (`disabled` an `TripPinSheetAction`), statt zu
+  fehlen — „Erledigt“ erst ab dem Tag selbst, „Auf einen anderen Tag“ nicht
+  für Erledigtes oder fest Terminiertes, „Feste Zeit entfernen“ nur mit
+  fester Zeit, in Untermenüs (Priorität, Grund der festen Zeit) trägt die
+  aktuelle Wahl den Haken. „Einplanen“ nur für Kandidaten.
+- Ein eingeplanter Stopp verlässt den Tag über „Löschen“ (ganz unten im
+  Menü, und Wischen nach links auf der Karte); er landet wieder bei den
+  Ideen, eine feste Zeit nimmt er mit weg.
 - Ausgenommen ist, was die Oberfläche selbst schon zeigt: Detailansicht und
   Pin-Sheet haben eigene Knöpfe für Karte und Route und blenden die Gruppe
   `.navigate` aus; nur die Liste klappt „Warum hier?“ an Ort und Stelle auf, weil

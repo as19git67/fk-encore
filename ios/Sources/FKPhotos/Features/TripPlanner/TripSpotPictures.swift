@@ -11,13 +11,26 @@ struct TripSpotThumbnail: View {
     let image: TripRoutePhoto
     var height: CGFloat
     var width: CGFloat? = nil
+    /// Whether a grey box stands in while the picture loads and when it
+    /// does not come. Off where the picture is a garnish (the cards of
+    /// a day): there nothing is better than a box with nothing in it.
+    var placeholder: Bool = true
+    @State private var failed = false
 
     var body: some View {
+        if !placeholder && failed {
+            EmptyView()
+        } else {
+            framed
+        }
+    }
+
+    private var framed: some View {
         // The frame is a plain rectangle and the picture an overlay on
         // it: a filled picture is wider than its frame, and laid out
         // itself it pushed the text beside it out of place.
         Rectangle()
-            .fill(.quaternary)
+            .fill(placeholder ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear))
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil)
             .overlay {
@@ -26,7 +39,11 @@ struct TripSpotThumbnail: View {
                     case .success(let picture):
                         picture.resizable().scaledToFill()
                     case .failure:
-                        Image(systemName: "photo").foregroundStyle(.secondary)
+                        if placeholder {
+                            Image(systemName: "photo").foregroundStyle(.secondary)
+                        } else {
+                            Color.clear.onAppear { failed = true }
+                        }
                     default:
                         Color.clear
                     }

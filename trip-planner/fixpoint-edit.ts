@@ -25,7 +25,9 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { requireOrganiser } from "./plan-access";
-import { addFixpoint, loadPlan, removeFixpoint, setFixpointPinReason, setFixpointSpot, type StoredLeg } from "./plan-store";
+import { addFixpoint, loadPlan, removeFixpoint, saveMovedDays, setFixpointPinReason, setFixpointSpot, type StoredLeg } from "./plan-store";
+import { fitAroundTicket } from "./day-order-api";
+import { isIdeasTrip } from "./ideas-mode";
 import { parsePinReason } from "./pin-reason";
 import type { FixpointKind } from "./fixpoints";
 import { MIN_BUFFER_MINUTES } from "./fixpoints";
@@ -139,9 +141,33 @@ export const addTripFixpoint = api(
     // the times it used to have — and delete the new one on the way.
     const written = await loadPlan(req.planId, userId);
     if (!written) throw APIError.internal("plan vanished while setting a fixed time");
-    return await replanAfterFrameChange(written, userId);
+    const result = await replanAfterFrameChange(written, userId);
+    if (!spot || !isIdeasTrip(result.plan.constraints)) return result;
+    return await makeRoomForTicket(result, legIndex, req.dayIndex, spot.osmRef, userId);
   },
 );
+
+/**
+ * On a trip of ideas the day keeps its order when a spot gets its
+ * ticket, so a spot in front whose estimated visit runs into the ticket
+ * steps behind it (`fitAroundTicket`) instead of leaving the day late.
+ */
+async function makeRoomForTicket(
+  result: PlanResponse,
+  legIndex: number,
+  dayIndex: number,
+  osmRef: string,
+  userId: number,
+): Promise<PlanResponse> {
+  const leg = result.plan.legs.find((l) => l.position === legIndex);
+  const day = leg?.days.find((d) => d.dayIndex === dayIndex);
+  if (!leg || !day) return result;
+  const { blocks, moved } = fitAroundTicket(leg, day, osmRef);
+  if (moved.length === 0) return result;
+  await saveMovedDays(result.plan.id, [{ day, blocks }]);
+  const updated = await loadPlan(result.plan.id, userId);
+  return updated ? { ...result, plan: updated } : result;
+}
 
 export const removeTripFixpoint = api(
   {
