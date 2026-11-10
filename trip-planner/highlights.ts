@@ -34,6 +34,7 @@ import { stayReach } from "./search-reach";
 import { imagesFor, prominenceAround, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
 import { haversineMeters } from "./travel";
+import { parseSearchArea, type SearchArea } from "./search-area";
 
 const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 50;
@@ -44,6 +45,12 @@ export interface HighlightsRequest {
   /** For "Mehr": where the next page starts. */
   offset?: number;
   limit?: number;
+  /**
+   * "In diesem Bereich suchen" on the map (stage 4): look around this
+   * instead of the stay's reach. The list then comes by fame alone —
+   * the model ordered the stay, not this corner of the map.
+   */
+  area?: SearchArea;
 }
 
 export interface Highlight {
@@ -56,6 +63,8 @@ export interface Highlight {
   /** From the stay's lodging. */
   distanceM: number;
   dwellMinutes: number;
+  /** Straight from OSM, for the day a place is open on (stage 4). */
+  openingHours: string | null;
   /** One line under the name: the model's sentence, else the best open-data reason. */
   reason: string | null;
   picture: SpotImage | null;
@@ -82,6 +91,7 @@ export const tripHighlights = api(
     const userId = requireUser();
     const offset = clampOffset(req.offset);
     const limit = clampLimit(req.limit);
+    const area = parseSearchArea(req.area);
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
     const leg = plan.legs.find((l) => l.position === req.legIndex);
@@ -92,16 +102,22 @@ export const tripHighlights = api(
 
     let ranked: ScoredCandidate[];
     try {
-      ranked = await rankedAround(leg, plan.constraints, await hiddenRefs(plan.id));
+      ranked = await rankedAround(leg, plan.constraints, await hiddenRefs(plan.id), area);
     } catch (err) {
       if (err instanceof APIError) return { ...empty, unavailable: true };
       throw err;
     }
 
-    const top = ranked.slice(0, MAX_CURATION_ENTRIES);
-    const stored = await storedHighlights(leg.id);
-    const status = await askForOrder(leg.id, top, stored);
-    const ordered = orderBy(ranked, stored?.status === "done" ? stored.picks : null);
+    let status: HighlightsStatus | null = null;
+    let ordered: Array<{ candidate: ScoredCandidate; reason: string | null }>;
+    if (area) {
+      ordered = orderBy(ranked, null);
+    } else {
+      const top = ranked.slice(0, MAX_CURATION_ENTRIES);
+      const stored = await storedHighlights(leg.id);
+      status = await askForOrder(leg.id, top, stored);
+      ordered = orderBy(ranked, stored?.status === "done" ? stored.picks : null);
+    }
 
     const page = ordered.slice(offset, offset + limit);
     const refs = page.map((p) => p.candidate.osmRef);
@@ -119,6 +135,7 @@ export const tripHighlights = api(
         category: candidate.category,
         distanceM: Math.round(haversineMeters(leg.anchor, candidate)),
         dwellMinutes: candidate.dwellMinutes,
+        openingHours: candidate.openingHours ?? null,
         reason,
         picture: images.get(candidate.osmRef) ?? null,
         description: descriptions.get(candidate.osmRef) ?? null,
@@ -138,8 +155,11 @@ async function rankedAround(
   leg: StoredLeg,
   constraints: Record<string, unknown>,
   hidden: ReadonlySet<string>,
+  area: SearchArea | null,
 ): Promise<ScoredCandidate[]> {
-  const spots = await spotsAround(leg.regionDb, leg.anchor, stayReach(leg), undefined);
+  const spots = area
+    ? await spotsAround(leg.regionDb, { lat: area.lat, lon: area.lon }, area.radiusM, undefined)
+    : await spotsAround(leg.regionDb, leg.anchor, stayReach(leg), undefined);
   const interests = Array.isArray(constraints.interests)
     ? (constraints.interests as unknown[]).filter((v): v is string => typeof v === "string")
     : undefined;

@@ -52,6 +52,8 @@ struct TripPlanDayView: View {
     @State private var editingStructure = false
     /// The stay planned as a whole, all its days on one screen (stage 3).
     @State private var planningStay = false
+    /// The spot picker (reise-planen-und-unterwegs.md, stage 4).
+    @State private var pickingSpot = false
     /// The minute the screen is drawn for. Ticks while the day on
     /// screen is today, so "jetzt" moves along the blocks instead of
     /// staying on the one the screen was opened on — the first trial's
@@ -81,6 +83,9 @@ struct TripPlanDayView: View {
         // screen behind them is a name that looks lost. The leg is on
         // the picker above when there is more than one.
         .navigationTitle(screenTitle)
+        .sheet(isPresented: $pickingSpot) {
+            TripSpotPickerView(viewModel: viewModel)
+        }
         .navigationDestination(isPresented: $planningStay) {
             TripStayPlanView(
                 viewModel: viewModel,
@@ -1701,7 +1706,16 @@ struct TripPlanDayView: View {
     @ViewBuilder
     private func addStopRow(_ block: TripBlock) -> some View {
         if let leg = viewModel.leg {
-            if leg.pool.isEmpty {
+            if viewModel.plan?.isIdeasTrip == true {
+                // One way in on a trip of ideas (stage 4): ideas,
+                // highlights, a name, food, with "+ Tag n".
+                Button {
+                    pickingSpot = true
+                } label: {
+                    Label("Spot hinzufügen", systemImage: "plus.circle")
+                        .font(.footnote)
+                }
+            } else if leg.pool.isEmpty {
                 NavigationLink {
                     TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position,
                                         ideas: viewModel.plan?.isIdeasTrip == true) {

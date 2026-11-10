@@ -30,6 +30,8 @@ import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { loadPlan, type StoredLeg } from "./plan-store";
 import { RESOLUTION_RADIUS_M } from "./place-lookup";
 import { DEFAULT_DWELL_MINUTES } from "./candidates";
+import { parseSearchArea, type SearchArea } from "./search-area";
+import { haversineMeters } from "./travel";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -48,6 +50,11 @@ export interface SearchPlacesRequest {
   legIndex?: number;
   categories?: string[];
   limit?: number;
+  /**
+   * "In diesem Bereich suchen" on the map (stage 4): look here instead
+   * of around each leg's base. Distances still count from the base.
+   */
+  area?: SearchArea;
 }
 
 export interface SearchedPlace {
@@ -100,6 +107,7 @@ export const searchPlaces = api(
       throw APIError.invalidArgument(`die Suche ist auf ${MAX_QUERY_CHARS} Zeichen begrenzt`);
     }
     const limit = clampLimit(req.limit);
+    const area = parseSearchArea(req.area);
 
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
@@ -118,7 +126,7 @@ export const searchPlaces = api(
       let more = false;
       try {
         const page = await getGeoClient().searchPois(leg.regionDb, {
-          center: { ...leg.anchor, radiusM: RESOLUTION_RADIUS_M },
+          center: area ?? { ...leg.anchor, radiusM: RESOLUTION_RADIUS_M },
           name: query.length > 0 ? query : undefined,
           categories: req.categories?.length ? req.categories : undefined,
           // One over, so "there are more" is known without a second
@@ -148,7 +156,9 @@ export const searchPlaces = api(
           name: displayName(spot),
           lat: spot.lat,
           lon: spot.lon,
-          distanceM: spot.distanceM,
+          // Around a map area the service measures from its centre; the
+          // row says how far out of the way it is, from the base.
+          distanceM: area ? Math.round(haversineMeters(leg.anchor, spot)) : spot.distanceM,
           categories: spot.categories,
           legIndex: leg.position,
           openingHours: spot.openingHours,
