@@ -17,8 +17,10 @@ struct TripStayPlanView: View {
     @State var viewModel: TripPlannerViewModel
     /// The actions of a stop, from the one place that builds them.
     let stopActions: (TripStop) -> [TripPinSheetAction]
-    /// Opens the day on its own screen (the band, the order, the breaks).
-    let openDay: (Int) -> Void
+    /// What a day's "⋯" does (order, a break, a fixed time, a day trip):
+    /// the host owns those sheets. A day has no screen of its own any
+    /// more (Anton, 10.11.).
+    let dayAction: (TripStayDayAction, Int) -> Void
     /// The screen's title when it is the trip's first screen (the
     /// trip's name); otherwise the stay's.
     var title: String? = nil
@@ -284,6 +286,100 @@ struct TripStayPlanView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
+    /// The day's "⋯": what used to live on the day's own screen.
+    private func dayMenu(_ day: TripDay, leg: TripLeg, hasStops: Bool) -> some View {
+        Menu {
+            Button {
+                dayAction(.order, day.dayIndex)
+            } label: {
+                Label("Reihenfolge vorschlagen", systemImage: "arrow.triangle.swap")
+            }
+            .disabled(!hasStops)
+            Menu {
+                ForEach(TripBreakPreset.allCases) { preset in
+                    Button {
+                        dayAction(.pause(preset), day.dayIndex)
+                    } label: {
+                        Label("\(preset.label) · \(TripClock.duration(preset.minutes))", systemImage: preset.symbolName)
+                    }
+                }
+            } label: {
+                Label("Pause einfügen", systemImage: "pause.circle")
+            }
+            Button {
+                dayAction(.fixedTime, day.dayIndex)
+            } label: {
+                Label("Feste Zeit eintragen", systemImage: "clock.badge.exclamationmark")
+            }
+            Button {
+                dayAction(.dayTrip, day.dayIndex)
+            } label: {
+                Label(day.anchor == nil ? "Ausflug planen" : "Ausflug ändern", systemImage: "car")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.body)
+                .frame(minWidth: 44, minHeight: 32)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel("Aktionen für \(TripStayPlan.dayHeading(day, leg: leg))")
+    }
+
+    /// What the day is planned around besides its spots: fixed times
+    /// without a spot (a spot's own time stands on its card), the
+    /// breaks, and what "Reihenfolge vorschlagen" said about an overfull
+    /// day. Each with its way to take it off.
+    @ViewBuilder
+    private func dayFrame(_ day: TripDay, leg: TripLeg) -> some View {
+        let free = day.fixpoints.filter { $0.spotRef == nil && !leg.isJourneyDeparture($0, dayIndex: day.dayIndex) }
+        let breaks = day.breaks ?? []
+        if !free.isEmpty || !breaks.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(free) { fix in
+                    HStack(spacing: 10) {
+                        Image(systemName: "clock")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(fix.label)
+                            Text(TripClock.format(fix.startMinutes)
+                                 + (fix.durationMinutes > 0 ? " · \(TripClock.duration(fix.durationMinutes))" : ""))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            Task { await viewModel.removeFixpoint(fix) }
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(viewModel.isSavingFixpoint)
+                        .accessibilityLabel("\(fix.label) entfernen")
+                    }
+                }
+                ForEach(breaks) { pause in
+                    TripBreakRow(pause: pause) {
+                        viewModel.select(dayIndex: day.dayIndex)
+                        Task { await viewModel.removeBreak(pause) }
+                    }
+                }
+            }
+            .font(.subheadline)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 10))
+        }
+        if let advice = viewModel.orderAdvice,
+           advice.applies(legIndex: viewModel.legIndex, dayIndex: day.dayIndex),
+           advice.overrunMinutes > 0 {
+            Text(advice.toDrop.isEmpty
+                 ? "Der Tag hält nicht alles, und keine Idee ist „Wenn Zeit“ oder „Will“. Ihr entscheidet, was wegfällt."
+                 : "Damit der Tag passt, könnten \(advice.toDrop.count) Ideen zurück zu den Ideen. Entfernt wird nichts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     /// A day trip, as the row the mock draws over the day: where to, the
     /// way there and back, and the two things to do about it.
     private func dayTripRow(_ anchor: TripDayAnchor, day: TripDay, leg: TripLeg) -> some View {
@@ -301,7 +397,7 @@ struct TripStayPlanView: View {
                                   coordinate: TripCoordinate(lat: anchor.lat, lon: anchor.lon)),
                         check: nil, segment: nil, currentMode: leg.transportMode)
                 }
-                Button("Fahrt ändern") { openDay(day.dayIndex) }
+                Button("Fahrt ändern") { dayAction(.dayTrip, day.dayIndex) }
             }
             .font(.caption.weight(.semibold))
             .buttonStyle(.borderless)
@@ -370,34 +466,30 @@ struct TripStayPlanView: View {
         }
         let missed = unanswered(TripOnTheRoad.missed(day, phase: phase, nowMinutes: nowMinutes))
         return VStack(alignment: .leading, spacing: 8) {
-            Button {
-                openDay(day.dayIndex)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(TripStayPlan.dayHeading(day, leg: leg) + (phase == .running ? " · heute" : ""))
-                            .font(.headline)
-                        if let weather = viewModel.stayForecast(dayIndex: day.dayIndex)?.overall {
-                            Label(weather.summary, systemImage: weather.symbolName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .labelStyle(.titleAndIcon)
-                        }
-                        Spacer(minLength: 6)
-                        if let line = onTheRoad ? TripStayPlan.visitedLine(day) : TripStayPlan.fillLine(day) {
-                            Text(line)
-                                .font(.caption)
-                                .foregroundStyle(!onTheRoad && (day.overrunMinutes ?? 0) > 0 ? Color.red : Color.secondary)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(TripStayPlan.dayHeading(day, leg: leg) + (phase == .running ? " · heute" : ""))
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                if let weather = viewModel.stayForecast(dayIndex: day.dayIndex)?.overall {
+                    Label(weather.summary, systemImage: weather.symbolName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .labelStyle(.titleAndIcon)
                 }
-                .contentShape(.rect)
+                Spacer(minLength: 6)
+                if let line = onTheRoad ? TripStayPlan.visitedLine(day) : TripStayPlan.fillLine(day) {
+                    Text(line)
+                        .font(.caption)
+                        .foregroundStyle(!onTheRoad && (day.overrunMinutes ?? 0) > 0 ? Color.red : Color.secondary)
+                }
+                if phase != .past {
+                    dayMenu(day, leg: leg, hasStops: !stops.isEmpty)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Öffnet den Tag")
+
+            if phase != .past {
+                dayFrame(day, leg: leg)
+            }
 
             if phase != .past, let note = weatherNotes.first(where: { $0.dayIndex == day.dayIndex }) {
                 TripWeatherNoteCard(note: note, leg: leg, busy: applyingNote == note.dayIndex,
@@ -1041,10 +1133,6 @@ struct TripStayPlanView: View {
                     .frame(maxWidth: .infinity)
                     Menu("Aktionen") {
                         TripSpotActionMenuItems(actions: stopActions(stop))
-                        Button("Tag \(dayIndex + 1) öffnen") {
-                            afterPin = { openDay(dayIndex) }
-                            picked = nil
-                        }
                     }
                     .frame(maxWidth: .infinity)
                 } else if idea != nil, let preferred {
@@ -1526,4 +1614,12 @@ enum TripStayPlan {
         }
         return out
     }
+}
+
+/// What the "⋯" of a day in the stay's planning view asks the host for.
+enum TripStayDayAction {
+    case order
+    case pause(TripBreakPreset)
+    case fixedTime
+    case dayTrip
 }
