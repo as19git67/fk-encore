@@ -44,6 +44,9 @@ struct TripStayPlanView: View {
     @State private var dropSlot: TripDropSlot?
     /// The card whose details are open, as a sheet over the days (stage 4).
     @State private var detailPick: TripStayDetailPick?
+    /// When a card was last swiped sideways: the lift of that finger
+    /// also ends the card's tap, which must not open its details.
+    @State private var swipedAt: Date?
     /// The spot picker (stage 4).
     @State private var picking = false
     /// The day out the picker was opened from, so it searches there.
@@ -624,7 +627,7 @@ struct TripStayPlanView: View {
     /// (Anton, 10.11.): the same "Löschen" as at the bottom of its menu.
     private func swipeToDelete(_ stop: TripStop) -> TripSwipeToDelete {
         let delete = stopActions(stop).first { $0.id == "delete" && !$0.disabled }
-        return TripSwipeToDelete(enabled: delete != nil) {
+        return TripSwipeToDelete(enabled: delete != nil, onSwipe: { swipedAt = Date() }) {
             if let delete { Task { await delete.run() } }
         }
     }
@@ -677,6 +680,7 @@ struct TripStayPlanView: View {
                     checkControl(stop, mode: mode)
                 }
                 Button {
+                    guard !TripSwipeToDelete.justSwiped(swipedAt) else { return }
                     detailPick = TripStayDetailPick(stop: stop, dayIndex: day.dayIndex)
                 } label: {
                     HStack(alignment: .center, spacing: 10) {
@@ -1760,7 +1764,16 @@ struct TripStopDropDelegate: DropDelegate {
 /// so `swipeActions` is not there to use; this is the same gesture.
 struct TripSwipeToDelete: ViewModifier {
     let enabled: Bool
+    /// Called as soon as a drag is sideways, so the card's own tap,
+    /// which ends with the same finger, can stand down.
+    var onSwipe: () -> Void = {}
     let perform: () -> Void
+
+    /// A tap within this long after a sideways drag was the drag.
+    static func justSwiped(_ at: Date?, now: Date = Date()) -> Bool {
+        guard let at else { return false }
+        return now.timeIntervalSince(at) < 0.5
+    }
 
     @State private var offset: CGFloat = 0
     @State private var open = false
@@ -1795,6 +1808,7 @@ struct TripSwipeToDelete: ViewModifier {
                         .onChanged { value in
                             // Only a sideways drag; a vertical one scrolls.
                             guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            onSwipe()
                             let base: CGFloat = open ? -button : 0
                             offset = min(0, base + value.translation.width)
                         }
@@ -1819,6 +1833,16 @@ struct TripSwipeToDelete: ViewModifier {
                             }
                         },
                 )
+                // While "Löschen" shows, a tap on the card closes it, as
+                // in a list, instead of reaching the card.
+                .overlay {
+                    if open {
+                        Color.clear
+                            .contentShape(.rect)
+                            .offset(x: offset)
+                            .onTapGesture { withAnimation(.snappy) { offset = 0; open = false } }
+                    }
+                }
                 .accessibilityAction(named: "Löschen", perform)
         }
     }

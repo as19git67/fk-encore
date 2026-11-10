@@ -133,4 +133,11 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertNil(TripPinReason(raw: "guess"))
         XCTAssertNil(TripPinReason(raw: nil))
     }
+
+    func testATapRightAfterASwipeIsTheSwipe() {
+        let now = Date()
+        XCTAssertFalse(TripSwipeToDelete.justSwiped(nil, now: now))
+        XCTAssertTrue(TripSwipeToDelete.justSwiped(now.addingTimeInterval(-0.2), now: now))
+        XCTAssertFalse(TripSwipeToDelete.justSwiped(now.addingTimeInterval(-1), now: now))
+    }
 }
