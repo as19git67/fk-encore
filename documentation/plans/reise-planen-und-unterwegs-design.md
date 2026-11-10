@@ -124,6 +124,19 @@ Jede der Ansichten oben hat eine Karte, umgeschaltet oben rechts mit „Liste | 
 
 ![Routen: Wege auf der Tageskarte (links) und das Blatt „Weg“ (rechts)](reise-planen-und-unterwegs/10-routen.svg)
 
+## Vorschlag: Wetter, Abendlicht, Ausflüge und Strecken (noch nicht entschieden)
+
+Diese vier Funktionen setzen heute auf den alten Tagesplaner auf, der auf einer Reise mit Ideen nichts mehr selbst auf einen Tag legt. Der Mock zeigt, wie sie auf einer Reise mit Ideen aussehen könnten: Die App schlägt vor, ihr bestätigt, alles lässt sich rückgängig machen. Welche davon so kommen, ist noch offen (Etappe 7, Teil 2).
+
+![Vorschlag: Wetter (1), Abendlicht (2), Tagesausflug (3), Strecken (4) und woher Ausflüge und Strecken kommen](reise-planen-und-unterwegs/11-vorschlaege-ideen-reise.svg)
+
+- **Wetter.** Regnet es an einem Tag mit Spots draußen, steht über dem Tag ein Hinweis mit „Mit Fr tauschen“ oder „Nur draußen verschieben“. Ein Blatt zeigt vorher, welcher Tag was bekommt; feste Zeiten bleiben an ihrem Tag.
+- **Abendlicht.** Die Details eines Aussichtspunkts zeigen das beste Licht an den Tagen der Reise. „+ Tag 3 am Abend“ legt ihn als feste Zeit mit Grund „Licht“ ans Ende des Tags.
+- **Tagesausflug.** Der Chip „Ausflüge“ in der Spot-Auswahl zeigt Orte in 30 min bis 2 h Entfernung. Gewählt wird der Tag zum Ausflugstag mit Hin- und Rückweg, und die Auswahl sucht an diesem Tag um das Ziel.
+- **Strecken.** Der Chip „Strecken“ zeigt Wander- und Radwege. Im Tag ist eine Strecke eine lange Karte mit Länge, Höhenmetern und „Weg zum Start“.
+
+**Woher sie kommen.** Ausflüge aus der Karte der Region (Orte mit mindestens drei Sehenswürdigkeiten, heute schon in `day-trip.ts`), von Hand als Ort des Tags (heute schon) oder neu aus einer Idee, die über 30 km entfernt liegt. Strecken aus den ausgeschilderten Wegen des OSM-Imports (heute schon in `routes.ts`), von Hand angelegt (heute schon) oder neu als GPX-Datei oder Tourenlink über das Teilen-Menü.
+
 ## Bestehende Reisen
 
 Reisen, die schon angelegt sind, gehen mit ihren Aufenthalten, Weiterreisen und Tagen in das neue Modell über. Ihre Ideen bleiben, ebenso die Ideen ohne Reise und die schon in Tage eingeplanten Spots. Gesuchte Kandidaten, Strecken und Wünsche (Abstimmungen) entfallen.
