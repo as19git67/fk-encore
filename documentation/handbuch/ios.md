@@ -254,8 +254,11 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Aufenthalt oder eine seiner Tageszeilen öffnet die Planung des
   Aufenthalts mit allen Tagen auf einem Bildschirm, „Zurück“ führt in den
   Verlauf. Unterwegs öffnet sich die Reise gleich in der Planung, am
-  laufenden Tag. Ein Tipp auf einen Tag öffnet diesen Tag für sich
-  (Zeitband, Reihenfolge, Pausen); eine Weiterreise zeigt direkt ihren Tag.
+  laufenden Tag. Ein Tag hat keinen eigenen Bildschirm: sein „⋯“ im Kopf
+  trägt „Reihenfolge vorschlagen“, „Pause einfügen“, „Feste Zeit
+  eintragen“ und „Ausflug planen“. Feste Zeiten ohne Spot und Pausen
+  stehen über den Karten des Tages und gehen mit dem Kreuz wieder weg.
+  Eine Weiterreise hat nur ihr Blatt im Reiseverlauf.
 - Eine neue Reise beginnt je Aufenthalt mit einer leeren Liste „Ideen“:
   die App sucht und plant nichts selbst. Ideen kommen über „Spot hinzufügen“,
   „Hier, wo ich bin“, Entdecken („Gegend wählen“, „Andere Gegend…“), Teilen
@@ -359,11 +362,8 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   passt der Tag nicht, sind die Ideen markiert, die zurück zu den Ideen
   könnten („Wenn Zeit“ zuerst, nie „Muss“). „Pause“ fügt Mittag, Kaffee
   oder eine kurze Pause am Ende ein; das Kreuz entfernt sie wieder.
-  Darüber zeigt ein Band den Tag von Anfang bis Ende: Besuche als Felder,
-  Wege als Linien, Pausen gestrichelt, Termine orange, heute ein roter
-  Strich für „jetzt“. Ein Tipp auf einen Besuch markiert ihn in der
-  Liste. Unter jedem Tag in der Tagesleiste zeigt ein dünner Balken, wie
-  voll er ist.
+  Beides steht im „⋯“ des Tages in der Planung des Aufenthalts. Im
+  Reiseverlauf zeigt unter jedem Tag ein dünner Balken, wie voll er ist.
 - Restaurants und Cafés unter den Ideen stehen in der Liste unter „Essen
   & Trinken“ und kommen nie in die vorgeschlagene Reihenfolge. An einer
   Pause öffnet „Jetzt aussuchen“ die Lokale in der Nähe, eure eigenen

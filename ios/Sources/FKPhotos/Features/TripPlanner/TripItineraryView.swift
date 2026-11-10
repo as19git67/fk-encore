@@ -700,10 +700,9 @@ struct TripItineraryView: View {
             onPlan(stay, day)
             return
         }
-        // "Planen" on a stay opens the stay as a whole (stage 3); a day
-        // row opens that day.
-        viewModel.wantsStayPlan = day == nil
-        viewModel.wantsDayScreen = day != nil
+        // "Planen" on a stay and a day row both open the stay as a
+        // whole (stage 3), a day row scrolled to its day.
+        viewModel.wantsStayPlan = true
         dismiss()
     }
 
