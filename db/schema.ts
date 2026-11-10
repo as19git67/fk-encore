@@ -3857,6 +3857,10 @@ export const tripPlanStops = pgTable(
     // row that knew them is deleted then, and the screen promises the
     // answer on every stop, not only on the ones still waiting.
     reasons: jsonb("reasons").notNull().default([]),
+    // Who put it on this day (stage 8, migration 0309): "hand" stays,
+    // "fill" ("Tag füllen") goes back to the open spots once the day is
+    // over without it.
+    placed_by: text("placed_by").notNull().default("hand"),
   },
   (table) => [
     uniqueIndex("trip_plan_stops_block_position_key").on(table.block_id, table.position),

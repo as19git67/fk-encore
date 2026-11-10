@@ -25,7 +25,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { dayWalkOfStored } from "./day-walk";
 import { recomputeDay } from "./move";
-import { loadPlan, saveRedistribution, type StoredPlan } from "./plan-store";
+import { loadPlan, saveRedistribution, type StoredPlan, type StoredStop } from "./plan-store";
 import { DISPLACEMENT_BOOST } from "./redistribute";
 import type { Candidate } from "./solver";
 
@@ -89,28 +89,7 @@ export const returnStopToPool = api(
     // old detour would be over budget for a spot nobody visits (§8.4).
     recomputeDay(blocks, dayWalkOfStored(leg.anchor, day), leg.mode);
 
-    const returning: Candidate = {
-      osmRef: stop.osmRef,
-      name: stop.name,
-      localName: stop.localName ?? null,
-      wikipediaUrl: stop.wikipediaUrl ?? null,
-      facadeAzimuth: stop.facadeAzimuth ?? null,
-      kind: stop.kind ?? null,
-      extent: stop.extent,
-      photoStop: stop.photoStop ?? false,
-      origin: stop.origin ?? "search",
-      priority: stop.priority,
-      openingHours: stop.openingHours ?? null,
-      reasons: stop.reasons ?? [],
-      lat: stop.lat,
-      lon: stop.lon,
-      category: stop.category,
-      dwellMinutes: stop.dwellMinutes,
-      // The same boost a displaced spot gets (§5): it was wanted enough
-      // to be planned once, so it comes back ahead of an equally scored
-      // newcomer rather than competing from scratch.
-      score: stop.score + DISPLACEMENT_BOOST,
-    };
+    const returning = candidateOfStop(stop);
     const pool = leg.pool.some((c) => c.osmRef === stop.osmRef)
       ? [...leg.pool]
       : [...leg.pool, returning];
@@ -122,6 +101,36 @@ export const returnStopToPool = api(
     return { plan: updated, name: stop.name };
   },
 );
+
+/**
+ * A stop as a pool entry again: what it is, why it was saved, and the
+ * boost a displaced spot gets (§5). Also what `open-return.ts` uses to
+ * give an unreached soft stop back to the open spots.
+ */
+export function candidateOfStop(stop: StoredStop): Candidate {
+  return {
+    osmRef: stop.osmRef,
+    name: stop.name,
+    localName: stop.localName ?? null,
+    wikipediaUrl: stop.wikipediaUrl ?? null,
+    facadeAzimuth: stop.facadeAzimuth ?? null,
+    kind: stop.kind ?? null,
+    extent: stop.extent,
+    photoStop: stop.photoStop ?? false,
+    origin: stop.origin ?? "search",
+    priority: stop.priority,
+    openingHours: stop.openingHours ?? null,
+    reasons: stop.reasons ?? [],
+    lat: stop.lat,
+    lon: stop.lon,
+    category: stop.category,
+    dwellMinutes: stop.dwellMinutes,
+    // The same boost a displaced spot gets (§5): it was wanted enough
+    // to be planned once, so it comes back ahead of an equally scored
+    // newcomer rather than competing from scratch.
+    score: stop.score + DISPLACEMENT_BOOST,
+  };
+}
 
 function locate(plan: StoredPlan, stopId: number) {
   for (const leg of plan.legs) {

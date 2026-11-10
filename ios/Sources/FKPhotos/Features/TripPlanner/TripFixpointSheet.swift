@@ -106,9 +106,53 @@ struct TripFixpointSheet: View {
         Calendar.current.date(bySettingHour: 17, minute: 45, second: 0, of: Date()) ?? Date()
     }
 
+    /// Opened from a spot: only what a fixed time of that spot needs.
+    /// The spot is where it happens and the way there is the day's, so
+    /// the kind, the place and the way are not asked (Anton, 10.11.).
+    private var forSpot: Bool { presetSpot != nil }
+
+    /// A spot's fixed time: when, on which day, why, and how long.
+    @ViewBuilder
+    private var spotForm: some View {
+        Section {
+            DatePicker("Uhrzeit", selection: $time, displayedComponents: .hourAndMinute)
+            if days.count > 1 {
+                Picker("Tag", selection: $dayIndex) {
+                    ForEach(days) { day in
+                        Text(day.label).tag(day.dayIndex)
+                    }
+                }
+            }
+        } header: {
+            Text(presetSpot?.name ?? "Spot")
+        } footer: {
+            Text("Zu dieser Uhrzeit steht der Spot fest im Tag, auf keinem anderen Tag, "
+                 + "und die App plant den Rest um ihn herum.")
+        }
+        Section {
+            Picker("Warum fest?", selection: $pinReason) {
+                ForEach(TripPinReason.allCases) { reason in
+                    Label(reason.label, systemImage: reason.systemImage).tag(reason)
+                }
+            }
+        }
+        Section {
+            Stepper(value: $durationMinutes, in: 0...480, step: 15) {
+                Text(TripClock.duration(durationMinutes))
+            }
+        } header: {
+            Text("Dauer")
+        } footer: {
+            Text("Wie lange ihr dort seid.")
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+              if forSpot {
+                spotForm
+              } else {
                 Section {
                     Picker("Art", selection: $kind) {
                         ForEach(Kind.allCases, id: \.self) { kind in
@@ -262,6 +306,7 @@ struct TripFixpointSheet: View {
                              + "Adresse da. Der Puffer von 20 Minuten kommt weiterhin dazu.")
                     }
                 }
+              }
             }
             .navigationTitle("Feste Zeit")
             .navigationBarTitleDisplayMode(.inline)
@@ -279,7 +324,7 @@ struct TripFixpointSheet: View {
                                 kind: kind.rawValue,
                                 travelMinutes: routePaysTheWay ? 0 : travelMinutes,
                                 durationMinutes: durationMinutes,
-                                place: place,
+                                place: forSpot ? nil : place,
                                 spotRef: kind == .appointment ? spot?.osmRef : nil,
                                 pinReason: kind == .appointment && spot != nil ? pinReason : nil,
                                 dayIndex: days.isEmpty ? nil : dayIndex,

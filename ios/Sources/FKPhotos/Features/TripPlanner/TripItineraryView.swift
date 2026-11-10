@@ -47,11 +47,10 @@ struct TripItineraryView: View {
 
     @State private var userHome: TripHome?
     /// The name the local model just proposed, said under the title
-    /// until somebody changes it.
-    @State private var nameWasSuggested = false
+    /// while it is still the trip's name. Changed in the settings
+    /// (suitcase › Einstellungen), never by a tap on the title.
+    @State private var suggestedName: String?
     @State private var suggestingName = false
-    @State private var renaming = false
-    @State private var newName = ""
 
     /// The one journey the planner would suggest (§22.7), or nil.
     @State private var suggestion: TripTransitSuggestion?
@@ -133,14 +132,6 @@ struct TripItineraryView: View {
             ToolbarItem(placement: .primaryAction) {
                 if saving { ProgressView() }
             }
-        }
-        .alert("Name der Reise", isPresented: $renaming) {
-            TextField("Name", text: $newName)
-                .textInputAutocapitalization(.words)
-            Button("Abbrechen", role: .cancel) {}
-            Button("Sichern") { Task { await rename(newName) } }
-        } message: {
-            Text("Leer lassen, und die App schlägt wieder einen vor.")
         }
         .sheet(item: $sheet) { which in
             NavigationStack {
@@ -231,32 +222,28 @@ struct TripItineraryView: View {
 
     private func header(_ draft: TripItineraryDraft) -> some View {
         let title = viewModel.plan?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return Button {
-            newName = title
-            renaming = true
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(title.isEmpty ? "Reise ohne Namen" : title)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(title.isEmpty ? .secondary : .primary)
-                        .multilineTextAlignment(.leading)
-                    if suggestingName { ProgressView() }
-                }
-                Text(TripItineraryText.tripSpan(draft))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if nameWasSuggested {
-                    Text("Vorschlag · tippen zum Ändern")
-                        .font(.caption)
-                        .foregroundStyle(.tint)
-                }
+        // Only a label: the name is changed under the suitcase ›
+        // Einstellungen (Anton, 10.11.), where the other settings of the
+        // trip are, not by a tap that is easy to hit by accident.
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(title.isEmpty ? "Reise ohne Namen" : title)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(title.isEmpty ? .secondary : .primary)
+                    .multilineTextAlignment(.leading)
+                    .accessibilityAddTraits(.isHeader)
+                if suggestingName { ProgressView() }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
+            Text(TripItineraryText.tripSpan(draft))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if let suggestedName, suggestedName == title {
+                Text("Vorschlag · ändern in den Einstellungen")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityHint("Namen der Reise ändern")
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Rows on the line
@@ -826,22 +813,8 @@ struct TripItineraryView: View {
         let answer: Answer? = try? await APIClient.shared.post(
             "/trip-planner/plans/\(viewModel.planId)/name-suggestion", body: Empty())
         if answer?.written == true {
-            nameWasSuggested = true
             await viewModel.load()
-        }
-    }
-
-    private func rename(_ name: String) async {
-        struct Body: Encodable { let title: String }
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            let response: TripPlanResponse = try await APIClient.shared.patch(
-                "/trip-planner/plans/\(viewModel.planId)/settings", body: Body(title: trimmed))
-            viewModel.replace(with: response)
-            nameWasSuggested = false
-            if trimmed.isEmpty { await suggestNameIfNeeded() }
-        } catch {
-            errorMessage = TripErrorText.describe(error)
+            suggestedName = viewModel.plan?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 

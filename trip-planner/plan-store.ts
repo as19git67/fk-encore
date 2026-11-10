@@ -43,6 +43,9 @@ import { spillOver } from "./spill";
 import { passedBy } from "./on-the-way";
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
+import { placedByOf } from "./placed-by";
+import { capacityOf, type StayCapacity } from "./open-capacity";
+import { localDateIn, zoneAt } from "./time-zone";
 import type { ScoredCandidate } from "./candidates";
 import { travelClassFor, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
@@ -143,6 +146,11 @@ export interface StoredLeg {
   days: StoredDay[];
   /** This leg's pool — redistribution never reaches across legs. */
   pool: StoredCandidate[];
+  /**
+   * Whether the open spots fit the days still to come (stage 8), on a
+   * stay of a trip of ideas; computed on read.
+   */
+  capacity?: StayCapacity;
 }
 
 /**
@@ -866,6 +874,7 @@ async function insertDays(
           source_url: (stop as { sourceUrl?: string | null }).sourceUrl ?? null,
           priority: stop.priority ?? DEFAULT_PRIORITY,
           opening_hours: stop.openingHours ?? null,
+          placed_by: placedByOf((stop as { placedBy?: string }).placedBy),
         });
       }
     }
@@ -1130,6 +1139,7 @@ export async function saveMovedDays(
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
           reasons: stop.reasons ?? [],
+          placed_by: placedByOf(stop.placedBy),
         }).returning({ id: tripPlanStops.id });
         idByRef.set(stop.osmRef, row.id);
       }
@@ -1296,6 +1306,7 @@ export async function loadPlan(
       title: written?.title ?? null,
       priority: priorityOf(row.priority),
       openingHours: row.opening_hours,
+      placedBy: placedByOf(row.placed_by),
       image: images.get(row.osm_ref) ?? null,
       description: descriptions.get(row.osm_ref) ?? null,
     });
@@ -1459,7 +1470,25 @@ export async function loadPlan(
         poolByLeg.get(l.id) ?? [],
         l.start_date,
       ),
-    })),
+    })).map((leg) => withCapacity(leg, isIdeasTrip(plan.constraints as Record<string, unknown>))),
+  };
+}
+
+/**
+ * The capacity line of a stay on a trip of ideas (stage 8): its open
+ * spots against the free time of the days still to come. A journey and
+ * an older trip of searched days have none.
+ */
+function withCapacity<L extends StoredLeg>(leg: L, ideas: boolean, now: Date = new Date()): L {
+  if (!ideas || leg.kind !== "stay") return leg;
+  return {
+    ...leg,
+    capacity: capacityOf({
+      days: leg.days,
+      open: leg.pool,
+      startDate: leg.startDate,
+      today: localDateIn(zoneAt(leg.anchor), now),
+    }),
   };
 }
 
@@ -1542,6 +1571,14 @@ async function rewriteDay(
         extent: stop.extent,
         origin: stop.origin ?? "search",
         reasons: stop.reasons ?? [],
+        // What the idea is travels with every rewrite of its day, not
+        // only with a move: a stop taken off the day next to it must not
+        // be the moment this one forgets it was a Muss.
+        note: stop.note ?? null,
+        source_url: stop.sourceUrl ?? null,
+        priority: stop.priority ?? DEFAULT_PRIORITY,
+        opening_hours: stop.openingHours ?? null,
+        placed_by: placedByOf(stop.placedBy),
       }).returning({ id: tripPlanStops.id });
       idByRef.set(stop.osmRef, row.id);
     }

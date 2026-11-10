@@ -40,6 +40,7 @@ import { isOnTrip, requireOrganiser } from "./plan-access";
 import { findSpotNote, loadPlan, type StoredPlan } from "./plan-store";
 import { getTripPlan, type PlanResponse } from "./plans";
 import { applyStopMoves, MOVE_STOPS_OP, MOVE_STOPS_UNDO_OP } from "./stay-weather-api";
+import { placeReturnedAgain, RETURN_OPEN_OP, RETURN_OPEN_UNDO_OP } from "./open-return";
 import type { StopMove } from "./stay-weather";
 import { saveTripSpotNote } from "./spot-notes";
 import { returnStopToPool } from "./to-pool";
@@ -223,7 +224,8 @@ export const planJournal = api(
         const payload = (row.payload ?? {}) as Record<string, unknown>;
         const kind = row.kind as OpKind;
         const itinerary = row.kind === ITINERARY_OP || row.kind === ITINERARY_UNDO_OP
-          || row.kind === MOVE_STOPS_OP || row.kind === MOVE_STOPS_UNDO_OP;
+          || row.kind === MOVE_STOPS_OP || row.kind === MOVE_STOPS_UNDO_OP
+          || row.kind === RETURN_OPEN_OP || row.kind === RETURN_OPEN_UNDO_OP;
         return {
           id: row.id,
           kind: row.kind,
@@ -234,7 +236,7 @@ export const planJournal = api(
           at: row.at,
           undoable: row.kind === ITINERARY_OP
             ? row.id === newestItinerary && row.undoneAt === null
-            : row.kind === MOVE_STOPS_OP
+            : row.kind === MOVE_STOPS_OP || row.kind === RETURN_OPEN_OP
             ? row.undoneAt === null
             : isOpKind(row.kind) && isUndoable(kind) && row.undoneAt === null,
           undoneAt: row.undoneAt,
@@ -274,6 +276,22 @@ export const undoPlanOp = api(
     }
     if (row.kind === MOVE_STOPS_OP) {
       await undoMoves(req.planId, userId, row.id, (row.payload ?? {}) as Record<string, unknown>);
+      return await planJournal({ planId: req.planId });
+    }
+    if (row.kind === RETURN_OPEN_OP) {
+      const payload = (row.payload ?? {}) as Record<string, unknown>;
+      await placeReturnedAgain(req.planId, userId, payload);
+      await db.insert(tripPlanOps).values({
+        plan_id: req.planId,
+        client_op_id: `undo-${row.id}-${Date.now()}`,
+        kind: RETURN_OPEN_UNDO_OP,
+        payload: { sentence: `Zurückgenommen: ${typeof payload.sentence === "string" ? payload.sentence : "Spots wieder offen"}` },
+        actor_id: userId,
+      });
+      await db
+        .update(tripPlanOps)
+        .set({ undone_at: sql`now()`, undone_by: userId })
+        .where(eq(tripPlanOps.id, row.id));
       return await planJournal({ planId: req.planId });
     }
     if (!isOpKind(row.kind) || !isUndoable(row.kind)) {

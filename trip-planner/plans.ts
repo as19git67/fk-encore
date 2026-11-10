@@ -1306,12 +1306,19 @@ export const moveTripStop = api(
       throw err;
     }
 
+    // Moved by a person, so it is theirs now (stage 8): a soft stop
+    // "Tag füllen" put here becomes firm and no longer goes back to the
+    // open spots when the day ends.
+    const firm = (blocks: typeof moved.fromBlocks) => blocks.map((block) => ({
+      ...block,
+      stops: block.stops.map((stop) => (stop.osmRef === osmRef ? { ...stop, placedBy: "hand" as const } : stop)),
+    }));
     const days =
       sourceDay.id === targetDay.id
-        ? [{ day: sourceDay, blocks: moved.fromBlocks }]
+        ? [{ day: sourceDay, blocks: firm(moved.fromBlocks) }]
         : [
             { day: sourceDay, blocks: moved.fromBlocks },
-            { day: targetDay, blocks: moved.toBlocks },
+            { day: targetDay, blocks: firm(moved.toBlocks) },
           ];
     await saveMovedDays(plan.id, days);
 

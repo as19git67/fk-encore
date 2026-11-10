@@ -67,6 +67,7 @@ import { tickLiveActivities } from "./live-activity";
 import { refillSpotFame } from "./spot-fame";
 import { tickHighlights } from "./highlights-job";
 import { describeSpots } from "./spot-description";
+import { tickReturnOpen } from "./open-return";
 
 // A trip planned for a place with no imported region is saved framed
 // and empty, and the import that follows takes hours (§4.3). This is
@@ -136,6 +137,21 @@ schedule({
   nextFire: everyMs(30 * 60_000),
   run: async () => {
     await describeSpots();
+  },
+});
+
+// A soft stop "Tag füllen" put on a day that ended without it is an
+// idea again (stage 8 of reise-planen-und-unterwegs.md). Half an hour
+// after midnight where the stay is is soon enough: nobody plans
+// tomorrow from yesterday's leftovers at ten past twelve.
+schedule({
+  name: "trip-planner-return-open",
+  description: "Give soft stops their day did not reach back to the open spots of the stay.",
+  service: "trip-planner",
+  scheduleLabel: "every 30m",
+  nextFire: everyMs(30 * 60_000),
+  run: async () => {
+    await tickReturnOpen();
   },
 });
 
