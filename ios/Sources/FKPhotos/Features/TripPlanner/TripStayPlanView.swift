@@ -12,8 +12,8 @@ import UniformTypeIdentifiers
 /// day to go to its end; an empty day is a drop zone of its own. The
 /// "⋯" on a card holds the same actions as the day's rows, the map's
 /// sheet and the detail screen (CLAUDE.md, "Aktionen an Spots"); a tap
-/// opens the details. "Liste | Karte" shows the same days on a map with
-/// day chips.
+/// opens the details. "Tage | Karte" (top right) shows the same days on
+/// a map with day chips.
 struct TripStayPlanView: View {
     @State var viewModel: TripPlannerViewModel
     /// The actions of a stop, from the one place that builds them.
@@ -26,6 +26,9 @@ struct TripStayPlanView: View {
     /// trip's name); otherwise the stay's.
     var title: String? = nil
 
+    /// "Tage | Karte", remembered for the screen (mock "Mit der Karte":
+    /// every view has its map).
+    @AppStorage("trip.stayPlan.layout") private var layout = Layout.list.rawValue
     /// The day the map shows numbered; nil is every day.
     @State private var mapDay: Int?
     @State private var showIdeasOnMap = true
@@ -61,6 +64,8 @@ struct TripStayPlanView: View {
     /// The last weather move, offered back.
     @State private var undo: WeatherUndo?
 
+    private enum Layout: String { case list, map }
+
     private struct WeatherUndo: Equatable {
         let sentence: String
         let opId: Int
@@ -70,7 +75,11 @@ struct TripStayPlanView: View {
     var body: some View {
         Group {
             if let leg = viewModel.leg {
-                list(leg)
+                if layout == Layout.map.rawValue {
+                    map(leg)
+                } else {
+                    list(leg)
+                }
             } else {
                 ContentUnavailableView("Kein Aufenthalt", systemImage: "map")
             }
@@ -86,6 +95,22 @@ struct TripStayPlanView: View {
         }
         .navigationTitle(title ?? viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Picker("Ansicht", selection: $layout) {
+                    Text("Tage").tag(Layout.list.rawValue)
+                    Text("Karte").tag(Layout.map.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            // The days have their own big button; the map keeps the plus.
+            if layout == Layout.map.rawValue {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Ideen und Suche", systemImage: "plus") { picking = true }
+                }
+            }
+        }
         .sheet(isPresented: $picking) {
             TripSpotPickerView(viewModel: viewModel)
         }
@@ -1535,9 +1560,18 @@ enum TripStayPlan {
         return parts.joined(separator: " · ")
     }
 
-    /// "3 h 20 von 9 h", "40 min zu viel", "noch frei", or nil for a
-    /// day without a clock.
+    /// True for a day the frame left no time on: the arrival comes after
+    /// the day's end (19:51 on a day that ends at 19:00), so the server
+    /// kept no block for spots and has no window to measure. A day of
+    /// an older trip without a clock still has its blocks.
+    static func hasNoTime(_ day: TripDay) -> Bool {
+        day.window == nil && !day.blocks.contains { $0.kind == "spots" }
+    }
+
+    /// "3 h 20 von 9 h", "40 min zu viel", "noch frei", "keine Zeit frei",
+    /// or nil for a day without a clock.
     static func fillLine(_ day: TripDay) -> String? {
+        if hasNoTime(day) { return "keine Zeit frei" }
         guard let window = day.window, window.minutes > 0 else { return nil }
         if let over = day.overrunMinutes, over > 0 {
             return "\(TripClock.duration(over)) zu viel"

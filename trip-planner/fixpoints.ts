@@ -194,7 +194,7 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
   let nominal = opts.nominalStartMinutes ?? DEFAULT_DAY_START_MINUTES;
   let started = false;
 
-  for (const shape of opts.blocks) {
+  for (const [index, shape] of opts.blocks.entries()) {
     const nominalStart = nominal;
     const nominalEnd = nominal + shape.budgetMinutes;
     nominal = nominalEnd;
@@ -280,7 +280,16 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
     // a morning for a day that had none — out of the first trial. What
     // is left has to be a real share of the block; below a third it
     // goes, and the next block begins at the arrival instead.
-    if (caught && budget < Math.max(MIN_VIABLE_BLOCK_MINUTES, Math.ceil(shape.budgetMinutes / CAUGHT_BLOCK_SHARE))) {
+    //
+    // Only while a later block can take over, though: the day of a trip
+    // of ideas is one block of ten hours, and arriving at 16:00 left it
+    // three — a third of nothing to follow, so the share threw the whole
+    // evening away and every spot went to the next day (Anton, 10.11.).
+    // The last block that holds spots keeps what is left, down to the
+    // floor every block has.
+    const laterTakesOver = opts.blocks.slice(index + 1).some((b) => b.kind === "spots");
+    const share = laterTakesOver ? Math.ceil(shape.budgetMinutes / CAUGHT_BLOCK_SHARE) : 0;
+    if (caught && budget < Math.max(MIN_VIABLE_BLOCK_MINUTES, share)) {
       dropped.push({
         id: shape.id,
         label: shape.label,

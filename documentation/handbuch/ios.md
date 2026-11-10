@@ -344,8 +344,9 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Umsortieren: eine Karte lange drücken und ziehen; eine Linie zeigt, wo
   sie landet, auch auf einem anderen Tag. Setzt man einem Spot eine feste
   Zeit, rückt ein Spot davor, der sonst in die feste Zeit liefe, dahinter.
-- Ein Pin steht nur an einer Karte mit fester Zeit; „Feste Zeit
-  entfernen“ im „⋯“ nimmt sie wieder weg. Ohne Foto zeigt die Karte kein
+- Ein Pin steht nur an einer Karte mit fester Zeit. „Feste Zeit …“ im
+  „⋯“ öffnet ihr Blatt: dort wird sie mit Grund eingetragen, geändert
+  oder unten mit „Feste Zeit entfernen“ wieder weggenommen. Ohne Foto zeigt die Karte kein
   Bild und keinen Platzhalter.
 - Die Details eines Spots sind ein Blatt: oben die Bilder (das Bild des
   Orts groß, weitere von Wikimedia Commons kleiner daneben, seitlich zum
@@ -364,7 +365,7 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Hat ein Aufenthalt nur einen Tag, fragt die App nicht nach dem Tag: ein
   Tipp auf eine Idee in der Karte legt sie auf diesen Tag, und das Blatt
   für eine feste Zeit zeigt keine Tagauswahl.
-- „Feste Zeit eintragen …“ an einem Spot fragt nur Uhrzeit, Tag, Grund (Ticket,
+- „Feste Zeit …“ an einem Spot fragt nur Uhrzeit, Tag, Grund (Ticket,
   Licht, Reservierung, Ereignis, Abfahrt) und Dauer; Ort und Weg sind die
   des Spots.
 - Dieselben Aktionen in Liste, Detail („Alle Details“), Pin-Sheet und

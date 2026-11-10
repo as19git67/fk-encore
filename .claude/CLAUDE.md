@@ -1430,9 +1430,10 @@ kann die Liste auch, und umgekehrt.
   dorthin, und sie lassen das Menü gleich: was der Zustand nicht erlaubt,
   steht ausgegraut da (`disabled` an `TripPinSheetAction`), statt zu
   fehlen — „Erledigt“ erst ab dem Tag selbst, „Auf einen anderen Tag“ nicht
-  für Erledigtes oder fest Terminiertes, „Feste Zeit entfernen“ nur mit
-  fester Zeit, in Untermenüs (Priorität, Grund der festen Zeit) trägt die
-  aktuelle Wahl den Haken. „Einplanen“ nur für Kandidaten.
+  für Erledigtes oder fest Terminiertes, im Untermenü Priorität trägt die
+  aktuelle Wahl den Haken. Was zu einer Sache gehört, ist ein Eintrag mit
+  einem Blatt: „Feste Zeit …“ öffnet das Blatt der festen Zeit, das sie
+  mit Grund einträgt, ändert oder entfernt. „Einplanen“ nur für Kandidaten.
 - Ein eingeplanter Stopp verlässt den Tag über „Löschen“ (ganz unten im
   Menü, und Wischen nach links auf der Karte); er landet wieder bei den
   Ideen, eine feste Zeit nimmt er mit weg.

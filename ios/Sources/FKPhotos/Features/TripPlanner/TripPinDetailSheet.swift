@@ -67,7 +67,6 @@ struct TripSpotActionSubmenu: Equatable, Sendable {
     let systemImage: String
 
     static let priority = TripSpotActionSubmenu(title: "Priorität", systemImage: "star")
-    static let pinReason = TripSpotActionSubmenu(title: "Grund der festen Zeit", systemImage: "pin")
 }
 
 /// What an action is about, in the order a menu shows them.

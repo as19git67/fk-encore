@@ -419,6 +419,7 @@ struct TripItineraryView: View {
                     .foregroundStyle(row.isOverfull ? Color.red : Color.secondary)
                 TripDayFillMark(fill: row.fill ?? 0)
                     .frame(width: 56)
+                    .opacity(row.noTime ? 0 : 1)
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 40)

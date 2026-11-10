@@ -950,6 +950,8 @@ final class TripPlannerViewModel {
             let spotRef: String?
             /// Why it has that hour (stage 3); only with `spotRef`.
             let pinReason: String?
+            /// The fixed time this one replaces, when it was changed.
+            let replaces: Int?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -970,6 +972,7 @@ final class TripPlannerViewModel {
                     lon: draft.place?.longitude,
                     spotRef: draft.spotRef,
                     pinReason: draft.spotRef == nil ? nil : draft.pinReason?.rawValue,
+                    replaces: draft.replaces,
                 ),
             )
             apply(response)
@@ -1004,33 +1007,6 @@ final class TripPlannerViewModel {
             let response: TripPlanResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/fixpoints/spot",
                 body: Body(fixpointId: fixpoint.rowId, spotRef: spotRef),
-            )
-            apply(response)
-        } catch {
-            errorMessage = TripErrorText.describe(error)
-        }
-    }
-
-    /// Say why a booked visit has its time, or that it has none (stage
-    /// 3). The hour stays, so nothing is re-planned.
-    func setPinReason(_ fixpoint: TripFixpoint, _ reason: TripPinReason?) async {
-        guard requireOnline() else { return }
-        struct Body: Encodable {
-            let fixpointId: Int
-            let pinReason: String?
-
-            func encode(to encoder: Encoder) throws {
-                var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encode(fixpointId, forKey: .fixpointId)
-                try container.encode(pinReason, forKey: .pinReason)
-            }
-
-            enum CodingKeys: String, CodingKey { case fixpointId, pinReason }
-        }
-        do {
-            let response: TripPlanResponse = try await APIClient.shared.post(
-                "/trip-planner/plans/\(planId)/fixpoints/pin-reason",
-                body: Body(fixpointId: fixpoint.rowId, pinReason: reason?.rawValue),
             )
             apply(response)
         } catch {
