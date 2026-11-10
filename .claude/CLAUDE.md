@@ -1427,8 +1427,8 @@ kann die Liste auch, und umgekehrt.
   `TripSpotActionMenuItems` (Menü) oder `TripSpotActionSections`
   (Pin-Sheet, Detailansicht). Keine Oberfläche baut eigene Knöpfe daneben.
 - Unterschiede kommen nur aus dem **Zustand** des Spots, nie aus dem Weg
-  dorthin: „Erledigt“ nur solange offen, „In einen anderen Block“ nicht für
-  Erledigtes, „Zurück zu den Kandidaten“ nur für eingeplante, „Einplanen“ nur
+  dorthin: „Erledigt“ nur solange offen, „Auf einen anderen Tag“ nicht für
+  Erledigtes, „Zurück zu den Ideen“ nur für eingeplante, „Einplanen“ nur
   für Kandidaten.
 - Ausgenommen ist, was die Oberfläche selbst schon zeigt: Detailansicht und
   Pin-Sheet haben eigene Knöpfe für Karte und Route und blenden die Gruppe

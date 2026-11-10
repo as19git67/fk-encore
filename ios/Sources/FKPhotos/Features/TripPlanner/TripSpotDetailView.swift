@@ -20,6 +20,8 @@ struct TripSpotDetailView<Actions: View>: View {
     /// looked up on the map belongs to no leg, and offering a pencil
     /// that saves nowhere is worse than not offering one.
     let onSave: ((TripSpotEdit) async -> Void)?
+    /// Where a new kind goes ("Art"). Nil where nothing can take one.
+    let onCategory: ((String) async -> Void)?
     /// When the light is good here today (§7.3). A hint and nothing
     /// more: it moves nothing, and it is absent for a trip with no
     /// dates, because there is no sun without a day.
@@ -45,12 +47,15 @@ struct TripSpotDetailView<Actions: View>: View {
     let onRoute: (() -> Void)?
     @State private var routeChoice: TripMapsChoice?
     @State private var editing: TripSpotEdit?
+    /// The kind just picked, shown until the caller hands a new spot.
+    @State private var shownCategory: String?
     @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
 
     init(
         spot: TripSpotDetail,
         mode: TripTransportMode = .foot,
         onSave: ((TripSpotEdit) async -> Void)? = nil,
+        onCategory: ((String) async -> Void)? = nil,
         light: TripSpotLight? = nil,
         shelter: TripSpotShelter? = nil,
         stayLight: TripStayLightRef? = nil,
@@ -61,6 +66,7 @@ struct TripSpotDetailView<Actions: View>: View {
         self.spot = spot
         self.mode = mode
         self.onSave = onSave
+        self.onCategory = onCategory
         self.light = light
         self.shelter = shelter
         self.stayLight = stayLight
@@ -101,58 +107,6 @@ struct TripSpotDetailView<Actions: View>: View {
                 TripSpotMapSnippet(coordinate: spot.coordinate, title: spot.displayName, name: spot.name,
                                    symbolName: TripCategory.symbol(spot.category))
                     .listRowInsets(EdgeInsets())
-            }
-
-            Section {
-                // What is written on the building, when it is not what
-                // the app just called the place (§10.4). The readable
-                // name is the one to plan with and the wrong one to
-                // stand in front of a door with.
-                if let localName = spot.localName {
-                    LabeledContent("Vor Ort", value: localName)
-                }
-                // The map's own name, kept visible under a name the
-                // group chose: the ticket desk answers to this one.
-                if let official = spot.officialName {
-                    LabeledContent("In OpenStreetMap", value: official)
-                }
-                LabeledContent("Art", value: TripCategory.label(spot.category))
-                if let shelter {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("Bei Regen")
-                        Spacer(minLength: 12)
-                        Label {
-                            Text(shelter.label)
-                                .multilineTextAlignment(.trailing)
-                        } icon: {
-                            Image(systemName: shelter.symbolName)
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
-                if let extent = spot.extent {
-                    // The way is the point: the day goes on from its end,
-                    // not from where it starts (§4.7).
-                    LabeledContent("Strecke", value: extent.summary)
-                }
-                if spot.name == nil {
-                    // Said rather than papered over: OpenStreetMap has no
-                    // name for this, and the app does not invent one
-                    // (§10.4, §15.3).
-                    Text("OpenStreetMap kennt für diesen Punkt keinen Namen.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                if spot.unmatched {
-                    Text("Kein OSM-Eintrag zugeordnet — Öffnungszeiten und Kategorie sind unbekannt.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            } footer: {
-                if !spot.unmatched {
-                    OSMAttributionNote()
-                }
             }
 
             if let article = spot.wikipediaUrl, let articleURL = URL(string: article) {
@@ -248,6 +202,8 @@ struct TripSpotDetailView<Actions: View>: View {
 
             actions({ dismiss() })
 
+            factsSection
+
             // Last, and deliberately so. It is the one part of this
             // screen nobody opens it for: what the place is, where it
             // is and what you can do with it come first, and the
@@ -263,6 +219,8 @@ struct TripSpotDetailView<Actions: View>: View {
         }
         .navigationTitle(spot.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: spot.osmRef) { shownCategory = nil }
+        .onChange(of: spot.category) { shownCategory = nil }
         .toolbar {
             if onSave != nil {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -307,6 +265,95 @@ struct TripSpotDetailView<Actions: View>: View {
 
     private var preference: TripMapsApp {
         TripMapsApp(rawValue: mapsPreference) ?? .apple
+    }
+
+    /// What the place is and how long you stay, after what can be done
+    /// with it: you open this screen for the place and its actions, and
+    /// look these up afterwards.
+    @ViewBuilder
+    private var factsSection: some View {
+        Section {
+            // What is written on the building, when it is not what
+            // the app just called the place (§10.4). The readable
+            // name is the one to plan with and the wrong one to
+            // stand in front of a door with.
+            if let localName = spot.localName {
+                LabeledContent("Vor Ort", value: localName)
+            }
+            // The map's own name, kept visible under a name the
+            // group chose: the ticket desk answers to this one.
+            if let official = spot.officialName {
+                LabeledContent("In OpenStreetMap", value: official)
+            }
+            categoryRow
+            if let shelter {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Bei Regen")
+                    Spacer(minLength: 12)
+                    Label {
+                        Text(shelter.label)
+                            .multilineTextAlignment(.trailing)
+                    } icon: {
+                        Image(systemName: shelter.symbolName)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
+            if let extent = spot.extent {
+                // The way is the point: the day goes on from its end,
+                // not from where it starts (§4.7).
+                LabeledContent("Strecke", value: extent.summary)
+            }
+            if spot.name == nil {
+                // Said rather than papered over: OpenStreetMap has no
+                // name for this, and the app does not invent one
+                // (§10.4, §15.3).
+                Text("OpenStreetMap kennt für diesen Punkt keinen Namen.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if spot.unmatched {
+                Text("Kein OSM-Eintrag zugeordnet — Öffnungszeiten und Kategorie sind unbekannt.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } footer: {
+            if !spot.unmatched {
+                OSMAttributionNote()
+            }
+        }
+
+    }
+
+    /// "Art", which the people planning can change where the caller
+    /// takes it — the map is sometimes wrong about what a place is.
+    @ViewBuilder
+    private var categoryRow: some View {
+        let category = shownCategory ?? spot.category
+        if let onCategory, category != "route" {
+            Picker("Art", selection: Binding(
+                get: { category },
+                set: { picked in
+                    guard picked != category else { return }
+                    shownCategory = picked
+                    Task { await onCategory(picked) }
+                },
+            )) {
+                ForEach(Self.categoryChoices(current: category), id: \.self) { id in
+                    Label(TripCategory.label(id), systemImage: TripCategory.symbol(id)).tag(id)
+                }
+            }
+            .pickerStyle(.menu)
+        } else {
+            LabeledContent("Art", value: TripCategory.label(category))
+        }
+    }
+
+    /// The kinds to offer, with the current one kept even if it is not
+    /// one a person picks, so the menu shows what is set.
+    static func categoryChoices(current: String) -> [String] {
+        TripCategory.pickable.contains(current) ? TripCategory.pickable : [current] + TripCategory.pickable
     }
 
     private func offerRoute() {
