@@ -39,6 +39,8 @@ import { ITINERARY_OP, ITINERARY_UNDO_OP, restoreItinerary, type ItinerarySnapsh
 import { isOnTrip, requireOrganiser } from "./plan-access";
 import { findSpotNote, loadPlan, type StoredPlan } from "./plan-store";
 import { getTripPlan, type PlanResponse } from "./plans";
+import { applyStopMoves, MOVE_STOPS_OP, MOVE_STOPS_UNDO_OP } from "./stay-weather-api";
+import type { StopMove } from "./stay-weather";
 import { saveTripSpotNote } from "./spot-notes";
 import { returnStopToPool } from "./to-pool";
 import {
@@ -220,7 +222,8 @@ export const planJournal = api(
       entries: rows.map((row) => {
         const payload = (row.payload ?? {}) as Record<string, unknown>;
         const kind = row.kind as OpKind;
-        const itinerary = row.kind === ITINERARY_OP || row.kind === ITINERARY_UNDO_OP;
+        const itinerary = row.kind === ITINERARY_OP || row.kind === ITINERARY_UNDO_OP
+          || row.kind === MOVE_STOPS_OP || row.kind === MOVE_STOPS_UNDO_OP;
         return {
           id: row.id,
           kind: row.kind,
@@ -231,6 +234,8 @@ export const planJournal = api(
           at: row.at,
           undoable: row.kind === ITINERARY_OP
             ? row.id === newestItinerary && row.undoneAt === null
+            : row.kind === MOVE_STOPS_OP
+            ? row.undoneAt === null
             : isOpKind(row.kind) && isUndoable(kind) && row.undoneAt === null,
           undoneAt: row.undoneAt,
           undoneBy: row.undoneById === null ? null : names.get(row.undoneById) ?? null,
@@ -265,6 +270,10 @@ export const undoPlanOp = api(
     }
     if (row.kind === ITINERARY_OP) {
       await undoItinerary(req.planId, userId, row.id, row.previous as ItinerarySnapshot | null);
+      return await planJournal({ planId: req.planId });
+    }
+    if (row.kind === MOVE_STOPS_OP) {
+      await undoMoves(req.planId, userId, row.id, (row.payload ?? {}) as Record<string, unknown>);
       return await planJournal({ planId: req.planId });
     }
     if (!isOpKind(row.kind) || !isUndoable(row.kind)) {
@@ -339,6 +348,41 @@ async function undoItinerary(
     client_op_id: `undo-${opId}-${Date.now()}`,
     kind: ITINERARY_UNDO_OP,
     payload: { sentence: "Änderung am Reiseverlauf zurückgenommen" },
+    actor_id: userId,
+  });
+  await db
+    .update(tripPlanOps)
+    .set({ undone_at: sql`now()`, undone_by: userId })
+    .where(eq(tripPlanOps.id, opId));
+}
+
+/**
+ * Put spots the weather moved back on the days they came from. A spot
+ * that has since moved again, or left the stay, is left where it is.
+ */
+async function undoMoves(
+  planId: number,
+  userId: number,
+  opId: number,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const plan = await loadPlan(planId, userId);
+  if (!plan) throw APIError.notFound("plan not found");
+  const leg = plan.legs.find((l) => l.position === payload.legIndex);
+  if (!leg) throw APIError.failedPrecondition("diesen Aufenthalt gibt es nicht mehr");
+  const moves = Array.isArray(payload.moves) ? (payload.moves as StopMove[]) : [];
+  // Only a spot still on the day it was moved to goes back: one moved
+  // again since is a later decision, and undoing this must not undo it.
+  const onTarget = new Set(leg.days.flatMap((day) => day.blocks.flatMap((block) =>
+    block.stops.map((stop) => `${stop.osmRef}@${day.dayIndex}`))));
+  await applyStopMoves(plan, leg, moves
+    .filter((move) => onTarget.has(`${move.osmRef}@${move.toDayIndex}`))
+    .map((move) => ({ osmRef: move.osmRef, toDayIndex: move.fromDayIndex })));
+  await db.insert(tripPlanOps).values({
+    plan_id: planId,
+    client_op_id: `undo-${opId}-${Date.now()}`,
+    kind: MOVE_STOPS_UNDO_OP,
+    payload: { sentence: `Zurückgenommen: ${typeof payload.sentence === "string" ? payload.sentence : "Spots verschoben"}` },
     actor_id: userId,
   });
   await db
