@@ -51,6 +51,7 @@ import { travelClassFor, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
 import { imagesFor, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
+import { summariesFor } from "./spot-summary";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 import { storedPinReason, type PinReason } from "./pin-reason";
 
@@ -178,6 +179,8 @@ export interface StoredCandidate extends ScoredCandidate {
   image?: SpotImage | null;
   /** What the place is, with its source (stage 4); null where nothing was found. */
   description?: SpotDescription | null;
+  /** One short German sentence about it, made from the description (`spot-summary.ts`). */
+  summary?: string | null;
   /** Why it was saved, in the words of whoever saved it (§9.2). */
   note: string | null;
   /** Where it came from, kept as provenance (§9.2). */
@@ -314,6 +317,8 @@ export interface StoredStop extends CurrentStop {
   image?: SpotImage | null;
   /** What the place is, with its source (stage 4); null where nothing was found. */
   description?: SpotDescription | null;
+  /** One short German sentence about it, made from the description (`spot-summary.ts`). */
+  summary?: string | null;
 }
 
 /**
@@ -1266,6 +1271,7 @@ export async function loadPlan(
   const images = await imagesFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
   // What each place is, with its source (stage 4).
   const descriptions = await descriptionsFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
+  const summaries = await summariesFor([...stopRows.map((r) => r.osm_ref), ...poolRows.map((r) => r.osm_ref)]);
 
   const stopsByBlock = new Map<number, StoredStop[]>();
   for (const row of stopRows) {
@@ -1309,6 +1315,7 @@ export async function loadPlan(
       placedBy: placedByOf(row.placed_by),
       image: images.get(row.osm_ref) ?? null,
       description: descriptions.get(row.osm_ref) ?? null,
+      summary: summaries.get(row.osm_ref) ?? null,
     });
     stopsByBlock.set(row.block_id, list);
   }
@@ -1410,6 +1417,7 @@ export async function loadPlan(
       unmatched: row.unmatched,
       image: images.get(row.osm_ref) ?? null,
       description: descriptions.get(row.osm_ref) ?? null,
+      summary: summaries.get(row.osm_ref) ?? null,
     });
     poolByLeg.set(row.leg_id, list);
   }

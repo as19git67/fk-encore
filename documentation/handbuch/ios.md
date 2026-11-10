@@ -273,9 +273,13 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   einen Karten-Link, darunter die Chips Alles, Ideen, Highlights, Essen
   und Mehr. **Highlights** zeigt, wofür die Gegend um den Aufenthalt
   bekannt ist (Bild, eine Zeile dazu, Entfernung zur Unterkunft), solange
-  das lokale Modell noch ordnet nach Bekanntheit mit dem Hinweis „wird
-  noch sortiert“. „+ Tag n“ legt einen Treffer auf den vorgeschlagenen
-  Tag, langes Drücken auf einen anderen Tag oder nur zu den Ideen; was
+  das lokale Modell sie noch ordnet nach Bekanntheit mit dem Hinweis
+  „Das lokale Modell ordnet die Highlights noch“. Unter dem Namen steht,
+  sobald es einen gibt, ein kurzer deutscher Satz, was der Ort ist (vom
+  lokalen Modell aus Wikivoyage, Wikipedia oder der Website des Orts
+  gemacht); derselbe Satz steht auf der Karte des Spots in der Planung des
+  Aufenthalts. Das „+“ am Ende der Zeile legt einen Treffer auf den
+  vorgeschlagenen Tag, langes Drücken auf einen anderen Tag oder nur zu den Ideen; was
   schon dort ist, steht als „In der Reise“ oder „Schon eingeplant“ in der
   Liste. Der Kopf eines Aufenthalts öffnet dieselbe Auswahl über „Spot
   hinzufügen“, „Ideen (n)“, „Ausflüge“ und „Strecken“, jeweils auf ihrem
@@ -304,7 +308,7 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - **Strecken.** Der Chip „Strecken“ in „Spot hinzufügen“ zeigt die
   ausgeschilderten Wander- und Radwege in der Nähe, die lohnendsten
   zuerst, mit geschätzter Dauer, Länge und Anstieg. Ein Tipp zeigt den
-  Verlauf auf der Karte, „+ Tag n“ legt die Strecke auf den Tag, langes
+  Verlauf auf der Karte, „+“ legt die Strecke auf den Tag, langes
   Drücken wählt einen anderen Tag oder „Als Idee behalten“. Am Tag ist
   sie eine Karte mit Länge, Anstieg und „Weg zum Start“. „Strecke von
   Hand anlegen“ unter der Liste bleibt für einen Weg, den die Karte nicht
@@ -341,9 +345,11 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Die Details eines Spots sind ein Blatt: oben Bild, Name, Art und
   Entfernung zur Unterkunft mit den Chips für feste Zeit, Priorität und
   Dauer, darunter Ticket, Öffnungszeiten, „Geplant“ und Notiz, dann
-  Beschreibung, Bilder und Karte. Unten stehen immer „Route“, „Karte“,
-  „Anderer Tag“ (in der Spot-Auswahl „+ Tag n“) und „Mehr“ mit allen
-  übrigen Aktionen. Die Spot-Auswahl gliedert sich in „Eure Ideen“ und
+  Karte, Bilder und Beschreibung, in derselben Reihenfolge wie bei einer
+  Strecke. Unten stehen immer „Route“, „Karte“, „Anderer Tag“ (in der
+  Spot-Auswahl „Hinzufügen“ mit „+“) und „Mehr“ mit allen übrigen
+  Aktionen. Die Details einer Strecke haben dieselbe Leiste: „Route“ zum
+  Start, „Karte“, „Hinzufügen“ und unter „Mehr“ „Als GPX exportieren“. Die Spot-Auswahl gliedert sich in „Eure Ideen“ und
   „Highlights in der Nähe“; Eingeplantes zeigt „✓ Tag n“.
 - In den Details eines Spots stehen Art, Aufenthaltsdauer und die Namen
   weiter unten; die Art lässt sich dort ändern (nicht bei einer

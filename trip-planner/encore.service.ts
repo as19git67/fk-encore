@@ -67,6 +67,7 @@ import { tickLiveActivities } from "./live-activity";
 import { refillSpotFame } from "./spot-fame";
 import { tickHighlights } from "./highlights-job";
 import { describeSpots } from "./spot-description";
+import { summariseSpots } from "./spot-summary";
 import { tickReturnOpen } from "./open-return";
 
 // A trip planned for a place with no imported region is saved framed
@@ -137,6 +138,19 @@ schedule({
   nextFire: everyMs(30 * 60_000),
   run: async () => {
     await describeSpots();
+  },
+});
+
+// One short German sentence per place, for the picker row and the day
+// card, made by the local model from the description above.
+schedule({
+  name: "trip-planner-spot-summaries",
+  description: "Make a short German sentence from each place's description.",
+  service: "trip-planner",
+  scheduleLabel: "every 10m",
+  nextFire: everyMs(10 * 60_000),
+  run: async () => {
+    await summariseSpots();
   },
 });
 

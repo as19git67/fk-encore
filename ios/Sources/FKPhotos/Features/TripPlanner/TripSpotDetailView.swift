@@ -89,9 +89,14 @@ struct TripSpotDetailView<Actions: View>: View {
             // is planned, and why somebody saved it.
             planFacts
 
-            // What the place is, where Wikipedia is thin too (stage 4).
-            if let description = spot.description {
-                TripSpotDescriptionSection(description: description)
+            // Karte, Bilder, then the text: the order of a way's details,
+            // so a spot and a route read alike (Anton, 10.11.).
+            Section {
+                // Zooms in place, and opens the maps app from its
+                // corner (§25, stage B).
+                TripSpotMapSnippet(coordinate: spot.coordinate, title: spot.displayName, name: spot.name,
+                                   symbolName: TripCategory.symbol(spot.category))
+                    .listRowInsets(EdgeInsets())
             }
 
             // Everything there is to look at, once the sheet is pulled up.
@@ -102,12 +107,9 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
             }
 
-            Section {
-                // Zooms in place, and opens the maps app from its
-                // corner (§25, stage B).
-                TripSpotMapSnippet(coordinate: spot.coordinate, title: spot.displayName, name: spot.name,
-                                   symbolName: TripCategory.symbol(spot.category))
-                    .listRowInsets(EdgeInsets())
+            // What the place is, where Wikipedia is thin too (stage 4).
+            if let description = spot.description {
+                TripSpotDescriptionSection(description: description)
             }
 
             contactSection
@@ -521,6 +523,8 @@ struct TripSpotDetailBar {
     var primary: TripPinSheetAction?
     /// The short label in the bar ("Anderer Tag", "+ Tag 3").
     var primaryTitle: String?
+    /// Its symbol in the bar, where it differs from the menu's.
+    var primaryImage: String? = nil
     var more: [TripPinSheetAction]
 
     /// A planned stop: "Auf einen anderen Tag" goes in the bar. The
@@ -548,7 +552,7 @@ struct TripSpotDetailBarView: View {
             button("Route", systemImage: "arrow.triangle.turn.up.right.circle", action: route)
             button("Karte", systemImage: "map", action: map)
             if let primary = bar.primary {
-                button(bar.primaryTitle ?? primary.title, systemImage: primary.systemImage) { run(primary) }
+                button(bar.primaryTitle ?? primary.title, systemImage: bar.primaryImage ?? primary.systemImage) { run(primary) }
                     .disabled(running != nil || primary.disabled)
             }
             Menu {

@@ -261,7 +261,7 @@ struct TripSpotPickerView: View {
                     }
                 }
                 if search.highlightsSorting && chip != .ideas && search.query.isEmpty {
-                    Label("Die Highlights werden noch sortiert; bis dahin nach Bekanntheit.",
+                    Label("Das lokale Modell ordnet die Highlights noch; bis dahin stehen sie nach Bekanntheit.",
                           systemImage: "arrow.up.arrow.down")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -319,13 +319,16 @@ struct TripSpotPickerView: View {
                 detail = item
             } label: {
                 HStack(alignment: .top, spacing: 10) {
+                    // The same 44 pt square as the rows of Ausflüge and
+                    // Strecken (Anton, 10.11.).
                     if let picture = item.picture {
-                        TripSpotThumbnail(image: picture, height: 56, width: 56)
+                        TripSpotThumbnail(image: picture, height: 44, width: 44)
                     } else {
                         Image(systemName: item.isIdea ? "lightbulb" : "mappin")
                             .foregroundStyle(.secondary)
-                            .frame(width: 56, height: 56)
+                            .frame(width: 44, height: 44)
                             .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+                            .accessibilityHidden(true)
                     }
                     rowText(item)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -349,6 +352,12 @@ struct TripSpotPickerView: View {
             Text(TripSpotName.line(item.title, local: item.localName))
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(2)
+            if let summary = item.summary {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
             if let line = item.line {
                 Text(line)
                     .font(.caption)
@@ -393,23 +402,12 @@ struct TripSpotPickerView: View {
         } else {
             let suggestion = search.suggestions[item.osmRef]
             let focused = tripFocus?.dayIndex
-            Button {
+            TripAddButton(running: busy == item.id,
+                          full: focused == nil && suggestion?.full == true,
+                          label: focused.map { "Auf Tag \($0 + 1) legen" } ?? TripSpotPicker.addLabel(suggestion)) {
                 Task { await add(item, onDay: focused ?? suggestion?.dayIndex) }
-            } label: {
-                if busy == item.id {
-                    ProgressView()
-                } else {
-                    Text(focused.map { "+ Tag \($0 + 1)" } ?? TripSpotPicker.addLabel(suggestion))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(focused == nil && suggestion?.full == true ? Color.orange : Color.accentColor)
-                }
             }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
             .disabled(busy != nil)
-            .accessibilityHint(suggestion?.full == true
-                               ? "Der Tag ist schon voll"
-                               : "Lange drücken für einen anderen Tag")
         }
     }
 
@@ -513,7 +511,7 @@ struct TripSpotPickerView: View {
         return detail
     }
 
-    /// The details' bar: "+ Tag n" for the suggested day next to Route
+    /// The details' bar: "+" (Hinzufügen) for the suggested day next to Route
     /// and Karte, the other days and the rest under "Mehr" (mock
     /// "Spot-Auswahl und Spot-Details").
     private func detailBar(_ item: TripPickerItem) -> TripSpotDetailBar {
@@ -522,7 +520,8 @@ struct TripSpotPickerView: View {
             ?? viewModel.leg?.days.map(\.dayIndex).min()
         let primary = all.first { $0.id == "day-\(suggested ?? -1)" }
         return TripSpotDetailBar(primary: primary,
-                                 primaryTitle: suggested.map { "+ Tag \($0 + 1)" },
+                                 primaryTitle: suggested.map { _ in "Hinzufügen" },
+                                 primaryImage: "plus.circle",
                                  more: all.filter { $0.id != primary?.id })
     }
 
@@ -602,6 +601,35 @@ struct TripSpotPickerView: View {
     private func suggest() async {
         let spots = items.filter { !$0.isPlanned }.map(\.suggestSpot)
         await search.loadSuggestions(for: spots)
+    }
+}
+
+/// The standard "+" at the end of a row: it puts the place on the
+/// suggested day, which only VoiceOver names (Anton, 10.11.: the day
+/// does not matter there). Orange when that day is already full; a
+/// long press on the row picks another.
+struct TripAddButton: View {
+    let running: Bool
+    let full: Bool
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if running {
+                ProgressView()
+            } else {
+                Image(systemName: "plus.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(full ? Color.orange : Color.accentColor)
+            }
+        }
+        .buttonStyle(.borderless)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(.rect)
+        .accessibilityLabel(label)
+        .accessibilityHint(full ? "Der Tag ist schon voll. Lange drücken für einen anderen Tag"
+                                : "Lange drücken für einen anderen Tag")
     }
 }
 

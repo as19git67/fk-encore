@@ -137,21 +137,11 @@ struct TripStayRoutesList: View {
                     .frame(minWidth: 44, minHeight: 32)
             } else {
                 let suggestion = suggestions[route.osmRef]
-                Button {
+                TripAddButton(running: busy == route.osmRef, full: suggestion?.full == true,
+                              label: TripSpotPicker.addLabel(suggestion)) {
                     Task { await add(route, onDay: suggestion?.dayIndex) }
-                } label: {
-                    if busy == route.osmRef {
-                        ProgressView()
-                    } else {
-                        Text(TripSpotPicker.addLabel(suggestion))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(suggestion?.full == true ? Color.orange : Color.accentColor)
-                    }
                 }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
                 .disabled(busy != nil)
-                .accessibilityHint("Lange drücken für einen anderen Tag")
             }
         }
         .contextMenu {

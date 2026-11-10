@@ -54,6 +54,8 @@ struct TripHighlight: Codable, Identifiable, Sendable {
     let reason: String?
     let picture: TripRoutePhoto?
     let description: TripSpotDescription?
+    /// One short German sentence about it; nil until the server made one.
+    var summary: String? = nil
     let wikipediaUrl: String?
     let inPool: Bool
     let planned: Bool
