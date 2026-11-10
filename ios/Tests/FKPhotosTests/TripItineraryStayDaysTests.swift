@@ -140,6 +140,8 @@ final class TripItineraryStayDaysTests: XCTestCase {
         let rows = TripItineraryDays.rows(stay: draft.items[0], dated: draft.dated()[0], days: [late],
                                           arrival: "19:51", departure: nil)
         XCTAssertEqual(rows[0].summary, "keine Zeit frei")
+        XCTAssertTrue(rows[0].noTime)
+        XCTAssertNil(rows[0].fill)
         XCTAssertEqual(rows[1].summary, "noch frei")
     }
 

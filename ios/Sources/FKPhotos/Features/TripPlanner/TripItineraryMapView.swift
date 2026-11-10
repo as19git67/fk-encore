@@ -116,6 +116,7 @@ struct TripItineraryMapView: View {
                             .foregroundStyle(row.isOverfull ? Color.red : Color.secondary)
                         TripDayFillMark(fill: row.fill ?? 0)
                             .frame(width: 48)
+                            .opacity(row.noTime ? 0 : 1)
                     }
                     .frame(minHeight: 30)
                     .contentShape(.rect)

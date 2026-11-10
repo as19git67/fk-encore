@@ -756,6 +756,8 @@ struct TripItineraryDayRow: Identifiable, Equatable {
     /// 0…1, above 1 when the day runs over; nil when the day has no
     /// clock to measure against.
     let fill: Double?
+    /// The arrival leaves the day no time: no fill mark, only the words.
+    var noTime = false
 
     var id: Int { number }
     var isOverfull: Bool { (fill ?? 0) > 1 }
@@ -787,7 +789,8 @@ enum TripItineraryDays {
                 fill = spots == 0 ? 0 : nil
             }
             let summary: String
-            if let day, spots == 0, TripStayPlan.hasNoTime(day) {
+            let noTime = day.map { spots == 0 && TripStayPlan.hasNoTime($0) } ?? false
+            if noTime {
                 summary = "keine Zeit frei"
             } else if (day?.overrunMinutes ?? 0) > 0 || (fill ?? 0) > 1 {
                 summary = "zu viel"
@@ -797,7 +800,8 @@ enum TripItineraryDays {
                 summary = spots == 1 ? "1 Spot" : "\(spots) Spots"
             }
             return TripItineraryDayRow(dayIndex: day?.dayIndex, number: offset + 1,
-                                       label: parts.joined(separator: " · "), summary: summary, fill: fill)
+                                       label: parts.joined(separator: " · "), summary: summary,
+                                       fill: noTime ? nil : fill, noTime: noTime)
         }
     }
 }
