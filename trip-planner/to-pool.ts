@@ -25,8 +25,9 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { dayWalkOfStored } from "./day-walk";
 import { recomputeDay } from "./move";
-import { loadPlan, saveRedistribution, type StoredPlan, type StoredStop } from "./plan-store";
-import { DISPLACEMENT_BOOST } from "./redistribute";
+import { loadPlan, saveRedistribution, type StoredCandidate, type StoredPlan, type StoredStop } from "./plan-store";
+import { DISPLACEMENT_BOOST, type CurrentStop } from "./redistribute";
+import type { PlacedBy } from "./placed-by";
 import type { Candidate } from "./solver";
 
 export interface ReturnToPoolRequest {
@@ -129,6 +130,38 @@ export function candidateOfStop(stop: StoredStop): Candidate {
     // to be planned once, so it comes back ahead of an equally scored
     // newcomer rather than competing from scratch.
     score: stop.score + DISPLACEMENT_BOOST,
+  };
+}
+
+/**
+ * A stop made from an idea of the stay, for putting it on a day: the
+ * way back of `candidateOfStop`. The ways are recomputed by whoever
+ * inserts it.
+ */
+export function stopOfCandidate(candidate: StoredCandidate, placedBy: PlacedBy): CurrentStop {
+  return {
+    osmRef: candidate.osmRef,
+    name: candidate.name,
+    localName: candidate.localName ?? null,
+    wikipediaUrl: candidate.wikipediaUrl ?? null,
+    facadeAzimuth: candidate.facadeAzimuth ?? null,
+    kind: candidate.kind ?? null,
+    extent: candidate.extent,
+    lat: candidate.lat,
+    lon: candidate.lon,
+    category: candidate.category,
+    dwellMinutes: candidate.dwellMinutes,
+    score: candidate.score,
+    travelFromPrevious: { minutes: 0, distanceM: 0, travelClass: "short_walk" },
+    status: "planned",
+    pinned: true,
+    note: candidate.note,
+    sourceUrl: candidate.sourceUrl,
+    origin: candidate.origin,
+    priority: candidate.priority,
+    openingHours: candidate.openingHours ?? null,
+    reasons: candidate.reasons,
+    placedBy,
   };
 }
 

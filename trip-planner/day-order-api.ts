@@ -66,51 +66,7 @@ export const orderTripDay = api(
     if (!day.detailed) throw APIError.failedPrecondition("dieser Tag ist noch nicht ausgeplant");
     const fromMinutes = validMinute(req.fromMinutes);
 
-    const date = leg.startDate ? addDays(leg.startDate, day.dayIndex) : null;
-    const walk = dayWalkOfStored(leg.anchor, day);
-    let position: Coordinate = walk.start;
-    let overrun = 0;
-    const toDrop: string[] = [];
-    const blocks: CurrentBlock[] = day.blocks.map((block) => {
-      const start = position;
-      if (block.stops.length > 0) position = leaveFrom(block.stops[block.stops.length - 1]);
-      const frame = block.kind === "spots" ? frameOf(block, day.fixpoints) : null;
-      if (!frame) return { ...block, stops: [...block.stops] };
-
-      const settled = block.stops.filter((s) => s.status !== "planned");
-      const pending = block.stops.filter((s) => s.status === "planned");
-      // Food is ordered like any spot (reise-planen-und-unterwegs.md,
-      // stage 3); a table booked for eight is a pinned visit and comes
-      // in through the tickets as a hard time, like the tower at 14:00.
-      const open = pending;
-      const breaks = orderBreaksOf(day.breaks, block.id);
-      const base = {
-        start,
-        startMinutes: frame.window.startMinutes,
-        endMinutes: frame.window.endMinutes,
-        stops: [],
-        mode: leg.mode,
-        date,
-        blocked: frame.blocked,
-      };
-      // Where the line stands once what is past is past.
-      const past = lineOf(base, settled.map((s) => orderStopOf(s, frame.tickets)), []);
-      const from = settled.length > 0 ? leaveFrom(settled[settled.length - 1]) : start;
-      const result = orderDay({
-        ...base,
-        start: from,
-        startMinutes: fromMinutes === null ? past.endMinutes : Math.max(past.endMinutes, fromMinutes),
-        stops: open.map((s) => orderStopOf(s, frame.tickets)),
-        breaks: breaks.map((b) => ({ ...b, position: Math.max(0, b.position - settled.length) })),
-      });
-      overrun += result.overrunMinutes;
-      toDrop.push(...result.toDrop);
-      const byRef = new Map(open.map((s) => [s.osmRef, s]));
-      const ordered = result.order.map((ref) => byRef.get(ref)!);
-      return { ...block, stops: [...settled, ...ordered] };
-    });
-
-    recomputeDay(blocks, walk, leg.mode);
+    const { blocks, overrunMinutes: overrun, toDrop } = orderBlocks(leg, day, day.blocks, fromMinutes);
     await saveMovedDays(plan.id, [{ day, blocks }]);
 
     const updated = await loadPlan(plan.id, userId);
@@ -118,6 +74,66 @@ export const orderTripDay = api(
     return { plan: updated, overrunMinutes: overrun, toDrop, elsewhere: elsewhereOf(updated, leg, day, toDrop) };
   },
 );
+
+/**
+ * The day's spots blocks in their best order, from what is past onward.
+ * Shared by "Reihenfolge vorschlagen" and "Tag füllen", which orders the
+ * day it fills. Nothing is written.
+ */
+export function orderBlocks(
+  leg: StoredLeg,
+  day: StoredDay,
+  blocks: readonly CurrentBlock[],
+  fromMinutes: number | null,
+): { blocks: CurrentBlock[]; overrunMinutes: number; toDrop: string[] } {
+  const date = leg.startDate ? addDays(leg.startDate, day.dayIndex) : null;
+  const walk = dayWalkOfStored(leg.anchor, day);
+  let position: Coordinate = walk.start;
+  let overrun = 0;
+  const toDrop: string[] = [];
+  const ordered: CurrentBlock[] = blocks.map((block) => {
+    const start = position;
+    if (block.stops.length > 0) position = leaveFrom(block.stops[block.stops.length - 1]);
+    // The frame is the stored block's: an inserted stop does not move it.
+    const stored = day.blocks.find((b) => b.id === block.id);
+    const frame = block.kind === "spots" && stored ? frameOf(stored, day.fixpoints) : null;
+    if (!frame) return { ...block, stops: [...block.stops] };
+
+    const settled = block.stops.filter((s) => s.status !== "planned");
+    const pending = block.stops.filter((s) => s.status === "planned");
+    // Food is ordered like any spot (reise-planen-und-unterwegs.md,
+    // stage 3); a table booked for eight is a pinned visit and comes
+    // in through the tickets as a hard time, like the tower at 14:00.
+    const open = pending;
+    const breaks = orderBreaksOf(day.breaks, block.id);
+    const base = {
+      start,
+      startMinutes: frame.window.startMinutes,
+      endMinutes: frame.window.endMinutes,
+      stops: [],
+      mode: leg.mode,
+      date,
+      blocked: frame.blocked,
+    };
+    // Where the line stands once what is past is past.
+    const past = lineOf(base, settled.map((s) => orderStopOf(s, frame.tickets)), []);
+    const from = settled.length > 0 ? leaveFrom(settled[settled.length - 1]) : start;
+    const result = orderDay({
+      ...base,
+      start: from,
+      startMinutes: fromMinutes === null ? past.endMinutes : Math.max(past.endMinutes, fromMinutes),
+      stops: open.map((s) => orderStopOf(s, frame.tickets)),
+      breaks: breaks.map((b) => ({ ...b, position: Math.max(0, b.position - settled.length) })),
+    });
+    overrun += result.overrunMinutes;
+    toDrop.push(...result.toDrop);
+    const byRef = new Map(open.map((s) => [s.osmRef, s]));
+    return { ...block, stops: [...settled, ...result.order.map((ref) => byRef.get(ref)!)] };
+  });
+
+  recomputeDay(ordered, walk, leg.mode);
+  return { blocks: ordered, overrunMinutes: overrun, toDrop };
+}
 
 export interface AddTripBreakRequest {
   planId: number;

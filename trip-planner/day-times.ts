@@ -68,7 +68,9 @@ export function frameOf(block: Pick<StoredBlock, "startMinutes" | "budgetMinutes
   return { window: { startMinutes: start, endMinutes: end }, blocked, tickets };
 }
 
-export function orderStopOf(stop: StoredStop, tickets: ReadonlyMap<string, number>): OrderStop {
+export function orderStopOf(
+  stop: Pick<StoredStop, "osmRef" | "lat" | "lon" | "extent" | "dwellMinutes" | "openingHours" | "priority">,
+  tickets: ReadonlyMap<string, number>): OrderStop {
   return {
     ref: stop.osmRef,
     lat: stop.lat,

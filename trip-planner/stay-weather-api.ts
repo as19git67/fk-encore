@@ -172,6 +172,43 @@ export async function applyStopMoves(
 async function notesOf(leg: StoredLeg, now: Date = new Date()): Promise<{ notes: WeatherNote[]; degraded: boolean }> {
   const startDate = leg.startDate;
   if (startDate === null || leg.kind === "transit") return { notes: [], degraded: false };
+  const { weather, degraded } = await stayWeather(leg, now);
+  const today = localToday(zoneAt(leg.anchor), now);
+  const noteDays: NoteDay[] = leg.days.filter((day) => day.detailed).map((day) => ({
+    dayIndex: day.dayIndex,
+    past: addDays(startDate, day.dayIndex) < today,
+    walk: dayWalkOfStored(leg.anchor, day),
+    stops: day.blocks.flatMap((block) => block.stops).map((stop) => {
+      const bound = day.fixpoints.find((fix) => fix.spotRef === stop.osmRef);
+      // A fixed time is a fixpoint with this spot (ideas plan): the
+      // stop's own `pinned` only says a person put it there, which on
+      // a trip of ideas every stop is.
+      const staysBecause = bound ? `${bound.label} ${clock(bound.startMinutes)}` : undefined;
+      return {
+        osmRef: stop.osmRef,
+        name: stop.title ?? stop.name ?? "Spot",
+        category: stop.category,
+        kind: stop.kind ?? null,
+        movable: stop.status === "planned" && !bound,
+        staysBecause: stop.status === "planned" ? staysBecause : undefined,
+      };
+    }),
+  }));
+  return { notes: weatherNotes(noteDays, weather), degraded };
+}
+
+/**
+ * The forecast of each day of a stay within its window, by day index.
+ * Shared by the weather notes and "Tag füllen". A stay without dates,
+ * or beyond the forecast, has none.
+ */
+export async function stayWeather(
+  leg: StoredLeg,
+  now: Date = new Date(),
+): Promise<{ weather: Map<number, DayWeather>; degraded: boolean }> {
+  const weather = new Map<number, DayWeather>();
+  const startDate = leg.startDate;
+  if (startDate === null || leg.kind === "transit") return { weather, degraded: false };
   const zone = zoneAt(leg.anchor);
   const days = leg.days.filter((day) => day.detailed);
   const dates = days.map((day) => addDays(startDate, day.dayIndex));
@@ -180,10 +217,6 @@ async function notesOf(leg: StoredLeg, now: Date = new Date()): Promise<{ notes:
   const wanted = [...new Set(dates.flatMap((date) => [addDays(date, -1), date, addDays(date, 1)]))];
   const { byDay, degraded } = await forecastFor(leg.anchor, wanted, now);
   const hours = [...byDay.values()].flat();
-
-  const today = localToday(zone, now);
-  const weather = new Map<number, DayWeather>();
-  const noteDays: NoteDay[] = [];
   for (const day of days) {
     const date = addDays(startDate, day.dayIndex);
     const offset = (zone ? offsetMinutes(zone, date) : null) ?? 0;
@@ -195,28 +228,8 @@ async function notesOf(leg: StoredLeg, now: Date = new Date()): Promise<{ notes:
       .sort((a, b) => a.minutes - b.minutes);
     const summary = dayWeatherOf(within);
     if (summary) weather.set(day.dayIndex, summary);
-    noteDays.push({
-      dayIndex: day.dayIndex,
-      past: date < today,
-      walk: dayWalkOfStored(leg.anchor, day),
-      stops: day.blocks.flatMap((block) => block.stops).map((stop) => {
-        const bound = day.fixpoints.find((fix) => fix.spotRef === stop.osmRef);
-        // A fixed time is a fixpoint with this spot (ideas plan): the
-        // stop's own `pinned` only says a person put it there, which on
-        // a trip of ideas every stop is.
-        const staysBecause = bound ? `${bound.label} ${clock(bound.startMinutes)}` : undefined;
-        return {
-          osmRef: stop.osmRef,
-          name: stop.title ?? stop.name ?? "Spot",
-          category: stop.category,
-          kind: stop.kind ?? null,
-          movable: stop.status === "planned" && !bound,
-          staysBecause: stop.status === "planned" ? staysBecause : undefined,
-        };
-      }),
-    });
   }
-  return { notes: weatherNotes(noteDays, weather), degraded };
+  return { weather, degraded };
 }
 
 /** The day's window; a day of ideas has one, an older day its blocks. */
