@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 3 built.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 4 built.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -294,6 +294,23 @@ the existing `TripSpotDetailView` content and `stopActions`/
 actions stay in one place). Map variant of the picker (`TripSpotMapView`):
 circles sized by fame, "In diesem Bereich suchen" sends the visible region
 to the highlights and name search.
+
+**Built (2026-11-10).** `POST …/legs/:legIndex/suggest-day` in
+`trip-planner/suggest-day.ts` answers for up to 60 places at once (an
+idea's own duration and hours win; unknown hours never count as closed;
+past days are skipped; without room, the open day with most time left,
+marked `full`). Highlights carry `openingHours`; highlights and the name
+search take an `area` (`search-area.ts`, clamped to 300 m–25 km) — around
+an area the highlights come by fame, without the model's order.
+iOS: `TripSpotPickerView` (search field for name or map link, chips
+Alles/Ideen/Highlights/Essen/Mehr, rows from `TripSpotPicker.items`,
+"+ Tag n", long press and the details for the other days and "Als Idee
+behalten", list or map with "In diesem Bereich suchen") is the way in
+from the stay plan, the day's "Spot hinzufügen" and the stay sheet on a
+trip of ideas; food is `TripFoodListView` aimed at the first day with an
+hour left. Spot details in the stay plan are a sheet at two heights
+(`TripSpotDetailPager`, swipe sideways through the day). `TripPoolView`
+and `TripPlaceSearchView` stay until stage 7.
 
 ### Stage 5 — on the road (backend + iOS)
 

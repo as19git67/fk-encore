@@ -142,4 +142,11 @@ struct TripAddFindResponse: Decodable, Sendable {
     let legIndex: Int
     let merged: Bool
     let unknown: [String]
+    /// The idea it became, by its ref in the trip (stage 4).
+    var entry: Entry? = nil
+    var matchedOsmRef: String? = nil
+
+    struct Entry: Decodable, Sendable {
+        let osmRef: String
+    }
 }

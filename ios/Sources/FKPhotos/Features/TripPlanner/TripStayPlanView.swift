@@ -27,6 +27,10 @@ struct TripStayPlanView: View {
     @State private var picked: TripStayMapPick?
     /// The card being dragged, so the day it hovers over can say so.
     @State private var targetedDay: Int?
+    /// The card whose details are open, as a sheet over the days (stage 4).
+    @State private var detailPick: TripStayDetailPick?
+    /// The spot picker (stage 4).
+    @State private var picking = false
 
     private enum Layout: String { case list, map }
 
@@ -53,6 +57,22 @@ struct TripStayPlanView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 180)
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button("Spot hinzufügen", systemImage: "plus") { picking = true }
+            }
+        }
+        .sheet(isPresented: $picking) {
+            TripSpotPickerView(viewModel: viewModel)
+        }
+        .sheet(item: $detailPick) { pick in
+            TripSpotDetailPager(
+                stops: viewModel.leg?.days.first(where: { $0.dayIndex == pick.dayIndex })
+                    .map(TripStayPlan.stops(of:)) ?? [pick.stop],
+                selected: pick.stop,
+                mode: viewModel.leg?.transportMode ?? .foot,
+                onSave: { await viewModel.saveNote($0) },
+                actions: stopActions,
+            )
         }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() },
                             dismiss: { viewModel.errorMessage = nil })
@@ -109,11 +129,17 @@ struct TripStayPlanView: View {
             .accessibilityHint("Öffnet den Tag")
 
             if stops.isEmpty {
-                Text("Spot hierher ziehen oder aus den Ideen hinzufügen")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 72)
+                Button {
+                    picking = true
+                } label: {
+                    Text("Spot hierher ziehen oder hinzufügen")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 72)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
                     .background {
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
@@ -155,19 +181,8 @@ struct TripStayPlanView: View {
     private func card(_ stop: TripStop, day: TripDay, number: Int) -> some View {
         let visit = viewModel.visit(holding: stop, onDay: day.dayIndex)
         return HStack(alignment: .top, spacing: 10) {
-            NavigationLink {
-                TripSpotDetailView(
-                    spot: TripSpotDetail(stop),
-                    mode: viewModel.leg?.transportMode ?? .foot,
-                    onSave: { await viewModel.saveNote($0) },
-                    light: nil,
-                    shelter: nil,
-                ) { closeDetail in
-                    TripSpotActionSections(
-                        actions: stopActions(stop).filter { $0.group != .navigate },
-                        close: closeDetail,
-                    )
-                }
+            Button {
+                detailPick = TripStayDetailPick(stop: stop, dayIndex: day.dayIndex)
             } label: {
                 HStack(alignment: .top, spacing: 10) {
                     if let image = stop.image {

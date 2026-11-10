@@ -565,6 +565,13 @@ final class TripPlannerViewModel {
     /// app shows the cost of the gesture rather than blocking it.
     @discardableResult
     func place(_ candidate: TripCandidate, inBlock blockId: String, onDay day: Int) async -> Bool {
+        await place(osmRef: candidate.osmRef, inBlock: blockId, onDay: day)
+    }
+
+    /// The same by its ref, for a place the spot picker has just made
+    /// an idea and that this screen's plan does not hold yet.
+    @discardableResult
+    func place(osmRef: String, inBlock blockId: String, onDay day: Int) async -> Bool {
         guard requireOnline() else { return false }
         struct Body: Encodable {
             let legIndex: Int
@@ -580,7 +587,7 @@ final class TripPlannerViewModel {
             let response: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/pool/place",
                 body: Body(legIndex: legIndex, dayIndex: day, blockId: blockId,
-                           osmRef: candidate.osmRef),
+                           osmRef: osmRef),
             )
             plan = response.plan
             overfullBlockIds = Set(response.overfullBlockIds)

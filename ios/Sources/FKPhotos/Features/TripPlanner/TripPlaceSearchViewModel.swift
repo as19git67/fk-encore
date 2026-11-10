@@ -48,6 +48,8 @@ struct TripHighlight: Codable, Identifiable, Sendable {
     let category: String
     let distanceM: Double
     let dwellMinutes: Int
+    /// Straight from OSM, unverified (stage 4); nil on an older server.
+    var openingHours: String? = nil
     /// The model's sentence, else the best open-data reason.
     let reason: String?
     let picture: TripRoutePhoto?
@@ -62,7 +64,7 @@ struct TripHighlight: Codable, Identifiable, Sendable {
     func asSearched(legIndex: Int) -> TripSearchedPlace {
         TripSearchedPlace(
             osmRef: osmRef, name: name, lat: lat, lon: lon, distanceM: distanceM,
-            categories: [category], legIndex: legIndex, openingHours: nil, phone: nil, website: nil,
+            categories: [category], legIndex: legIndex, openingHours: openingHours, phone: nil, website: nil,
             dwellMinutes: dwellMinutes, inPool: inPool, planned: planned,
         )
     }
@@ -120,6 +122,36 @@ struct TripSearchPlacesResponse: Codable, Sendable {
     let unavailableLegs: [Int]
 }
 
+/// "In diesem Bereich suchen" (reise-planen-und-unterwegs.md, stage 4):
+/// the part of the map somebody is looking at.
+struct TripSearchArea: Codable, Equatable, Sendable {
+    let lat: Double
+    let lon: Double
+    let radiusM: Double
+}
+
+/// Where "+ Tag n" would put a place: the first day of the stay with
+/// room on which it is open, computed on the server.
+struct TripDaySuggestion: Codable, Equatable, Sendable {
+    let osmRef: String
+    let dayIndex: Int?
+    let blockId: String?
+    /// No day had room; this is the open one with the most time left.
+    let full: Bool
+}
+
+struct TripDaySuggestionsResponse: Codable, Sendable {
+    let suggestions: [TripDaySuggestion]
+}
+
+/// One place asked about, as `POST …/suggest-day` takes it.
+struct TripSuggestSpot: Encodable, Hashable, Sendable {
+    let osmRef: String
+    var dwellMinutes: Int? = nil
+    var openingHours: String? = nil
+    var category: String? = nil
+}
+
 /// The state behind the search screen.
 ///
 /// Adding goes to the same `POST …/finds` every other way in uses, so
@@ -146,6 +178,10 @@ final class TripPlaceSearchViewModel {
     /// say "nothing found" before anything was looked for.
     private(set) var hasSearched = false
     private(set) var addingRef: String?
+    /// The map's area to search instead of the stay's reach; nil is the stay.
+    var area: TripSearchArea?
+    /// "+ Tag n" per place, by its ref (stage 4).
+    private(set) var suggestions: [String: TripDaySuggestion] = [:]
     private(set) var added: [String: String] = [:]
     var errorMessage: String?
 
@@ -179,11 +215,12 @@ final class TripPlaceSearchViewModel {
         struct Body: Encodable {
             let legIndex: Int
             let offset: Int
+            let area: TripSearchArea?
         }
         do {
             let response: TripHighlightsResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/highlights",
-                body: Body(legIndex: legIndex, offset: more ? highlights.count : 0),
+                body: Body(legIndex: legIndex, offset: more ? highlights.count : 0, area: area),
             )
             highlights = more ? highlights + response.results : response.results
             highlightsHaveMore = response.hasMore
@@ -217,11 +254,13 @@ final class TripPlaceSearchViewModel {
             let query: String
             let legIndex: Int?
             let categories: [String]?
+            let area: TripSearchArea?
         }
         do {
             let response: TripSearchPlacesResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/search",
-                body: Body(query: text, legIndex: legIndex, categories: categories),
+                body: Body(query: text, legIndex: legIndex, categories: categories,
+                           area: legIndex == nil ? nil : area),
             )
             results = response.results
             hasMore = response.hasMore
@@ -229,6 +268,56 @@ final class TripPlaceSearchViewModel {
             errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Asks where "+ Tag n" would put these places. Only the ones not
+    /// asked yet; a failure leaves the buttons without a day, which
+    /// then read "Zur Reise".
+    func loadSuggestions(for spots: [TripSuggestSpot], refresh: Bool = false) async {
+        guard let legIndex else { return }
+        let wanted = refresh ? spots : spots.filter { suggestions[$0.osmRef] == nil }
+        guard !wanted.isEmpty else { return }
+        struct Body: Encodable {
+            let spots: [TripSuggestSpot]
+        }
+        do {
+            for chunk in stride(from: 0, to: wanted.count, by: 60).map({ Array(wanted[$0..<min($0 + 60, wanted.count)]) }) {
+                let response: TripDaySuggestionsResponse = try await APIClient.shared.post(
+                    "/trip-planner/plans/\(planId)/legs/\(legIndex)/suggest-day",
+                    body: Body(spots: chunk),
+                )
+                for suggestion in response.suggestions { suggestions[suggestion.osmRef] = suggestion }
+            }
+        } catch {
+            // The row still works without a day.
+        }
+    }
+
+    /// A place became an idea or moved onto a day: what is free changed.
+    func forgetSuggestions() {
+        suggestions = [:]
+    }
+
+    /// Adds a place as an idea and returns the ref it has in the trip,
+    /// for placing it on a day right after.
+    @discardableResult
+    func addReturningRef(_ place: TripSearchedPlace) async -> String? {
+        addingRef = place.osmRef
+        defer { addingRef = nil }
+        do {
+            let response: TripAddFindResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/finds",
+                body: requestFor(place),
+            )
+            added[place.osmRef] = response.merged
+                ? "mit einem vorhandenen Eintrag zusammengeführt"
+                : (ideas ? "in der Reise" : "bei den Kandidaten")
+            errorMessage = nil
+            return response.entry?.osmRef ?? response.matchedOsmRef ?? place.osmRef
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+            return nil
         }
     }
 

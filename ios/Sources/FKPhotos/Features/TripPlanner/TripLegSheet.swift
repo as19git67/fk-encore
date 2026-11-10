@@ -18,6 +18,7 @@ struct TripLegSheet: View {
     @State var viewModel: TripPlannerViewModel
     let leg: TripLeg
     @Environment(\.dismiss) private var dismiss
+    @State private var pickingSpot = false
 
     var body: some View {
         List {
@@ -52,6 +53,15 @@ struct TripLegSheet: View {
             // in memory, and a spot that is only on the server is a spot
             // nobody sees until the next pull.
             Section {
+                // On a trip of ideas the one way in (stage 4): ideas,
+                // highlights, a name or a link, food, with "+ Tag n".
+                if viewModel.plan?.isIdeasTrip == true, !leg.isTransit, leg.position == viewModel.legIndex {
+                    Button {
+                        pickingSpot = true
+                    } label: {
+                        Label("Spot hinzufügen", systemImage: "plus.circle")
+                    }
+                }
                 // The way into the candidates that needs nothing else —
                 // no share sheet, no map app, no model (§9.2, case 4).
                 NavigationLink {
@@ -122,6 +132,9 @@ struct TripLegSheet: View {
             } header: {
                 Text(viewModel.plan?.isIdeasTrip == true ? "Ideen" : "Vorrat")
             }
+        }
+        .sheet(isPresented: $pickingSpot) {
+            TripSpotPickerView(viewModel: viewModel)
         }
         .navigationTitle(leg.isTransit ? "Weiterreise" : "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
