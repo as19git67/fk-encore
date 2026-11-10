@@ -18,6 +18,7 @@ import { DEFAULT_DWELL_MINUTES } from "./candidates";
 import { addDays } from "./leg-dates";
 import { openingOn } from "./opening-hours";
 import { loadPlan, type StoredDay } from "./plan-store";
+import { isStoppableJourney } from "./transit-leg";
 
 /** More than a page of the picker has no reason to be asked at once. */
 export const MAX_SUGGEST_SPOTS = 60;
@@ -93,7 +94,8 @@ export const suggestTripDay = api(
     if (!plan) throw APIError.notFound("plan not found");
     const leg = plan.legs.find((l) => l.position === req.legIndex);
     if (!leg) throw APIError.notFound(`leg ${req.legIndex} not found in this plan`);
-    if (leg.kind !== "stay") {
+    // A stop on the way goes onto the journey's one day (`transit-leg.ts`).
+    if (leg.kind !== "stay" && !isStoppableJourney(leg)) {
       return { suggestions: req.spots.map((s) => ({ osmRef: s.osmRef, dayIndex: null, blockId: null, full: false })) };
     }
     const ideas = new Map(leg.pool.map((c) => [c.osmRef, c]));

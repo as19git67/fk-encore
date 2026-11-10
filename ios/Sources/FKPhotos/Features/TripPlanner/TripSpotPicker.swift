@@ -231,8 +231,20 @@ enum TripSpotPicker {
 
     /// What VoiceOver says for the "+" of a row: the day it goes to,
     /// which the button itself no longer shows (Anton, 10.11.).
-    static func addLabel(_ suggestion: TripDaySuggestion?) -> String {
+    /// Where the search goes when the picker is opened from a day out:
+    /// around its destination, as on foot (`DAY_TRIP_SEARCH_RADIUS_M`).
+    static func dayTripFocus(_ dayIndex: Int?, in leg: TripLeg?)
+        -> (focus: TripDayTripFocus, area: TripSearchArea)? {
+        guard let dayIndex, let anchor = leg?.days.first(where: { $0.dayIndex == dayIndex })?.anchor
+        else { return nil }
+        return (TripDayTripFocus(dayIndex: dayIndex, name: anchor.label ?? "Ausflug"),
+                TripSearchArea(lat: anchor.lat, lon: anchor.lon, radiusM: Double(anchor.radiusM ?? 3_000)))
+    }
+
+    static func addLabel(_ suggestion: TripDaySuggestion?, onTheWay: Bool = false) -> String {
         guard let day = suggestion?.dayIndex else { return "Hinzufügen" }
+        // A journey has one day; "Tag 1" would name a day of a stay.
+        if onTheWay { return "Unterwegs einplanen" }
         return "Auf Tag \(day + 1) legen"
     }
 

@@ -47,6 +47,9 @@ import { inviteToTrip } from "./shares";
 import { addFind } from "./add-find";
 import { getTripItinerary, putTripItinerary, type ItineraryItem } from "./itinerary";
 import { planJournal, undoPlanOp } from "./plan-ops";
+import { tripHighlights } from "./highlights";
+import { suggestTripDay } from "./suggest-day";
+import { placeFromPool } from "./pool";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
 const NEXT = { lat: 48.37, lon: 11.4 };
@@ -922,5 +925,54 @@ describe("taking a change of the itinerary back", () => {
     const plain = await oneStay();
     await editStay(plain.id, 0, { anchorLabel: "Pension Musterhof" });
     expect(await itineraryRows(plain.id)).toEqual([]);
+  });
+});
+
+// MARK: - Stops on the way, on a trip of ideas
+
+describe("a journey by car on a trip of ideas", () => {
+  async function ideasTrip() {
+    const { plan } = await createTripPlan({
+      startEmpty: true,
+      // In the future: a day that is over is not offered.
+      legs: [
+        { title: "Erster Ort", anchor: ANCHOR, anchorLabel: "Hotel am Fluss", days: 2, startDate: "2027-09-05", mode: "car" },
+        { title: "Zweiter Ort", anchor: NEXT, days: 2, startDate: "2027-09-07", mode: "car" },
+      ],
+    });
+    return plan;
+  }
+
+  it("starts with an empty day on the way, offers the corridor and keeps a chosen stop", async () => {
+    const plan = await ideasTrip();
+    const { plan: after } = await addJourney(plan.id, 0, { departAt: "10:00", arriveAt: "16:00" });
+    const journey = after.legs[1];
+    expect(journey.kind).toBe("transit");
+    // Nothing is chosen for the travellers: the window is there, empty.
+    expect(journey.days[0]).toMatchObject({ detailed: true });
+    expect(journey.days[0].blocks).toHaveLength(1);
+    expect(journey.days[0].blocks[0]).toMatchObject({ id: "transit", stops: [] });
+
+    // The place on the way is offered, with its detour as the distance.
+    const offered = await tripHighlights({ planId: plan.id, legIndex: 1 });
+    const onTheWay = offered.results.find((r) => r.osmRef === "node:3");
+    expect(onTheWay).toBeDefined();
+    expect(onTheWay!.distanceM).toBe(800);
+
+    // "+ Tag" puts it onto the journey's one day.
+    const { suggestions } = await suggestTripDay({
+      planId: plan.id, legIndex: 1, spots: [{ osmRef: "node:3", dwellMinutes: 60 }],
+    });
+    expect(suggestions[0]).toMatchObject({ dayIndex: 0, blockId: "transit", full: false });
+
+    await addFind({ planId: plan.id, lat: onTheWay!.lat, lon: onTheWay!.lon, name: onTheWay!.name ?? undefined, legIndex: 1 });
+    const pooled = (await getTripPlan({ planId: plan.id })).plan.legs[1].pool[0];
+    await placeFromPool({ planId: plan.id, legIndex: 1, dayIndex: 0, blockId: "transit", osmRef: pooled.osmRef });
+    expect(stopRefs((await getTripPlan({ planId: plan.id })).plan.legs[1])).toEqual([pooled.osmRef]);
+
+    // A later departure plans the journey again and keeps the stop.
+    const { plan: moved } = await addJourney(plan.id, 0, { departAt: "11:00", arriveAt: "17:00" });
+    expect(moved.legs[1].departMinutes).toBe(660);
+    expect(stopRefs(moved.legs[1])).toEqual([pooled.osmRef]);
   });
 });

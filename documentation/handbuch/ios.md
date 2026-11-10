@@ -242,6 +242,12 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   ihrer Karte im Verlauf steht. „‹Weiterreise› entfernen“ nimmt
   Verkehrsmittel, Zeiten, Nächte und Notiz weg; die Verbindung zwischen
   den Aufenthalten bleibt mit offenen Zeiten.
+- Mit Auto, Rad oder zu Fuß an einem Tag hat das Blatt den Abschnitt
+  „Halte unterwegs“: „Halt hinzufügen“ öffnet die Spot-Auswahl mit Orten
+  nah am Weg (die Entfernung ist der Umweg), „Unterwegs einplanen“ legt
+  einen auf die Fahrt. Wischen löscht einen Halt. Die Halte stehen auch
+  unter der Weiterreise im Verlauf. Ohne Abfahrt und Ankunft gibt es
+  noch keine Halte.
 - Die Planung eines Aufenthalts beginnt mit seinem Namen, darunter Tage,
   Daten und Unterkunft (unterwegs „Tag n von m · heute“ und das Wetter),
   und der Knopf „Ideen (n) und Suche“ öffnet die Spot-Auswahl. Oben steht
@@ -249,7 +255,9 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Ankunft bzw. Abfahrt und rechts „verplant von verfügbar“, unterwegs
   „n von m besucht“; jede Karte nennt Art und Dauer, darunter die
   geschätzte Uhrzeit. Ein Ausflugstag trägt oben die Zeile „Ausflug
-  nach …“ mit Hin- und Rückweg, „Weg zeigen“ und „Fahrt ändern“.
+  nach …“ mit Hin- und Rückweg, „Weg zeigen“, „Dort suchen“ und
+  „Fahrt ändern“. „Dort suchen“ und der leere Tag öffnen die
+  Spot-Auswahl um das Ausflugsziel, und „+ Tag n“ legt auf diesen Tag.
 - Eine Reise öffnet sich mit ihrem Reiseverlauf. Ein Tipp auf einen
   Aufenthalt oder eine seiner Tageszeilen öffnet die Planung des
   Aufenthalts mit allen Tagen auf einem Bildschirm, „Zurück“ führt in den

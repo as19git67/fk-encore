@@ -295,6 +295,13 @@ struct TripJourneySheet: View {
     let onCommit: TripItineraryCommit
     /// "Hafen einfügen" on a ship journey between two stays.
     var onInsertPort: ((TripItineraryItem.ID) -> Void)? = nil
+    /// What is planned on the way so far: nil while the journey has no
+    /// day to put a stop on (no times yet, or not saved).
+    var stops: [TripStop]? = nil
+    /// "Halt hinzufügen": saves the chain as it stands, then opens the
+    /// spot picker on the journey. Answers the refusal, if any.
+    var onAddStop: ((TripItineraryDraft) async -> String?)? = nil
+    var onRemoveStop: ((TripStop) async -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var saving = false
@@ -313,6 +320,10 @@ struct TripJourneySheet: View {
     }
 
     private var isOutbound: Bool { draft.outbound?.id == journeyId }
+    /// By car, bike or on foot, within a day: there is a way to stop on.
+    private var stoppable: Bool {
+        [.car, .bike, .foot].contains(journey.transportMode) && (journey.nights ?? 0) == 0
+    }
     private var timesOpen: Bool { journey.departAt == nil && journey.arriveAt == nil }
 
     var body: some View {
@@ -393,6 +404,10 @@ struct TripJourneySheet: View {
                 Text("Nachtzug, Fähre, Flug über Nacht oder Seetage.")
             }
 
+            if stoppable {
+                stopsSection
+            }
+
             Section("Notiz") {
                 TextField("z. B. Flugnummer, Sitzplatz", text: Binding(
                     get: { journey.note ?? "" },
@@ -460,6 +475,51 @@ struct TripJourneySheet: View {
                 }
                 .disabled(saving)
             }
+        }
+    }
+
+    /// "Halte unterwegs": a viewpoint, a town for lunch on the drive.
+    @ViewBuilder
+    private var stopsSection: some View {
+        Section {
+            ForEach(stops ?? [], id: \.rowId) { stop in
+                LabeledContent(stop.displayName, value: TripClock.duration(stop.dwellMinutes))
+                    .swipeActions {
+                        if let onRemoveStop {
+                            Button("Löschen", role: .destructive) {
+                                Task { await onRemoveStop(stop) }
+                            }
+                        }
+                    }
+            }
+            if !timesOpen, let onAddStop {
+                Button {
+                    Task { await addStop(onAddStop) }
+                } label: {
+                    Label("Halt hinzufügen", systemImage: "plus.circle")
+                }
+                .disabled(saving)
+            }
+        } header: {
+            Text("Halte unterwegs")
+        } footer: {
+            Text(timesOpen
+                 ? "Mit Abfahrt und Ankunft lassen sich Halte auf dem Weg einplanen."
+                 : "Vorschläge liegen nah am Weg; die Entfernung ist der Umweg.")
+        }
+    }
+
+    private func addStop(_ onAddStop: (TripItineraryDraft) async -> String?) async {
+        if let problem = draft.problems().first {
+            error = problem
+            return
+        }
+        saving = true
+        defer { saving = false }
+        if let refusal = await onAddStop(draft) {
+            error = refusal
+        } else {
+            dismiss()
         }
     }
 

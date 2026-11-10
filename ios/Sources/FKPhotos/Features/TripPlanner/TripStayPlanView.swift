@@ -46,6 +46,8 @@ struct TripStayPlanView: View {
     @State private var detailPick: TripStayDetailPick?
     /// The spot picker (stage 4).
     @State private var picking = false
+    /// The day out the picker was opened from, so it searches there.
+    @State private var pickingDayTrip: Int?
     /// Days that are over, opened from their one line (stage 5).
     @State private var expandedPast: Set<Int> = []
     /// The done stop whose check mark was tapped: "Nicht besucht"?
@@ -111,8 +113,8 @@ struct TripStayPlanView: View {
                 }
             }
         }
-        .sheet(isPresented: $picking) {
-            TripSpotPickerView(viewModel: viewModel)
+        .sheet(isPresented: $picking, onDismiss: { pickingDayTrip = nil }) {
+            TripSpotPickerView(viewModel: viewModel, dayTrip: pickingDayTrip)
         }
         .sheet(item: $detailPick) { pick in
             TripSpotDetailPager(
@@ -425,6 +427,10 @@ struct TripStayPlanView: View {
                                   coordinate: TripCoordinate(lat: anchor.lat, lon: anchor.lon)),
                         check: nil, segment: nil, currentMode: leg.transportMode)
                 }
+                Button("Dort suchen") {
+                    pickingDayTrip = day.dayIndex
+                    picking = true
+                }
                 Button("Fahrt ändern") { dayAction(.dayTrip, day.dayIndex) }
             }
             .font(.caption.weight(.semibold))
@@ -531,6 +537,7 @@ struct TripStayPlanView: View {
 
             if stops.isEmpty {
                 Button {
+                    pickingDayTrip = day.anchor == nil ? nil : day.dayIndex
                     picking = true
                 } label: {
                     Text("Spot hierher ziehen oder aus den Ideen hinzufügen")

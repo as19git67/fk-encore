@@ -532,6 +532,20 @@ stage 7 runs in this order, one PR each:
 6. **New sources.** An idea more than 30 km from the stay asks "Ausflug
    daraus machen?"; a GPX file or a tour link through the share menu
    becomes a route.
+7. **Stops on the way (Anton, 2026-11-10).** A journey by car, bike or on
+   foot within a day is a place to stop on: a viewpoint, a town for
+   lunch. **Built (2026-11-10).** On a trip of ideas the journey's one
+   day starts as an empty block "Unterwegs"; nothing is chosen for the
+   travellers (`ideas` in `planTransitLeg`). The highlights of such a
+   journey are its corridor (`corridorPool` in `transit-leg.ts`, by fame,
+   the distance is the detour) and `suggest-day` offers its one day
+   (`isStoppableJourney`); a re-plan keeps the stops (`carry-stops.ts`).
+   iOS: the journey sheet has "Halte unterwegs" with the stops (swipe to
+   delete) and "Halt hinzufügen", which saves the chain first and then
+   opens the spot picker on the journey ("Unterwegs einplanen"); the
+   stops stand under the journey in the itinerary. Without both times
+   there is no day to stop on, and the sheet says so. Still open: the
+   stops as points on the itinerary map.
 
 ### Stage 8 — open spots: a day holds only what is fixed (backend + iOS)
 

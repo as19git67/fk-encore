@@ -161,6 +161,17 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// days aboard rather than as "unterwegs".
     var isAboard: Bool { isTransit && transportMode == .ship }
 
+    /// A journey one can stop on: within a day, by car, bike or on
+    /// foot. The same rule as `isStoppableJourney` on the server.
+    var isStoppable: Bool {
+        isTransit && days.count == 1 && [.car, .bike, .foot].contains(transportMode)
+    }
+
+    /// What is planned on the way of a journey, in order.
+    var stopsOnTheWay: [TripStop] {
+        days.flatMap { $0.blocks.flatMap(\.stops) }
+    }
+
     /// Is this fixed time one of the two the journey writes for
     /// itself — the departure on its first day, the arrival on its
     /// last (§22.7)? They are the journey's frame and are changed in

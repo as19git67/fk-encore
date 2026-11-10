@@ -153,6 +153,8 @@ export interface TransitLegRequest {
 }
 
 export interface TransitPlanOptions {
+  /** A trip of ideas: no stop is chosen for the travellers. */
+  ideas?: boolean;
   categories?: string[];
   interests?: string[];
   dwellMinutes?: Record<string, number>;
@@ -184,28 +186,15 @@ export async function planTransitLeg(
     ?? await pickRegion(req.origin.lat, req.origin.lon);
   const pending = region ? null : await requestRegionFor(req.destination);
 
-  const needsPool = frames.some((f) => f.plannable);
+  // A trip of ideas plans nothing by itself (ideen-statt-pool.md): the
+  // journey's day is an empty window, and a stop goes in only when
+  // somebody picks it from the corridor (`highlights.ts`).
+  const needsPool = !opts.ideas && frames.some((f) => f.plannable);
   let pool: ScoredCandidate[] = [];
   if (needsPool) {
-    // Along the roads when the router knows them (§24, stage 2), the
-    // ellipse around the straight line when it does not.
-    const roads = await roadsBetween(getRouterClient(), req.origin, req.destination, req.mode, DETOUR_BUDGET_M[req.mode]);
-    const regions = await regionsCovering(req.origin, req.destination, DETOUR_BUDGET_M[req.mode], roads);
-    if (regions.length > 0) {
-      const found = await corridorCandidates(regions, req.origin, req.destination, {
-        detourBudgetM: DETOUR_BUDGET_M[req.mode],
-        categories: opts.categories,
-        interests: opts.interests,
-        dwellMinutes: opts.dwellMinutes,
-        requireProminence: true,
-        roads,
-        mode: req.mode,
-      });
-      pool = found
-        .filter((c) => !opts.hidden?.has(c.osmRef))
-        .map(({ detourM: _detour, ...candidate }) => candidate);
-      if (opts.votes) pool = applyVotes(pool, opts.votes);
-    }
+    pool = (await corridorPool(req.origin, req.destination, req.mode, opts))
+      .map(({ detourM: _detour, ...candidate }) => candidate);
+    if (opts.votes) pool = applyVotes(pool, opts.votes);
   }
 
   const direct = travelLeg(req.origin, req.destination, req.mode);
@@ -219,13 +208,15 @@ export async function planTransitLeg(
       baseBudgetMinutes: budget,
       budgetMinutes: budget,
     };
-    if (!frame.plannable) {
+    if (!frame.plannable || opts.ideas) {
       return {
         blocks: [{ id: shape.id, label: shape.label, kind: shape.kind, budgetMinutes: budget,
                    usedMinutes: 0, stops: [], startMinutes: frame.fromMinutes }],
         fixpoints: frame.fixpoints,
-        detailed: false,
-        bufferReason: frame.reason,
+        // The window of a journey one can stop on is a day to put stops
+        // on, as a stay's day of ideas is.
+        detailed: frame.plannable,
+        bufferReason: frame.plannable ? null : frame.reason,
       };
     }
     const solved = solveDay({
@@ -272,6 +263,42 @@ export async function planTransitLeg(
     },
     pending,
   };
+}
+
+/**
+ * The places worth a stop on the way, least detour first, each with
+ * its detour. Empty when no region covers the way yet.
+ */
+export async function corridorPool(
+  origin: Coordinate,
+  destination: Coordinate,
+  mode: TransportMode,
+  opts: Pick<TransitPlanOptions, "categories" | "interests" | "dwellMinutes" | "hidden">,
+): Promise<Array<ScoredCandidate & { detourM: number }>> {
+  const budget = DETOUR_BUDGET_M[mode];
+  // Along the roads when the router knows them (§24, stage 2), the
+  // ellipse around the straight line when it does not.
+  const roads = await roadsBetween(getRouterClient(), origin, destination, mode, budget);
+  const regions = await regionsCovering(origin, destination, budget, roads);
+  if (regions.length === 0) return [];
+  const found = await corridorCandidates(regions, origin, destination, {
+    detourBudgetM: budget,
+    categories: opts.categories,
+    interests: opts.interests,
+    dwellMinutes: opts.dwellMinutes,
+    requireProminence: true,
+    roads,
+    mode,
+  });
+  return found.filter((c) => !opts.hidden?.has(c.osmRef));
+}
+
+/**
+ * A journey one can stop on: within one day, by car, bike or on foot,
+ * with both of its times. Its one day has the block "Unterwegs".
+ */
+export function isStoppableJourney(leg: { kind?: string | null; mode: string; days: readonly unknown[] }): boolean {
+  return leg.kind === "transit" && leg.days.length === 1 && PLANNABLE.has(leg.mode as TransportMode);
 }
 
 /**

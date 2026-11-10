@@ -39,6 +39,15 @@ struct TripItineraryView: View {
     @State private var errorMessage: String?
     @State private var saving = false
     @State private var sheet: ItinerarySheet?
+    /// The spot picker on a journey ("Halt hinzufügen"), and the leg
+    /// the planner was on before, to go back to when it closes.
+    @State private var stopsPick: StopsPick?
+    @State private var stopsReturnTo: Int?
+
+    private struct StopsPick: Identifiable {
+        let legPosition: Int
+        var id: Int { legPosition }
+    }
     @State private var undo: UndoOffer?
 
     /// "Liste | Karte", remembered for the screen.
@@ -137,6 +146,12 @@ struct TripItineraryView: View {
             NavigationStack {
                 sheetContent(which)
             }
+        }
+        .sheet(item: $stopsPick, onDismiss: {
+            if let back = stopsReturnTo { viewModel.select(leg: back) }
+            stopsReturnTo = nil
+        }) { _ in
+            TripSpotPickerView(viewModel: viewModel)
         }
         .task {
             if draft == nil { await load() }
@@ -455,6 +470,14 @@ struct TripItineraryView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
+                        if let stops = stoppableLeg(of: journey)?.stopsOnTheWay, !stops.isEmpty {
+                            Label(stops.map(\.displayName).joined(separator: " · "), systemImage: "mappin")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .accessibilityLabel("Halte unterwegs: "
+                                                    + stops.map(\.displayName).joined(separator: ", "))
+                        }
                     }
                     Spacer(minLength: 6)
                     if let shift = TripItineraryText.zoneShift(journey.zoneShiftMinutes) {
@@ -654,6 +677,9 @@ struct TripItineraryView: View {
                     draft: draft, journeyId: id,
                     onCommit: { next in await commit(next) },
                     onInsertPort: { journeyId in openLater(.port(journeyId)) },
+                    stops: stoppableLeg(of: draft[id])?.stopsOnTheWay,
+                    onAddStop: { next in await addStops(next, journeyId: id) },
+                    onRemoveStop: { stop in await viewModel.returnToPool(stop) },
                 )
             }
         case .port(let id):
@@ -670,6 +696,34 @@ struct TripItineraryView: View {
                 onClear: { await clearHome() },
             )
         }
+    }
+
+    // MARK: - Stops on the way
+
+    /// The journey's own leg, when one can stop on it (`isStoppable`).
+    private func stoppableLeg(of journey: TripItineraryItem?) -> TripLeg? {
+        guard let legId = journey?.legId,
+              let leg = viewModel.plan?.legs.first(where: { $0.id == legId }), leg.isStoppable
+        else { return nil }
+        return leg
+    }
+
+    /// "Halt hinzufügen": the chain is saved first, so the times just
+    /// typed make the journey a leg with a day; then the spot picker
+    /// opens on that leg, and the stay it was on comes back after.
+    private func addStops(_ next: TripItineraryDraft, journeyId: TripItineraryItem.ID) async -> String? {
+        guard let index = next.index(of: journeyId) else { return nil }
+        if let refusal = await commit(next) { return refusal }
+        guard let saved = draft?.items, saved.indices.contains(index),
+              let leg = stoppableLeg(of: saved[index])
+        else { return "Auf dieser Fahrt lassen sich keine Halte einplanen." }
+        stopsReturnTo = viewModel.legIndex
+        viewModel.select(leg: leg.position)
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            stopsPick = StopsPick(legPosition: leg.position)
+        }
+        return nil
     }
 
     /// Open another sheet once the one on screen has gone: a sheet that
