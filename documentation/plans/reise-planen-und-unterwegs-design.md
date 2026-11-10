@@ -135,6 +135,12 @@ Jede der Ansichten oben hat eine Karte, umgeschaltet oben rechts mit „Liste | 
 
 ![Routen: Wege auf der Tageskarte (links) und das Blatt „Weg“ (rechts)](reise-planen-und-unterwegs/10-routen.svg)
 
+## Navigation
+
+Eine Reise öffnet sich im Reiseverlauf, unterwegs gleich in „Aufenthalt planen“ am laufenden Tag. Bildschirme stehen in einem Stapel und „Zurück“ führt zum vorigen; alles Übrige sind Blätter von unten oder Menüs, die über dem Bildschirm liegen, von dem aus sie geöffnet wurden.
+
+![Navigation zwischen den Bildschirmen des Reiseplaners](reise-planen-und-unterwegs/12-navigation.svg)
+
 ## Bestehende Reisen
 
 Reisen, die schon angelegt sind, gehen mit ihren Aufenthalten, Weiterreisen und Tagen in das neue Modell über. Ihre Ideen bleiben, ebenso die Ideen ohne Reise und die schon in Tage eingeplanten Spots. Gesuchte Kandidaten, Strecken und Wünsche (Abstimmungen) entfallen.

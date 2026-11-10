@@ -1886,7 +1886,8 @@ struct TripPlanDayView: View {
         }
         // "Beim nächsten Mal" (§20.3): the same as in the pool — a copy
         // into the collection, the stop stays where it is.
-        actions.append(TripPinSheetAction(id: "keep", title: "Für später merken", systemImage: "lightbulb",
+        actions.append(TripPinSheetAction(id: "keep", title: "Für andere Reisen merken", systemImage: "lightbulb",
+                                          footer: "Eine Kopie in den Ideenvorrat für eine andere Reise; hier bleibt alles, wie es ist.",
                                           closes: false) {
             await viewModel.keepForNextTime(osmRefs: [stop.osmRef])
         })

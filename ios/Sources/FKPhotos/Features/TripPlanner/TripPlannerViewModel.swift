@@ -72,7 +72,7 @@ final class TripPlannerViewModel {
     /// is re-read.
     private var ideasOfferDismissals = 0
     @ObservationIgnored private let ideasOfferMemory = TripIdeasOfferMemory()
-    /// What the last "für später merken" did, in words.
+    /// What the last "für andere Reisen merken" did, in words.
     var keptForNextTime: String?
     /// Set while a hard time is being written or removed (§4.4): both
     /// re-plan the trip, which is not instant.
@@ -1267,7 +1267,7 @@ final class TripPlannerViewModel {
             keptForNextTime = response.sentence
             errorMessage = nil
         } catch {
-            errorMessage = "Das ließ sich nicht für später merken."
+            errorMessage = "Das ließ sich nicht für andere Reisen merken."
         }
     }
 

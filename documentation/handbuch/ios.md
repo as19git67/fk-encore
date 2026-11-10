@@ -214,7 +214,7 @@ Bildschirme (je Titel ein Bildschirm): Neue Reise, Reise, Reiseverlauf
 (Aufenthalte und Weiterreisen als eine Kette, Zuhause an beiden Enden,
 Plus auf der Linie, Umsortieren, ein Datum im Kopf), Spot hinzufügen (Suche, Chips
 Alles, Ideen, Highlights, Ausflüge, Strecken, Essen, Mehr; Abstimmungs-Ring je Idee,
-Feste Zeit, Für später merken, Priorität, Aus den Ideen entfernen), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
+Feste Zeit, Für andere Reisen merken, Priorität, Aus den Ideen entfernen), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
 Wetter, „Ab hier umplanen“, „Umräumen“, „Gruppe trennen“ /
 „Wieder zusammen“), Ausflug, Karte, Strecken (anlegen,
 auf der Karte, Als GPX exportieren), Reisezeiten prüfen,
