@@ -417,6 +417,51 @@ describe("the way there and the way home", () => {
   });
 });
 
+describe("a note on a journey", () => {
+  const notesOf = async (planId: number) =>
+    (await chainOf(planId)).items.map((i) => (i.kind === "journey" ? i.note ?? null : "stay"));
+
+  it("keeps a note on a journey with or without its times, and takes it off again", async () => {
+    const plan = await threeStays();
+    await addJourney(plan.id, 0, { departAt: "10:00", arriveAt: "12:00" });
+
+    const chain = await chainOf(plan.id);
+    chain.items[stayAt(chain.items, 0) + 1].note = "  Zug 123, Wagen 4  ";
+    chain.items[stayAt(chain.items, 1) + 1].note = "Platz am Fenster";
+    await write(plan.id, chain);
+    expect(await notesOf(plan.id)).toEqual(["stay", "Zug 123, Wagen 4", "stay", "Platz am Fenster", "stay"]);
+
+    // A note changes nothing a day holds.
+    const before = await getTripPlan({ planId: plan.id });
+    const again = await chainOf(plan.id);
+    again.items[stayAt(again.items, 1) + 1].note = "";
+    await write(plan.id, again);
+    expect(await notesOf(plan.id)).toEqual(["stay", "Zug 123, Wagen 4", "stay", null, "stay"]);
+    const after = await getTripPlan({ planId: plan.id });
+    expect(after.plan.legs.map(stopRefs)).toEqual(before.plan.legs.map(stopRefs));
+  });
+
+  it("keeps the notes of the way there and the way home while their times are open", async () => {
+    const plan = await threeStays();
+    await setTripHome({ planId: plan.id, ...HOME, label: "Zuhause" });
+    const chain = await chainOf(plan.id);
+    chain.items.unshift({ kind: "journey", departAt: null, arriveAt: null, note: "Flug FX 100" });
+    chain.items.push({ kind: "journey", departAt: null, arriveAt: null, note: "Sitz 12A" });
+    await write(plan.id, chain);
+
+    expect(await notesOf(plan.id)).toEqual(["Flug FX 100", "stay", null, "stay", null, "stay", "Sitz 12A"]);
+    const { plan: stored } = await getTripPlan({ planId: plan.id });
+    expect(stored.legs.every((l) => l.kind === "stay")).toBe(true);
+  });
+
+  it("refuses a note longer than a booking", async () => {
+    const plan = await threeStays();
+    const chain = await chainOf(plan.id);
+    chain.items[stayAt(chain.items, 0) + 1].note = "x".repeat(501);
+    await expect(write(plan.id, chain)).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+});
+
 describe("voting on the way", () => {
   it("lets the group turn a stop on the journey down, and the next plan leaves it out", async () => {
     const plan = await threeStays();

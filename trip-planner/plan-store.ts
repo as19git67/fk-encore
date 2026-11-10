@@ -123,6 +123,13 @@ export interface StoredLeg {
    */
   quartersAboard: boolean;
   tenderPort: boolean;
+  /**
+   * A stay's notes on the journeys around it (migration 0308): the one
+   * that leaves it, and on the first stay the way there from home.
+   * Optional so a leg built in a test needs neither.
+   */
+  departureNote?: string | null;
+  arrivalNote?: string | null;
   /** ISO date of this leg's first day, or null when the trip has no dates. */
   startDate: string | null;
   /**
@@ -547,6 +554,34 @@ export async function setLegPositions(
       .update(tripPlanLegs)
       .set({ position })
       .where(and(eq(tripPlanLegs.id, legId), eq(tripPlanLegs.plan_id, planId)));
+  }
+}
+
+/**
+ * Write the notes on the journeys, one entry per stay in the order the
+ * stays stand in the chain: the note of the journey that leaves it, and
+ * of the way there from home (only the first stay has one).
+ *
+ * By order rather than by id because a stay the chain just inserted has
+ * no id its caller knows.
+ */
+export async function setJourneyNotes(
+  planId: number,
+  notes: ReadonlyArray<{ departure: string | null; arrival: string | null }>,
+  db: Db = dbDefault,
+): Promise<void> {
+  const stays = await db
+    .select({ id: tripPlanLegs.id, departure: tripPlanLegs.departure_note, arrival: tripPlanLegs.arrival_note })
+    .from(tripPlanLegs)
+    .where(and(eq(tripPlanLegs.plan_id, planId), eq(tripPlanLegs.kind, "stay")))
+    .orderBy(asc(tripPlanLegs.position));
+  for (const [index, stay] of stays.entries()) {
+    const wanted = notes[index] ?? { departure: null, arrival: null };
+    if (wanted.departure === stay.departure && wanted.arrival === stay.arrival) continue;
+    await db
+      .update(tripPlanLegs)
+      .set({ departure_note: wanted.departure, arrival_note: wanted.arrival })
+      .where(eq(tripPlanLegs.id, stay.id));
   }
 }
 
@@ -1395,6 +1430,8 @@ export async function loadPlan(
       awaitingRegion: l.awaiting_region,
       quartersAboard: l.quarters_aboard,
       tenderPort: l.tender_port,
+      departureNote: l.departure_note,
+      arrivalNote: l.arrival_note,
       startDate: l.start_date,
       radiusM: l.radius_m,
       dayStartMinutes: l.day_starts_at,

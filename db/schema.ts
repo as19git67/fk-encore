@@ -3670,6 +3670,11 @@ export const tripPlanLegs = pgTable(
     // an Bord" with an hour in hand. A tender port adds the boat back.
     quarters_aboard: boolean("quarters_aboard").notNull().default(false),
     tender_port: boolean("tender_port").notNull().default(false),
+    // A note on a journey, the flight number or the seat (migration
+    // 0308): `departure_note` is the journey leaving this stay,
+    // `arrival_note` the way there from home, read on the first stay.
+    departure_note: text("departure_note"),
+    arrival_note: text("arrival_note"),
     // Optional real dates; absent means "day 1, day 2, …".
     start_date: date("start_date"),
     // What this leg was searched with, so it can be searched again when

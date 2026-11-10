@@ -2150,6 +2150,13 @@
       "when": 1790560000000,
       "tag": "0307_trip_ways",
       "breakpoints": true
+    },
+    {
+      "idx": 308,
+      "version": "7",
+      "when": 1790620000000,
+      "tag": "0308_trip_journey_notes",
+      "breakpoints": true
     }
   ]
 }
