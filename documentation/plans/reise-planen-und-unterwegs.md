@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 6 built; stage 7 in part; stage 8 (open spots, decided 2026-11-10): step 1 built (`placed-by.ts`, `open-return.ts`, `open-capacity.ts`).
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 6 built; stage 7 in part; stage 8 (open spots, decided 2026-11-10): step 1 built (`placed-by.ts`, `open-return.ts`, `open-capacity.ts`); step 2 built on the server (`open-fill.ts`, `open-fill-api.ts`; accepting is a journal entry `fill-day`).
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG

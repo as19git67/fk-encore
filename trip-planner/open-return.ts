@@ -34,7 +34,7 @@ import {
   type StoredStop,
 } from "./plan-store";
 import { localDateIn, zoneAt } from "./time-zone";
-import { candidateOfStop } from "./to-pool";
+import { candidateOfStop, stopOfCandidate } from "./to-pool";
 import type { CurrentBlock } from "./redistribute";
 
 /** The journal kind of soft stops given back after their day; undone by placing them again. */
@@ -197,30 +197,7 @@ export async function placeReturnedAgain(
     try {
       blocks = insertStop({
         blocks,
-        stop: {
-          osmRef: candidate.osmRef,
-          name: candidate.name,
-          localName: candidate.localName ?? null,
-          wikipediaUrl: candidate.wikipediaUrl ?? null,
-          facadeAzimuth: candidate.facadeAzimuth ?? null,
-          kind: candidate.kind ?? null,
-          extent: candidate.extent,
-          lat: candidate.lat,
-          lon: candidate.lon,
-          category: candidate.category,
-          dwellMinutes: candidate.dwellMinutes,
-          score: candidate.score,
-          travelFromPrevious: { minutes: 0, distanceM: 0, travelClass: "short_walk" },
-          status: "planned",
-          pinned: true,
-          note: candidate.note,
-          sourceUrl: candidate.sourceUrl,
-          origin: candidate.origin,
-          priority: candidate.priority,
-          openingHours: candidate.openingHours ?? null,
-          reasons: candidate.reasons,
-          placedBy: "hand",
-        },
+        stop: stopOfCandidate(candidate, "hand"),
         toBlockId: blockId,
         walk: dayWalkOfStored(leg.anchor, day),
         mode: leg.mode,
