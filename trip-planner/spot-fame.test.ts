@@ -14,7 +14,7 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan } from "./plans";
 import { resetFameClient, setFameClient, type FameClient, type ItemFacts } from "./fame-client";
-import { articleOf, fameFor, imagesFor, prominenceAround, refillSpotFame } from "./spot-fame";
+import { articleOf, fameFor, finishLookups, imagesFor, prominenceAround, refillSpotFame } from "./spot-fame";
 import type { CommonsPhoto } from "./commons-client";
 import { getTripPlan } from "./plans";
 import { galleryOf } from "./spot-gallery";
@@ -145,6 +145,19 @@ describe("ranking a pool by open data", () => {
 });
 
 describe("a picture on the card", () => {
+  it("finishes an unfinished lookup at once when a page shows it", async () => {
+    fake.broken = true;
+    const spots = [sight(3, 0.003, "Musterdom")];
+    await fameFor(spots, CITY);
+    expect((await imagesFor(["node:3"])).size).toBe(0);
+
+    fake.broken = false;
+    expect(await finishLookups(["node:3", "node:1"], CITY, { wait: true })).toBe(true);
+    expect((await imagesFor(["node:3"])).get("node:3")?.title).toBe("File:Musterdom Westfassade.jpg");
+    // Nothing open any more.
+    expect(await finishLookups(["node:3"], CITY)).toBe(false);
+  });
+
   it("takes the article's main image first, then Wikidata's, then one taken close by", async () => {
     const bare = { ...sight(4, 0.004, "Brunnen ohne Artikel"), wikidataQid: null, wikipedia: null };
     fake.near = [photo("File:Brunnen 2025.jpg")];

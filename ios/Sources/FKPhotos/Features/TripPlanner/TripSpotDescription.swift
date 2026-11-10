@@ -20,6 +20,16 @@ struct TripSpotDescription: Codable, Equatable, Sendable {
         }
     }
 
+    /// Under the short sentence: "aus Wikivoyage", as in the mock.
+    var shortSourceLabel: String {
+        switch source {
+        case "wikivoyage": return "aus Wikivoyage"
+        case "wikipedia":  return "aus Wikipedia"
+        case "website":    return "von der Website des Orts"
+        default:           return ""
+        }
+    }
+
     var link: URL? { url.flatMap(URL.init(string:)) }
 }
 

@@ -305,6 +305,11 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   „Nicht mehr vorschlagen“. Danach sucht die Liste dort, und „+ Tag n“
   legt auf den Ausflugstag, bis man den Chip „Ausflug …“ schließt. Unter
   „Schon geplant“ stehen die Ausflüge des Aufenthalts mit „Dort suchen“.
+- „Liste | Karte“ oben gilt auch für Ausflüge und Strecken: die Karte
+  zeigt die Ausflugsziele (ein Tipp zeigt die Zeile mit „+“) bzw. alle
+  Strecken mit ihrem Verlauf (ein Tipp öffnet die Details). Fehlen einem
+  Highlight beim ersten Laden noch Bild und Beschreibung, holt der Server
+  sie sofort nach und die Liste zeigt sie wenige Sekunden später.
 - **Strecken.** Der Chip „Strecken“ in „Spot hinzufügen“ zeigt die
   ausgeschilderten Wander- und Radwege in der Nähe, die lohnendsten
   zuerst, mit geschätzter Dauer, Länge und Anstieg. Ein Tipp zeigt den
@@ -342,11 +347,12 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Ein Pin steht nur an einer Karte mit fester Zeit; „Feste Zeit
   entfernen“ im „⋯“ nimmt sie wieder weg. Ohne Foto zeigt die Karte kein
   Bild und keinen Platzhalter.
-- Die Details eines Spots sind ein Blatt: oben Bild, Name, Art und
-  Entfernung zur Unterkunft mit den Chips für feste Zeit, Priorität und
-  Dauer, darunter Ticket, Öffnungszeiten, „Geplant“ und Notiz, dann
-  Karte, Bilder und Beschreibung, in derselben Reihenfolge wie bei einer
-  Strecke. Unten stehen immer „Route“, „Karte“, „Anderer Tag“ (in der
+- Die Details eines Spots sind ein Blatt: oben die Bilder (das Bild des
+  Orts groß, weitere von Wikimedia Commons kleiner daneben, seitlich zum
+  Weiterwischen), dann Name, Art und Entfernung zur Unterkunft, der kurze
+  Satz mit seiner Quelle („aus Wikivoyage“) und eine Zeile mit
+  Öffnungszeit, Dauer und Priorität (dazu die feste Zeit), darunter
+  Ticket, „Geplant“ und Notiz, dann Karte und der ganze Text. Unten stehen immer „Route“, „Karte“, „Anderer Tag“ (in der
   Spot-Auswahl „Hinzufügen“ mit „+“) und „Mehr“ mit allen übrigen
   Aktionen. Die Details einer Strecke haben dieselbe Leiste: „Route“ zum
   Start, „Karte“, „Hinzufügen“ und unter „Mehr“ „Als GPX exportieren“. Die Spot-Auswahl gliedert sich in „Eure Ideen“ und

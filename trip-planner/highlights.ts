@@ -31,7 +31,7 @@ import {
 import { hiddenRefs, loadPlan, type StoredLeg } from "./plan-store";
 import { spotsAround } from "./plans";
 import { stayReach } from "./search-reach";
-import { imagesFor, prominenceAround, type SpotImage } from "./spot-fame";
+import { finishLookups, imagesFor, prominenceAround, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
 import { summariesFor } from "./spot-summary";
 import { haversineMeters } from "./travel";
@@ -86,6 +86,12 @@ export interface HighlightsResponse {
   sorting: boolean;
   /** The region search did not answer, which is not "nothing here". */
   unavailable: boolean;
+  /**
+   * Some places of this page are still being looked up (picture,
+   * description): asking again in a few seconds shows them. Optional
+   * for an app older than this.
+   */
+  picturesPending?: boolean;
 }
 
 export const tripHighlights = api(
@@ -124,7 +130,9 @@ export const tripHighlights = api(
 
     const page = ordered.slice(offset, offset + limit);
     const refs = page.map((p) => p.candidate.osmRef);
-    const [images, descriptions, summaries] = await Promise.all([imagesFor(refs), descriptionsFor(refs), summariesFor(refs)]);
+    const [images, descriptions, summaries, picturesPending] = await Promise.all([
+      imagesFor(refs), descriptionsFor(refs), summariesFor(refs), finishLookups(refs, leg.anchor),
+    ]);
     const inPool = new Set(leg.pool.map((c) => c.osmRef));
     const planned = plannedRefs(leg);
 
@@ -150,6 +158,7 @@ export const tripHighlights = api(
       hasMore: ordered.length > offset + limit,
       sorting: status === "pending" || status === "running",
       unavailable: false,
+      picturesPending,
     };
   },
 );

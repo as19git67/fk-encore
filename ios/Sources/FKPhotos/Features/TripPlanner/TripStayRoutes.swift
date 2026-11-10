@@ -23,6 +23,8 @@ enum TripStayRoutesText {
 struct TripStayRoutesList: View {
     let viewModel: TripPlannerViewModel
     let leg: TripLeg
+    /// "Karte" at the top of the picker: every way on one map.
+    var showsMap = false
 
     @State private var routes: [TripNearbyRoute] = []
     @State private var note: String?
@@ -37,6 +39,33 @@ struct TripStayRoutesList: View {
     private var planId: Int { viewModel.planId }
 
     var body: some View {
+        Group {
+            if showsMap && loaded {
+                TripRoutesMapView(planId: planId, legIndex: leg.position, routes: routes) { shown = $0 }
+            } else {
+                list
+            }
+        }
+        .task(id: leg.position) { await load() }
+        .sheet(item: $shown) { route in
+            NavigationStack {
+                TripRouteCourseView(planId: planId, legIndex: leg.position, route: route,
+                                    onTake: isTaken(route) ? nil : { await add(route, onDay: nil) })
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Schließen", systemImage: "xmark") { shown = nil }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+            .opaqueSheetBackground()
+        }
+        .sheet(isPresented: $addingByHand) {
+            addByHandSheet
+        }
+    }
+
+    private var list: some View {
         List {
             Section {
                 if !loaded {
@@ -65,28 +94,15 @@ struct TripStayRoutesList: View {
             }
         }
         .listStyle(.insetGrouped)
-        .task(id: leg.position) { await load() }
-        .sheet(item: $shown) { route in
-            NavigationStack {
-                TripRouteCourseView(planId: planId, legIndex: leg.position, route: route,
-                                    onTake: isTaken(route) ? nil : { await add(route, onDay: nil) })
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Schließen", systemImage: "xmark") { shown = nil }
-                        }
-                    }
+    }
+
+    private var addByHandSheet: some View {
+        NavigationStack {
+            TripRouteEntryView(planId: planId, legIndex: leg.position) {
+                Task { await viewModel.load() }
             }
-            .presentationDetents([.medium, .large])
-            .opaqueSheetBackground()
         }
-        .sheet(isPresented: $addingByHand) {
-            NavigationStack {
-                TripRouteEntryView(planId: planId, legIndex: leg.position) {
-                    Task { await viewModel.load() }
-                }
-            }
-            .opaqueSheetBackground()
-        }
+        .opaqueSheetBackground()
     }
 
     private func isTaken(_ route: TripNearbyRoute) -> Bool {

@@ -291,6 +291,7 @@ extension TripSpotDetail {
         extent = nil
         image = highlight.picture
         description = highlight.description
+        summary = highlight.summary
     }
 
     /// A search result: what OpenStreetMap knows and nothing more.

@@ -54,72 +54,77 @@ struct TripSpotThumbnail: View {
     }
 }
 
-/// The place's own picture, large, and under it a strip of what its
-/// Commons category holds (candidate ranking, stage 2).
-///
-/// Wikipedia articles use one or two photographs; the category of the
-/// same place often has dozens, taken from every side. The strip loads
-/// when the screen opens and is simply absent when there is nothing
-/// more — or when Commons does not answer, which is not an error over a
-/// place that is otherwise all there.
-struct TripSpotPictures: View {
-    let osmRef: String
-    let image: TripRoutePhoto?
+/// The pictures at the top of a spot's details (mock "Ablauf 2", step
+/// 3): the place's own picture large, the gallery's others smaller
+/// beside it two by two, swiped sideways when there are more than fit.
+/// Every picture opens its page on Commons, where its licence is.
+struct TripSpotGallery: View {
+    /// The place's own first, as the server orders the gallery.
+    let photos: [TripRoutePhoto]
 
-    @State private var more: [TripRoutePhoto] = []
-    @State private var loaded = false
+    private let height: CGFloat = 172
+    private let gap: CGFloat = 6
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let image {
-                Link(destination: URL(string: image.pageUrl) ?? URL(string: "https://commons.wikimedia.org")!) {
-                    TripSpotThumbnail(image: image, height: 220)
-                }
-                .accessibilityLabel("Bild des Orts auf Wikimedia Commons öffnen")
-                Text(image.credit)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-            }
-            if !more.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 8) {
-                        ForEach(more) { photo in
-                            Link(destination: URL(string: photo.pageUrl) ?? URL(string: "https://commons.wikimedia.org")!) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    TripSpotThumbnail(image: photo, height: 96, width: 128)
-                                    Text(photo.credit)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .frame(width: 128, alignment: .leading)
+        if let first = photos.first {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: gap) {
+                            picture(first, width: height * 4 / 3, height: height)
+                            ForEach(Array(stride(from: 1, to: photos.count, by: 2)), id: \.self) { index in
+                                VStack(spacing: gap) {
+                                    small(photos[index])
+                                    if index + 1 < photos.count {
+                                        small(photos[index + 1])
+                                    } else {
+                                        Color.clear.frame(width: smallWidth, height: smallHeight)
+                                    }
                                 }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Weiteres Bild auf Wikimedia Commons öffnen")
                         }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
+                    .frame(height: height)
+                    Text(first.credit)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 16)
                 }
-                .frame(height: 120)
+                .padding(.vertical, 8)
+                .listRowInsets(EdgeInsets())
             }
         }
-        .padding(.bottom, 8)
-        .task { await load() }
     }
 
-    private func load() async {
-        guard !loaded else { return }
-        defer { loaded = true }
+    private var smallHeight: CGFloat { (height - gap) / 2 }
+    private var smallWidth: CGFloat { smallHeight * 4 / 3 }
+
+    private func small(_ photo: TripRoutePhoto) -> some View {
+        picture(photo, width: smallWidth, height: smallHeight)
+    }
+
+    private func picture(_ photo: TripRoutePhoto, width: CGFloat, height: CGFloat) -> some View {
+        Link(destination: URL(string: photo.pageUrl) ?? URL(string: "https://commons.wikimedia.org")!) {
+            TripSpotThumbnail(image: photo, height: height, width: width)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Bild auf Wikimedia Commons öffnen")
+    }
+
+    /// The gallery of a place, its own picture first; just that picture
+    /// when the gallery does not answer.
+    static func load(osmRef: String, image: TripRoutePhoto?) async -> [TripRoutePhoto] {
         do {
             let response: TripRoutePhotosResponse = try await APIClient.shared.get(
                 "/trip-planner/spots/gallery",
                 query: ["osmRef": osmRef],
             )
-            // The large picture is already on screen.
-            more = response.photos.filter { $0.pageUrl != image?.pageUrl }
+            let rest = response.photos.filter { $0.pageUrl != image?.pageUrl }
+            return (image.map { [$0] } ?? []) + rest
         } catch {
-            more = []
+            return image.map { [$0] } ?? []
         }
     }
 }
