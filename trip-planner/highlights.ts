@@ -21,7 +21,7 @@ import { tripSpotFame } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { toCandidates, type ScoredCandidate } from "./candidates";
 import { MAX_CURATION_ENTRIES, signatureOf } from "./curation";
-import { curationContextOf, SHAREABLE_REASON } from "./curation-job";
+import { curationContextOf, SHAREABLE_REASON } from "./highlights-model";
 import {
   requestHighlightsOrder,
   storedHighlights,

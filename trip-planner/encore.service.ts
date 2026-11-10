@@ -65,7 +65,6 @@ import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
 import { tickLiveActivities } from "./live-activity";
 import { refillSpotFame } from "./spot-fame";
-import { tickCuration } from "./curation-job";
 import { tickHighlights } from "./highlights-job";
 import { describeSpots } from "./spot-description";
 
@@ -112,19 +111,16 @@ schedule({
   },
 });
 
-// The local model's order of a stay's pool (ranking plan, stage 3):
-// one stay at a time, never on a request path. A pool write marks the
-// stay as due; this asks the model and moves the pool into the answer.
+// The local model's order of a stay's highlights (ideas plan, stage 2):
+// one stay at a time, never on a request path. The name stays from the
+// candidates' curation, which went with the searched pool.
 schedule({
   name: "trip-planner-curation",
-  description: "Let the local model order the candidates of stays whose pool changed.",
+  description: "Let the local model order the highlights of stays that asked for them.",
   service: "trip-planner",
   scheduleLabel: "every 5m",
   nextFire: everyMs(5 * 60_000),
   run: async () => {
-    await tickCuration();
-    // The highlights of a stay of ideas (ideas plan, stage 2): the
-    // same model and prompt, a list nobody has planned from yet.
     await tickHighlights();
   },
 });
