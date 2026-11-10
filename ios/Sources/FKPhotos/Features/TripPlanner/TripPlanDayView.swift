@@ -1884,29 +1884,10 @@ struct TripPlanDayView: View {
                 await viewModel.returnToPool(stop)
             })
         }
-        // "Beim nächsten Mal" (§20.3): the same as in the pool — a copy
-        // into the collection, the stop stays where it is.
-        actions.append(TripPinSheetAction(id: "keep", title: "Für andere Reisen merken", systemImage: "lightbulb",
-                                          footer: "Eine Kopie in den Ideenvorrat für eine andere Reise; hier bleibt alles, wie es ist.",
-                                          closes: false) {
-            await viewModel.keepForNextTime(osmRefs: [stop.osmRef])
-        })
-
-        if ideas {
-            // A trip of ideas proposes nothing by itself, so there is
-            // nothing to hide a spot from: it is taken off the day and
-            // off the ideas.
-            if status == .planned && !isFramed(stop) {
-                actions.append(TripPinSheetAction(
-                    id: "remove", title: "Aus der Reise entfernen", systemImage: "trash",
-                    role: .destructive,
-                    footer: "Er verlässt den Tag und die Ideen. In der Spot-Auswahl lässt er sich wieder hinzufügen.",
-                    group: .remove,
-                ) {
-                    await viewModel.removeFromTrip(stop)
-                })
-            }
-        } else {
+        // On a day the card only leaves the day: keeping it for another
+        // trip and taking it out of the trip are actions of an idea, in
+        // the spot picker (Anton, 10.11.).
+        if !ideas {
             actions.append(TripPinSheetAction(
                 id: "hide", title: "Für diese Reise ausblenden", systemImage: "eye.slash",
                 role: .destructive,

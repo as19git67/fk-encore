@@ -630,14 +630,6 @@ final class TripPlannerViewModel {
         await drop(osmRef: candidate.osmRef)
     }
 
-    /// Take a planned stop off its day and off the ideas (a trip of
-    /// ideas, where nothing is proposed that could be hidden instead).
-    func removeFromTrip(_ stop: TripStop) async {
-        await returnToPool(stop)
-        guard errorMessage == nil else { return }
-        await drop(osmRef: stop.osmRef)
-    }
-
     private func drop(osmRef: String) async {
         guard requireOnline() else { return }
         struct Body: Encodable {
