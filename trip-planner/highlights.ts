@@ -34,7 +34,8 @@ import { stayReach } from "./search-reach";
 import { finishLookups, imagesFor, prominenceAround, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
 import { summariesFor } from "./spot-summary";
-import { haversineMeters } from "./travel";
+import { isStoppableJourney, corridorPool } from "./transit-leg";
+import { haversineMeters, type TransportMode } from "./travel";
 import { parseSearchArea, type SearchArea } from "./search-area";
 
 const DEFAULT_LIMIT = 15;
@@ -61,7 +62,7 @@ export interface Highlight {
   lat: number;
   lon: number;
   category: string;
-  /** From the stay's lodging. */
+  /** From the stay's lodging; on a journey, the detour off the way. */
   distanceM: number;
   dwellMinutes: number;
   /** Straight from OSM, for the day a place is open on (stage 4). */
@@ -106,12 +107,25 @@ export const tripHighlights = api(
     const leg = plan.legs.find((l) => l.position === req.legIndex);
     if (!leg) throw APIError.notFound(`leg ${req.legIndex} not found in this plan`);
     const empty = { results: [], hasMore: false, sorting: false };
-    if (leg.kind !== "stay") return { ...empty, unavailable: false };
-    if (!leg.regionDb) return { ...empty, unavailable: true };
+    const along = isStoppableJourney(leg) && leg.origin !== null && !area;
+    if (leg.kind !== "stay" && !isStoppableJourney(leg)) return { ...empty, unavailable: false };
+    if (!leg.regionDb && !along) return { ...empty, unavailable: true };
 
     let ranked: ScoredCandidate[];
+    // On a journey the distance that matters is the detour, not the
+    // way from a lodging it does not have.
+    let detours: Map<string, number> | null = null;
     try {
-      ranked = await rankedAround(leg, plan.constraints, await hiddenRefs(plan.id), area);
+      if (along) {
+        const found = await corridorPool(leg.origin as { lat: number; lon: number }, leg.anchor,
+          leg.mode as TransportMode, { interests: interestsOf(plan.constraints), hidden: await hiddenRefs(plan.id) });
+        detours = new Map(found.map((c) => [c.osmRef, c.detourM]));
+        ranked = found
+          .map(({ detourM: _detour, ...candidate }) => candidate)
+          .sort((a, b) => b.score - a.score || a.osmRef.localeCompare(b.osmRef));
+      } else {
+        ranked = await rankedAround(leg, plan.constraints, await hiddenRefs(plan.id), area);
+      }
     } catch (err) {
       if (err instanceof APIError) return { ...empty, unavailable: true };
       throw err;
@@ -119,7 +133,8 @@ export const tripHighlights = api(
 
     let status: HighlightsStatus | null = null;
     let ordered: Array<{ candidate: ScoredCandidate; reason: string | null }>;
-    if (area) {
+    // The model orders a stay; a journey goes by fame, as a map corner does.
+    if (area || along) {
       ordered = orderBy(ranked, null);
     } else {
       const top = ranked.slice(0, MAX_CURATION_ENTRIES);
@@ -144,7 +159,7 @@ export const tripHighlights = api(
         lat: candidate.lat,
         lon: candidate.lon,
         category: candidate.category,
-        distanceM: Math.round(haversineMeters(leg.anchor, candidate)),
+        distanceM: detours?.get(candidate.osmRef) ?? Math.round(haversineMeters(leg.anchor, candidate)),
         dwellMinutes: candidate.dwellMinutes,
         openingHours: candidate.openingHours ?? null,
         reason,
@@ -173,9 +188,7 @@ async function rankedAround(
   const spots = area
     ? await spotsAround(leg.regionDb, { lat: area.lat, lon: area.lon }, area.radiusM, undefined)
     : await spotsAround(leg.regionDb, leg.anchor, stayReach(leg), undefined);
-  const interests = Array.isArray(constraints.interests)
-    ? (constraints.interests as unknown[]).filter((v): v is string => typeof v === "string")
-    : undefined;
+  const interests = interestsOf(constraints);
   return toCandidates(spots, {
     interests,
     prominence: await prominenceAround(spots, leg.anchor),
@@ -183,6 +196,12 @@ async function rankedAround(
   })
     .filter((c) => !hidden.has(c.osmRef))
     .sort((a, b) => b.score - a.score || a.osmRef.localeCompare(b.osmRef));
+}
+
+function interestsOf(constraints: Record<string, unknown>): string[] | undefined {
+  return Array.isArray(constraints.interests)
+    ? (constraints.interests as unknown[]).filter((v): v is string => typeof v === "string")
+    : undefined;
 }
 
 /** Hand the best of the list to the background, unless it already has them. */

@@ -39,10 +39,19 @@ struct TripSpotPickerView: View {
 
     /// `chip` is where the picker opens: the stay sheet's "Ideen",
     /// "Ausflüge" and "Strecken" open on theirs.
-    init(viewModel: TripPlannerViewModel, chip: TripPickerChip = .all) {
+    /// `dayTrip` opens it from a day out: the search goes around where
+    /// that day goes, and "+ Tag n" adds to that day.
+    init(viewModel: TripPlannerViewModel, chip: TripPickerChip = .all, dayTrip: Int? = nil) {
         _viewModel = State(initialValue: viewModel)
-        _search = State(initialValue: TripPlaceSearchViewModel(
-            planId: viewModel.planId, legIndex: viewModel.legIndex, ideas: true))
+        let search = TripPlaceSearchViewModel(
+            planId: viewModel.planId, legIndex: viewModel.legIndex, ideas: true)
+        var chip = chip
+        if let focus = TripSpotPicker.dayTripFocus(dayTrip, in: viewModel.leg) {
+            search.area = focus.area
+            _tripFocus = State(initialValue: focus.focus)
+            chip = .highlights
+        }
+        _search = State(initialValue: search)
         _chip = State(initialValue: chip)
         _ballot = State(initialValue: TripStayBallot(planId: viewModel.planId, legIndex: viewModel.legIndex))
     }
@@ -87,7 +96,7 @@ struct TripSpotPickerView: View {
                 .onChange(of: items.map(\.id)) { _, _ in
                     Task { await suggest() }
                 }
-                .navigationTitle(viewModel.leg.map { "Spots für \($0.displayTitle)" } ?? "Spots")
+                .navigationTitle(viewModel.leg.map { $0.isTransit ? "Halte unterwegs" : "Spots für \($0.displayTitle)" } ?? "Spots")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .principal) {
@@ -405,7 +414,7 @@ struct TripSpotPickerView: View {
             let focused = tripFocus?.dayIndex
             TripAddButton(running: busy == item.id,
                           full: focused == nil && suggestion?.full == true,
-                          label: focused.map { "Auf Tag \($0 + 1) legen" } ?? TripSpotPicker.addLabel(suggestion)) {
+                          label: focused.map { "Auf Tag \($0 + 1) legen" } ?? TripSpotPicker.addLabel(suggestion, onTheWay: viewModel.leg?.isTransit == true)) {
                 Task { await add(item, onDay: focused ?? suggestion?.dayIndex) }
             }
             .disabled(busy != nil)

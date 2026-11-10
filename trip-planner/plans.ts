@@ -1541,6 +1541,7 @@ export const planPendingTrip = api(
 async function planTransitFromRequest(
   legReq: LegRequest,
   trip: {
+    ideas?: boolean;
     categories?: string[];
     interests?: string[];
     dwellMinutes?: Record<string, number>;

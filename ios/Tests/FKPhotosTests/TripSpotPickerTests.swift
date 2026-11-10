@@ -73,6 +73,13 @@ final class TripSpotPickerTests: XCTestCase {
             TripDaySuggestion(osmRef: "x", dayIndex: nil, blockId: nil, full: false)), "Hinzufügen")
     }
 
+    func testOnAJourneyTheButtonSaysOnTheWayNotADay() {
+        XCTAssertEqual(TripSpotPicker.addLabel(
+            TripDaySuggestion(osmRef: "x", dayIndex: 0, blockId: "transit", full: false), onTheWay: true),
+            "Unterwegs einplanen")
+        XCTAssertEqual(TripSpotPicker.addLabel(nil, onTheWay: true), "Hinzufügen")
+    }
+
     func testTheSearchRadiusIsHalfTheVisibleMap() {
         let radius = TripSpotPicker.radiusM(latitudeDelta: 0.02, longitudeDelta: 0.02, latitude: 0)
         XCTAssertEqual(radius, 1_110, accuracy: 1)
