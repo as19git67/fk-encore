@@ -77,10 +77,11 @@ struct TripPlanDayView: View {
             if viewModel.isLoading && viewModel.plan == nil {
                 ProgressView("Plan wird geladen…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if viewModel.plan != nil, viewModel.leg?.isTransit != true {
+            } else if viewModel.plan != nil {
+                // Always the itinerary, also when the selected leg is a
+                // journey: a journey is its sheet in the itinerary, not a
+                // day screen of its own (Anton, 10.11.).
                 itineraryRoot
-            } else if let day = viewModel.day, let leg = viewModel.leg {
-                content(day: day, leg: leg)
             } else if let message = viewModel.errorMessage {
                 ContentUnavailableView("Plan nicht verfügbar", systemImage: "map", description: Text(message))
             } else {
@@ -99,9 +100,6 @@ struct TripPlanDayView: View {
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() }, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let day = viewModel.day, let leg = viewModel.leg, leg.isTransit {
-                dayMapItem(day: day, leg: leg)
-            }
             if viewModel.day != nil, viewModel.leg != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     // Only what belongs to the whole trip (§25). What
