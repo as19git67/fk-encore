@@ -132,6 +132,17 @@ final class TripItineraryStayDaysTests: XCTestCase {
         XCTAssertEqual(rows[2].fill, 0)
     }
 
+    func testADayArrivedAtAfterItsEndSaysSo() {
+        let draft = TripItineraryDraft(startDate: "2026-11-27", hasHome: false, items: [
+            stay("Musterstadt", days: 2),
+        ])
+        let late = TripDay(id: 1, dayIndex: 0, detailed: true, bufferReason: nil, blocks: [], fixpoints: [])
+        let rows = TripItineraryDays.rows(stay: draft.items[0], dated: draft.dated()[0], days: [late],
+                                          arrival: "19:51", departure: nil)
+        XCTAssertEqual(rows[0].summary, "keine Zeit frei")
+        XCTAssertEqual(rows[1].summary, "noch frei")
+    }
+
     func testDaysWithoutADateAreOnlyNumbered() {
         let draft = TripItineraryDraft(startDate: nil, hasHome: false, items: [stay("Musterstadt", days: 2)])
         let rows = TripItineraryDays.rows(stay: draft.items[0], dated: draft.dated()[0], days: [],

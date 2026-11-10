@@ -66,6 +66,18 @@ describe("a day the group only reaches later", () => {
     expect(gone.blocks[0].id).toBe("midday");
   });
 
+  it("keeps what is left of the last block, since no block comes after it to take over", () => {
+    // A trip of ideas has one block of ten hours. Arriving at 16:00
+    // leaves three of them: less than a third, but the whole evening,
+    // and dropping it sent every spot to the next day.
+    const IDEAS = [block("day", 600)];
+    const { blocks } = scheduleDay({ blocks: IDEAS, dayStartMinutes: at(16), nominalStartMinutes: at(9) });
+    expect(blocks.map((b) => [b.id, b.startMinutes, b.budgetMinutes])).toEqual([["day", at(16), 180]]);
+    // A sliver is still not a block.
+    const late = scheduleDay({ blocks: IDEAS, dayStartMinutes: at(18, 45), nominalStartMinutes: at(9) });
+    expect(late.blocks).toEqual([]);
+  });
+
   it("leaves a day that starts on time untouched", () => {
     const { blocks, dropped } = scheduleDay({ blocks: DAY, dayStartMinutes: at(9), nominalStartMinutes: at(9) });
     expect(dropped).toEqual([]);

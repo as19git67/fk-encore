@@ -63,7 +63,10 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 200)), "3 h 20 von 9 h")
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 0)), "noch frei")
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 600, over: 60)), "1 h zu viel")
-        XCTAssertNil(TripStayPlan.fillLine(day(0, [])))
+        // An older trip's day without a clock still has its blocks.
+        XCTAssertNil(TripStayPlan.fillLine(day(0, [block("day", [])])))
+        // Arriving after the day's end leaves no block and no window.
+        XCTAssertEqual(TripStayPlan.fillLine(day(0, [])), "keine Zeit frei")
         XCTAssertEqual(TripStayPlan.fill(day(0, [], planned: 270)) ?? 0, 0.5, accuracy: 1e-9)
     }
 
