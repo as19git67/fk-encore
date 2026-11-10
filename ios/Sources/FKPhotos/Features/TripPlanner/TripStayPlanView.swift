@@ -33,6 +33,8 @@ struct TripStayPlanView: View {
     @State private var picked: TripStayMapPick?
     /// What a button of the marker's sheet opens once that sheet is gone.
     @State private var afterPin: (() -> Void)?
+    /// The hour the map's slider is at; nil until it is moved.
+    @State private var sliderMinutes: Int?
     /// The card being dragged, so the day it hovers over can say so.
     @State private var targetedDay: Int?
     /// The card whose details are open, as a sheet over the days (stage 4).
@@ -955,6 +957,15 @@ struct TripStayPlanView: View {
                         .frame(width: 26, height: 26)
                         .background(Color.secondary, in: .circle)
                 }
+                if let wayDay, let minutes = sliderMinutes,
+                   let here = TripStayPlan.position(at: minutes, day: wayDay, leg: leg) {
+                    Annotation("Nach Plan um \(TripClock.format(minutes))",
+                               coordinate: CLLocationCoordinate2D(latitude: here.lat, longitude: here.lon)) {
+                        Image(systemName: "figure.walk.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.white, Color.accentColor)
+                    }
+                }
                 ForEach(markers) { marker in
                     Annotation(marker.title, coordinate: marker.coordinate) {
                         Button {
@@ -971,7 +982,14 @@ struct TripStayPlanView: View {
             .task(id: wayDay.map(wayKey)) {
                 if let wayDay { await viewModel.loadDayWays(dayIndex: wayDay.dayIndex) }
             }
+
+            // Where the plan has you at an hour, say to check a light
+            // (mock "Kartenvarianten", B): only for one chosen day.
+            if let wayDay, let window = wayDay.window, window.minutes > 0 {
+                timeSlider(window: window)
+            }
         }
+        .onChange(of: mapDay) { sliderMinutes = nil }
         // A tap on a marker opens the same things the card offers
         // (mock "Kartenvarianten", B): Details, Route, the actions.
         .sheet(item: $picked, onDismiss: {
@@ -1072,6 +1090,24 @@ struct TripStayPlanView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func timeSlider(window: TripDayWindow) -> some View {
+        let value = Binding<Double>(
+            get: { Double(sliderMinutes ?? window.startMinutes) },
+            set: { sliderMinutes = Int($0) },
+        )
+        return HStack(spacing: 12) {
+            Text(TripClock.format(sliderMinutes ?? window.startMinutes))
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                .frame(width: 52, alignment: .leading)
+            Slider(value: value, in: Double(window.startMinutes)...Double(window.endMinutes), step: 5)
+                .accessibilityLabel("Uhrzeit nach Plan")
+                .accessibilityValue(TripClock.format(sliderMinutes ?? window.startMinutes))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     /// A stay of one day has nowhere else to put an idea: the tap puts
@@ -1359,6 +1395,29 @@ enum TripStayPlan {
         var line = "hin \(TripClock.format(depart)) bis \(TripClock.format(depart + anchor.travelMinutes))"
         if let back = anchor.returnMinutes { line += " · zurück ab \(TripClock.format(back))" }
         return line
+    }
+
+    /// Where the plan has the group at `minutes`: at a spot during its
+    /// visit, on the straight line between two spots on the way, at the
+    /// start before the first. Nil for a day without estimated times.
+    static func position(at minutes: Int, day: TripDay, leg: TripLeg) -> TripCoordinate? {
+        let timed = stops(of: day).filter { $0.etaMinutes != nil }
+        guard let first = timed.first, let firstEta = first.etaMinutes else { return nil }
+        var previous = day.anchor?.coordinate ?? leg.anchor
+        var previousEnd = min(day.window?.startMinutes ?? firstEta, firstEta)
+        for stop in timed {
+            let eta = stop.etaMinutes ?? previousEnd
+            if minutes < eta {
+                let span = max(1, eta - previousEnd)
+                let share = min(1, max(0, Double(minutes - previousEnd) / Double(span)))
+                return TripCoordinate(lat: previous.lat + (stop.coordinate.lat - previous.lat) * share,
+                                      lon: previous.lon + (stop.coordinate.lon - previous.lon) * share)
+            }
+            if minutes < eta + stop.dwellMinutes { return stop.coordinate }
+            previous = stop.coordinate
+            previousEnd = eta + stop.dwellMinutes
+        }
+        return previous
     }
 
     /// "2 von 5 besucht", for a day on the road.

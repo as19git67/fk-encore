@@ -78,6 +78,23 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertEqual(TripStayPlan.visitedLine(d), "0 von 2 besucht")
     }
 
+    func testTheSliderFindsWhereThePlanHasYou() throws {
+        let leg = try JSONDecoder().decode(TripLeg.self, from: Data("""
+        { "id": 1, "position": 0, "title": "Beispielstadt", "anchor": { "lat": 48.0, "lon": 11.0 },
+          "anchorRadiusM": null, "anchorLabel": null, "arriveMinutes": null, "mode": "foot",
+          "regionDb": "nom_beispiel", "startDate": null, "days": [], "pool": [] }
+        """.utf8))
+        // One stop at 48.37 / 10.9 from 10:30 for 90 minutes; the day starts at 09:00.
+        let d = day(0, [block("day", [stop(1, eta: 630, dwell: 90)])], planned: 90)
+        let start = try XCTUnwrap(TripStayPlan.position(at: 540, day: d, leg: leg))
+        XCTAssertEqual(start.lat, 48.0, accuracy: 1e-9)
+        let halfway = try XCTUnwrap(TripStayPlan.position(at: 585, day: d, leg: leg))
+        XCTAssertEqual(halfway.lat, 48.185, accuracy: 1e-9)
+        let there = try XCTUnwrap(TripStayPlan.position(at: 700, day: d, leg: leg))
+        XCTAssertEqual(there.lat, 48.37, accuracy: 1e-9)
+        XCTAssertNil(TripStayPlan.position(at: 600, day: day(0, [block("day", [stop(2)])]), leg: leg))
+    }
+
     func testADayTripSaysTheWayThereAndBack() throws {
         func anchor(_ times: String) throws -> TripDayAnchor {
             try JSONDecoder().decode(TripDayAnchor.self, from: Data("""

@@ -244,6 +244,9 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   „n von m besucht“; jede Karte nennt Art und Dauer, darunter die
   geschätzte Uhrzeit. Ein Tipp auf eine Markierung der Karte öffnet ein
   kleines Blatt mit Details, Route und Aktionen, bei einer Idee „+ Tag n“.
+  Ist ein Tag gewählt, zeigt ein Regler unter der Karte, wo man nach Plan
+  zu einer Uhrzeit wäre. Ein Ausflugstag trägt oben die Zeile „Ausflug
+  nach …“ mit Hin- und Rückweg, „Weg zeigen“ und „Fahrt ändern“.
 - Öffnet man eine Reise, steht oben die Leiste der Aufenthalte und
   darunter die Planung des gewählten Aufenthalts mit allen Tagen auf einem
   Bildschirm. Ein Tipp auf einen Tag öffnet diesen Tag für sich (Zeitband,
