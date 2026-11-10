@@ -1825,7 +1825,9 @@ struct TripPlanDayView: View {
         // refuses the move, so it is not offered.
         // Nor one a fixed time holds at its hour (§4.4, §7.3): the server
         // refuses that move, and the way is to change the fixed time.
-        if status != .done, !isFramed(stop), let day, let blockId = day.blocks.first(where: {
+        // Nor on a stay of one day: there is no other day to go to.
+        if status != .done, !isFramed(stop), (viewModel.leg?.days.count ?? 0) > 1,
+           let day, let blockId = day.blocks.first(where: {
             $0.stops.contains { $0.rowId == stop.rowId }
         })?.id {
             actions.append(TripPinSheetAction(id: "move", title: "Auf einen anderen Tag",
