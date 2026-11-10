@@ -106,6 +106,13 @@ on a significant location change.
 
 ## Screens
 
+No new screen comes in. Mocks A, C and D are the existing „Aufenthalt
+planen“ (`TripStayPlanView`), before the trip and on the running day; mock B
+is one new sheet opened from a day on that screen. Itinerary, spot picker,
+spot details, Weg, the day screen and its map stay as they are.
+
+![Navigation: was sich ändert](offene-spots/03-navigation.svg)
+
 - **Stay planning (before the trip):** capacity line and „Noch offen“ at the
   top (open spots as cards, sorted by priority, with their hints), then the
   days, each showing only its fixed and firm stops, its fill mark and
