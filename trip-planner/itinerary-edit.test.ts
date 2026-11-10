@@ -456,6 +456,16 @@ describe("the quarters travel along (§21.3)", () => {
     expect(plan.legs.map((l) => [l.quartersAboard, l.tenderPort])).toEqual([[true, false], [true, true]]);
   });
 
+  it("lets a ship journey carry the sea days of a cruise, and keeps the week's limit for everything else", async () => {
+    const plan = await twoPorts();
+    const { plan: after } = await addJourney(plan.id, 0, { departAt: "18:00", arriveAt: "08:00", nights: 12, mode: "ship" });
+    expect(after.legs[1].days).toHaveLength(13);
+    await expect(addJourney(plan.id, 0, { departAt: "18:00", arriveAt: "08:00", nights: 31, mode: "ship" }))
+      .rejects.toMatchObject({ code: "invalid_argument" });
+    await expect(addJourney(plan.id, 0, { departAt: "18:00", arriveAt: "08:00", nights: 7, mode: "car" }))
+      .rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
   it("ends a port day with 'Alle an Bord' and an hour in hand, and calls the sea a day aboard", async () => {
     const plan = await twoPorts();
     const { plan: after } = await addJourney(plan.id, 0, { departAt: "17:00", arriveAt: "08:00", nights: 2, mode: "ship" });

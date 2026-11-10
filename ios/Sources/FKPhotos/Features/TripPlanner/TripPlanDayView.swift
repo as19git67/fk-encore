@@ -50,6 +50,8 @@ struct TripPlanDayView: View {
     @State private var editingLeg = false
     /// The trip's structure — legs and journeys — from the leg strip.
     @State private var editingStructure = false
+    /// The stay planned as a whole, all its days on one screen (stage 3).
+    @State private var planningStay = false
     /// The minute the screen is drawn for. Ticks while the day on
     /// screen is today, so "jetzt" moves along the blocks instead of
     /// staying on the one the screen was opened on — the first trial's
@@ -79,6 +81,16 @@ struct TripPlanDayView: View {
         // screen behind them is a name that looks lost. The leg is on
         // the picker above when there is more than one.
         .navigationTitle(screenTitle)
+        .navigationDestination(isPresented: $planningStay) {
+            TripStayPlanView(
+                viewModel: viewModel,
+                stopActions: { stop in stopActions(stop) },
+                openDay: { dayIndex in
+                    viewModel.select(dayIndex: dayIndex)
+                    planningStay = false
+                },
+            )
+        }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() }, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -107,6 +119,11 @@ struct TripPlanDayView: View {
                     // belongs to the leg is behind its header, what
                     // belongs to the day is on the day.
                     Menu {
+                        Button {
+                            planningStay = true
+                        } label: {
+                            Label("Ganzen Aufenthalt planen", systemImage: "square.stack")
+                        }
                         Button {
                             showSettings = true
                         } label: {
@@ -841,7 +858,12 @@ struct TripPlanDayView: View {
         }
         .padding(.vertical, 6)
         .background(.bar)
-        .sheet(isPresented: $editingStructure) {
+        .sheet(isPresented: $editingStructure, onDismiss: {
+            if viewModel.wantsStayPlan {
+                viewModel.wantsStayPlan = false
+                planningStay = true
+            }
+        }) {
             NavigationStack {
                 TripItineraryView(viewModel: viewModel)
             }
@@ -1785,6 +1807,17 @@ struct TripPlanDayView: View {
                     addingFixpoint = true
                 }
             })
+        }
+        // Why a booked visit has its hour (stage 3): the same choice the
+        // sheet offers when the time is made, changed without re-planning.
+        if let visit = viewModel.visit(holding: stop) {
+            for reason in TripPinReason.allCases where reason != visit.reason {
+                actions.append(TripPinSheetAction(id: "pinReason-\(reason.rawValue)",
+                                                  title: "Fest wegen: \(reason.label)",
+                                                  systemImage: reason.systemImage, closes: false) {
+                    await viewModel.setPinReason(visit, reason)
+                })
+            }
         }
         actions.append(TripPinSheetAction(id: "pin",
                                           title: stop.pinned ? "Nicht mehr anheften" : "Anheften",

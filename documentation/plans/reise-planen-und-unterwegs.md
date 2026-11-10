@@ -1,6 +1,6 @@
 # Planning a trip and living it: one itinerary, a stay planned as a whole, the same screen on the road
 
-Status: planned. Decided with Anton on 2026-11-09. No stage built yet.
+Status: in progress. Decided with Anton on 2026-11-09. Stages 1 to 3 built.
 
 The UI concept, with mock-ups and step-by-step flows, lives in a Claude Doc
 ("Reiseverlauf: Reise und Stopps anlegen"); a copy with all mock-ups as SVG
@@ -233,6 +233,21 @@ date; swipe left to delete with undo through `…/ops/undo`. Title tap edits
 the name; an empty name shows the suggestion. Map variant: stays as
 numbered markers, journeys as lines, the selected stay's card below.
 
+**Built (2026-11-09).** `TripItineraryView` is a line of stays and
+journeys with the days under every stay (`TripItineraryDays.rows`: label
+with date, arrival and departure, "n Spots" / "noch frei" / "zu viel", fill
+from `plannedMinutes` over the window) and "Liste | Karte"
+(`TripItineraryMapView`: numbered stays, journeys as lines, dashed while
+open, a great circle for a flight, the selected stay's card below). The
+sheets are in `TripItinerarySheets.swift`: `TripStaySheet` (new and edit),
+`TripJourneySheet`, `TripPortSheet` (`insertPort` in the draft splits the
+ship journey and keeps the end), `TripHomeSheet`. Every sheet saves the
+whole chain at once; "Sichern" is gone. Removing a stay and shortening one
+offer "Rückgängig" through the journal's newest `itinerary` entry. A tap on
+a stay or a day selects it in the day view until stage 3 brings the stay's
+own planning view. The settings no longer show a date. A ship journey may
+carry up to 30 nights (`MAX_SHIP_NIGHTS`), every other journey keeps 6.
+
 ### Stage 3 — planning view of a stay (iOS)
 
 A new `TripStayPlanView` replaces `TripPlanDayView` as the place where a stay
@@ -246,6 +261,23 @@ hard. Food stops are allowed in a day; `day-order.ts` stops leaving them in
 place unless they are pinned. Map variant: `TripDayMapView` grows day chips
 (one day, all days, ideas), faded other days, hollow ideas, "+ Tag n" on a
 marker.
+
+**Built (2026-11-09).** The pin reason lives on the fixpoint that holds
+the time (`trip_plan_fixpoints.pin_reason`, migration 0305), not on the
+stop: the reason and the hour belong together, and a stop's `pinned`
+flag already means something else ("frame-placed, never moved"). It is
+set with the appointment ("Warum fest?" in the fixed-time sheet), changed
+with `POST …/fixpoints/pin-reason` without a re-plan, rides through every
+re-plan, and goes when the spot is untied (`pin-reason.ts`). The day
+order needed nothing for pinned spots (every booked visit was already a
+hard time); food is no longer held in place. `TripStayPlanView` is
+reached from "Planen" on a stay in the itinerary and from the day's menu
+("Ganzen Aufenthalt planen"); it does not replace `TripPlanDayView` yet,
+which stays the screen of one day (band, order, breaks) that a day
+header opens. Cards carry the actions of `stopActions` behind "⋯", the
+details on a tap, drag onto a card or a day through the move endpoint.
+The map variant lives in the stay view (chips: all days, one day, ideas;
+"+ Tag n" on a tapped marker) rather than in `TripDayMapView`.
 
 ### Stage 4 — spot picker and spot details (iOS)
 

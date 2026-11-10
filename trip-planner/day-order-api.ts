@@ -22,7 +22,7 @@ import { dayWalkOfStored } from "./day-walk";
 import { lineOf, orderDay } from "./day-order";
 import { frameOf, orderBreaksOf, orderStopOf, type DayBreak } from "./day-times";
 import { leaveFrom } from "./extent";
-import { MEAL_CATEGORIES, recomputeDay } from "./move";
+import { recomputeDay } from "./move";
 import { loadPlan, saveMovedDays, type StoredDay, type StoredLeg, type StoredPlan } from "./plan-store";
 import type { CurrentBlock } from "./redistribute";
 import type { Coordinate } from "./travel";
@@ -65,9 +65,10 @@ export const orderTripDay = api(
 
       const settled = block.stops.filter((s) => s.status !== "planned");
       const pending = block.stops.filter((s) => s.status === "planned");
-      // Food is never ordered into the day (stage 6): a restaurant put
-      // on it by hand keeps its place in the line, the rest moves round it.
-      const open = pending.filter((s) => !MEAL_CATEGORIES.has(s.category));
+      // Food is ordered like any spot (reise-planen-und-unterwegs.md,
+      // stage 3); a table booked for eight is a pinned visit and comes
+      // in through the tickets as a hard time, like the tower at 14:00.
+      const open = pending;
       const breaks = orderBreaksOf(day.breaks, block.id);
       const base = {
         start,
@@ -92,9 +93,6 @@ export const orderTripDay = api(
       toDrop.push(...result.toDrop);
       const byRef = new Map(open.map((s) => [s.osmRef, s]));
       const ordered = result.order.map((ref) => byRef.get(ref)!);
-      pending.forEach((stop, index) => {
-        if (MEAL_CATEGORIES.has(stop.category)) ordered.splice(Math.min(index, ordered.length), 0, stop);
-      });
       return { ...block, stops: [...settled, ...ordered] };
     });
 

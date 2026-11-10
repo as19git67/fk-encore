@@ -39,26 +39,16 @@ struct TripPlanSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Name") {
-                TextField("Name der Reise", text: $model.title)
-            }
-
             Section {
-                Toggle("Termin steht fest", isOn: $model.isDated)
-                if model.isDated {
-                    DatePicker("Erster Tag", selection: $model.startDate,
-                               displayedComponents: .date)
-                }
+                TextField("Name der Reise", text: $model.title)
             } header: {
-                Text("Wann?")
+                Text("Name")
             } footer: {
-                // The arrival and the ways between the stays are the
-                // itinerary's (stage 3): one place for the chain, not
-                // a second copy of its first time here.
-                Text("Mit einem Datum weiß die App, welcher Tag heute ist, und öffnet die "
-                     + "Reise unterwegs auf dem richtigen Tag. Die Tage werden dabei nicht "
-                     + "neu geplant. Ankunft, Abfahrt und Verkehrsmittel stehen im "
-                     + "Reiseverlauf.")
+                // The date is the "Von" of the first stay or of the way
+                // there (reise-planen-und-unterwegs.md, stage 2): one
+                // place for the chain, not a second copy of it here.
+                Text("Das Datum der Reise ist das „Von“ des ersten Aufenthalts oder der Anreise, "
+                     + "im Reiseverlauf. Ankunft, Abfahrt und Verkehrsmittel stehen dort auch.")
             }
 
             Section {

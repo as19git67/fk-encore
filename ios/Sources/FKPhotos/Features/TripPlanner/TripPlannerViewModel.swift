@@ -94,6 +94,9 @@ final class TripPlannerViewModel {
     /// day screen: the trip was just made and its itinerary is the
     /// screen to land on, not a day of its only stay.
     var wantsItinerary = false
+    /// Set by the itinerary's "Planen" on a stay: the day screen opens
+    /// the stay's planning view once the itinerary has closed (stage 3).
+    var wantsStayPlan = false
 
     /// Set once the screen has landed on a day of its own accord, so
     /// that reloading after a change does not yank the traveller back
@@ -730,6 +733,8 @@ final class TripPlannerViewModel {
             /// The spot this appointment is for (§4.4): the plan puts it
             /// at this hour and nowhere else.
             let spotRef: String?
+            /// Why it has that hour (stage 3); only with `spotRef`.
+            let pinReason: String?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -749,6 +754,7 @@ final class TripPlannerViewModel {
                     lat: draft.place?.latitude,
                     lon: draft.place?.longitude,
                     spotRef: draft.spotRef,
+                    pinReason: draft.spotRef == nil ? nil : draft.pinReason?.rawValue,
                 ),
             )
             apply(response)
@@ -788,6 +794,43 @@ final class TripPlannerViewModel {
         } catch {
             errorMessage = TripErrorText.describe(error)
         }
+    }
+
+    /// Say why a booked visit has its time, or that it has none (stage
+    /// 3). The hour stays, so nothing is re-planned.
+    func setPinReason(_ fixpoint: TripFixpoint, _ reason: TripPinReason?) async {
+        guard requireOnline() else { return }
+        struct Body: Encodable {
+            let fixpointId: Int
+            let pinReason: String?
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(fixpointId, forKey: .fixpointId)
+                try container.encode(pinReason, forKey: .pinReason)
+            }
+
+            enum CodingKeys: String, CodingKey { case fixpointId, pinReason }
+        }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/fixpoints/pin-reason",
+                body: Body(fixpointId: fixpoint.rowId, pinReason: reason?.rawValue),
+            )
+            apply(response)
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// The booked visit that holds this stop at its hour, if any: on the
+    /// given day, or on any day of the leg (a spot is on one day only).
+    func visit(holding stop: TripStop, onDay dayIndex: Int? = nil) -> TripFixpoint? {
+        let days = leg?.days.filter { dayIndex == nil || $0.dayIndex == dayIndex } ?? []
+        for day in days {
+            if let fix = day.fixpoints.first(where: { $0.isVisit && $0.spotRef == stop.osmRef }) { return fix }
+        }
+        return nil
     }
 
     /// Send this day somewhere else, or call it home (§4.5).

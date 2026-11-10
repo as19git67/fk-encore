@@ -3755,6 +3755,9 @@ export const tripPlanFixpoints = pgTable(
     // (§7.3, migration 0202) — null for an ordinary appointment.
     block_id: text("block_id"),
     spot_ref: text("spot_ref"),
+    // Why a booked visit has its time (migration 0305): ticket, light,
+    // reservation, event, departure. Null for an ordinary appointment.
+    pin_reason: text("pin_reason"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("trip_plan_fixpoints_day_idx").on(table.day_id, table.start_minutes)]

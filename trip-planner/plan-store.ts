@@ -49,6 +49,7 @@ import { imagesFor, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
 import { curationStatusOf, markCurationDue, type CurationStatus } from "./curation-job";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
+import { storedPinReason, type PinReason } from "./pin-reason";
 
 type Db = typeof dbDefault;
 
@@ -787,6 +788,7 @@ async function insertDays(
         lon: fix.lon ?? null,
         block_id: fix.blockId ?? null,
         spot_ref: fix.spotRef ?? null,
+        pin_reason: fix.spotRef ? (fix.pinReason ?? null) : null,
       });
     }
 
@@ -1206,6 +1208,7 @@ export async function loadPlan(
       lon: row.lon,
       blockId: row.block_id,
       spotRef: row.spot_ref,
+      pinReason: row.spot_ref ? storedPinReason(row.pin_reason) : null,
     });
     fixpointsByDay.set(row.day_id, list);
   }
@@ -1927,6 +1930,7 @@ export async function addFixpoint(
       lon: fix.lon ?? null,
       block_id: fix.blockId ?? null,
       spot_ref: fix.spotRef ?? null,
+      pin_reason: fix.spotRef ? (fix.pinReason ?? null) : null,
     })
     .returning({ id: tripPlanFixpoints.id });
   return row.id;
@@ -1971,7 +1975,7 @@ export async function removeFixpointsBoundTo(
   // forgets the spot it was for.
   const unbound = await db
     .update(tripPlanFixpoints)
-    .set({ spot_ref: null })
+    .set({ spot_ref: null, pin_reason: null })
     .where(and(
       eq(tripPlanFixpoints.day_id, dayId),
       eq(tripPlanFixpoints.spot_ref, osmRef),
@@ -2023,6 +2027,7 @@ export async function setFixpointSpot(
   fixpointId: number,
   spotRef: string | null,
   db: Db = dbDefault,
+  pinReason?: PinReason | null,
 ): Promise<boolean> {
   const [owned] = await db
     .select({ id: tripPlanFixpoints.id })
@@ -2040,9 +2045,46 @@ export async function setFixpointSpot(
     .limit(1);
   if (!owned) return false;
 
+  // Untied, the reason goes with the spot: a plain appointment has
+  // nothing to be pinned for.
   await db.update(tripPlanFixpoints)
-    .set({ spot_ref: spotRef })
+    .set({
+      spot_ref: spotRef,
+      ...(spotRef === null ? { pin_reason: null } : pinReason !== undefined ? { pin_reason: pinReason } : {}),
+    })
     .where(eq(tripPlanFixpoints.id, fixpointId));
+  return true;
+}
+
+/**
+ * Say why a booked visit has its time, or take the reason off. Only a
+ * booked visit (an appointment tied to a spot, not a frame): answers
+ * false otherwise. The time stays as it is, so nothing is re-planned.
+ */
+export async function setFixpointPinReason(
+  planId: number,
+  ownerId: number,
+  fixpointId: number,
+  pinReason: PinReason | null,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const [owned] = await db
+    .select({ id: tripPlanFixpoints.id })
+    .from(tripPlanFixpoints)
+    .innerJoin(tripPlanDays, eq(tripPlanFixpoints.day_id, tripPlanDays.id))
+    .innerJoin(tripPlanLegs, eq(tripPlanDays.leg_id, tripPlanLegs.id))
+    .innerJoin(tripPlans, eq(tripPlanLegs.plan_id, tripPlans.id))
+    .where(and(
+      eq(tripPlanFixpoints.id, fixpointId),
+      eq(tripPlans.id, planId),
+      eq(tripPlanFixpoints.kind, "appointment"),
+      isNull(tripPlanFixpoints.block_id),
+      isNotNull(tripPlanFixpoints.spot_ref),
+      visibleToUser(ownerId),
+    ))
+    .limit(1);
+  if (!owned) return false;
+  await db.update(tripPlanFixpoints).set({ pin_reason: pinReason }).where(eq(tripPlanFixpoints.id, fixpointId));
   return true;
 }
 

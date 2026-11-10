@@ -645,8 +645,13 @@ struct TripFixpoint: Codable, Identifiable, Sendable, Equatable {
     /// appointment, and for a plan from a server that did not know.
     var blockId: String?
     var spotRef: String?
+    /// Why a booked visit has its time (stage 3): ticket, light,
+    /// reservation, event, departure. Nil for any other fixed time and
+    /// from an older server.
+    var pinReason: String? = nil
 
     var id: Int { rowId }
+    var reason: TripPinReason? { TripPinReason(raw: pinReason) }
     /// True for the frame of a block: shown on the block as its hours,
     /// not in the band of fixed times — one place for one outing.
     var framesBlock: Bool { blockId != nil && spotRef != nil }

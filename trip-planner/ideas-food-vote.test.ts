@@ -15,6 +15,7 @@ import { createTripPlan, getTripPlan, updateTripSettings } from "./plans";
 import { addFind } from "./add-find";
 import { placeFromPool } from "./pool";
 import { orderTripDay } from "./day-order-api";
+import { addTripFixpoint, setTripFixpointPinReason } from "./fixpoint-edit";
 import { nearbyFood } from "./food";
 import { applyVotesToPlan } from "./plan-votes";
 
@@ -31,6 +32,7 @@ function spot(id: number, name: string, lat: number, lon: number, kind: string, 
 
 const TRATTORIA = spot(11, "Beispieltrattoria", TOWN.lat + 0.003, TOWN.lon, "amenity=restaurant", ["food"]);
 const CAFE = spot(12, "Beispielcafé", TOWN.lat + 0.001, TOWN.lon, "amenity=cafe", ["cafe"]);
+const OSTERIA = spot(13, "Beispielosteria", TOWN.lat + 0.012, TOWN.lon, "amenity=restaurant", ["food"]);
 
 let geo: InMemoryGeoClient;
 
@@ -48,7 +50,7 @@ beforeEach(async () => {
     bbox_min_lat: 48.2, bbox_min_lon: 10.5, bbox_max_lat: 48.6, bbox_max_lon: 11.6, status: "ready_running",
   });
   geo = new InMemoryGeoClient();
-  geo.setSearchSpots("nom_west", [TRATTORIA, CAFE]);
+  geo.setSearchSpots("nom_west", [TRATTORIA, CAFE, OSTERIA]);
   setGeoClient(geo);
   return () => resetGeoClient();
 });
@@ -71,22 +73,38 @@ describe("food on a trip of ideas", () => {
     expect(places.some((p) => p.name === "Beispielcafé" && !p.idea)).toBe(true);
   });
 
-  it("leaves a restaurant put on the day by hand where it is when ordering", async () => {
+  it("orders a restaurant like any spot, and holds a booked table at its hour", async () => {
     const plan = await trip();
-    await addFind({ planId: plan.id, lat: TRATTORIA.lat, lon: TRATTORIA.lon, name: "Beispieltrattoria" });
-    await addFind({ planId: plan.id, lat: TOWN.lat - 0.006, lon: TOWN.lon, name: "Beispielbrunnen", dwellMinutes: 30 });
-    await addFind({ planId: plan.id, lat: TOWN.lat + 0.006, lon: TOWN.lon, name: "Beispielturm", dwellMinutes: 30 });
+    // The restaurant far to the north, the tower to the east, the fountain
+    // to the west: a walk that begins at the restaurant is the long way.
+    await addFind({ planId: plan.id, lat: OSTERIA.lat, lon: OSTERIA.lon, name: "Beispielosteria" });
+    await addFind({ planId: plan.id, lat: TOWN.lat, lon: TOWN.lon + 0.006, name: "Beispielturm", dwellMinutes: 30 });
+    await addFind({ planId: plan.id, lat: TOWN.lat, lon: TOWN.lon - 0.006, name: "Beispielbrunnen", dwellMinutes: 30 });
     let current = (await getTripPlan({ planId: plan.id })).plan;
-    // The restaurant first, then the far tower, then the fountain on the other side.
     const byName = (name: string) => current.legs[0].pool.find((c) => c.name === name)!.osmRef;
-    const order = [byName("Beispieltrattoria"), byName("Beispielturm"), byName("Beispielbrunnen")];
-    for (const osmRef of order) {
+    const trattoria = byName("Beispielosteria");
+    for (const osmRef of [trattoria, byName("Beispielturm"), byName("Beispielbrunnen")]) {
       current = (await placeFromPool({ planId: plan.id, dayIndex: 0, osmRef })).plan;
     }
     const { plan: ordered } = await orderTripDay({ planId: plan.id, dayIndex: 0 });
     const names = ordered.legs[0].days[0].blocks[0].stops.map((s) => s.name);
-    expect(names[0]).toBe("Beispieltrattoria");
     expect(names).toHaveLength(3);
+    expect(names[0]).not.toBe("Beispielosteria");
+
+    const { plan: booked } = await addTripFixpoint({
+      planId: plan.id, dayIndex: 0, at: "13:00", durationMinutes: 60, spotRef: trattoria, pinReason: "reservation",
+    });
+    const fix = booked.legs[0].days[0].fixpoints.find((f) => f.spotRef === trattoria)!;
+    expect(fix.pinReason).toBe("reservation");
+    await orderTripDay({ planId: plan.id, dayIndex: 0 });
+    const day = (await getTripPlan({ planId: plan.id })).plan.legs[0].days[0];
+    const table = day.blocks.flatMap((b) => b.stops).find((s) => s.osmRef === trattoria)!;
+    expect(table.etaMinutes).toBe(13 * 60);
+
+    const { plan: event } = await setTripFixpointPinReason({ planId: plan.id, fixpointId: fix.rowId!, pinReason: "event" });
+    expect(event.legs[0].days[0].fixpoints.find((f) => f.rowId === fix.rowId)!.pinReason).toBe("event");
+    await expect(setTripFixpointPinReason({ planId: plan.id, fixpointId: fix.rowId!, pinReason: "guess" }))
+      .rejects.toThrow(/pinReason/);
   });
 });
 

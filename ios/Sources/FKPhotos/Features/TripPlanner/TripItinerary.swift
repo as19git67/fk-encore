@@ -50,10 +50,17 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
     // What the server derived, read only.
     var startDate: String?
     var endDate: String?
+    /// A stay's IANA zone, looked up from its coordinates (stage 1 of
+    /// reise-planen-und-unterwegs.md). Never sent back.
+    var timeZone: String?
+    /// How far the clock jumps on this journey, in minutes; positive
+    /// when the arrival is ahead. Never sent back.
+    var zoneShiftMinutes: Int?
 
     enum CodingKeys: String, CodingKey {
         case kind, legId, title, anchor, anchorLabel, anchorRadiusM, mode, days, radiusM
         case quartersAboard, tenderPort, departAt, arriveAt, nights, startDate, endDate
+        case timeZone, zoneShiftMinutes
     }
 
     init(kind: Kind) {
@@ -78,6 +85,8 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
         nights = try c.decodeIfPresent(Int.self, forKey: .nights)
         startDate = try c.decodeIfPresent(String.self, forKey: .startDate)
         endDate = try c.decodeIfPresent(String.self, forKey: .endDate)
+        timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
+        zoneShiftMinutes = try c.decodeIfPresent(Int.self, forKey: .zoneShiftMinutes)
     }
 
     /// What the server reads. Absent means "keep what is stored" for a
@@ -227,6 +236,14 @@ struct TripItineraryDraft: Equatable {
     static let minStayDays = 1
     static let maxStayDays = 14
     static let maxJourneyNights = 6
+    /// A ship's sea days are its nights on the way; a cruise before its
+    /// ports are put in is one long ship journey.
+    static let maxShipNights = 30
+
+    /// How many nights a journey of this mode may have.
+    static func maxNights(for mode: TripTransportMode) -> Int {
+        mode == .ship ? maxShipNights : maxJourneyNights
+    }
 
     init(startDate: String?, hasHome: Bool, homeLabel: String = "Zuhause", items: [TripItineraryItem]) {
         self.startDate = startDate
@@ -261,6 +278,52 @@ struct TripItineraryDraft: Equatable {
     func stay(after id: TripItineraryItem.ID) -> TripItineraryItem? {
         guard let i = index(of: id), i + 1 < items.count else { return nil }
         return items[i + 1].isStay ? items[i + 1] : nil
+    }
+
+    /// The journey that arrives at this stay, or nil when the stay
+    /// opens the chain.
+    func journey(before stayId: TripItineraryItem.ID) -> TripItineraryItem? {
+        guard let i = index(of: stayId), i > 0, items[i - 1].isJourney else { return nil }
+        return items[i - 1]
+    }
+
+    /// The journey that leaves this stay, or nil when it closes the chain.
+    func journey(after stayId: TripItineraryItem.ID) -> TripItineraryItem? {
+        guard let i = index(of: stayId), i + 1 < items.count, items[i + 1].isJourney else { return nil }
+        return items[i + 1]
+    }
+
+    /// A stay with a ship on both sides sleeps aboard, whatever its
+    /// fields say: the server reads it the same way (`betweenShips` in
+    /// `itinerary.ts`).
+    func isBetweenShips(_ stayId: TripItineraryItem.ID) -> Bool {
+        guard let before = journey(before: stayId), let after = journey(after: stayId) else { return false }
+        return before.transportMode == .ship && after.transportMode == .ship
+    }
+
+    /// Whether this stay's "Von" is the trip's one date: it opens the
+    /// chain, so no journey before it owns a day (plan, "The model").
+    func ownsStart(_ id: TripItineraryItem.ID) -> Bool {
+        items.first?.id == id
+    }
+
+    /// The way there from home, when the trip knows home.
+    var outbound: TripItineraryItem? {
+        items.first?.isJourney == true ? items.first : nil
+    }
+
+    /// "Anreise", "Heimreise", "Schiff" or "Weiterreise": what a journey
+    /// is called on its card and on its sheet.
+    func name(of journey: TripItineraryItem) -> String {
+        if stay(before: journey.id) == nil { return "Anreise" }
+        if stay(after: journey.id) == nil { return "Heimreise" }
+        return journey.transportMode == .ship ? "Schiff" : "Weiterreise"
+    }
+
+    /// How many days the trip has in all, counted the way the cards
+    /// count them.
+    var totalDays: Int {
+        (TripItineraryText.dayOffsets(of: self).last?.last ?? 0) + 1
     }
 
     /// The item a way into the screen points at (stage 3): a leg's own
@@ -438,6 +501,52 @@ struct TripItineraryDraft: Equatable {
         moveStays(fromOffsets: IndexSet(integer: position), toOffset: target)
     }
 
+    /// Put a port into a ship journey (plan, "Cruises"): the journey is
+    /// split around a stay, and the end of the trip stays where it was.
+    ///
+    /// `ashoreAfter` is how many nights after setting off the ship
+    /// docks, `days` how many calendar days the port lasts (the day the
+    /// ship leaves again counts), `ashoreFrom` and `aboardUntil` the
+    /// clock times. The first half keeps the journey's id and departure,
+    /// the second half its arrival and whatever nights are left. Nil
+    /// when the port does not fit inside the journey, or when a time on
+    /// the same day would run backwards.
+    @discardableResult
+    mutating func insertPort(into journeyId: TripItineraryItem.ID, ashoreAfter: Int, days: Int,
+                             ashoreFrom: String?, aboardUntil: String?) -> TripItineraryItem.ID? {
+        guard let i = index(of: journeyId), items[i].isJourney, canAddStay,
+              ashoreAfter >= 0, days >= Self.minStayDays, days <= Self.maxStayDays
+        else { return nil }
+        let journey = items[i]
+        let nights = journey.nights ?? 0
+        let rest = nights - ashoreAfter - (days - 1)
+        guard rest >= 0 else { return nil }
+        let clock = { (text: String?) in text.flatMap(TripClock.minutes(fromClock:)) }
+        if ashoreAfter == 0, let depart = clock(journey.departAt), let ashore = clock(ashoreFrom), ashore <= depart {
+            return nil
+        }
+        if days == 1, let ashore = clock(ashoreFrom), let aboard = clock(aboardUntil), aboard <= ashore {
+            return nil
+        }
+        if rest == 0, let aboard = clock(aboardUntil), let arrive = clock(journey.arriveAt), arrive <= aboard {
+            return nil
+        }
+        var first = journey
+        first.arriveAt = ashoreFrom
+        first.nights = ashoreAfter
+        var port = TripItineraryItem(kind: .stay)
+        port.days = days
+        port.mode = TripTransportMode.foot.rawValue
+        var second = TripItineraryItem(kind: .journey)
+        second.mode = journey.mode
+        second.departAt = aboardUntil
+        second.arriveAt = journey.arriveAt
+        second.nights = rest
+        items.replaceSubrange(i...i, with: [first, port, second])
+        normalise()
+        return port.id
+    }
+
     /// Home came or went: the way there and the way home with it.
     mutating func setHome(_ label: String?) {
         hasHome = label != nil
@@ -514,6 +623,34 @@ enum TripItineraryText {
         }
     }
 
+    /// "+8 h", "−7 h", "+5 h 30": the jump of the clock on a journey
+    /// that crosses zones. Nil when it does not jump.
+    static func zoneShift(_ minutes: Int?) -> String? {
+        guard let minutes, minutes != 0 else { return nil }
+        let sign = minutes > 0 ? "+" : "−"
+        let hours = abs(minutes) / 60
+        let rest = abs(minutes) % 60
+        return rest == 0 ? "\(sign)\(hours) h" : "\(sign)\(hours) h \(rest)"
+    }
+
+    /// The trip under its name: "Fr 27.11. bis Do 3.12.2026 · 7 Tage",
+    /// or "Noch ohne Datum · 7 Tage".
+    static func tripSpan(_ draft: TripItineraryDraft, timeZone: TimeZone = .current) -> String {
+        let days = draft.totalDays
+        let length = days == 1 ? "1 Tag" : "\(days) Tage"
+        guard let start = draft.startDate, let end = draft.lastDate else { return "Noch ohne Datum · \(length)" }
+        return "\(shortDate(start, timeZone: timeZone)) bis \(longDate(end, timeZone: timeZone)) · \(length)"
+    }
+
+    /// "Do 3.12.2026": the end of a trip, with its year.
+    static func longDate(_ isoDay: String, timeZone: TimeZone = .current) -> String {
+        guard let date = TripCalendar.date(fromIsoDay: isoDay, timeZone: timeZone) else { return isoDay }
+        let formatter = DateFormatter()
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate("EEE d. MMM yyyy")
+        return formatter.string(from: date)
+    }
+
     /// "Mo, 3.6." — short enough for a card, in the phone's own words.
     static func shortDate(_ isoDay: String, timeZone: TimeZone = .current) -> String {
         guard let date = TripCalendar.date(fromIsoDay: isoDay, timeZone: timeZone) else { return isoDay }
@@ -574,4 +711,64 @@ struct TripTransitSuggestion: Codable, Sendable, Equatable {
 
 struct TripTransitSuggestionResponse: Codable, Sendable {
     let suggestion: TripTransitSuggestion?
+}
+
+/// One day under a stay in the itinerary (reise-planen-und-unterwegs.md,
+/// stage 2): which day, what is in it, and how full it is — the same
+/// figure the stay's planning view shows as "planned of available".
+struct TripItineraryDayRow: Identifiable, Equatable {
+    /// The day's index within its leg, as the plan numbers it; nil for
+    /// a day the server has not written yet (a stay just lengthened).
+    let dayIndex: Int?
+    /// Counted from one within the stay.
+    let number: Int
+    /// "Tag 1 · Fr., 27. Nov. · an 12:30".
+    let label: String
+    /// "2 Spots", "noch frei", "zu viel".
+    let summary: String
+    /// 0…1, above 1 when the day runs over; nil when the day has no
+    /// clock to measure against.
+    let fill: Double?
+
+    var id: Int { number }
+    var isOverfull: Bool { (fill ?? 0) > 1 }
+}
+
+enum TripItineraryDays {
+    /// The rows under a stay. `days` are the stay's days as the plan has
+    /// them, empty while it is not saved; `arrival` and `departure` are the times of
+    /// the journeys on either side, which shorten the first and the
+    /// last day.
+    static func rows(stay: TripItineraryItem, dated: TripItineraryDated, days planned: [TripDay],
+                     arrival: String?, departure: String?,
+                     timeZone: TimeZone = .current) -> [TripItineraryDayRow] {
+        let count = max(1, stay.days ?? 1)
+        let days = planned.sorted { $0.dayIndex < $1.dayIndex }
+        return (0..<count).map { offset in
+            let day = offset < days.count ? days[offset] : nil
+            var parts = ["Tag \(offset + 1)"]
+            if let start = dated.startDate, let date = TripCalendar.day(start, plus: offset, timeZone: timeZone) {
+                parts.append(TripItineraryText.shortDate(date, timeZone: timeZone))
+            }
+            if offset == 0, let arrival { parts.append("an \(arrival)") }
+            if offset == count - 1, let departure { parts.append("ab \(departure)") }
+            let spots = day?.blocks.reduce(0) { $0 + $1.stops.count } ?? 0
+            let fill: Double?
+            if let window = day?.window, window.minutes > 0 {
+                fill = Double(day?.plannedMinutes ?? 0) / Double(window.minutes)
+            } else {
+                fill = spots == 0 ? 0 : nil
+            }
+            let summary: String
+            if (day?.overrunMinutes ?? 0) > 0 || (fill ?? 0) > 1 {
+                summary = "zu viel"
+            } else if spots == 0 {
+                summary = "noch frei"
+            } else {
+                summary = spots == 1 ? "1 Spot" : "\(spots) Spots"
+            }
+            return TripItineraryDayRow(dayIndex: day?.dayIndex, number: offset + 1,
+                                       label: parts.joined(separator: " · "), summary: summary, fill: fill)
+        }
+    }
 }

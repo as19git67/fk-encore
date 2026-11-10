@@ -29,6 +29,7 @@
  */
 
 import type { PlannedBlockShape } from "./blocks";
+import type { PinReason } from "./pin-reason";
 
 /** 09:00 — when a day is assumed to start if nobody says otherwise. */
 export const DEFAULT_DAY_START_MINUTES = 9 * 60;
@@ -104,6 +105,12 @@ export interface Fixpoint {
   blockId?: string | null;
   /** The spot the bound block is planned around, by its OSM reference. */
   spotRef?: string | null;
+  /**
+   * Why a booked visit has its time (`pin-reason.ts`): ticket, light,
+   * reservation, event, departure. Only with a `spotRef`; it changes
+   * nothing in the arithmetic, every pinned spot is a hard time.
+   */
+  pinReason?: PinReason | null;
 }
 
 export interface ScheduledBlock extends PlannedBlockShape {
