@@ -1,11 +1,11 @@
 /**
- * A day trip inside a day: Pisa from 10:15 to 15:30, San Gimignano
+ * A day trip inside a day: Seestadt from 10:15 to 15:30, Bergdorf
  * before and after (Anton, 10.11.: "wie ein verschachtelter Aufenthalt
  * mit begrenzter Zeitspanne"; 11.11.: several on one day, no limit).
  *
  * The whole-day day trip (`day-anchor.ts`) moves the entire day to the
- * destination. That is right for a day in Florence and wrong for half
- * a day in Lucca: the morning in the village and the evening back at
+ * destination. That is right for a day in a big city and wrong for half
+ * a day in Hafenstadt: the morning in the village and the evening back at
  * the quarters are part of the same day, around the same bed.
  *
  * So an excursion is a **block** of the day. The day's spots block is
@@ -30,7 +30,7 @@ export interface Excursion {
   id: string;
   lat: number;
   lon: number;
-  /** "Pisa". */
+  /** "Seestadt". */
   label: string | null;
   /** How far to look around it; null falls back to the walking default. */
   radiusM: number | null;
@@ -56,7 +56,7 @@ export function excursionIdOf(blockId: string): string | null {
   return blockId.startsWith("excursion:") ? blockId.slice("excursion:".length) : null;
 }
 
-/** "Ausflug nach Pisa". */
+/** "Ausflug nach Seestadt". */
 export function excursionLabel(excursion: Pick<Excursion, "label">): string {
   return excursion.label ? `Ausflug nach ${excursion.label}` : "Ausflug";
 }

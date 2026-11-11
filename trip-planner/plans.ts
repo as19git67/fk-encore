@@ -176,7 +176,7 @@ export interface LegRequest {
   dayAnchors?: DayAnchorRequest[];
   /**
    * Day trips with a time window inside a day (`excursions.ts`): half a
-   * day in Pisa, the rest at the quarters. Read on a trip of ideas only.
+   * day in Seestadt, the rest at the quarters. Read on a trip of ideas only.
    */
   excursions?: ExcursionRequest[];
   /**
@@ -1825,7 +1825,7 @@ async function planLeg(
     // scheduler cut for it: the block after it opens up to hold the way
     // there and the visit (`frame-spots.ts`).
     framed.blocks = hostVisits(home.blocks, fixpoints.map((f) => f.fixpoint));
-    // Half a day in Pisa (`excursions.ts`): the day at the quarters
+    // Half a day in Seestadt (`excursions.ts`): the day at the quarters
     // loses the hours away, and the excursion stands in the gap as a
     // block of its own. Not on a whole-day trip, which is elsewhere
     // already.

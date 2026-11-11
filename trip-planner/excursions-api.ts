@@ -27,7 +27,7 @@ export interface AddExcursionRequest {
   dayIndex: number;
   lat: number;
   lon: number;
-  /** "Pisa". */
+  /** "Seestadt". */
   label?: string;
   /** How far to look around it; omitted is the walking default. */
   radiusM?: number;
