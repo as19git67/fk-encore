@@ -231,7 +231,7 @@ export function recomputeDay(
       // A route is left at its far end (§4.7).
       position = leaveFrom(stop);
     }
-    if (index === lastWithStops && !walk.places?.has(block.id)) {
+    if (index === lastWithStops && !walk.places?.[block.id]) {
       used += travelLeg(position, walk.end, mode).minutes;
     }
     block.usedMinutes = used;

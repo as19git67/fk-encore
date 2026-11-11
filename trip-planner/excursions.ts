@@ -178,15 +178,15 @@ export function blockStart(
   previousBlockId: string | null,
   position: Coordinate,
   quarters: Coordinate,
-  places: ReadonlyMap<string, Coordinate> | undefined,
+  places: Readonly<Record<string, Coordinate>> | undefined,
 ): Coordinate {
-  const place = places?.get(blockId);
+  const place = places?.[blockId];
   if (place) return place;
-  if (previousBlockId !== null && places?.has(previousBlockId)) return quarters;
+  if (previousBlockId !== null && places?.[previousBlockId]) return quarters;
   return position;
 }
 
 /** Each excursion's block and the place it is planned around. */
-export function excursionPlaces(excursions: readonly Pick<Excursion, "id" | "lat" | "lon">[] | undefined): Map<string, Coordinate> {
-  return new Map((excursions ?? []).map((e) => [excursionBlockId(e.id), { lat: e.lat, lon: e.lon }]));
+export function excursionPlaces(excursions: readonly Pick<Excursion, "id" | "lat" | "lon">[] | undefined): Record<string, Coordinate> {
+  return Object.fromEntries((excursions ?? []).map((e) => [excursionBlockId(e.id), { lat: e.lat, lon: e.lon }]));
 }

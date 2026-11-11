@@ -50,7 +50,7 @@ export interface DayWalk {
    */
   home?: Coordinate;
   /** The block of each excursion and the place it is planned around (`excursions.ts`). */
-  places?: ReadonlyMap<string, Coordinate>;
+  places?: Record<string, Coordinate>;
 }
 
 /**
