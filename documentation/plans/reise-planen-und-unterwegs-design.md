@@ -20,7 +20,7 @@ Ohne Datum funktioniert die Kette genauso; dann heißt es „Tag 1 bis 3“. Ein
 
 **Kreuzfahrten.** Jeder Hafen ist ein eigener Aufenthalt, das Schiff dazwischen eine Weiterreise „Schiff“. Landgangszeiten sind Ankunft und Abfahrt dieser Schiffsfahrten, Seetage ihre Nächte unterwegs. Liegt auf beiden Seiten eines Aufenthalts ein Schiff, fragt er nicht nach einem Hotel und zeigt „Übernachtung an Bord“. So hat jeder Hafen eigene Ideen, eine Suche um den Hafen und dieselbe Planungsansicht wie eine Stadt.
 
-**Der Name der Reise** wird nicht abgefragt. Gibt niemand einen ein, schlägt das lokale Modell einen aus Aufenthalten und Datum vor („Musterstadt im November“); Tippen auf den Titel ändert ihn.
+**Der Name der Reise** wird nicht abgefragt. Gibt niemand einen ein, schlägt das lokale Modell einen aus Aufenthalten und Datum vor („Musterstadt im November“). Geändert wird er unter Koffer › Einstellungen, nicht per Tipp auf den Titel.
 
 **Zuhause** bleibt, wie es heute ist: einmal je Nutzer festgelegt. Ist es gesetzt, gibt es Anreise und Heimreise als Weiterreisen.
 
@@ -56,7 +56,7 @@ Jede Änderung wirkt sofort auf die gerechneten Daten: Wer aus drei Nächten vie
 
 ![Details eines Aufenthalts (ein Hafen, Übernachtung an Bord) und das Blatt einer Weiterreise](reise-planen-und-unterwegs/02-aufenthalt-weiterreise.svg)
 
-**Die Details eines Aufenthalts** öffnet „Bearbeiten“ im Kopf der Planungsansicht; „Aufenthalt planen“ in den Details führt zurück. Sie tragen dieselben Felder wie „Neuer Aufenthalt“, dazu Ankunft und Abfahrt zum Lesen: Diese Zeiten gehören den Weiterreisen, „›“ öffnet sie.
+**Die Details eines Aufenthalts** öffnet ein Tipp auf den Kopf der Planungsansicht: Name und „4 Tage · Fr 27.11. bis Mo 30.11. · Hotel Beispiel“ tragen rechts ein „›“, unterwegs ebenso. Bearbeitet wird also genau das, was dort steht, nicht die Spots oder Ausflüge; ein Knopf „Bearbeiten“ ließe das offen. Dasselbe bietet das Menü am Titel in der Navigationsleiste als „Ort, Tage und Unterkunft …“ (wie „Umbenennen“ in Dateien oder Notizen); „Aufenthalt planen“ in den Details führt zurück. Sie tragen dieselben Felder wie „Neuer Aufenthalt“, dazu Ankunft und Abfahrt zum Lesen: Diese Zeiten gehören den Weiterreisen, „›“ öffnet sie.
 
 **Das Blatt einer Weiterreise** hat Verkehrsmittel, Abfahrt und Ankunft (Ortszeit), Nächte unterwegs, den Schalter „Zeiten noch offen“ und eine Notiz für Flugnummer oder Sitzplatz. Bei der Anreise kommt „Ab“ (Zuhause) und „Von“ dazu, das den Beginn der Reise setzt. Solange die Zeiten offen sind, rechnet der Tag mit Vorgaben: Abfahrt 10:00, Ankunft 15:00, Anreise von Zuhause ab 08:00.
 
@@ -66,7 +66,8 @@ Die Planungsansicht zeigt alle Tage eines Aufenthalts auf einem Bildschirm (Mock
 
 - **Spots** sind Karten mit Bild, Dauer, Priorität (Muss, Will, Wenn Zeit) und geschätzter Uhrzeit.
 - **Ziehen** ändert die Reihenfolge, auch in einen anderen Tag; lang drücken hebt eine Karte an.
-- **⋯** an der Karte führt direkt zu den Aktionen, Antippen öffnet die Details.
+- **⋯** an der Karte führt direkt zu den Aktionen, Antippen öffnet die Details. Schieben nach links löscht den Spot aus dem Tag, er geht zurück zu den Ideen.
+- **⋯** am Tageskopf trägt, was den ganzen Tag betrifft: Reihenfolge vorschlagen, Pause einfügen, feste Zeit eintragen, Ausflug planen. Ein Tag hat keinen eigenen Bildschirm.
 - **Leere Tage** zeigen ein Feld „Spot hierher ziehen oder aus den Ideen hinzufügen“.
 
 **Gepinnt** ist ein Spot mit einer festen Zeit, die die Reihenfolge nicht verschieben darf: ein Ticket oder Zeitfenster, ein Fotostopp wegen des Lichts, eine Reservierung, ein Ereignis zu fester Zeit, eine feste Abfahrt (Fähre, Seilbahn, letzte Rückfahrt). Ein Ort, der nur an einem Tag offen ist, hängt am Tag, nicht an einer Uhrzeit. Für alle nicht gepinnten Spots schlägt die App die Reihenfolge vor.
@@ -79,12 +80,12 @@ Die Planungsansicht zeigt alle Tage eines Aufenthalts auf einem Bildschirm (Mock
 
 ![Spot-Auswahl und Spot-Details · Blatt von unten, halbe und volle Höhe](reise-planen-und-unterwegs/03-spot-auswahl-details.svg)
 
-**Spot-Auswahl.** Das Plus „Ideen und Suche“ öffnet ein großes Blatt mit einem Suchfeld (Name, Kategorie oder eingefügter Karten-Link) und Chips für Ideen, Highlights, Essen und mehr. Ohne Suchwort stehen zuerst die eigenen Ideen, dann die Highlights in der Nähe nach Bekanntheit. „+ Tag 3“ legt einen Spot in den vorgeschlagenen Tag, den ersten mit Platz, an dem er offen ist; lang drücken wählt einen anderen Tag oder „Nur merken“. Das Blatt bleibt offen, bis man „Fertig“ tippt, so lassen sich mehrere Spots hintereinander einplanen.
+**Spot-Auswahl.** Das Plus „Ideen und Suche“ öffnet ein großes Blatt mit einem Suchfeld (Name, Kategorie oder eingefügter Karten-Link) und Chips für Ideen, Highlights, Essen und mehr. Ohne Suchwort stehen zuerst die eigenen Ideen, dann die Highlights in der Nähe nach Bekanntheit. Das Plus an einer Zeile legt einen Spot in den vorgeschlagenen Tag, den ersten mit Platz, an dem er offen ist; welcher das ist, steht nicht am Knopf, der Spot zeigt danach „✓ Tag 3“; lang drücken wählt einen anderen Tag oder „Nur merken“. Das Blatt bleibt offen, bis man „Fertig“ tippt, so lassen sich mehrere Spots hintereinander einplanen.
 
 - **Ausflüge** zeigt Orte 30 Minuten bis 2 Stunden von der Unterkunft mit mindestens drei Sehenswürdigkeiten, aus der Karte der Region. Gewählt wird der Tag zum Ausflugstag mit Hin- und Rückweg als Zeile, und die Auswahl sucht an diesem Tag um das Ziel. Eine Idee, die mehr als 30 km von der Unterkunft liegt, fragt „Ausflug daraus machen?“. Von Hand geht es weiter über „Ausflug planen“ am Tag.
 - **Strecken** zeigt die ausgeschilderten Wander- und Radwege der Karte in der Nähe. Eine eigene Strecke (Name, Start, Ende, Dauer) legt man über „Mehr“ an.
 
-**Spot-Details.** Tippen auf eine Karte oder eine Zeile der Auswahl öffnet ein Blatt von unten auf halber Höhe; der Tag bleibt darüber sichtbar. Nach oben ziehen zeigt alles: Bilder, Beschreibung mit Quelle, Öffnungszeiten der Woche, Ticket, Notiz, Kontakt. Zu geht es mit einem Wisch nach unten, einem Tipp auf den Tag darüber, mit ✕ oder „Fertig“. Seitlich wischen blättert zum nächsten Spot des Tags. Es gibt keinen Seitenwechsel und keinen Zurück-Knopf.
+**Spot-Details.** Tippen auf eine Karte oder eine Zeile der Auswahl öffnet ein Blatt von unten auf halber Höhe; der Tag bleibt darüber sichtbar. Nach oben ziehen zeigt alles: Bilder, Kartenausschnitt, Beschreibung mit Quelle, Öffnungszeiten der Woche, Ticket, Notiz, Kontakt. Zu geht es mit einem Wisch nach unten, einem Tipp auf den Tag darüber, mit ✕ oder „Fertig“. Seitlich wischen blättert zum nächsten Spot des Tags. Es gibt keinen Seitenwechsel und keinen Zurück-Knopf.
 
 **Abendlicht.** Ein Spot mit Blick (Aussichtspunkt, Fassade nach Westen) zeigt in den Details das beste Licht an den Tagen des Aufenthalts, etwa „16:05 bis 16:40“, mit dem Hinweis, an welchem Tag Wolken erwartet werden. „+ Tag 3 am Abend“ plant ihn als Spot mit fester Zeit und dem Grund „Licht“. Kippt das Wetter an diesem Tag, fragt der Regen-Hinweis nach einem anderen Tag.
 
@@ -112,7 +113,7 @@ Während der Reise bleibt das Gerüst dasselbe, und man kann jederzeit umplanen.
 
 **Mitschreiben.** Besucht ist ein Spot, wenn man mindestens 10 Minuten im Umkreis von 100 m war, bei langen Besuchen ein Viertel der geplanten Zeit; die Verweildauer allein genügt; Ankunft und Abfahrt werden festgehalten. Das Wetter wird je Spot zur Besuchszeit und je Tag gespeichert. Ein Spot, dessen Zeit vorbei ist und der nicht besucht wurde, bleibt bis zum Abend stehen; dann fragt die App einmal: anderer Tag oder zurück zu den Ideen.
 
-**Von Hand abhaken und rückgängig.** Ohne Standortfreigabe markiert ein Wisch nach rechts einen Spot als besucht. Jedes Abhaken, auch ein automatisches, lässt sich rückgängig machen: Nach einem automatischen Abhaken trägt die Karte des Spots eine Weile „gerade abgehakt“ und den Knopf „Doch nicht“, für den Fall, dass man nur vorbeigegangen ist. Später geht es über einen Tipp auf den Haken und „Nicht besucht“.
+**Von Hand abhaken und rückgängig.** Ohne Standortfreigabe markiert ein Tipp auf den Kreis an der Karte einen Spot als besucht; ein Wisch wäre in den Tagen mit Ziehen und Ablegen im Weg. Jedes Abhaken, auch ein automatisches, lässt sich rückgängig machen: Nach einem automatischen Abhaken trägt die Karte des Spots eine Weile „gerade abgehakt“ und den Knopf „Doch nicht“, für den Fall, dass man nur vorbeigegangen ist. Später geht es über einen Tipp auf den Haken und „Nicht besucht“.
 
 **Fotos.** Fotos werden nach Aufnahmezeit und Ort einem Spot zugeordnet. Jeder sieht nur die Fotos, die ihm selbst gehören oder auf die er über ein freigegebenes Album Zugriff hat. Die Teilnahme an einer Reise erweitert keine Zugriffsrechte.
 
@@ -128,7 +129,7 @@ Jede der Ansichten oben hat eine Karte, umgeschaltet oben rechts mit „Liste | 
 
 - **Reiseverlauf.** Jeder Aufenthalt ist eine nummerierte Markierung, jede Weiterreise eine Linie mit Verkehrsmittel und Zeit (gestrichelt, solange die Zeiten offen sind). Unten steht die Karte des gewählten Aufenthalts mit den Füllmarken seiner Tage und „Planen“; seitlich wischen wählt den nächsten Aufenthalt und schiebt die Karte mit.
 - **Aufenthalt planen.** Chips wählen einen Tag, alle Tage oder die Ideen. Die Spots des gewählten Tags stehen nummeriert in ihrer Reihenfolge, mit dem Weg ab der Unterkunft; Spots anderer Tage sind blass, Ideen hohl. Der Regler unter der Karte zeigt, wo man nach Plan zu einer Uhrzeit wäre, etwa um ein Licht zu prüfen. Eine blasse Markierung oder eine Idee antippen bietet „+ Tag 2“ an, so lässt sich ein Tag auch auf der Karte zusammenstellen.
-- **Spot-Auswahl.** Highlights erscheinen als Kreise, je bekannter, desto größer; eigene Ideen sind voll, eingeplante tragen ihre Nummer und ihren Tag. Verschieben oder Zoomen sucht nicht von selbst, erst „In diesem Bereich suchen“. Die Karte unten hat „+ Tag 3“ wie die Zeile der Liste.
+- **Spot-Auswahl.** Highlights erscheinen als Kreise, je bekannter, desto größer; eigene Ideen sind voll, eingeplante tragen ihre Nummer und ihren Tag. Verschieben oder Zoomen sucht nicht von selbst, erst „In diesem Bereich suchen“. Die Karte unten hat das Plus wie die Zeile der Liste.
 - **Unterwegs.** Der laufende Tag zeigt den eigenen Standort, die besuchten Spots mit Haken, eine Linie durch die Besuche in ihrer wirklichen Reihenfolge, auch durch nicht geplante Halte (gezeichnet aus den Besuchen, eine GPS-Spur wird nicht gespeichert), und an jedem besuchten Spot die Zahl der Fotos. Der nächste Spot ist hervorgehoben und steht unten mit „Route“, was das Blatt „Weg“ vom Standort aus öffnet. Der Hinweis „hinter dem Plan“ und „Neu ordnen“ sind dieselben wie in der Liste.
 
 **Routen.** Auf der Tageskarte folgen die Wege zwischen den Spots den Straßen, berechnet von unserem Valhalla für zu Fuß, Rad und Auto, und tragen ihre Dauer als Etikett. Geladen wird nur der gewählte Tag, Abschnitt für Abschnitt, und gespeichert; nach dem Umsortieren nur die neuen Abschnitte. ÖPNV kennt Valhalla nicht (kein Fahrplan): Solche Abschnitte sind eine gestrichelte Luftlinie mit geschätzter Zeit, die echte Verbindung liefert die Karten-App. In der Liste steht zwischen zwei Spots eine Wegzeile („9 min zu Fuß · 700 m“); ein Tipp darauf oder auf ein Etikett öffnet das Blatt „Weg“ mit Von und Nach, einer Dauer je Verkehrsmittel, nur dieser Strecke auf der Karte, der Ankunft geprüft gegen Öffnungszeit und Ticket und „In der Karten-App starten“. Ein anderes Verkehrsmittel gilt nur für diesen Abschnitt, der Tag rechnet mit der neuen Dauer weiter. Navigiert wird in Apple Karten, nicht in der App. Im Reiseverlauf sind Weiterreisen keine berechneten Routen: ein Flug ist ein Bogen, Fähre und Bahn sind Linien mit Verkehrsmittel und Zeit.
