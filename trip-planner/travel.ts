@@ -49,6 +49,17 @@ export const WALKING_SPEED_M_PER_MIN = 75;
 export type TransportMode = "foot" | "bike" | "transit" | "car" | "ship" | "plane";
 
 /**
+ * How a day out is reached from the quarters. A stay "zu Fuß" means
+ * getting about the town on foot, not walking to the next one: a day
+ * trip goes by car where the group has one, otherwise by train or bus
+ * (11.11.2026: the cities around a village never came up as day
+ * trips because the way there was reckoned on foot).
+ */
+export function dayTripMode(stayMode: TransportMode): TransportMode {
+  return stayMode === "car" || stayMode === "transit" ? stayMode : "transit";
+}
+
+/**
  * Speeds in metres per minute while actually moving, deliberately
  * pessimistic. What happens before you move is the overhead below.
  *

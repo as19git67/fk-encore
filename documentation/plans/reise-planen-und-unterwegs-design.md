@@ -100,6 +100,15 @@ Die Planungsansicht zeigt alle Tage eines Aufenthalts auf einem Bildschirm (Mock
 
 ![Ausflüge im Tag: zwei Ausflüge mit Zeitfenster an einem Tag (A) und das Blatt „Ausflug“ (B)](reise-planen-und-unterwegs/16-ausfluege-im-tag.svg)
 
+**Spots für einen Ausflug.** Die Spot-Auswahl sagt oben in der Leiste „Für“, wohin „+“ legt: in den Aufenthalt (um die Unterkunft), in das Fenster eines Ausflugs („Tag 3 · 10:40–13:00 · noch 1 h 20 frei“) oder auf einen ganztägigen Ausflug. „Ändern“ listet den Aufenthalt und darunter je Tag seine Ausflüge; ein Tag ohne Ausflug steckt im Aufenthalt.
+
+- **Aus „+ Spot in Seestadt“** steht der Ausflug schon in der Leiste. Die Suche heißt „In Seestadt suchen“, die Liste zeigt zuerst, was um das Ziel liegt, mit Entfernung vom Ziel, dann „Aus euren Ideen, nahe Seestadt“, dann die übrigen Ideen. Was länger dauert, als das Fenster noch hält, steht blass da („passt nicht, 1 h 20 frei“) und geht trotzdem hinein; der Abschnitt zeigt dann „zu viel“.
+- **Ohne Ausflug geöffnet** steht der Aufenthalt in der Leiste. Liegt ein Treffer am Ziel eines Ausflugs, sagt seine Zeile „nahe Seestadt · Ausflug Tag 3“, und „+“ legt ihn in diesen Ausflug.
+- **Langes Drücken** auf eine Zeile bietet jeden Ausflug, jeden Tag und „Als Idee behalten“. „In diesem Bereich suchen“ auf der Karte bleibt beim gewählten Ausflug.
+- **Der Weg zu einem Ausflug** wird nie zu Fuß gerechnet: hat der Aufenthalt Auto oder Bahn, gilt das, sonst Bahn und Bus. Auch die Ausflugsziele im Chip „Ausflüge“ werden so gesucht, sonst fände ein Aufenthalt „zu Fuß“ nur Orte im Umkreis von wenigen Kilometern (11.11.2026).
+
+![Spots für einen Ausflug: die Auswahl aus „+ Spot in Seestadt“ (A) und „Ändern“ (B)](reise-planen-und-unterwegs/17-spots-fuer-ausflug.svg)
+
 **Geteilte Links.** Ein Ort, der aus der Karten-App oder Safari geteilt wird, kommt als Idee zum nächstgelegenen Aufenthalt. Liegt er mehr als 50 km von allen entfernt, fragt die App, wohin. Eine geteilte GPX-Datei oder ein Tourenlink (etwa von Komoot oder Outdooractive) wird zur Strecke.
 
 ## Abläufe Schritt für Schritt
