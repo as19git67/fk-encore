@@ -20,7 +20,7 @@ Ohne Datum funktioniert die Kette genauso; dann heißt es „Tag 1 bis 3“. Ein
 
 **Kreuzfahrten.** Jeder Hafen ist ein eigener Aufenthalt, das Schiff dazwischen eine Weiterreise „Schiff“. Landgangszeiten sind Ankunft und Abfahrt dieser Schiffsfahrten, Seetage ihre Nächte unterwegs. Liegt auf beiden Seiten eines Aufenthalts ein Schiff, fragt er nicht nach einem Hotel und zeigt „Übernachtung an Bord“. So hat jeder Hafen eigene Ideen, eine Suche um den Hafen und dieselbe Planungsansicht wie eine Stadt.
 
-**Der Name der Reise** wird nicht abgefragt. Gibt niemand einen ein, schlägt das lokale Modell einen aus Aufenthalten und Datum vor („Musterstadt im November“); Tippen auf den Titel ändert ihn.
+**Der Name der Reise** wird nicht abgefragt. Gibt niemand einen ein, schlägt das lokale Modell einen aus Aufenthalten und Datum vor („Musterstadt im November“). Geändert wird er unter Koffer › Einstellungen, nicht per Tipp auf den Titel.
 
 **Zuhause** bleibt, wie es heute ist: einmal je Nutzer festgelegt. Ist es gesetzt, gibt es Anreise und Heimreise als Weiterreisen.
 
@@ -66,7 +66,8 @@ Die Planungsansicht zeigt alle Tage eines Aufenthalts auf einem Bildschirm (Mock
 
 - **Spots** sind Karten mit Bild, Dauer, Priorität (Muss, Will, Wenn Zeit) und geschätzter Uhrzeit.
 - **Ziehen** ändert die Reihenfolge, auch in einen anderen Tag; lang drücken hebt eine Karte an.
-- **⋯** an der Karte führt direkt zu den Aktionen, Antippen öffnet die Details.
+- **⋯** an der Karte führt direkt zu den Aktionen, Antippen öffnet die Details. Schieben nach links löscht den Spot aus dem Tag, er geht zurück zu den Ideen.
+- **⋯** am Tageskopf trägt, was den ganzen Tag betrifft: Reihenfolge vorschlagen, Pause einfügen, feste Zeit eintragen, Ausflug planen. Ein Tag hat keinen eigenen Bildschirm.
 - **Leere Tage** zeigen ein Feld „Spot hierher ziehen oder aus den Ideen hinzufügen“.
 
 **Gepinnt** ist ein Spot mit einer festen Zeit, die die Reihenfolge nicht verschieben darf: ein Ticket oder Zeitfenster, ein Fotostopp wegen des Lichts, eine Reservierung, ein Ereignis zu fester Zeit, eine feste Abfahrt (Fähre, Seilbahn, letzte Rückfahrt). Ein Ort, der nur an einem Tag offen ist, hängt am Tag, nicht an einer Uhrzeit. Für alle nicht gepinnten Spots schlägt die App die Reihenfolge vor.
@@ -84,7 +85,7 @@ Die Planungsansicht zeigt alle Tage eines Aufenthalts auf einem Bildschirm (Mock
 - **Ausflüge** zeigt Orte 30 Minuten bis 2 Stunden von der Unterkunft mit mindestens drei Sehenswürdigkeiten, aus der Karte der Region. Gewählt wird der Tag zum Ausflugstag mit Hin- und Rückweg als Zeile, und die Auswahl sucht an diesem Tag um das Ziel. Eine Idee, die mehr als 30 km von der Unterkunft liegt, fragt „Ausflug daraus machen?“. Von Hand geht es weiter über „Ausflug planen“ am Tag.
 - **Strecken** zeigt die ausgeschilderten Wander- und Radwege der Karte in der Nähe. Eine eigene Strecke (Name, Start, Ende, Dauer) legt man über „Mehr“ an.
 
-**Spot-Details.** Tippen auf eine Karte oder eine Zeile der Auswahl öffnet ein Blatt von unten auf halber Höhe; der Tag bleibt darüber sichtbar. Nach oben ziehen zeigt alles: Bilder, Beschreibung mit Quelle, Öffnungszeiten der Woche, Ticket, Notiz, Kontakt. Zu geht es mit einem Wisch nach unten, einem Tipp auf den Tag darüber, mit ✕ oder „Fertig“. Seitlich wischen blättert zum nächsten Spot des Tags. Es gibt keinen Seitenwechsel und keinen Zurück-Knopf.
+**Spot-Details.** Tippen auf eine Karte oder eine Zeile der Auswahl öffnet ein Blatt von unten auf halber Höhe; der Tag bleibt darüber sichtbar. Nach oben ziehen zeigt alles: Bilder, Kartenausschnitt, Beschreibung mit Quelle, Öffnungszeiten der Woche, Ticket, Notiz, Kontakt. Zu geht es mit einem Wisch nach unten, einem Tipp auf den Tag darüber, mit ✕ oder „Fertig“. Seitlich wischen blättert zum nächsten Spot des Tags. Es gibt keinen Seitenwechsel und keinen Zurück-Knopf.
 
 **Abendlicht.** Ein Spot mit Blick (Aussichtspunkt, Fassade nach Westen) zeigt in den Details das beste Licht an den Tagen des Aufenthalts, etwa „16:05 bis 16:40“, mit dem Hinweis, an welchem Tag Wolken erwartet werden. „+ Tag 3 am Abend“ plant ihn als Spot mit fester Zeit und dem Grund „Licht“. Kippt das Wetter an diesem Tag, fragt der Regen-Hinweis nach einem anderen Tag.
 
@@ -112,7 +113,7 @@ Während der Reise bleibt das Gerüst dasselbe, und man kann jederzeit umplanen.
 
 **Mitschreiben.** Besucht ist ein Spot, wenn man mindestens 10 Minuten im Umkreis von 100 m war, bei langen Besuchen ein Viertel der geplanten Zeit; die Verweildauer allein genügt; Ankunft und Abfahrt werden festgehalten. Das Wetter wird je Spot zur Besuchszeit und je Tag gespeichert. Ein Spot, dessen Zeit vorbei ist und der nicht besucht wurde, bleibt bis zum Abend stehen; dann fragt die App einmal: anderer Tag oder zurück zu den Ideen.
 
-**Von Hand abhaken und rückgängig.** Ohne Standortfreigabe markiert ein Wisch nach rechts einen Spot als besucht. Jedes Abhaken, auch ein automatisches, lässt sich rückgängig machen: Nach einem automatischen Abhaken trägt die Karte des Spots eine Weile „gerade abgehakt“ und den Knopf „Doch nicht“, für den Fall, dass man nur vorbeigegangen ist. Später geht es über einen Tipp auf den Haken und „Nicht besucht“.
+**Von Hand abhaken und rückgängig.** Ohne Standortfreigabe markiert ein Tipp auf den Kreis an der Karte einen Spot als besucht; ein Wisch wäre in den Tagen mit Ziehen und Ablegen im Weg. Jedes Abhaken, auch ein automatisches, lässt sich rückgängig machen: Nach einem automatischen Abhaken trägt die Karte des Spots eine Weile „gerade abgehakt“ und den Knopf „Doch nicht“, für den Fall, dass man nur vorbeigegangen ist. Später geht es über einen Tipp auf den Haken und „Nicht besucht“.
 
 **Fotos.** Fotos werden nach Aufnahmezeit und Ort einem Spot zugeordnet. Jeder sieht nur die Fotos, die ihm selbst gehören oder auf die er über ein freigegebenes Album Zugriff hat. Die Teilnahme an einer Reise erweitert keine Zugriffsrechte.
 
