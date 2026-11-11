@@ -135,6 +135,9 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// whole replanning mechanic turns on (§5), and at trip resolution
     /// the actual planning result (§4.3).
     let pool: [TripCandidate]
+    /// Does the open part of the stay fit its coming days (stage 8)?
+    /// Only on a trip of ideas; nil elsewhere and from an older server.
+    var capacity: TripStayCapacity? = nil
     /// "stay" for a place the group is based at, "transit" for the
     /// journey between two of them (§22.7). Nil from an older server,
     /// which only ever had stays.
@@ -673,10 +676,16 @@ struct TripStop: Codable, Identifiable, Sendable {
     var outsideHours: Bool? = nil
     /// The mode picked in "Weg" for the way here; nil for the stay's own.
     var wayMode: String? = nil
+    /// "hand" or "fill" (stage 8): "fill" is a soft stop "Tag füllen"
+    /// put there, which goes back to the open spots if the day does not
+    /// reach it. Nil from an older server, which only had hand stops.
+    var placedBy: String? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }
     var ideaPriority: TripIdeaPriority { TripIdeaPriority(raw: priority) }
+    /// Put on the day by "Tag füllen", not by hand ("von der App").
+    var isSoft: Bool { placedBy == "fill" }
     /// "10:42" on this phone's clock, for a stop that is done and knows
     /// when. The row says it next to the tick: a day that moved a stop
     /// into the morning should say why it is there.

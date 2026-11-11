@@ -75,6 +75,10 @@ struct TripStayPlanView: View {
     /// The sheet "Aufenthalt" with place, days and lodging, opened from
     /// the head of the days or the title's menu.
     @State private var editingStay: TripStayEditing?
+    /// "Tag füllen" or "Alle Tage füllen", whose sheet is open (stage 8).
+    @State private var fillRequest: TripFillRequest?
+    /// "n weitere anzeigen" under the open spots.
+    @State private var showAllOpen = false
 
     private enum Layout: String { case list, map }
 
@@ -112,6 +116,11 @@ struct TripStayPlanView: View {
         .toolbarTitleMenu {
             Button("Ort, Tage und Unterkunft …", systemImage: "info.circle") {
                 Task { await openStay() }
+            }
+        }
+        .sheet(item: $fillRequest) { request in
+            TripDayFillSheet(planId: viewModel.planId, legIndex: viewModel.legIndex, request: request) { days in
+                await acceptFill(days, fromMinutes: request.fromMinutes)
             }
         }
         .sheet(item: $editingStay) { editing in
@@ -296,7 +305,7 @@ struct TripStayPlanView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 stayHeader(leg, running: running, nowMinutes: nowMinutes)
-                if running == nil { ideasButton(leg) }
+                if running == nil { openSection(leg) }
                 ForEach(days(of: leg)) { day in
                     let phase = TripOnTheRoad.phase(of: day.dayIndex, in: leg, today: today)
                     Group {
@@ -522,6 +531,140 @@ struct TripStayPlanView: View {
     }
 
     /// "Ideen (6) und Suche": the one way into the spot picker.
+    // MARK: - Open spots (stage 8)
+
+    /// Above the days before the trip (mock 13 A): what fits, and the
+    /// spots no day holds yet, Muss first.
+    private func openSection(_ leg: TripLeg) -> some View {
+        let open = TripOpenSpots.open(of: leg)
+        let shown = showAllOpen ? open : Array(open.prefix(4))
+        let fillable = days(of: leg).filter { $0.anchor == nil }
+        return VStack(alignment: .leading, spacing: 8) {
+            if let capacity = leg.capacity, !open.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(TripOpenSpots.capacityLine(capacity))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(capacity.fits ? Color.primary : Color.red)
+                    if let detail = TripOpenSpots.capacityDetail(capacity) {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text(open.isEmpty ? "Noch offen" : "Noch offen · \(open.count) \(open.count == 1 ? "Spot" : "Spots")")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                if !open.isEmpty, !fillable.isEmpty {
+                    Button("Alle Tage füllen") {
+                        fillRequest = TripFillRequest(dayIndex: nil, fromMinutes: nil)
+                    }
+                    .font(.footnote)
+                }
+            }
+            if open.isEmpty {
+                Text("Alles, was ihr sehen wollt, steht auf einem Tag oder kommt über „Spot hinzufügen“ dazu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(shown) { candidate in
+                openCard(candidate, days: fillable, leg: leg)
+            }
+            if open.count > shown.count {
+                Button("\(open.count - shown.count) weitere anzeigen") {
+                    withAnimation { showAllOpen = true }
+                }
+                .font(.footnote)
+                .frame(maxWidth: .infinity)
+            }
+            ideasButton(leg)
+        }
+    }
+
+    /// One open spot: what it is, how long, its priority and hints.
+    /// Dragged onto a day, or put there from its menu, it stands there by hand.
+    private func openCard(_ candidate: TripCandidate, days: [TripDay], leg: TripLeg) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(TripSpotName.line(candidate.displayName, local: candidate.localName))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                Text(TripOpenSpots.cardLine(candidate))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
+                              closedOn: candidate.closedOn ?? [],
+                              openingHours: candidate.openingHours)
+            }
+            Spacer(minLength: 0)
+            if let image = candidate.image {
+                TripSpotThumbnail(image: image, height: 48, width: 48, placeholder: false)
+            }
+            Menu {
+                ForEach(days) { day in
+                    Button("Auf \(TripStayPlan.dayTitle(day, leg: leg))") {
+                        guard let block = TripSpotPicker.spotsBlock(of: day) else { return }
+                        Task { _ = await viewModel.place(candidate, inBlock: block.id, onDay: day.dayIndex) }
+                    }
+                }
+                Divider()
+                Button("Ideen und Suche", systemImage: "magnifyingglass") { picking = true }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 32, height: 32)
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel("Aktionen für \(candidate.displayName)")
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .onDrag {
+            NSItemProvider(object: TripOpenSpots.dragId(candidate.osmRef) as NSString)
+        } preview: {
+            Text(candidate.displayName)
+                .font(.subheadline.weight(.semibold))
+                .padding(8)
+                .background(.regularMaterial, in: .rect(cornerRadius: 8))
+        }
+    }
+
+    /// "Tag füllen" under a coming day, and the hint on the last one
+    /// while Muss spots do not fit.
+    @ViewBuilder
+    private func fillButton(_ day: TripDay, running: Bool, nowMinutes: Int) -> some View {
+        if let leg = viewModel.leg, day.dayIndex == days(of: leg).last?.dayIndex,
+           let hint = TripOpenSpots.mustHint(open: TripOpenSpots.open(of: leg), capacity: leg.capacity) {
+            Label(hint, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        Button {
+            fillRequest = TripFillRequest(dayIndex: day.dayIndex, fromMinutes: running ? nowMinutes : nil)
+        } label: {
+            Label("Tag füllen", systemImage: "wand.and.stars")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 36)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private func acceptFill(_ days: [(dayIndex: Int, osmRefs: [String])], fromMinutes: Int?) async -> String? {
+        do {
+            let response = try await TripFillAPI.accept(planId: viewModel.planId, legIndex: viewModel.legIndex,
+                                                        days: days, fromMinutes: fromMinutes)
+            await viewModel.load()
+            withAnimation { undo = WeatherUndo(sentence: response.sentence, opId: response.opId) }
+            return nil
+        } catch {
+            return TripErrorText.describe(error)
+        }
+    }
+
     private func ideasButton(_ leg: TripLeg) -> some View {
         Button {
             picking = true
@@ -698,6 +841,9 @@ struct TripStayPlanView: View {
                 }
                 .buttonStyle(.bordered)
             }
+            if phase != .past, day.anchor == nil, !TripOpenSpots.open(of: leg).isEmpty {
+                fillButton(day, running: phase == .running, nowMinutes: nowMinutes)
+            }
         }
         // The day is a heading over its cards, not a box around them.
         .padding(.vertical, 4)
@@ -862,6 +1008,12 @@ struct TripStayPlanView: View {
                                 Text(TripStayPlan.kindLine(stop))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if stop.isSoft, stop.stopStatus == .planned {
+                                    // What the day does not reach is open again in the evening.
+                                    Label("von der App", systemImage: "sparkles")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                                 if let summary = stop.summary {
                                     Text(summary)
                                         .font(.caption)
@@ -1185,6 +1337,12 @@ struct TripStayPlanView: View {
     /// (counted among the day's stops) or to the end.
     private func drop(_ items: [String], onDay day: TripDay, before: Int?) -> Bool {
         dropSlot = nil
+        if let osmRef = items.first.flatMap(TripOpenSpots.osmRef(fromDragId:)) {
+            // An open spot dragged onto a day stands there by hand.
+            guard let target = TripStayPlan.dropTarget(day: day, before: before) else { return false }
+            Task { _ = await viewModel.place(osmRef: osmRef, inBlock: target.blockId, onDay: day.dayIndex) }
+            return true
+        }
         guard let leg = viewModel.leg,
               let rowId = items.first.flatMap(TripStayPlan.rowId(fromDragId:)),
               let stop = TripStayPlan.stop(rowId: rowId, in: leg),

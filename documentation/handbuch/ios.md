@@ -303,7 +303,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Chip. Ort, Tage und Unterkunft ändert ein Tipp auf die Kopfzeile der
   Planung (Name und Tage, mit „>“) oder der Eintrag „Ort, Tage und
   Unterkunft …“ im Menü des Titels; beides öffnet das Blatt „Aufenthalt“
-  wie im Reiseverlauf. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
+  wie im Reiseverlauf.
+- **Noch offen.** Über den Tagen steht, was noch keinem Tag gehört: eine
+  Zeile „ca. Muss … · Will … · frei …“ (oder wie viel zu viel ist) und die
+  offenen Spots, Muss zuerst. Ein offener Spot kommt per Ziehen oder über
+  „⋯“ fest auf einen Tag. „Tag füllen“ unter einem Tag (oder „Alle Tage
+  füllen“) schlägt passende Spots mit Grund vor; „–“ lässt einen offen,
+  erst „Übernehmen“ legt sie auf den Tag, mit „Rückgängig“. Was so auf
+  einen Tag kam, trägt „von der App“ und ist abends wieder offen, wenn der
+  Tag es nicht erreicht hat. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
   „Feste Zeit …“ (legt sie auf den Tag und hält die Uhrzeit), „Für später
   merken“, die Priorität und „Aus den Ideen entfernen“.
 - **Regen.** Regnet es laut Vorhersage an einem Tag mit Spots draußen,

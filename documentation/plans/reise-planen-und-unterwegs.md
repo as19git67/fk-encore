@@ -721,7 +721,8 @@ suggestion of a day stays as it is; it only orders what is on that day.
    writes the accepted spots as soft stops and orders the day. Selection in
    a pure `open-fill.ts` (open, weather, priority, detour, free time).
    „Alle Tage füllen“ over the coming days.
-3. **Stay screen.** iOS: capacity line and „Noch offen“ on top of
+3. **Stay screen.** *Built:* `TripOpenSpots.swift` (capacity line, open
+   spots, `TripDayFillSheet`), wired into `TripStayPlanView`. iOS: capacity line and „Noch offen“ on top of
    `TripStayPlanView`, days with fixed and firm stops, „Tag füllen“ per
    day, sheet `TripDayFillSheet`, hint for Muss spots at risk on the last
    days. A soft stop looks the same as a firm one except for a small „von
