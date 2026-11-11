@@ -1,0 +1,172 @@
+name: iOS TestFlight
+
+# Archives the iOS app (with its share and widgets extensions) and uploads
+# the build to App Store Connect, where it shows up in TestFlight.
+#
+# Started by hand only — from the Actions tab, the GitHub mobile app
+# ("Run workflow") or the API. Feature work lands on main many times a
+# day and should not ship a build each time; a TestFlight release is a
+# decision, so it is a button.
+#
+# Signing is Xcode's automatic signing with an App Store Connect API key
+# (`-allowProvisioningUpdates`): Xcode uses a cloud-managed distribution
+# certificate and creates the App Store profiles for all three bundle IDs
+# itself. No certificate or profile lives in the repository or in secrets.
+#
+# Secrets (repository › Settings › Secrets and variables › Actions):
+#   ASC_KEY_ID     App Store Connect API key ID
+#   ASC_ISSUER_ID  issuer ID shown above the key list
+#   ASC_KEY_P8     full text of the downloaded AuthKey_<id>.p8
+# The key needs the Admin role; App Manager may not create the
+# distribution certificate that cloud signing needs.
+#
+# Build number: the commit count of the checked-out ref, never lower than
+# the number in the project (which the pre-commit hook keeps at the commit
+# count, see scripts/sync-ios-build-number.sh). It is passed to xcodebuild
+# and applies to all three targets alike; nothing is committed. Running
+# twice on the same commit gives the same number, which App Store Connect
+# refuses — the run then says so.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ios
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The build number is the commit count, so the whole history.
+          fetch-depth: 0
+
+      - name: Select latest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: Check secrets
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          missing=""
+          [ -n "$ASC_KEY_ID" ] || missing="$missing ASC_KEY_ID"
+          [ -n "$ASC_ISSUER_ID" ] || missing="$missing ASC_ISSUER_ID"
+          [ -n "$ASC_KEY_P8" ] || missing="$missing ASC_KEY_P8"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets:$missing"
+            exit 1
+          fi
+
+      - name: Write the API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          key_dir="$RUNNER_TEMP/asc"
+          mkdir -p "$key_dir"
+          key_path="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$key_path"
+          chmod 600 "$key_path"
+          echo "ASC_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Work out version and build number
+        run: |
+          count=$(git rev-list --count HEAD)
+          project=$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\);.*/\1/p' FKPhotos.xcodeproj/project.pbxproj | head -1)
+          build=$(( count > ${project:-0} ? count : ${project:-0} ))
+          version=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' FKPhotos.xcodeproj/project.pbxproj | head -1)
+          echo "BUILD_NUMBER=$build" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Version $version, build $build ($(git rev-parse --short HEAD))"
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project FKPhotos.xcodeproj \
+            -scheme FKPhotos \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/FKPhotos.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            2>&1 | tee "$RUNNER_TEMP/archive.log"
+
+      - name: Export and upload to App Store Connect
+        run: |
+          set -o pipefail
+          team=$(sed -n 's/.*DEVELOPMENT_TEAM = \([A-Z0-9]*\);.*/\1/p' FKPhotos.xcodeproj/project.pbxproj | head -1)
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>destination</key>
+            <string>upload</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>${team}</string>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          if ! xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/FKPhotos.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee "$RUNNER_TEMP/export.log"; then
+            if grep -qiE 'bundle version must be higher|has already been (used|uploaded)|CFBundleVersion.*(already|previously)' "$RUNNER_TEMP/export.log"; then
+              echo "::error::Build $BUILD_NUMBER is already in App Store Connect. Merge something new to main (or raise MARKETING_VERSION) and run again."
+            fi
+            exit 1
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "### Uploaded to App Store Connect"
+            echo ""
+            echo "Version **$APP_VERSION**, build **$BUILD_NUMBER**, commit \`$(git rev-parse --short HEAD)\`."
+            echo ""
+            echo "The build appears in TestFlight once Apple has processed it (usually 5–30 minutes)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-testflight-logs
+          path: |
+            ${{ runner.temp }}/archive.log
+            ${{ runner.temp }}/export.log
+          if-no-files-found: ignore
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
