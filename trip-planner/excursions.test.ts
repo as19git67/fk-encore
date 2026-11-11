@@ -46,3 +46,16 @@ describe("blockStart", () => {
     expect(blockStart("day", null, there, home, places)).toBe(there);
   });
 });
+
+describe("the way to an excursion", () => {
+  it("is never reckoned on foot: a stay on foot goes by train or bus", async () => {
+    const { excursionTravel } = await import("./excursions");
+    const { travelLeg } = await import("./travel");
+    const home = { lat: 43.0, lon: 11.0 };
+    const there = { lat: 43.4, lon: 11.0 };
+    const onFoot = excursionTravel(home, there, "foot");
+    expect(onFoot).toBe(travelLeg(home, there, "transit").minutes);
+    expect(onFoot).toBeLessThan(travelLeg(home, there, "foot").minutes / 3);
+    expect(excursionTravel(home, there, "car")).toBe(travelLeg(home, there, "car").minutes);
+  });
+});

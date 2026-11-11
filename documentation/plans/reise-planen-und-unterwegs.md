@@ -576,6 +576,19 @@ stage 7 runs in this order, one PR each:
    Still open: the running day shows the stops of an excursion in one
    list without its section, and a drag onto an empty excursion lands at
    the quarters.
+   **Spots for an excursion (mock 17, built 2026-11-11).** The spot
+   picker has a bar "Für" naming what "+" adds to: the stay, an
+   excursion's window (with what it still holds) or a whole-day trip;
+   "Ändern" lists the stay and each day's excursions
+   (`TripPickerTarget.swift`). On an excursion the search is "In …
+   suchen", found places come first with their distance from the
+   destination, then the ideas near it, then the rest; a spot longer
+   than the window is pale but still added. Opened on the stay, a row at
+   an excursion's destination says "nahe … · Ausflug Tag n" and "+" puts
+   it into that excursion. The way to an excursion and the search for
+   day-trip targets never go on foot: a stay by car or transit keeps its
+   mode, every other goes by transit (`dayTripMode` in `travel.ts`) —
+   on foot, a stay in a village found no town within reach.
 
 ### Stage 8 — open spots: a day holds only what is fixed (backend + iOS)
 

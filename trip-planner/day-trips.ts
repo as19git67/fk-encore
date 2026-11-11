@@ -35,6 +35,7 @@ import { addDays } from "./leg-dates";
 import { loadPlan, type StoredLeg } from "./plan-store";
 import type { PlanResponse } from "./plans";
 import { searchRadiusFor } from "./search-reach";
+import { dayTripMode } from "./travel";
 import { localToday } from "./stay-weather-api";
 import { zoneAt } from "./time-zone";
 
@@ -138,7 +139,8 @@ async function targetsOf(leg: StoredLeg): Promise<{ targets: DayTripTarget[]; no
   if (leg.kind === "transit") return { targets: [], note: null };
   const region = await pickRegion(leg.anchor.lat, leg.anchor.lon);
   if (!region) return { targets: [], note: "Für diese Gegend ist noch keine Region importiert." };
-  const mode = leg.mode;
+  // A day out goes by car or train, whatever the stay does on foot.
+  const mode = dayTripMode(leg.mode);
   const minRadiusM = reachWithin(leg.anchor, mode, MIN_DAY_TRIP_MINUTES);
   const maxRadiusM = reachWithin(leg.anchor, mode, MAX_TRIP_TRAVEL_MINUTES);
   if (maxRadiusM <= minRadiusM) return { targets: [], note: "In Tagesausflug-Nähe liegt nichts." };

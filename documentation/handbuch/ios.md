@@ -267,6 +267,18 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   mehrere Ausflüge, solange sie sich nicht überschneiden. „⋯“ am
   Abschnitt ändert die Zeiten, zeigt den Weg oder entfernt den Ausflug;
   seine Spots gehen dann zurück zu den Ideen.
+- „Spot hinzufügen“ sagt oben unter „Für“, wohin „+“ legt: in den
+  Aufenthalt, in einen Ausflug (mit Zeitfenster und „noch … frei“) oder
+  auf einen ganztägigen Ausflug; „Ändern“ wählt etwas anderes. Bei einem
+  Ausflug sucht die Liste um das Ziel, nennt die Entfernung vom Ziel und
+  zeigt die Ideen nahe dem Ziel zuerst; was nicht mehr ins Fenster
+  passt, steht blass da und geht trotzdem hinein. Für den Aufenthalt
+  geöffnet, sagt eine Zeile am Ziel eines Ausflugs „nahe … · Ausflug
+  Tag n“, und „+“ legt sie in diesen Ausflug. Langes Drücken bietet
+  jeden Ausflug, jeden Tag und „Als Idee behalten“.
+- Der Weg zu einem Ausflug zählt nie zu Fuß: mit Auto oder Bahn im
+  Aufenthalt gilt das, sonst Bahn und Bus. Deshalb schlägt der Chip
+  „Ausflüge“ auch bei einem Aufenthalt zu Fuß die Städte der Umgebung vor.
 - Eine Reise öffnet sich mit ihrem Reiseverlauf. Ein Tipp auf einen
   Aufenthalt oder eine seiner Tageszeilen öffnet die Planung des
   Aufenthalts mit allen Tagen auf einem Bildschirm, „Zurück“ führt in den

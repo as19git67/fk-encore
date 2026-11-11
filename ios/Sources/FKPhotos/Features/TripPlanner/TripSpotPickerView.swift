@@ -25,6 +25,10 @@ struct TripSpotPickerView: View {
     /// After "Ausflüge": the day out the search is around, and the day
     /// "+ Tag n" adds to.
     @State private var tripFocus: TripDayTripFocus?
+    /// What "+" adds to (Mock 17): the stay, an excursion's window or a
+    /// day out; nil on a journey, which has no bar "Für".
+    @State private var target: TripPickerTarget?
+    @State private var choosingTarget = false
     /// The idea a fixed time is being written for (§4.4).
     @State private var appointmentFor: TripCandidate?
     /// What an action in the details queued for when they have closed:
@@ -49,16 +53,25 @@ struct TripSpotPickerView: View {
         let search = TripPlaceSearchViewModel(
             planId: viewModel.planId, legIndex: viewModel.legIndex, ideas: true)
         var chip = chip
+        let leg = viewModel.leg
+        var target = leg.flatMap { $0.isTransit ? nil : TripPickerTargets.stay($0) }
         if let excursion {
             let focus = TripSpotPicker.excursionFocus(excursion.excursion, dayIndex: excursion.dayIndex)
             search.area = focus.area
             _tripFocus = State(initialValue: focus.focus)
+            if let day = leg?.days.first(where: { $0.dayIndex == excursion.dayIndex }) {
+                target = TripPickerTargets.excursion(excursion.excursion, on: day)
+            }
             chip = .highlights
-        } else if let focus = TripSpotPicker.dayTripFocus(dayTrip, in: viewModel.leg) {
+        } else if let focus = TripSpotPicker.dayTripFocus(dayTrip, in: leg) {
             search.area = focus.area
             _tripFocus = State(initialValue: focus.focus)
+            if let day = leg?.days.first(where: { $0.dayIndex == dayTrip }) {
+                target = TripPickerTargets.dayTrip(day)
+            }
             chip = .highlights
         }
+        _target = State(initialValue: target)
         _search = State(initialValue: search)
         _chip = State(initialValue: chip)
         _ballot = State(initialValue: TripStayBallot(planId: viewModel.planId, legIndex: viewModel.legIndex))
@@ -86,9 +99,15 @@ struct TripSpotPickerView: View {
     var body: some View {
         NavigationStack {
             content
-                .safeAreaInset(edge: .top, spacing: 0) { chips }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 0) {
+                        if let current = liveTarget { targetBar(current) }
+                        chips
+                    }
+                    .background(.bar)
+                }
                 .searchable(text: $search.query, placement: .navigationBarDrawer(displayMode: .always),
-                            prompt: "Name, Kategorie oder Karten-Link")
+                            prompt: liveTarget?.searchPrompt ?? "Name, Kategorie oder Karten-Link")
                 .onSubmit(of: .search) { Task { await runQuery() } }
                 .task(id: search.query) {
                     // Typing pauses before it searches, as everywhere in the app.
@@ -125,6 +144,7 @@ struct TripSpotPickerView: View {
                     ballot.errorMessage = nil
                 })
                 .sheet(item: $appointmentFor) { appointmentSheet($0) }
+                .sheet(isPresented: $choosingTarget) { targetChooser }
                 .sheet(item: $detail, onDismiss: runAfterDetail) { detailSheet($0) }
         }
     }
@@ -142,6 +162,9 @@ struct TripSpotPickerView: View {
                 await viewModel.load()
                 tripFocus = focus
                 search.area = area
+                target = viewModel.leg.flatMap { leg in
+                    TripPickerTargets.away(of: leg).first { $0.kind == .dayTrip && $0.dayIndex == focus.dayIndex }
+                } ?? target
                 chip = .highlights
                 search.forgetSuggestions()
                 await reload()
@@ -152,8 +175,8 @@ struct TripSpotPickerView: View {
                 leg: viewModel.leg,
                 open: { detail = $0 },
                 searchHere: { area in
+                    // "In diesem Bereich suchen" stays with the excursion (Mock 17).
                     search.area = area
-                    tripFocus = nil
                     Task { await reload() }
                 },
             )
@@ -226,27 +249,26 @@ struct TripSpotPickerView: View {
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(chip == option ? .isSelected : [])
                 }
-                if search.area != nil {
+                if search.area != nil && search.area != liveTarget?.area {
                     Button {
-                        search.area = nil
-                        tripFocus = nil
+                        search.area = liveTarget?.area
                         Task { await reload() }
                     } label: {
-                        Label(tripFocus.map { "Ausflug \($0.name) · Tag \($0.dayIndex + 1)" } ?? "Kartenbereich",
-                              systemImage: "xmark.circle.fill")
+                        Label("Kartenbereich", systemImage: "xmark.circle.fill")
                             .font(.subheadline)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(Color(.tertiarySystemFill), in: .capsule)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Wieder um die Unterkunft suchen")
+                    .accessibilityLabel(liveTarget?.kind == .stay || liveTarget == nil
+                                        ? "Wieder um die Unterkunft suchen"
+                                        : "Wieder um \(liveTarget!.name) suchen")
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
-        .background(.bar)
     }
 
     // MARK: - List
@@ -287,21 +309,10 @@ struct TripSpotPickerView: View {
                 let all = items
                 let ideas = all.filter(\.isOwnIdea)
                 let found = all.filter { !$0.isOwnIdea }
-                if !ideas.isEmpty {
-                    Section {
-                        ForEach(ideas) { item in row(item) }
-                    } header: {
-                        Text(ideas.count == 1 ? "Eure Ideen · 1 noch ohne Tag"
-                                              : "Eure Ideen · \(ideas.count) noch ohne Tag")
-                    }
-                }
-                if !found.isEmpty {
-                    Section {
-                        ForEach(found) { item in row(item) }
-                    } header: {
-                        Text(search.query.isEmpty && chip != .more
-                             ? "Highlights in der Nähe · nach Bekanntheit" : "Treffer")
-                    }
+                if let away = liveTarget, away.kind != .stay {
+                    awaySections(away, ideas: ideas, found: found)
+                } else {
+                    staySections(ideas: ideas, found: found)
                 }
                 if all.isEmpty {
                     emptyRow
@@ -313,6 +324,193 @@ struct TripSpotPickerView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    /// The stay's list: its ideas, then the highlights or what was found.
+    @ViewBuilder
+    private func staySections(ideas: [TripPickerItem], found: [TripPickerItem]) -> some View {
+        if !ideas.isEmpty {
+            Section {
+                ForEach(ideas) { item in row(item) }
+            } header: {
+                Text(ideas.count == 1 ? "Eure Ideen · 1 noch ohne Tag"
+                                      : "Eure Ideen · \(ideas.count) noch ohne Tag")
+            }
+        }
+        if !found.isEmpty {
+            Section {
+                ForEach(found) { item in row(item) }
+            } header: {
+                Text(search.query.isEmpty && chip != .more
+                     ? "Highlights in der Nähe · nach Bekanntheit" : "Treffer")
+            }
+        }
+    }
+
+    /// Mock 17, A: what is around the destination, then the ideas near
+    /// it, then the rest of the stay's ideas.
+    @ViewBuilder
+    private func awaySections(_ away: TripPickerTarget, ideas: [TripPickerItem], found: [TripPickerItem]) -> some View {
+        if !found.isEmpty {
+            Section {
+                ForEach(found) { item in row(item) }
+            } header: {
+                Text(search.query.isEmpty && chip != .more ? "Um \(away.name)" : "Treffer")
+            }
+        }
+        let split = TripPickerTargets.splitIdeas(ideas, around: away)
+        if !split.near.isEmpty {
+            Section("Aus euren Ideen, nahe \(away.name)") {
+                ForEach(split.near) { item in row(item) }
+            }
+        }
+        if !split.rest.isEmpty {
+            Section("Weitere Ideen des Aufenthalts") {
+                ForEach(split.rest) { item in row(item) }
+            }
+        }
+    }
+
+    // MARK: - For
+
+    /// The target as the plan has it now: what its window still holds
+    /// changes with every spot added.
+    private var liveTarget: TripPickerTarget? {
+        guard let target else { return nil }
+        return TripPickerTargets.refreshed(target, in: viewModel.leg) ?? target
+    }
+
+    /// The bar "Für" over the search (Mock 17): what "+" adds to, and
+    /// "Ändern" for the stay, its excursions and its days out.
+    private func targetBar(_ current: TripPickerTarget) -> some View {
+        let away = current.kind != .stay
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("FÜR")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Button {
+                choosingTarget = true
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(current.title, systemImage: away ? "car.fill" : "bed.double")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(current.barLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Ändern")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.accentColor)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(away ? Color.accentColor.opacity(0.12) : Color(.tertiarySystemFill),
+                            in: .rect(cornerRadius: 10))
+                .overlay {
+                    if away {
+                        RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 1)
+                    }
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Für: \(current.title), \(current.barLine)")
+            .accessibilityHint("Wählen, wofür gesucht wird")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    /// Mock 17, B: the stay, then each day with an excursion or a day out.
+    private var targetChooser: some View {
+        NavigationStack {
+            List {
+                if let leg = viewModel.leg {
+                    Section {
+                        targetRow(TripPickerTargets.stay(leg))
+                    }
+                    ForEach(TripPickerTargets.days(of: leg)) { day in
+                        Section(day.title) {
+                            ForEach(day.targets) { targetRow($0) }
+                        }
+                    }
+                    Section {
+                    } footer: {
+                        Text("Nur Ausflüge stehen hier; ein Tag ohne steckt in „\(leg.displayTitle)“.")
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Wofür suchen?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { choosingTarget = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .opaqueSheetBackground()
+    }
+
+    private func targetRow(_ option: TripPickerTarget) -> some View {
+        let chosen = option.id == liveTarget?.id
+        return Button {
+            choose(option)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .opacity(chosen ? 1 : 0)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(option.title, systemImage: option.kind == .stay ? "bed.double" : "car.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(option.line)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    /// Search around the new target, and add there.
+    private func choose(_ option: TripPickerTarget) {
+        choosingTarget = false
+        guard option.id != liveTarget?.id else { return }
+        target = option
+        tripFocus = option.focus
+        search.area = option.area
+        if option.kind != .stay && chip == .all { chip = .highlights }
+        search.forgetSuggestions()
+        Task { await reload() }
+    }
+
+    /// The excursion or day out a row lies at, while the picker adds to
+    /// the stay: its "+" then goes there (Mock 17, B).
+    private func nearTarget(_ item: TripPickerItem) -> TripPickerTarget? {
+        guard liveTarget?.kind == .stay, let leg = viewModel.leg else { return nil }
+        return TripPickerTargets.near(item.coordinate, in: TripPickerTargets.away(of: leg))
+    }
+
+    /// Where "+" on a row puts the spot: the chosen excursion, or the one
+    /// the row lies at.
+    private func rowFocus(_ item: TripPickerItem) -> TripDayTripFocus? {
+        tripFocus ?? nearTarget(item)?.focus
+    }
+
+    /// True when a row takes longer than the excursion's window holds.
+    private func misfits(_ item: TripPickerItem) -> Bool {
+        guard let away = liveTarget, away.kind == .excursion else { return false }
+        return TripPickerTargets.doesNotFit(dwellMinutes: item.dwellMinutes, away)
     }
 
     @ViewBuilder
@@ -360,6 +558,8 @@ struct TripSpotPickerView: View {
             }
             addButton(item)
         }
+        // Longer than the window holds: pale, but "+" still adds it.
+        .opacity(misfits(item) ? 0.55 : 1)
         .contextMenu {
             TripSpotActionMenuItems(actions: actions(item))
         }
@@ -381,6 +581,11 @@ struct TripSpotPickerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+            }
+            if let place = placeLine(item) {
+                Text(place)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             HStack(spacing: 6) {
                 if let minutes = item.dwellMinutes {
@@ -408,6 +613,21 @@ struct TripSpotPickerView: View {
         }
     }
 
+    /// Where a row lies from the chosen excursion ("600 m vom Ziel",
+    /// "passt nicht, 1 h 20 frei"), or the excursion it lies at while
+    /// the picker adds to the stay ("nahe Seestadt · Ausflug Tag 3").
+    private func placeLine(_ item: TripPickerItem) -> String? {
+        guard !item.isPlanned else { return nil }
+        if let away = liveTarget, away.kind != .stay {
+            let distance = TripPickerTargets.fromDestination(item.coordinate, away)
+            if misfits(item) {
+                return [distance, TripPickerTargets.misfitText(away)].compactMap { $0 }.joined(separator: " · ")
+            }
+            return distance
+        }
+        return nearTarget(item).map(TripPickerTargets.nearText)
+    }
+
     @ViewBuilder
     private func addButton(_ item: TripPickerItem) -> some View {
         if item.isPlanned || done[item.id]?.hasPrefix("auf Tag") == true {
@@ -419,11 +639,13 @@ struct TripSpotPickerView: View {
                 .accessibilityLabel(day.map { "Schon eingeplant, Tag \($0 + 1)" } ?? "Schon eingeplant")
         } else {
             let suggestion = search.suggestions[item.osmRef]
-            let focused = tripFocus?.dayIndex
+            let focus = rowFocus(item)
+            let into = liveTarget?.kind == .stay ? nearTarget(item) : liveTarget
             TripAddButton(running: busy == item.id,
-                          full: focused == nil && suggestion?.full == true,
-                          label: tripFocus?.blockId != nil ? "In den Ausflug nach \(tripFocus!.name)" : focused.map { "Auf Tag \($0 + 1) legen" } ?? TripSpotPicker.addLabel(suggestion, onTheWay: viewModel.leg?.isTransit == true)) {
-                Task { await add(item, onDay: focused ?? suggestion?.dayIndex) }
+                          full: focus == nil && suggestion?.full == true,
+                          label: focus != nil ? (into?.addLabel ?? "Hinzufügen")
+                              : TripSpotPicker.addLabel(suggestion, onTheWay: viewModel.leg?.isTransit == true)) {
+                Task { await add(item, onDay: focus?.dayIndex ?? suggestion?.dayIndex, into: focus) }
             }
             .disabled(busy != nil)
         }
@@ -472,16 +694,37 @@ struct TripSpotPickerView: View {
         later: @escaping @MainActor (@escaping @MainActor () -> Void) -> Void = { $0() },
     ) -> [TripPinSheetAction] {
         guard let leg = viewModel.leg, !item.isPlanned else { return [] }
-        let suggested = tripFocus?.dayIndex ?? search.suggestions[item.osmRef]?.dayIndex
-        var out: [TripPinSheetAction] = leg.days.sorted { $0.dayIndex < $1.dayIndex }.map { day in
-            let title = TripStayPlan.dayTitle(day, leg: leg)
-            return TripPinSheetAction(
-                id: "day-\(day.dayIndex)",
-                title: day.dayIndex == suggested ? "Auf \(title) (vorgeschlagen)" : "Auf \(title)",
-                systemImage: day.dayIndex == suggested ? "calendar.badge.plus" : "calendar",
+        let focus = rowFocus(item)
+        let suggested = focus == nil ? search.suggestions[item.osmRef]?.dayIndex : nil
+        // Every excursion of the stay, the one "+" adds to first (Mock 17:
+        // a long press offers another excursion, another day, or the idea).
+        let windows = TripPickerTargets.away(of: leg).filter { $0.kind == .excursion }
+        let isFocus = { (option: TripPickerTarget) in focus?.blockId != nil && option.blockId == focus?.blockId }
+        let excursions = windows.filter(isFocus) + windows.filter { !isFocus($0) }
+        var out: [TripPinSheetAction] = excursions.map { option in
+            TripPinSheetAction(
+                id: "target-\(option.id)",
+                title: "\(option.title) · Tag \((option.dayIndex ?? 0) + 1)",
+                systemImage: "car",
                 closes: false,
             ) {
-                await add(item, onDay: day.dayIndex)
+                await add(item, onDay: option.dayIndex, into: option.focus)
+            }
+        }
+        // A day out as a whole puts the spot on that day; every other day
+        // takes it at the quarters.
+        out += leg.days.sorted { $0.dayIndex < $1.dayIndex }.map { day -> TripPinSheetAction in
+            let title = TripStayPlan.dayTitle(day, leg: leg)
+            let dayOut = day.anchor != nil
+            let chosen = day.dayIndex == suggested || (focus?.blockId == nil && focus?.dayIndex == day.dayIndex)
+            return TripPinSheetAction(
+                id: "day-\(day.dayIndex)",
+                title: chosen ? "Auf \(title) (vorgeschlagen)" : "Auf \(title)",
+                systemImage: chosen ? "calendar.badge.plus" : "calendar",
+                closes: false,
+            ) {
+                await add(item, onDay: day.dayIndex,
+                          into: dayOut ? TripPickerTargets.dayTrip(day)?.focus : nil)
             }
         }
         if !item.isIdea {
@@ -534,9 +777,11 @@ struct TripSpotPickerView: View {
     /// "Spot-Auswahl und Spot-Details").
     private func detailBar(_ item: TripPickerItem) -> TripSpotDetailBar {
         let all = actions(item, later: { afterDetail = $0 })
-        let suggested = tripFocus?.dayIndex ?? search.suggestions[item.osmRef]?.dayIndex
+        let focus = rowFocus(item)
+        let suggested = focus?.dayIndex ?? search.suggestions[item.osmRef]?.dayIndex
             ?? viewModel.leg?.days.map(\.dayIndex).min()
-        let primary = all.first { $0.id == "day-\(suggested ?? -1)" }
+        let primary = focus?.blockId.flatMap { id in all.first { $0.id == "target-\(id)" } }
+            ?? all.first { $0.id == "day-\(suggested ?? -1)" }
         return TripSpotDetailBar(primary: primary,
                                  primaryTitle: suggested.map { _ in "Hinzufügen" },
                                  primaryImage: "plus.circle",
@@ -563,7 +808,9 @@ struct TripSpotPickerView: View {
     }
 
     /// Puts a place on a day, or only into the ideas when `day` is nil.
-    private func add(_ item: TripPickerItem, onDay day: Int?) async {
+    /// `into` names the excursion's window on that day; without it the
+    /// spot goes to the day at the quarters.
+    private func add(_ item: TripPickerItem, onDay day: Int?, into focus: TripDayTripFocus? = nil) async {
         guard busy == nil else { return }
         busy = item.id
         defer { busy = nil }
@@ -587,7 +834,7 @@ struct TripSpotPickerView: View {
             return
         }
         guard let target = viewModel.leg?.days.first(where: { $0.dayIndex == day }),
-              let block = TripSpotPicker.block(of: target, focus: tripFocus)
+              let block = TripSpotPicker.block(of: target, focus: focus)
         else { return }
         if await viewModel.place(osmRef: ref, inBlock: block.id, onDay: day) {
             done[item.id] = "auf Tag \(day + 1)"

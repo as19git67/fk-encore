@@ -23,7 +23,7 @@
  */
 
 import { MIN_VIABLE_BLOCK_MINUTES } from "./fixpoints";
-import { travelLeg, type Coordinate, type TransportMode } from "./travel";
+import { dayTripMode, travelLeg, type Coordinate, type TransportMode } from "./travel";
 
 /** A day trip with a time window, as stored beside the day (migration 0311). */
 export interface Excursion {
@@ -61,9 +61,9 @@ export function excursionLabel(excursion: Pick<Excursion, "label">): string {
   return excursion.label ? `Ausflug nach ${excursion.label}` : "Ausflug";
 }
 
-/** One way from the quarters to the destination. */
-export function excursionTravel(quarters: Coordinate, excursion: Pick<Excursion, "lat" | "lon">, mode: TransportMode): number {
-  return travelLeg(quarters, { lat: excursion.lat, lon: excursion.lon }, mode).minutes;
+/** One way from the quarters to the destination, never on foot (`dayTripMode`). */
+export function excursionTravel(quarters: Coordinate, excursion: Pick<Excursion, "lat" | "lon">, stayMode: TransportMode): number {
+  return travelLeg(quarters, { lat: excursion.lat, lon: excursion.lon }, dayTripMode(stayMode)).minutes;
 }
 
 /** The hours the group is away: from leaving the quarters to being back. */
