@@ -1069,6 +1069,89 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// What the excursion sheet hands back for a time window.
+    struct ExcursionDraft {
+        let place: TripPlace
+        let departMinutes: Int
+        let returnMinutes: Int
+        let radiusM: Int?
+    }
+
+    /// A day trip with a time window on a day (Anton, 11.11.: as many
+    /// as fit). `replaceDayTrip` turns the day's whole-day trip into
+    /// this one; its spots move into the window.
+    func addExcursion(_ draft: ExcursionDraft, dayIndex: Int, replaceDayTrip: Bool = false) async -> Bool {
+        guard requireOnline() else { return false }
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let label: String?
+            let radiusM: Int?
+            let departAt: String
+            let returnAt: String
+            let replaceDayTrip: Bool?
+        }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/legs/\(legIndex)/days/\(dayIndex)/excursions",
+                body: Body(lat: draft.place.latitude, lon: draft.place.longitude, label: draft.place.name,
+                           radiusM: draft.radiusM, departAt: TripClock.format(draft.departMinutes),
+                           returnAt: TripClock.format(draft.returnMinutes),
+                           replaceDayTrip: replaceDayTrip ? true : nil),
+            )
+            apply(response)
+            return true
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+            return false
+        }
+    }
+
+    /// New hours or a new place for an excursion; the day is cut again.
+    func updateExcursion(_ excursion: TripExcursion, _ draft: ExcursionDraft, dayIndex: Int) async -> Bool {
+        guard requireOnline() else { return false }
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let label: String?
+            let radiusM: Int?
+            let departAt: String
+            let returnAt: String
+        }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.patch(
+                "/trip-planner/plans/\(planId)/legs/\(legIndex)/days/\(dayIndex)/excursions/\(excursion.id)",
+                body: Body(lat: draft.place.latitude, lon: draft.place.longitude, label: draft.place.name,
+                           radiusM: draft.radiusM, departAt: TripClock.format(draft.departMinutes),
+                           returnAt: TripClock.format(draft.returnMinutes)),
+            )
+            apply(response)
+            return true
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+            return false
+        }
+    }
+
+    /// Take an excursion off the day; its spots go back to the ideas.
+    func removeExcursion(_ excursion: TripExcursion, dayIndex: Int) async {
+        guard requireOnline() else { return }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.delete(
+                "/trip-planner/plans/\(planId)/legs/\(legIndex)/days/\(dayIndex)/excursions/\(excursion.id)",
+            )
+            apply(response)
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
     /// Take one off again. The day gets its minutes back, so the server
     /// plans it again — a block still shortened for a train nobody
     /// catches would be wrong in the quietest possible way.

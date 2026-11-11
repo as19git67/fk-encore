@@ -13,6 +13,7 @@
  */
 
 import { isVisit } from "./frame-spots";
+import { blockStart, excursionPlaces } from "./excursions";
 import { addDays } from "./leg-dates";
 import { lineOf, type OrderBreak, type OrderInput, type OrderStop } from "./day-order";
 import { resolveFixpoints, type Fixpoint } from "./fixpoints";
@@ -120,8 +121,11 @@ export function withDayTimes(
     let overrun = 0;
     let windowMinutes = 0;
     const breakEtas = new Map<string, number>();
-    const blocks = day.blocks.map((block) => {
+    const home = position;
+    const places = excursionPlaces(day.excursions);
+    const blocks = day.blocks.map((block, index) => {
       const frame = block.kind === "spots" ? frameOf(block, day.fixpoints) : null;
+      position = blockStart(block.id, index > 0 ? day.blocks[index - 1].id : null, position, home, places);
       const start = position;
       if (block.stops.length > 0) position = leaveFrom(block.stops[block.stops.length - 1]);
       if (!frame) return block;
@@ -206,14 +210,20 @@ function chosenSegments(
   if (!segments || segments.size === 0) return out;
   let fromRef = DAY_START;
   let from = start;
-  for (const block of day.blocks) {
+  const places = excursionPlaces(day.excursions);
+  day.blocks.forEach((block, index) => {
+    const at = blockStart(block.id, index > 0 ? day.blocks[index - 1].id : null, from, start, places);
+    if (at !== from) {
+      from = at;
+      fromRef = DAY_START;
+    }
     for (const stop of block.stops) {
       const choice = segments.get(segmentKey(fromRef, stop.osmRef));
       if (choice) out.set(stop.osmRef, { from, choice });
       fromRef = stop.osmRef;
       from = leaveFrom(stop);
     }
-  }
+  });
   return out;
 }
 

@@ -28,6 +28,7 @@
  */
 
 import { dayEnds, type DayEnds } from "./day-ends";
+import { excursionPlaces } from "./excursions";
 import type { FixpointKind } from "./fixpoints";
 import type { Coordinate } from "./travel";
 
@@ -43,6 +44,13 @@ export interface DayWalk {
    * the platform rather than the quarters (§4.4).
    */
   end: Coordinate;
+  /**
+   * Where the day is at home: the quarters, or a whole-day trip's
+   * destination. The first block after an excursion starts here.
+   */
+  home?: Coordinate;
+  /** The block of each excursion and the place it is planned around (`excursions.ts`). */
+  places?: ReadonlyMap<string, Coordinate>;
 }
 
 /**
@@ -69,6 +77,7 @@ export function dayWalkOf(
 /** A day as the storage layer hands it over, and no more than that. */
 export interface StoredDayShape {
   anchor?: { lat: number; lon: number } | null;
+  excursions?: readonly { id: string; lat: number; lon: number }[];
   fixpoints?: readonly StoredFixpointShape[];
   blocks?: readonly { startMinutes?: number | null }[];
 }
@@ -90,7 +99,9 @@ export interface StoredFixpointShape {
  * to disagree in the first place.
  */
 export function dayWalkOfStored(legAnchor: Coordinate, day: StoredDayShape): DayWalk {
-  return dayWalkOf(legAnchor, day.anchor, endsOfStored(day));
+  const walk = dayWalkOf(legAnchor, day.anchor, endsOfStored(day));
+  if (!day.excursions || day.excursions.length === 0) return walk;
+  return { ...walk, home: placeOf(day.anchor) ?? legAnchor, places: excursionPlaces(day.excursions) };
 }
 
 /**

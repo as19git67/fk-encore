@@ -258,6 +258,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   nach …“ mit Hin- und Rückweg, „Weg zeigen“, „Dort suchen“ und
   „Fahrt ändern“. „Dort suchen“ und der leere Tag öffnen die
   Spot-Auswahl um das Ausflugsziel, und „+ Tag n“ legt auf diesen Tag.
+- Ein Ausflug muss nicht den ganzen Tag dauern: „⋯“ am Tag › „Ausflug
+  hinzufügen“ öffnet das Blatt „Ausflug“ mit Ziel, „Ganzer Tag |
+  Zeitfenster“, Abfahrt an der Unterkunft und Rückfahrt vom Ziel. Ein
+  Zeitfenster steht im Tag als eigener Abschnitt mit seinen Spots und
+  „+ Spot in …“, das um das Ziel sucht und in dieses Fenster legt;
+  davor und danach plant der Tag an der Unterkunft. An einem Tag gehen
+  mehrere Ausflüge, solange sie sich nicht überschneiden. „⋯“ am
+  Abschnitt ändert die Zeiten, zeigt den Weg oder entfernt den Ausflug;
+  seine Spots gehen dann zurück zu den Ideen.
 - Eine Reise öffnet sich mit ihrem Reiseverlauf. Ein Tipp auf einen
   Aufenthalt oder eine seiner Tageszeilen öffnet die Planung des
   Aufenthalts mit allen Tagen auf einem Bildschirm, „Zurück“ führt in den

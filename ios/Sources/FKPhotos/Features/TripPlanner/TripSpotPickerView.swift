@@ -41,12 +41,20 @@ struct TripSpotPickerView: View {
     /// "Ausflüge" and "Strecken" open on theirs.
     /// `dayTrip` opens it from a day out: the search goes around where
     /// that day goes, and "+ Tag n" adds to that day.
-    init(viewModel: TripPlannerViewModel, chip: TripPickerChip = .all, dayTrip: Int? = nil) {
+    /// `excursion` opens it from a time window inside a day (Mock 16):
+    /// the search goes around its destination and "+" adds into its window.
+    init(viewModel: TripPlannerViewModel, chip: TripPickerChip = .all, dayTrip: Int? = nil,
+         excursion: (dayIndex: Int, excursion: TripExcursion)? = nil) {
         _viewModel = State(initialValue: viewModel)
         let search = TripPlaceSearchViewModel(
             planId: viewModel.planId, legIndex: viewModel.legIndex, ideas: true)
         var chip = chip
-        if let focus = TripSpotPicker.dayTripFocus(dayTrip, in: viewModel.leg) {
+        if let excursion {
+            let focus = TripSpotPicker.excursionFocus(excursion.excursion, dayIndex: excursion.dayIndex)
+            search.area = focus.area
+            _tripFocus = State(initialValue: focus.focus)
+            chip = .highlights
+        } else if let focus = TripSpotPicker.dayTripFocus(dayTrip, in: viewModel.leg) {
             search.area = focus.area
             _tripFocus = State(initialValue: focus.focus)
             chip = .highlights
@@ -414,7 +422,7 @@ struct TripSpotPickerView: View {
             let focused = tripFocus?.dayIndex
             TripAddButton(running: busy == item.id,
                           full: focused == nil && suggestion?.full == true,
-                          label: focused.map { "Auf Tag \($0 + 1) legen" } ?? TripSpotPicker.addLabel(suggestion, onTheWay: viewModel.leg?.isTransit == true)) {
+                          label: tripFocus?.blockId != nil ? "In den Ausflug nach \(tripFocus!.name)" : focused.map { "Auf Tag \($0 + 1) legen" } ?? TripSpotPicker.addLabel(suggestion, onTheWay: viewModel.leg?.isTransit == true)) {
                 Task { await add(item, onDay: focused ?? suggestion?.dayIndex) }
             }
             .disabled(busy != nil)
@@ -579,7 +587,7 @@ struct TripSpotPickerView: View {
             return
         }
         guard let target = viewModel.leg?.days.first(where: { $0.dayIndex == day }),
-              let block = TripSpotPicker.spotsBlock(of: target)
+              let block = TripSpotPicker.block(of: target, focus: tripFocus)
         else { return }
         if await viewModel.place(osmRef: ref, inBlock: block.id, onDay: day) {
             done[item.id] = "auf Tag \(day + 1)"

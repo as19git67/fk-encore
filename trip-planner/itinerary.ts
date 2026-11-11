@@ -287,6 +287,7 @@ export function dayInputOf(day: StoredLeg["days"][number]): CreateDayInput {
         waterAround: day.anchor.waterAround ?? null,
       }
       : null,
+    ...(day.excursions ? { excursions: day.excursions } : {}),
     fixpoints: day.fixpoints.map((fix) => ({
       id: fix.id,
       label: fix.label,
@@ -905,6 +906,7 @@ function stayRequest(frame: StayFrame, existing: StoredLeg | null): LegRequest {
       ...departure,
     ],
     dayAnchors: (base.dayAnchors ?? []).filter((a) => a.dayIndex < frame.days),
+    excursions: (base.excursions ?? []).filter((e) => e.dayIndex < frame.days),
   };
 }
 

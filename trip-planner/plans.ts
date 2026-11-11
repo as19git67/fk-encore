@@ -71,6 +71,7 @@ import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
 import { legLimitFor, type TransportMode } from "./travel";
 import { planTransitLeg } from "./transit-leg";
+import { excursionTravel, withExcursions, type Excursion } from "./excursions";
 import { parsePinReason } from "./pin-reason";
 import {
   DEFAULT_DAY_START_MINUTES,
@@ -173,6 +174,11 @@ export interface LegRequest {
    * only the day goes to Pisa.
    */
   dayAnchors?: DayAnchorRequest[];
+  /**
+   * Day trips with a time window inside a day (`excursions.ts`): half a
+   * day in Pisa, the rest at the quarters. Read on a trip of ideas only.
+   */
+  excursions?: ExcursionRequest[];
   /**
    * The journey *into* this leg.
    *
@@ -281,6 +287,21 @@ export interface DayAnchorRequest {
    * which follows the transport mode.
    */
   radiusM?: number;
+}
+
+/** A day trip with a time window, carried through a re-plan. */
+export interface ExcursionRequest {
+  /** Its id, so its block and its stops survive a re-plan. */
+  id: string;
+  dayIndex: number;
+  lat: number;
+  lon: number;
+  label?: string;
+  radiusM?: number;
+  /** When the group leaves the quarters, "HH:MM". */
+  departAt: string;
+  /** When they start back from the destination, "HH:MM". */
+  returnAt: string;
 }
 
 export interface CreatePlanRequest {
@@ -895,6 +916,17 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
           ? undefined
           : formatMinutesOfDay(day.anchor.returnMinutes),
       }]),
+    // Like a day trip: part of the frame the traveller set.
+    excursions: leg.days.flatMap((day) => (day.excursions ?? []).map((e) => ({
+      id: e.id,
+      dayIndex: day.dayIndex,
+      lat: e.lat,
+      lon: e.lon,
+      label: e.label ?? undefined,
+      radiusM: e.radiusM ?? undefined,
+      departAt: formatMinutesOfDay(e.departMinutes),
+      returnAt: formatMinutesOfDay(e.returnMinutes),
+    }))),
   };
 }
 
@@ -1664,6 +1696,7 @@ async function planLeg(
   const dayStartMinutes = validateTimeOfDay(legReq.dayStartsAt, "dayStartsAt");
   const fixpointsByDay = groupFixpoints(legReq.fixpoints, dayCount);
   const dayAnchors = groupDayAnchors(legReq.dayAnchors, dayCount);
+  const excursionsByDay = trip.ideas ? groupExcursions(legReq.excursions, dayCount) : new Map<number, Excursion[]>();
 
   // No imported region here yet. The trip is still worth saving: §4.3
   // already has a resolution for "framed but not filled in", and a
@@ -1792,6 +1825,14 @@ async function planLeg(
     // scheduler cut for it: the block after it opens up to hold the way
     // there and the visit (`frame-spots.ts`).
     framed.blocks = hostVisits(home.blocks, fixpoints.map((f) => f.fixpoint));
+    // Half a day in Pisa (`excursions.ts`): the day at the quarters
+    // loses the hours away, and the excursion stands in the gap as a
+    // block of its own. Not on a whole-day trip, which is elsewhere
+    // already.
+    const excursions = dayTrip === null ? excursionsByDay.get(dayIndex) ?? [] : [];
+    if (excursions.length > 0) {
+      framed.blocks = withExcursions(framed.blocks, excursions, (e) => excursionTravel(anchor, e, mode));
+    }
 
     // Beyond the detail horizon the day keeps its frame and stays
     // empty: the pool *is* the plan at trip resolution (§4.3), and
@@ -1821,6 +1862,7 @@ async function planLeg(
         // filled the day out of the quarters' pool when somebody
         // detailed it the evening before (§4.5).
         anchor: storedAnchor(dayTrip),
+        excursions,
       });
       continue;
     }
@@ -1887,6 +1929,7 @@ async function planLeg(
       fixpoints: fixpoints.map((f) => f.stored),
       detailed: true,
       anchor: storedAnchor(dayTrip),
+      excursions,
     });
     const placed = new Set(withFrames.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
     // What the day trip did not use joins the leg's pool rather than
@@ -2109,6 +2152,40 @@ function groupDayAnchors(
       departMinutes: validateTimeOfDay(req.departAt, `dayAnchors[${i}].departAt`),
       returnMinutes: validateTimeOfDay(req.returnAt, `dayAnchors[${i}].returnAt`),
     });
+  }
+  return byDay;
+}
+
+/** The excursions of a leg by day, checked as the day trips are. */
+function groupExcursions(
+  requests: ExcursionRequest[] | undefined,
+  dayCount: number,
+): Map<number, Excursion[]> {
+  const byDay = new Map<number, Excursion[]>();
+  if (!requests) return byDay;
+  if (!Array.isArray(requests)) throw APIError.invalidArgument("excursions must be an array");
+  for (const [i, req] of requests.entries()) {
+    // A day a shortened stay no longer has takes its excursion with it.
+    if (!Number.isInteger(req.dayIndex) || req.dayIndex < 0 || req.dayIndex >= dayCount) continue;
+    if (typeof req.id !== "string" || req.id.length === 0 || req.id.length > 64) {
+      throw APIError.invalidArgument(`excursions[${i}].id must be a short string`);
+    }
+    const at = validateAnchor({ lat: req.lat, lon: req.lon });
+    const departMinutes = validateTimeOfDay(req.departAt, `excursions[${i}].departAt`);
+    const returnMinutes = validateTimeOfDay(req.returnAt, `excursions[${i}].returnAt`);
+    if (departMinutes === null || returnMinutes === null) {
+      throw APIError.invalidArgument(`excursions[${i}] needs departAt and returnAt`);
+    }
+    const list = byDay.get(req.dayIndex) ?? [];
+    list.push({
+      id: req.id,
+      ...at,
+      label: req.label?.trim() || null,
+      radiusM: req.radiusM === undefined ? null : Math.round(req.radiusM),
+      departMinutes,
+      returnMinutes,
+    });
+    byDay.set(req.dayIndex, list);
   }
   return byDay;
 }

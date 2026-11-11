@@ -18,6 +18,8 @@ struct TripStayDayTripsResponse: Codable, Sendable {
 struct TripDayTripFocus: Equatable, Sendable {
     let dayIndex: Int
     let name: String
+    /// The excursion's window to add into, when the focus is one (Mock 16).
+    var blockId: String? = nil
 }
 
 enum TripStayDayTripText {

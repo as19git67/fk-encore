@@ -51,6 +51,10 @@ struct TripStayPlanView: View {
     @State private var picking = false
     /// The day out the picker was opened from, so it searches there.
     @State private var pickingDayTrip: Int?
+    /// The excursion the picker was opened from ("+ Spot in Seestadt").
+    @State private var pickingExcursion: TripExcursionPick?
+    /// The excursion whose removal is being confirmed.
+    @State private var removingExcursion: TripExcursionPick?
     /// Days that are over, opened from their one line (stage 5).
     @State private var expandedPast: Set<Int> = []
     /// The done stop whose check mark was tapped: "Nicht besucht"?
@@ -116,8 +120,23 @@ struct TripStayPlanView: View {
                 }
             }
         }
-        .sheet(isPresented: $picking, onDismiss: { pickingDayTrip = nil }) {
-            TripSpotPickerView(viewModel: viewModel, dayTrip: pickingDayTrip)
+        .sheet(isPresented: $picking, onDismiss: {
+            pickingDayTrip = nil
+            pickingExcursion = nil
+        }) {
+            TripSpotPickerView(viewModel: viewModel, dayTrip: pickingDayTrip,
+                               excursion: pickingExcursion.map { ($0.dayIndex, $0.excursion) })
+        }
+        .confirmationDialog(removingExcursion.map { "\($0.excursion.title) entfernen?" } ?? "",
+                            isPresented: Binding(get: { removingExcursion != nil },
+                                                 set: { if !$0 { removingExcursion = nil } }),
+                            titleVisibility: .visible) {
+            Button("Ausflug entfernen", role: .destructive) {
+                guard let pick = removingExcursion else { return }
+                Task { await viewModel.removeExcursion(pick.excursion, dayIndex: pick.dayIndex) }
+            }
+        } message: {
+            Text("Seine Spots gehen zurück zu den Ideen.")
         }
         .sheet(item: $detailPick) { pick in
             TripSpotDetailPager(
@@ -347,7 +366,7 @@ struct TripStayPlanView: View {
             Button {
                 dayAction(.dayTrip, day.dayIndex)
             } label: {
-                Label(day.anchor == nil ? "Ausflug planen" : "Ausflug ändern", systemImage: "car")
+                Label(day.anchor == nil ? "Ausflug hinzufügen" : "Ausflug ändern", systemImage: "car")
             }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -538,7 +557,7 @@ struct TripStayPlanView: View {
                 dayTripRow(anchor, day: day, leg: leg)
             }
 
-            if stops.isEmpty {
+            if stops.isEmpty && (day.excursions ?? []).isEmpty {
                 Button {
                     pickingDayTrip = day.anchor == nil ? nil : day.dayIndex
                     picking = true
@@ -594,16 +613,32 @@ struct TripStayPlanView: View {
                     .font(.footnote)
                     .frame(maxWidth: .infinity)
                 }
-            } else {
+            } else if (day.excursions ?? []).isEmpty {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
-                    let slot = TripDropSlot(dayIndex: day.dayIndex, before: index)
-                    insertionLine(slot)
-                    wayLine(to: stop, on: day, leg: leg)
-                    card(stop, day: day, number: index + 1, mode: .plan, diary: nil)
-                        .modifier(swipeToDelete(stop))
-                        .modifier(reorderable(stop, slot: slot, day: day))
+                    planCard(stop, index: index, day: day, leg: leg)
                 }
                 insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
+            } else {
+                // A day with excursions (Mock 16): each window is a
+                // section of its own, the rest of the day at the quarters.
+                ForEach(TripStayPlan.sections(of: day)) { section in
+                    if let excursion = section.excursion {
+                        excursionSection(excursion, section: section, day: day, leg: leg)
+                    } else {
+                        ForEach(Array(section.block.stops.enumerated()), id: \.element.id) { offset, stop in
+                            planCard(stop, index: section.offset + offset, day: day, leg: leg)
+                        }
+                    }
+                }
+                insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
+                Button {
+                    picking = true
+                } label: {
+                    Label("Spot in \(leg.displayTitle)", systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(.bordered)
             }
         }
         // The day is a heading over its cards, not a box around them.
@@ -613,6 +648,80 @@ struct TripStayPlanView: View {
         ) { ids in
             drop(ids, onDay: day, before: nil)
         })
+    }
+
+    /// One card of the plan with its drop line and way line.
+    @ViewBuilder
+    private func planCard(_ stop: TripStop, index: Int, day: TripDay, leg: TripLeg) -> some View {
+        let slot = TripDropSlot(dayIndex: day.dayIndex, before: index)
+        insertionLine(slot)
+        wayLine(to: stop, on: day, leg: leg)
+        card(stop, day: day, number: index + 1, mode: .plan, diary: nil)
+            .modifier(swipeToDelete(stop))
+            .modifier(reorderable(stop, slot: slot, day: day))
+    }
+
+    /// An excursion as a section of the day (Mock 16 A): where to, the
+    /// hours, its own spots, "+ Spot in …", and below it the way back.
+    private func excursionSection(_ excursion: TripExcursion, section: TripStaySection,
+                                  day: TripDay, leg: TripLeg) -> some View {
+        let pick = TripExcursionPick(dayIndex: day.dayIndex, excursion: excursion)
+        return VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Label(excursion.title, systemImage: leg.transportMode.systemImage)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Menu {
+                        Button {
+                            dayAction(.excursion(excursion), day.dayIndex)
+                        } label: {
+                            Label("Zeiten ändern", systemImage: "clock")
+                        }
+                        Button {
+                            wayRequest = TripWayRequest(
+                                from: .init(name: leg.anchorLabel ?? "Unterkunft", coordinate: leg.anchor),
+                                to: .init(name: excursion.displayName, coordinate: excursion.coordinate),
+                                check: nil, segment: nil, currentMode: leg.transportMode)
+                        } label: {
+                            Label("Weg zeigen", systemImage: "map")
+                        }
+                        Button(role: .destructive) {
+                            removingExcursion = pick
+                        } label: {
+                            Label("Ausflug entfernen", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .frame(minWidth: 44, minHeight: 32)
+                            .contentShape(.rect)
+                    }
+                    .accessibilityLabel("Aktionen für \(excursion.title)")
+                }
+                Text(excursion.line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(Array(section.block.stops.enumerated()), id: \.element.id) { offset, stop in
+                    planCard(stop, index: section.offset + offset, day: day, leg: leg)
+                }
+                Button {
+                    pickingExcursion = pick
+                    picking = true
+                } label: {
+                    Label("Spot in \(excursion.displayName)", systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .accessibilityHint("Sucht um \(excursion.displayName) und legt in dieses Zeitfenster")
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.5)))
+            Text("↓ zurück in \(leg.displayTitle) ca. \(TripClock.format(excursion.backHomeMinutes))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// Dragging a card to another place (the system's lift, a line where
@@ -1629,10 +1738,21 @@ enum TripStayPlan {
     /// (counted across the day's spots blocks) at its place in that
     /// block, or the end of the day's last spots block. Nil for a day
     /// without a spots block.
+    /// The spots blocks of a day in order, each with its first number.
+    static func sections(of day: TripDay) -> [TripStaySection] {
+        var offset = 0
+        return day.blocks.filter { $0.kind == "spots" }.map { block in
+            defer { offset += block.stops.count }
+            return TripStaySection(block: block, offset: offset, excursion: day.excursion(ofBlock: block.id))
+        }
+    }
+
     static func dropTarget(day: TripDay, before: Int?) -> (blockId: String, position: Int?)? {
         let blocks = day.blocks.filter { $0.kind == "spots" }
         guard let last = blocks.last else { return nil }
-        guard let before else { return (last.id, nil) }
+        // The end of the day is the day at the quarters, not the last
+        // excursion's window (Mock 16).
+        guard let before else { return ((blocks.last { day.excursion(ofBlock: $0.id) == nil } ?? last).id, nil) }
         var remaining = before
         for block in blocks {
             if remaining < block.stops.count { return (block.id, remaining) }
@@ -1686,6 +1806,23 @@ enum TripStayDayAction {
     case pause(TripBreakPreset)
     case fixedTime
     case dayTrip
+    /// Change an excursion's hours or place (Mock 16).
+    case excursion(TripExcursion)
+}
+
+/// An excursion and its day, for the picker and the removal question.
+struct TripExcursionPick: Equatable {
+    let dayIndex: Int
+    let excursion: TripExcursion
+}
+
+/// A spots block of a day and where its stops start in the day's
+/// numbering; an excursion's block carries its excursion.
+struct TripStaySection: Identifiable {
+    let block: TripBlock
+    let offset: Int
+    let excursion: TripExcursion?
+    var id: String { block.id }
 }
 
 /// Where a dragged card would land in the stay's planning view.

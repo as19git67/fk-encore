@@ -22,7 +22,23 @@ struct TripDayAnchorSheet: View {
     let dayLabel: String
     /// What the day says today, so the sheet can offer to undo it.
     let current: TripDayAnchor?
+    /// The excursion being changed, when the sheet opened from one.
+    var excursion: TripExcursion? = nil
+    /// "Ganzer Tag" is offered only on a day without other excursions.
+    var allowsWholeDay = true
+    /// A time window inside the day (Anton, 10./11.11.); nil on a host
+    /// that only knows whole days. True when it was saved.
+    var onSaveWindow: ((TripPlannerViewModel.ExcursionDraft) async -> Bool)? = nil
+    var onRemoveExcursion: (() async -> Void)? = nil
     let onSave: (Draft?) async -> Void
+
+    /// How much of the day the outing takes.
+    enum Span: String, CaseIterable, Identifiable {
+        case wholeDay
+        case window
+        var id: String { rawValue }
+        var label: String { self == .wholeDay ? "Ganzer Tag" : "Zeitfenster" }
+    }
 
     /// What the sheet hands back — the place and, if anybody said, the
     /// two hours that frame the outing.
@@ -50,7 +66,16 @@ struct TripDayAnchorSheet: View {
     @State private var departure = Self.defaultDeparture
     @State private var back = Self.defaultReturn
     @State private var saving = false
+    @State private var span = Span.window
     @Environment(\.dismiss) private var dismiss
+
+    private var windowed: Bool { onSaveWindow != nil && span == .window }
+
+    /// Out at 10:00, back at 13:00: half a day, as in the mock.
+    static var defaultWindowDeparture: Date { at(hour: 10, minute: 0) }
+    static var defaultWindowReturn: Date { at(hour: 13, minute: 0) }
+
+    private var travelMinutes: Int? { excursion?.travelMinutes ?? current?.travelMinutes }
 
     /// 8:30 out, 17:30 back — the shape of a day trip. "Now" would be a
     /// time nobody means.
@@ -62,11 +87,11 @@ struct TripDayAnchorSheet: View {
     }
 
     private var departMinutes: Int? {
-        saysDeparture ? TripDayTimeline.minutesOfDay(departure) : nil
+        saysDeparture || windowed ? TripDayTimeline.minutesOfDay(departure) : nil
     }
 
     private var returnMinutes: Int? {
-        saysReturn ? TripDayTimeline.minutesOfDay(back) : nil
+        saysReturn || windowed ? TripDayTimeline.minutesOfDay(back) : nil
     }
 
     var body: some View {
@@ -103,11 +128,50 @@ struct TripDayAnchorSheet: View {
                          + "Stunde hin und eine zurück heißt: sechs Stunden statt acht.")
                 }
 
+                if onSaveWindow != nil && excursion == nil && allowsWholeDay {
+                    Section {
+                        Picker("Wie lange", selection: $span.animation()) {
+                            ForEach(Span.allCases) { option in
+                                Text(option.label).tag(option)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    } header: {
+                        Text("Wie lange")
+                    } footer: {
+                        Text(span == .window
+                             ? "Davor und danach plant der Tag am Ort der Unterkunft. Mehrere Ausflüge an einem Tag gehen, solange sie sich nicht überschneiden."
+                             : "Der ganze Tag findet am Ziel statt.")
+                    }
+                }
+
+                if windowed {
+                    windowHours
+                }
+
                 reachSection
 
-                hours
+                if !windowed {
+                    hours
+                }
 
-                if let current {
+                if let excursion, let onRemoveExcursion {
+                    Section {
+                        Button(role: .destructive) {
+                            saving = true
+                            Task {
+                                await onRemoveExcursion()
+                                saving = false
+                                dismiss()
+                            }
+                        } label: {
+                            Label("Ausflug entfernen", systemImage: "trash")
+                        }
+                        .disabled(saving)
+                    } footer: {
+                        Text("Die Spots von \(excursion.displayName) gehen zurück zu den Ideen.")
+                    }
+                } else if let current {
                     Section {
                         Button(role: .destructive) {
                             saving = true
@@ -137,6 +201,13 @@ struct TripDayAnchorSheet: View {
                         guard let place else { return }
                         saving = true
                         Task {
+                            if windowed, let onSaveWindow, let depart = departMinutes, let home = returnMinutes {
+                                let saved = await onSaveWindow(TripPlannerViewModel.ExcursionDraft(
+                                    place: place, departMinutes: depart, returnMinutes: home, radiusM: reach.radiusM))
+                                saving = false
+                                if saved { dismiss() }
+                                return
+                            }
                             await onSave(Draft(
                                 place: place,
                                 departMinutes: departMinutes,
@@ -212,6 +283,32 @@ struct TripDayAnchorSheet: View {
         }
     }
 
+    /// The window of an excursion: both hours, and what the drive makes
+    /// of them (Mock 16 B).
+    private var windowHours: some View {
+        Section {
+            DatePicker("Abfahrt an der Unterkunft", selection: $departure, displayedComponents: .hourAndMinute)
+            if let travel = travelMinutes, travel > 0, let depart = departMinutes {
+                LabeledContent("Ankunft am Ziel", value: "ca. \(TripClock.format(depart + travel))")
+                    .foregroundStyle(.secondary)
+            }
+            DatePicker("Rückfahrt um", selection: $back, displayedComponents: .hourAndMinute)
+            if let travel = travelMinutes, travel > 0, let home = returnMinutes {
+                LabeledContent("Zurück an der Unterkunft", value: "ca. \(TripClock.format(home + travel))")
+                    .foregroundStyle(.secondary)
+            }
+            if !hoursAddUp {
+                Label("Die Rückfahrt liegt vor der Abfahrt.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .font(.footnote)
+            }
+        } header: {
+            Text("Zeiten")
+        } footer: {
+            Text("Die Fahrzeit schätzt die App, solange ein Ziel noch neu ist; nach dem Sichern steht sie hier.")
+        }
+    }
+
     /// The one part still guessed once a departure is named — shown
     /// rather than hidden, so a wrong estimate is visible instead of
     /// turning up later as a shorter afternoon.
@@ -220,7 +317,7 @@ struct TripDayAnchorSheet: View {
     /// does not own a travel model, and inventing one here would be a
     /// second set of answers.
     private var estimatedArrival: String? {
-        TripOutingHours.arrival(departMinutes: departMinutes, travelMinutes: current?.travelMinutes)
+        TripOutingHours.arrival(departMinutes: departMinutes, travelMinutes: travelMinutes)
     }
 
     /// Refused here rather than by the server, so nobody watches a
@@ -237,6 +334,22 @@ struct TripDayAnchorSheet: View {
     /// Pisa again — and leaving without searching would have saved the
     /// day away from the place it was already on.
     private func adoptCurrent() {
+        if let excursion {
+            span = .window
+            place = TripPlace(name: excursion.displayName, subtitle: nil,
+                              latitude: excursion.lat, longitude: excursion.lon)
+            reach = TripOutingReach.of(radiusM: excursion.radiusM)
+            departure = Self.at(hour: excursion.departMinutes / 60, minute: excursion.departMinutes % 60)
+            back = Self.at(hour: excursion.returnMinutes / 60, minute: excursion.returnMinutes % 60)
+            return
+        }
+        if onSaveWindow != nil && (current != nil || !allowsWholeDay) {
+            span = current != nil && allowsWholeDay ? .wholeDay : .window
+        }
+        if span == .window && current == nil {
+            departure = Self.defaultWindowDeparture
+            back = Self.defaultWindowReturn
+        }
         guard let current else { return }
         place = current.place
         reach = TripOutingReach.of(radiusM: current.radiusM)

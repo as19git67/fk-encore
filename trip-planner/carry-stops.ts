@@ -18,6 +18,7 @@
 
 import { dayWalkOfStored } from "./day-walk";
 import { recomputeDay } from "./move";
+import { excursionIdOf } from "./excursions";
 import type { CreateDayInput, StoredLeg } from "./plan-store";
 import type { CurrentBlock, CurrentStop } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
@@ -54,10 +55,19 @@ export function carryStops(
 
     const already = new Set(target.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
     const blocks = target.blocks as unknown as CurrentBlock[];
-    const fallback = blocks.find((b) => b.kind === "spots") ?? blocks[0];
+    const fallback = blocks.find((b) => b.kind === "spots" && excursionIdOf(b.id) === null)
+      ?? blocks.find((b) => b.kind === "spots") ?? blocks[0];
     for (const { blockId, stop } of stops) {
       if (already.has(stop.osmRef)) continue;
-      const block = blocks.find((b) => b.id === blockId) ?? fallback;
+      const own = blocks.find((b) => b.id === blockId);
+      // A spot of an excursion that is gone was chosen around a place
+      // the day no longer goes to (`excursions.ts`): back to the ideas,
+      // not into the day at the quarters.
+      if (!own && excursionIdOf(blockId) !== null) {
+        back.push(asIdea(stop));
+        continue;
+      }
+      const block = own ?? fallback;
       block.stops.push(carried(stop));
       already.add(stop.osmRef);
     }
