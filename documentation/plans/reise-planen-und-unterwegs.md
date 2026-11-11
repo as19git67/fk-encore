@@ -69,8 +69,12 @@ What is still wrong is the shape of the app around it:
   screen**, each with "planned of available" (the same figure as the fill
   bar under the stay in the itinerary). Tapping a day row opens it scrolled
   to that day.
-- "Bearbeiten" in the header opens the stay's details; "Aufenthalt planen"
-  in the details leads back.
+- The header (name and "4 Tage · Fr 27.11. bis Mo 30.11. · Hotel Beispiel",
+  on the road "Tag 2 von 4 · heute") is one tappable row with a "›" and
+  opens the stay's details; the navigation title's menu offers the same as
+  "Ort, Tage und Unterkunft …". No "Bearbeiten" button: it would not say
+  that only the stay's basics are meant, not its spots or day trips
+  (Anton, 11.11.). "Aufenthalt planen" in the details leads back.
 - Spot cards show picture, duration, priority and estimated time. Drag
   reorders, also into another day. `⋯` opens the actions, a tap the details.
 - **Pinned** is a spot with a fixed time the ordering must not move: ticket

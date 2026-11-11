@@ -35,15 +35,13 @@
 <path d="M520.0,808.0 L720.0,808.0" fill="none" stroke="#57606a" stroke-width="1.3" marker-end="url(#a)"/>
 <text x="620.0" y="802.0" text-anchor="middle" font-size="11.5" fill="#1f2328">„⋯“ an der Karte</text>
 <path d="M520.0,918.0 L720.0,918.0" fill="none" stroke="#57606a" stroke-width="1.3" marker-end="url(#a)"/>
-<text x="620.0" y="912.0" text-anchor="middle" font-size="11.5" fill="#1f2328">Tageskopf antippen</text>
+<text x="620.0" y="912.0" text-anchor="middle" font-size="11.5" fill="#1f2328">„⋯“ am Tageskopf</text>
 <path d="M520.0,688.0 L520.0,638.0 L1140.0,638.0 L1140.0,660.0" fill="none" stroke="#57606a" stroke-width="1.3" marker-end="url(#a)"/>
 <text x="860.0" y="632.0" text-anchor="middle" font-size="11.5" fill="#1f2328">Spot-Karte antippen</text>
 <path d="M960.0,688.0 L1020.0,688.0" fill="none" stroke="#57606a" stroke-width="1.3" marker-end="url(#a)"/>
 <text x="990.0" y="682.0" text-anchor="middle" font-size="11.5" fill="#1f2328">Zeile</text>
 <path d="M1140.0,716.0 L1140.0,780.0" fill="none" stroke="#57606a" stroke-width="1.3" marker-end="url(#a)"/>
 <text x="1148.0" y="754.0" text-anchor="start" font-size="11.5" fill="#1f2328">„Route“, Wegzeile</text>
-<path d="M960.0,918.0 L1020.0,918.0" fill="none" stroke="#57606a" stroke-width="1.3" marker-end="url(#a)"/>
-<text x="990.0" y="912.0" text-anchor="middle" font-size="11.5" fill="#1f2328">Karte</text>
 <rect x="20" y="334" width="160" height="56" rx="12" fill="#eef4fd" stroke="#2f6fd6" stroke-width="1.5"/>
 <text x="32" y="356" font-size="13.5" font-weight="600" fill="#1f2328">Reisen</text>
 <text x="32" y="374" font-size="11.5" fill="#656d76">Liste der Reisen</text>
@@ -88,12 +86,11 @@
 <rect x="720" y="780" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.1"/>
 <text x="732" y="802" font-size="13.5" font-weight="600" fill="#1f2328">Aktionen ⋯</text>
 <text x="732" y="820" font-size="11.5" fill="#656d76">anderer Tag, Termin, Priorität</text>
-<rect x="720" y="890" width="240" height="56" rx="12" fill="#eef4fd" stroke="#2f6fd6" stroke-width="1.5"/>
-<text x="732" y="912" font-size="13.5" font-weight="600" fill="#1f2328">Tag</text>
-<text x="732" y="930" font-size="11.5" fill="#656d76">Zeitband, Reihenfolge, Pausen</text>
-<rect x="1020" y="890" width="240" height="56" rx="12" fill="#eef4fd" stroke="#2f6fd6" stroke-width="1.5"/>
-<text x="1032" y="912" font-size="13.5" font-weight="600" fill="#1f2328">Tageskarte</text>
-<text x="1032" y="930" font-size="11.5" fill="#656d76">Spots und Wege des Tags</text>
+<rect x="720" y="890" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#8c959f" stroke-width="1.1"/>
+<text x="732" y="912" font-size="13.5" font-weight="600" fill="#1f2328">Tag ⋯</text>
+<text x="732" y="930" font-size="11.5" fill="#656d76">Reihenfolge, Pause, feste Zeit, Ausflug</text>
+<text x="1000" y="904" font-size="11.5" fill="#656d76">Ein Tag hat keinen eigenen Bildschirm.</text>
+<text x="1000" y="920" font-size="11.5" fill="#656d76">Die Karte der Tage: „Tage | Karte“</text><text x="1000" y="936" font-size="11.5" fill="#656d76">oben in „Aufenthalt planen“.</text>
 <text x="20" y="450" font-size="11.5" fill="#656d76">Unterwegs öffnet sich die Reise</text>
 <text x="20" y="466" font-size="11.5" fill="#656d76">gleich in „Aufenthalt planen“,</text>
 <text x="20" y="482" font-size="11.5" fill="#656d76">am laufenden Tag.</text>
@@ -101,7 +98,7 @@
 <text x="980" y="206" font-size="11.5" fill="#656d76">„Aufenthalt“ öffnet ebenfalls</text>
 <text x="980" y="222" font-size="11.5" fill="#656d76">die Planung dieses Aufenthalts.</text>
 <text x="980" y="238" font-size="11.5" fill="#656d76">Ankunft und Abfahrt „›“</text>
-<text x="980" y="254" font-size="11.5" fill="#656d76">öffnen die Weiterreise.</text>
+<text x="980" y="254" font-size="11.5" fill="#656d76">öffnen die Weiterreise.</text><text x="980" y="278" font-size="11.5" fill="#656d76">Der Kopf von „Aufenthalt planen“</text><text x="980" y="294" font-size="11.5" fill="#656d76">(„›“) öffnet das Blatt „Aufenthalt“.</text>
 <text x="1020" y="560" font-size="11.5" fill="#656d76">In den Spot-Details öffnet</text>
 <text x="1020" y="576" font-size="11.5" fill="#656d76">„Karte“ die Karten-App,</text>
 <text x="1020" y="592" font-size="11.5" fill="#656d76">„Anderer Tag“ die Tage,</text>
