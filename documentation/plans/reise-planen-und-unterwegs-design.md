@@ -56,7 +56,7 @@ Jede Änderung wirkt sofort auf die gerechneten Daten: Wer aus drei Nächten vie
 
 ![Details eines Aufenthalts (ein Hafen, Übernachtung an Bord) und das Blatt einer Weiterreise](reise-planen-und-unterwegs/02-aufenthalt-weiterreise.svg)
 
-**Die Details eines Aufenthalts** öffnet „Bearbeiten“ im Kopf der Planungsansicht; „Aufenthalt planen“ in den Details führt zurück. Sie tragen dieselben Felder wie „Neuer Aufenthalt“, dazu Ankunft und Abfahrt zum Lesen: Diese Zeiten gehören den Weiterreisen, „›“ öffnet sie.
+**Die Details eines Aufenthalts** öffnet ein Tipp auf den Kopf der Planungsansicht: Name und „4 Tage · Fr 27.11. bis Mo 30.11. · Hotel Beispiel“ tragen rechts ein „›“, unterwegs ebenso. Bearbeitet wird also genau das, was dort steht, nicht die Spots oder Ausflüge; ein Knopf „Bearbeiten“ ließe das offen. Dasselbe bietet das Menü am Titel in der Navigationsleiste als „Ort, Tage und Unterkunft …“ (wie „Umbenennen“ in Dateien oder Notizen); „Aufenthalt planen“ in den Details führt zurück. Sie tragen dieselben Felder wie „Neuer Aufenthalt“, dazu Ankunft und Abfahrt zum Lesen: Diese Zeiten gehören den Weiterreisen, „›“ öffnet sie.
 
 **Das Blatt einer Weiterreise** hat Verkehrsmittel, Abfahrt und Ankunft (Ortszeit), Nächte unterwegs, den Schalter „Zeiten noch offen“ und eine Notiz für Flugnummer oder Sitzplatz. Bei der Anreise kommt „Ab“ (Zuhause) und „Von“ dazu, das den Beginn der Reise setzt. Solange die Zeiten offen sind, rechnet der Tag mit Vorgaben: Abfahrt 10:00, Ankunft 15:00, Anreise von Zuhause ab 08:00.
 
