@@ -300,7 +300,10 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   schon dort ist, steht als „In der Reise“ oder „Schon eingeplant“ in der
   Liste. Der Kopf eines Aufenthalts öffnet dieselbe Auswahl über „Spot
   hinzufügen“, „Ideen (n)“, „Ausflüge“ und „Strecken“, jeweils auf ihrem
-  Chip. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
+  Chip. Ort, Tage und Unterkunft ändert ein Tipp auf die Kopfzeile der
+  Planung (Name und Tage, mit „>“) oder der Eintrag „Ort, Tage und
+  Unterkunft …“ im Menü des Titels; beides öffnet das Blatt „Aufenthalt“
+  wie im Reiseverlauf. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
   „Feste Zeit …“ (legt sie auf den Tag und hält die Uhrzeit), „Für später
   merken“, die Priorität und „Aus den Ideen entfernen“.
 - **Regen.** Regnet es laut Vorhersage an einem Tag mit Spots draußen,

@@ -72,6 +72,9 @@ struct TripStayPlanView: View {
     @State private var applyingNote: Int?
     /// The last weather move, offered back.
     @State private var undo: WeatherUndo?
+    /// The sheet "Aufenthalt" with place, days and lodging, opened from
+    /// the head of the days or the title's menu.
+    @State private var editingStay: TripStayEditing?
 
     private enum Layout: String { case list, map }
 
@@ -104,6 +107,17 @@ struct TripStayPlanView: View {
         }
         .navigationTitle(title ?? viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
+        // Only the stay's own data: "Bearbeiten" would not say that the
+        // spots and excursions are edited elsewhere (Anton, 11.11.).
+        .toolbarTitleMenu {
+            Button("Ort, Tage und Unterkunft …", systemImage: "info.circle") {
+                Task { await openStay() }
+            }
+        }
+        .sheet(item: $editingStay) { editing in
+            TripStaySheet(draft: editing.draft, stayId: editing.id, purpose: .edit,
+                          onCommit: { next in await commitStay(next) })
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Picker("Ansicht", selection: $layout) {
@@ -315,6 +329,24 @@ struct TripStayPlanView: View {
     /// The stay's name and what it is: its days and lodging, or on the
     /// road which day it is and the weather now.
     private func stayHeader(_ leg: TripLeg, running: TripDay?, nowMinutes: Int) -> some View {
+        Button {
+            Task { await openStay() }
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                stayHeaderText(leg, running: running)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Ort, Tage und Unterkunft")
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private func stayHeaderText(_ leg: TripLeg, running: TripDay?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(leg.displayTitle)
                 .font(.title2.weight(.bold))
@@ -334,8 +366,34 @@ struct TripStayPlanView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        .multilineTextAlignment(.leading)
+    }
+
+    /// The itinerary as it is now, with this stay picked, for its sheet.
+    private func openStay() async {
+        guard let legId = viewModel.leg?.id else { return }
+        do {
+            let response: TripItineraryResponse = try await APIClient.shared.get(
+                "/trip-planner/plans/\(viewModel.planId)/itinerary")
+            let draft = TripItineraryDraft(response: response)
+            guard let stay = draft.items.first(where: { $0.isStay && $0.legId == legId }) else { return }
+            editingStay = TripStayEditing(id: stay.id, draft: draft)
+        } catch {
+            viewModel.errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Saved like from the itinerary: the whole chain, read back.
+    private func commitStay(_ next: TripItineraryDraft) async -> String? {
+        if let problem = next.problems().first { return problem }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.put(
+                "/trip-planner/plans/\(viewModel.planId)/itinerary", body: next.request)
+            viewModel.replace(with: response)
+            return nil
+        } catch {
+            return TripErrorText.describe(error)
+        }
     }
 
     /// The day's "⋯": what used to live on the day's own screen.
@@ -1983,4 +2041,10 @@ struct TripSwipeToDelete: ViewModifier {
                 .accessibilityAction(named: "Löschen", perform)
         }
     }
+}
+
+/// The stay whose sheet is open from its days.
+struct TripStayEditing: Identifiable {
+    let id: TripItineraryItem.ID
+    let draft: TripItineraryDraft
 }
