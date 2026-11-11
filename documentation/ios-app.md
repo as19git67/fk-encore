@@ -111,6 +111,27 @@ Two rules that have to work together here:
   with the old one. After the five minutes of grace the server allows a
   rotated refresh token, the only remedy was to sign in again.
 
+### 1.2 TestFlight builds
+
+`.github/workflows/ios-testflight.yml` archives the app with both extensions
+and uploads it to App Store Connect. It runs only when started by hand
+(Actions › "iOS TestFlight" › "Run workflow", also from the GitHub mobile
+app, or through the API), never on a push: a TestFlight release is a
+decision, not a side effect of a merge.
+
+- **Signing** is automatic signing with an App Store Connect API key
+  (`-allowProvisioningUpdates`, cloud-managed distribution certificate). The
+  key (Admin role) lives in the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
+  `ASC_KEY_P8`; no certificate or profile is in the repository.
+- **Build number** is the commit count of the checked-out ref, never below
+  `CURRENT_PROJECT_VERSION` in the project, passed to `xcodebuild` for all
+  three targets and not committed. A second run on the same commit yields
+  the same number and App Store Connect refuses it.
+- **Version** is `MARKETING_VERSION` from the project; raise it there for a
+  new release line.
+- The archive uses the shared scheme `FKPhotos`
+  (`FKPhotos.xcodeproj/xcshareddata/xcschemes/`).
+
 ---
 
 ## 2. Implemented iOS Features (Documentation Catch-up)
