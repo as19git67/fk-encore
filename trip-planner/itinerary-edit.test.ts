@@ -50,6 +50,7 @@ import { planJournal, undoPlanOp } from "./plan-ops";
 import { tripHighlights } from "./highlights";
 import { suggestTripDay } from "./suggest-day";
 import { placeFromPool } from "./pool";
+import { addTripExcursion, removeTripExcursion, updateTripExcursion } from "./excursions-api";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
 const NEXT = { lat: 48.37, lon: 11.4 };
@@ -974,5 +975,61 @@ describe("a journey by car on a trip of ideas", () => {
     const { plan: moved } = await addJourney(plan.id, 0, { departAt: "11:00", arriveAt: "17:00" });
     expect(moved.legs[1].departMinutes).toBe(660);
     expect(stopRefs(moved.legs[1])).toEqual([pooled.osmRef]);
+  });
+});
+
+describe("day trips with a time window on a trip of ideas", () => {
+  it("cuts the day, keeps each spot in its part and sends an excursion's spots back to the ideas", async () => {
+    const { plan } = await createTripPlan({
+      startEmpty: true,
+      legs: [{ title: "Bergdorf", anchor: ANCHOR, anchorLabel: "Hotel", days: 2, startDate: "2027-09-05", mode: "car" }],
+    });
+    const there = { lat: 48.37, lon: 11.0 };
+    const { plan: one } = await addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...there, label: "Seestadt", departAt: "10:00", returnAt: "13:00",
+    });
+    const day = one.legs[0].days[1];
+    expect(day.excursions).toHaveLength(1);
+    const id = day.excursions![0].id;
+    expect(day.blocks.map((b) => b.id)).toEqual(["day", `excursion:${id}`, `day@${id}`]);
+    expect(day.excursions![0].travelMinutes).toBeGreaterThan(0);
+
+    // A second one may not overlap the first.
+    await expect(addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...there, departAt: "12:00", returnAt: "15:00",
+    })).rejects.toThrow(/zurück seid/);
+    const { plan: two } = await addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...there, label: "Hafenstadt", departAt: "15:00", returnAt: "17:00",
+    });
+    expect(two.legs[0].days[1].blocks).toHaveLength(5);
+
+    // A spot in the excursion and one at the quarters.
+    await addFind({ planId: plan.id, lat: there.lat, lon: there.lon, name: "Dom", legIndex: 0, dwellMinutes: 60 });
+    await addFind({ planId: plan.id, lat: ANCHOR.lat, lon: ANCHOR.lon + 0.001, name: "Turm", legIndex: 0, dwellMinutes: 45 });
+    const pool = (await getTripPlan({ planId: plan.id })).plan.legs[0].pool;
+    const dom = pool.find((c) => c.name === "Dom")!.osmRef;
+    const turm = pool.find((c) => c.name === "Turm")!.osmRef;
+    await placeFromPool({ planId: plan.id, legIndex: 0, dayIndex: 1, blockId: `excursion:${id}`, osmRef: dom });
+    await placeFromPool({ planId: plan.id, legIndex: 0, dayIndex: 1, blockId: "day", osmRef: turm });
+    const placed = (await getTripPlan({ planId: plan.id })).plan.legs[0].days[1];
+    const inDom = placed.blocks.find((b) => b.id === `excursion:${id}`)!.stops[0];
+    // Walked from the destination, not driven from the quarters.
+    expect(inDom.travelFromPrevious?.minutes ?? 0).toBeLessThan(5);
+    expect(inDom.etaMinutes).toBeGreaterThanOrEqual(10 * 60 + day.excursions![0].travelMinutes);
+
+    // New hours re-plan the day and keep both spots where they were.
+    const { plan: moved } = await updateTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, excursionId: id, departAt: "09:30", returnAt: "12:30",
+    });
+    const movedDay = moved.legs[0].days[1];
+    expect(movedDay.blocks.find((b) => b.id === `excursion:${id}`)!.stops.map((s) => s.osmRef)).toEqual([dom]);
+    expect(movedDay.blocks.find((b) => b.id === "day")!.stops.map((s) => s.osmRef)).toEqual([turm]);
+
+    // Removing it sends its spot back to the ideas; the quarters keep theirs.
+    const { plan: removed } = await removeTripExcursion({ planId: plan.id, legIndex: 0, dayIndex: 1, excursionId: id });
+    const after = removed.legs[0];
+    expect(after.days[1].excursions).toHaveLength(1);
+    expect(stopRefs(after)).toEqual([turm]);
+    expect(after.pool.map((c) => c.osmRef)).toContain(dom);
   });
 });

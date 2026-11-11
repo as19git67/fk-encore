@@ -135,6 +135,9 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// whole replanning mechanic turns on (§5), and at trip resolution
     /// the actual planning result (§4.3).
     let pool: [TripCandidate]
+    /// Does the open part of the stay fit its coming days (stage 8)?
+    /// Only on a trip of ideas; nil elsewhere and from an older server.
+    var capacity: TripStayCapacity? = nil
     /// "stay" for a place the group is based at, "transit" for the
     /// journey between two of them (§22.7). Nil from an older server,
     /// which only ever had stays.
@@ -311,9 +314,53 @@ struct TripDay: Codable, Identifiable, Sendable {
     var waitMinutes: Int? = nil
     var freeMinutes: Int? = nil
     var overrunMinutes: Int? = nil
+    /// Day trips with a time window inside this day, earliest first
+    /// (`trip-planner/excursions.ts`). Each is planned in its own block.
+    var excursions: [TripExcursion]? = nil
 
     /// True when the day was kept free rather than left unplanned.
     var isBuffer: Bool { !(bufferReason ?? "").isEmpty }
+
+    /// The excursion a block of this day is planned in, or nil for the
+    /// day at the quarters.
+    func excursion(ofBlock blockId: String) -> TripExcursion? {
+        excursions?.first { $0.blockId == blockId }
+    }
+}
+
+/// Half a day in Seestadt: leave the quarters at 10:00, start back at
+/// 13:00, the rest of the day at home (Anton, 10./11.11.).
+struct TripExcursion: Codable, Identifiable, Sendable, Equatable {
+    let id: String
+    let lat: Double
+    let lon: Double
+    let label: String?
+    let radiusM: Int?
+    /// When the group leaves the quarters, minutes past midnight.
+    let departMinutes: Int
+    /// When they start back from the destination.
+    let returnMinutes: Int
+    /// One way, computed by the server from the stay's mode.
+    let travelMinutes: Int
+
+    var blockId: String { "excursion:\(id)" }
+    var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
+
+    var displayName: String {
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed! : "Ausflug"
+    }
+
+    var title: String { label.map { "Ausflug nach \($0)" } ?? "Ausflug" }
+
+    /// "Abfahrt 10:00 · zurück 13:00 · je 40 min Fahrt".
+    var line: String {
+        "Abfahrt \(TripClock.format(departMinutes)) · zurück \(TripClock.format(returnMinutes))"
+            + (travelMinutes > 0 ? " · je \(TripClock.duration(travelMinutes)) Fahrt" : "")
+    }
+
+    /// When they are back at the quarters.
+    var backHomeMinutes: Int { returnMinutes + travelMinutes }
 }
 
 /// "Mittag", 60 minutes, after the second stop (ideas plan, stage 4).
@@ -629,10 +676,16 @@ struct TripStop: Codable, Identifiable, Sendable {
     var outsideHours: Bool? = nil
     /// The mode picked in "Weg" for the way here; nil for the stay's own.
     var wayMode: String? = nil
+    /// "hand" or "fill" (stage 8): "fill" is a soft stop "Tag füllen"
+    /// put there, which goes back to the open spots if the day does not
+    /// reach it. Nil from an older server, which only had hand stops.
+    var placedBy: String? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }
     var ideaPriority: TripIdeaPriority { TripIdeaPriority(raw: priority) }
+    /// Put on the day by "Tag füllen", not by hand ("von der App").
+    var isSoft: Bool { placedBy == "fill" }
     /// "10:42" on this phone's clock, for a stop that is done and knows
     /// when. The row says it next to the tick: a day that moved a stop
     /// into the morning should say why it is there.

@@ -550,6 +550,32 @@ stage 7 runs in this order, one PR each:
    stops stand under the journey in the itinerary. Without both times
    there is no day to stop on, and the sheet says so. Still open: the
    stops as points on the itinerary map.
+8. **Day trips with a time window (Anton, 2026-11-10/11).** A day trip
+   need not take the whole day: half a day in one town, the rest at the
+   quarters, and as many on one day as fit (mock 16 in the design copy).
+   **Built (2026-11-11).** An excursion is stored on its day
+   (`trip_plan_days.excursions`, migration 0311): destination, the hour
+   the group leaves the quarters and the hour it starts back. On a trip
+   of ideas the planner cuts the day's spots block around the hours away
+   and puts the excursion in the gap as a block `excursion:<id>` from
+   arrival to the start back (`withExcursions` in `excursions.ts`); the
+   piece after it is `day@<id>`. Every walk of the day starts an
+   excursion's block at its destination and the block after it at the
+   quarters (`blockStart`, used by `recomputeDay`, `withDayTimes`,
+   `orderBlocks`, `fitAroundTicket`). Two excursions may not overlap and
+   need time at the destination (`excursionProblem`). Endpoints `POST`,
+   `PATCH` and `DELETE …/legs/:legIndex/days/:dayIndex/excursions` in
+   `excursions-api.ts`; each re-plans, and the spots of a removed
+   excursion go back to the ideas (`carry-stops.ts`). Adding one with
+   `replaceDayTrip` turns a whole-day trip into a window and keeps its
+   spots. iOS: the day's "⋯" › "Ausflug hinzufügen" opens the "Ausflug"
+   sheet with "Ganzer Tag | Zeitfenster"; a day with excursions shows
+   each as a section with its spots, "+ Spot in …" (the picker searches
+   around it and adds into its window) and "⋯" (Zeiten ändern, Weg
+   zeigen, Ausflug entfernen), and "↓ zurück in … ca. 13:40" below it.
+   Still open: the running day shows the stops of an excursion in one
+   list without its section, and a drag onto an empty excursion lands at
+   the quarters.
 
 ### Stage 8 — open spots: a day holds only what is fixed (backend + iOS)
 
@@ -699,7 +725,8 @@ suggestion of a day stays as it is; it only orders what is on that day.
    writes the accepted spots as soft stops and orders the day. Selection in
    a pure `open-fill.ts` (open, weather, priority, detour, free time).
    „Alle Tage füllen“ over the coming days.
-3. **Stay screen.** iOS: capacity line and „Noch offen“ on top of
+3. **Stay screen.** *Built:* `TripOpenSpots.swift` (capacity line, open
+   spots, `TripDayFillSheet`), wired into `TripStayPlanView`. iOS: capacity line and „Noch offen“ on top of
    `TripStayPlanView`, days with fixed and firm stops, „Tag füllen“ per
    day, sheet `TripDayFillSheet`, hint for Muss spots at risk on the last
    days. A soft stop looks the same as a firm one except for a small „von

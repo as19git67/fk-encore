@@ -258,6 +258,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   nach …“ mit Hin- und Rückweg, „Weg zeigen“, „Dort suchen“ und
   „Fahrt ändern“. „Dort suchen“ und der leere Tag öffnen die
   Spot-Auswahl um das Ausflugsziel, und „+ Tag n“ legt auf diesen Tag.
+- Ein Ausflug muss nicht den ganzen Tag dauern: „⋯“ am Tag › „Ausflug
+  hinzufügen“ öffnet das Blatt „Ausflug“ mit Ziel, „Ganzer Tag |
+  Zeitfenster“, Abfahrt an der Unterkunft und Rückfahrt vom Ziel. Ein
+  Zeitfenster steht im Tag als eigener Abschnitt mit seinen Spots und
+  „+ Spot in …“, das um das Ziel sucht und in dieses Fenster legt;
+  davor und danach plant der Tag an der Unterkunft. An einem Tag gehen
+  mehrere Ausflüge, solange sie sich nicht überschneiden. „⋯“ am
+  Abschnitt ändert die Zeiten, zeigt den Weg oder entfernt den Ausflug;
+  seine Spots gehen dann zurück zu den Ideen.
 - Eine Reise öffnet sich mit ihrem Reiseverlauf. Ein Tipp auf einen
   Aufenthalt oder eine seiner Tageszeilen öffnet die Planung des
   Aufenthalts mit allen Tagen auf einem Bildschirm, „Zurück“ führt in den
@@ -291,7 +300,18 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   schon dort ist, steht als „In der Reise“ oder „Schon eingeplant“ in der
   Liste. Der Kopf eines Aufenthalts öffnet dieselbe Auswahl über „Spot
   hinzufügen“, „Ideen (n)“, „Ausflüge“ und „Strecken“, jeweils auf ihrem
-  Chip. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
+  Chip. Ort, Tage und Unterkunft ändert ein Tipp auf die Kopfzeile der
+  Planung (Name und Tage, mit „>“) oder der Eintrag „Ort, Tage und
+  Unterkunft …“ im Menü des Titels; beides öffnet das Blatt „Aufenthalt“
+  wie im Reiseverlauf.
+- **Noch offen.** Über den Tagen steht, was noch keinem Tag gehört: eine
+  Zeile „ca. Muss … · Will … · frei …“ (oder wie viel zu viel ist) und die
+  offenen Spots, Muss zuerst. Ein offener Spot kommt per Ziehen oder über
+  „⋯“ fest auf einen Tag. „Tag füllen“ unter einem Tag (oder „Alle Tage
+  füllen“) schlägt passende Spots mit Grund vor; „–“ lässt einen offen,
+  erst „Übernehmen“ legt sie auf den Tag, mit „Rückgängig“. Was so auf
+  einen Tag kam, trägt „von der App“ und ist abends wieder offen, wenn der
+  Tag es nicht erreicht hat. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
   „Feste Zeit …“ (legt sie auf den Tag und hält die Uhrzeit), „Für später
   merken“, die Priorität und „Aus den Ideen entfernen“.
 - **Regen.** Regnet es laut Vorhersage an einem Tag mit Spots draußen,

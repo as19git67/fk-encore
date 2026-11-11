@@ -3730,6 +3730,17 @@ export const tripPlanDays = pgTable(
     // where in the day's line they stand. No venue, no place on the map.
     breaks: jsonb("breaks").$type<{ id: string; label: string; minutes: number; blockId: string; position: number }[]>()
       .notNull().default([]),
+    // Day trips with a time window inside the day (migration 0311,
+    // `trip-planner/excursions.ts`). Each one is a block of the day.
+    excursions: jsonb("excursions").$type<{
+      id: string;
+      lat: number;
+      lon: number;
+      label: string | null;
+      radiusM: number | null;
+      departMinutes: number;
+      returnMinutes: number;
+    }[]>().notNull().default([]),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );

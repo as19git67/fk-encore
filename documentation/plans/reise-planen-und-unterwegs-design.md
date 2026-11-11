@@ -91,6 +91,15 @@ Die Planungsansicht zeigt alle Tage eines Aufenthalts auf einem Bildschirm (Mock
 
 ![Regen am Tag (1), Abendlicht in den Details (2), Ausflüge (3) und Strecken (4) in der Spot-Auswahl](reise-planen-und-unterwegs/11-vorschlaege-ideen-reise.svg)
 
+**Ausflüge im Tag.** Ein Ausflug ist ein Abschnitt im Tag, wie ein kleiner Aufenthalt mit begrenzter Zeit: morgens zwei Stunden in Seestadt, nachmittags drei in Hafenstadt, dazwischen und danach wieder am Ort der Unterkunft. Er hat eine Abfahrt an der Unterkunft und eine Rückfahrt vom Ziel; die Fahrzeit dazwischen schätzt die App. An einem Tag dürfen beliebig viele Ausflüge stehen, solange sie sich nicht überschneiden (Anton, 11.11.2026).
+
+- **Anlegen** über „⋯“ am Tag › „Ausflug hinzufügen“: Ziel, „Ganzer Tag“ oder „Zeitfenster“, Abfahrt und Rückfahrt, wie weit um das Ziel gesucht wird. „Ganzer Tag“ verlegt den ganzen Tag ans Ziel wie bisher und geht nur an einem Tag ohne andere Ausflüge.
+- **Im Tag** steht der Ausflug als farbiger Abschnitt mit seinen eigenen Spots, Abfahrt, Rückfahrt und Fahrzeit. Davor und danach plant der Tag wie gewohnt um die Unterkunft, mit „zurück in … 13:40“ als Wegzeile.
+- **„+ Spot in Seestadt“** öffnet die Spot-Auswahl um das Ziel und legt den Spot in das Fenster des Ausflugs; „+ Spot in Bergdorf“ legt ihn in die Zeit am Ort. Jeder Spot gehört zu dem Abschnitt, in dem er steht; Ziehen zwischen Abschnitten geht wie zwischen Tagen.
+- **„⋯“ am Ausflug** hat Zeiten ändern, Weg zeigen und Ausflug entfernen. Entfernt gehen seine Spots zurück zu den Ideen.
+
+![Ausflüge im Tag: zwei Ausflüge mit Zeitfenster an einem Tag (A) und das Blatt „Ausflug“ (B)](reise-planen-und-unterwegs/16-ausfluege-im-tag.svg)
+
 **Geteilte Links.** Ein Ort, der aus der Karten-App oder Safari geteilt wird, kommt als Idee zum nächstgelegenen Aufenthalt. Liegt er mehr als 50 km von allen entfernt, fragt die App, wohin. Eine geteilte GPX-Datei oder ein Tourenlink (etwa von Komoot oder Outdooractive) wird zur Strecke.
 
 ## Abläufe Schritt für Schritt

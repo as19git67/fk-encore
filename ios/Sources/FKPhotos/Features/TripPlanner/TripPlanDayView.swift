@@ -43,6 +43,8 @@ struct TripPlanDayView: View {
     /// The appointment whose spot is being chosen (§4.4).
     @State private var linkingFixpoint: TripFixpoint?
     @State private var settingDayAnchor = false
+    /// The excursion whose sheet is open from its "⋯", if any.
+    @State private var editingExcursion: TripExcursion?
     /// The block being split (§6.5), while its sheet is open.
     @State private var splitting: TripSplitTarget?
     /// A stay's planning view, pushed from the itinerary, which is where
@@ -182,13 +184,8 @@ struct TripPlanDayView: View {
                 candidates: viewModel.leg?.pool ?? [],
             ) { Task { await viewModel.load() } }
         }
-        .sheet(isPresented: $settingDayAnchor) {
-            TripDayAnchorSheet(
-                dayLabel: dayLabel(),
-                current: viewModel.day?.anchor,
-            ) { draft in
-                await viewModel.setDayAnchor(draft)
-            }
+        .sheet(isPresented: $settingDayAnchor, onDismiss: { editingExcursion = nil }) {
+            excursionSheet
         }
         .sheet(isPresented: $addingFixpoint, onDismiss: {
             fixpointPreset = nil
@@ -324,6 +321,40 @@ struct TripPlanDayView: View {
         }
     }
 
+    /// "Ausflug" for the selected day: a whole day elsewhere, or a time
+    /// window inside the day (Mock 16). On a trip of ideas only the
+    /// server cuts days into windows; elsewhere the sheet is whole days.
+    @ViewBuilder
+    private var excursionSheet: some View {
+        let day = viewModel.day
+        let dayIndex = viewModel.dayIndex
+        let ideas = viewModel.plan?.isIdeasTrip ?? false
+        let others = (day?.excursions ?? []).filter { $0.id != editingExcursion?.id }
+        TripDayAnchorSheet(
+            dayLabel: dayLabel(),
+            current: editingExcursion == nil ? day?.anchor : nil,
+            excursion: editingExcursion,
+            allowsWholeDay: others.isEmpty,
+            onSaveWindow: ideas ? saveWindow(day: day, dayIndex: dayIndex) : nil,
+            onRemoveExcursion: editingExcursion.map { editing -> () async -> Void in
+                { await viewModel.removeExcursion(editing, dayIndex: dayIndex) }
+            },
+        ) { draft in
+            await viewModel.setDayAnchor(draft)
+        }
+    }
+
+    private func saveWindow(day: TripDay?, dayIndex: Int) -> (TripPlannerViewModel.ExcursionDraft) async -> Bool {
+        let editing = editingExcursion
+        let replaces = day?.anchor != nil
+        return { draft in
+            if let editing {
+                return await viewModel.updateExcursion(editing, draft, dayIndex: dayIndex)
+            }
+            return await viewModel.addExcursion(draft, dayIndex: dayIndex, replaceDayTrip: replaces)
+        }
+    }
+
     /// A stay opens as a whole, every day on one screen (stage 3).
     private var stayRoot: some View {
         TripStayPlanView(
@@ -335,7 +366,12 @@ struct TripPlanDayView: View {
                 case .order: Task { await viewModel.orderDay() }
                 case .pause(let preset): Task { await viewModel.addBreak(label: preset.label, minutes: preset.minutes) }
                 case .fixedTime: Self.afterMenu { addingFixpoint = true }
-                case .dayTrip: Self.afterMenu { settingDayAnchor = true }
+                case .dayTrip:
+                    editingExcursion = nil
+                    Self.afterMenu { settingDayAnchor = true }
+                case .excursion(let excursion):
+                    editingExcursion = excursion
+                    Self.afterMenu { settingDayAnchor = true }
                 }
             },
             // The stay's name heads the list in large; the bar only

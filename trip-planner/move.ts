@@ -32,6 +32,7 @@ import type { CurrentBlock, CurrentStop } from "./redistribute";
 import { leaveFrom } from "./extent";
 import { spillOver } from "./spill";
 import { travelLeg, type Coordinate, type TransportMode } from "./travel";
+import { blockStart } from "./excursions";
 
 export class MoveError extends Error {}
 
@@ -216,6 +217,11 @@ export function recomputeDay(
 
   blocks.forEach((block, index) => {
     let used = 0;
+    // An excursion is walked from its destination, and the block after
+    // it from the quarters (`excursions.ts`): the drive is in the
+    // excursion's window, not in a stop's way.
+    position = blockStart(block.id, index > 0 ? blocks[index - 1].id : null, position,
+                          walk.home ?? walk.end, walk.places);
     for (const stop of block.stops) {
       const leg = travelLeg(position, stop, mode);
       stop.travelFromPrevious = leg;
@@ -225,7 +231,7 @@ export function recomputeDay(
       // A route is left at its far end (§4.7).
       position = leaveFrom(stop);
     }
-    if (index === lastWithStops) {
+    if (index === lastWithStops && !walk.places?.[block.id]) {
       used += travelLeg(position, walk.end, mode).minutes;
     }
     block.usedMinutes = used;

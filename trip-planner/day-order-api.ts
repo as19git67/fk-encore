@@ -18,6 +18,7 @@ import { getAuthData } from "~encore/auth";
 import db from "../db/database";
 import { tripPlanDays, tripPlans } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
+import { blockStart } from "./excursions";
 import { dayWalkOfStored } from "./day-walk";
 import { lineOf, orderDay } from "./day-order";
 import { frameOf, orderBreaksOf, orderStopOf, type DayBreak } from "./day-times";
@@ -91,7 +92,9 @@ export function orderBlocks(
   let position: Coordinate = walk.start;
   let overrun = 0;
   const toDrop: string[] = [];
-  const ordered: CurrentBlock[] = blocks.map((block) => {
+  const ordered: CurrentBlock[] = blocks.map((block, index) => {
+    position = blockStart(block.id, index > 0 ? blocks[index - 1].id : null, position,
+                          walk.home ?? walk.end, walk.places);
     const start = position;
     if (block.stops.length > 0) position = leaveFrom(block.stops[block.stops.length - 1]);
     // The frame is the stored block's: an inserted stop does not move it.
@@ -152,7 +155,9 @@ export function fitAroundTicket(
   const walk = dayWalkOfStored(leg.anchor, day);
   let position: Coordinate = walk.start;
   const moved: string[] = [];
-  const blocks: CurrentBlock[] = day.blocks.map((block) => {
+  const blocks: CurrentBlock[] = day.blocks.map((block, index) => {
+    position = blockStart(block.id, index > 0 ? day.blocks[index - 1].id : null, position,
+                          walk.home ?? walk.end, walk.places);
     const start = position;
     if (block.stops.length > 0) position = leaveFrom(block.stops[block.stops.length - 1]);
     const frame = block.kind === "spots" ? frameOf(block, day.fixpoints) : null;

@@ -46,6 +46,26 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertNil(end.position)
     }
 
+    func testADayWithAnExcursionIsCutIntoSectionsAndEndsAtTheQuarters() throws {
+        var d = day(0, [block("day", [stop(1)]), block("excursion:a", [stop(2), stop(3)]), block("day@a", [])])
+        d.excursions = [TripExcursion(id: "a", lat: 48.4, lon: 11.0, label: "Seestadt", radiusM: nil,
+                                      departMinutes: 600, returnMinutes: 780, travelMinutes: 40)]
+        let sections = TripStayPlan.sections(of: d)
+        XCTAssertEqual(sections.map(\.id), ["day", "excursion:a", "day@a"])
+        XCTAssertEqual(sections.map(\.offset), [0, 1, 3])
+        XCTAssertEqual(sections[1].excursion?.title, "Ausflug nach Seestadt")
+        XCTAssertNil(sections[2].excursion)
+        XCTAssertEqual(d.excursions?.first?.line, "Abfahrt 10:00 · zurück 13:00 · je 40 min Fahrt")
+        XCTAssertEqual(d.excursions?.first?.backHomeMinutes, 820)
+        // A drop at the end of the day goes to the quarters, not the window.
+        let end = try XCTUnwrap(TripStayPlan.dropTarget(day: d, before: nil))
+        XCTAssertEqual(end.blockId, "day@a")
+        // The picker adds to the quarters unless it was opened on the excursion.
+        XCTAssertEqual(TripSpotPicker.spotsBlock(of: d)?.id, "day")
+        let focus = TripSpotPicker.excursionFocus(d.excursions![0], dayIndex: 0).focus
+        XCTAssertEqual(TripSpotPicker.block(of: d, focus: focus)?.id, "excursion:a")
+    }
+
     func testAnEmptyDayTakesADropAtItsEnd() throws {
         let target = try XCTUnwrap(TripStayPlan.dropTarget(day: day(1, [block("day", [])]), before: nil))
         XCTAssertEqual(target.blockId, "day")

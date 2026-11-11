@@ -54,6 +54,7 @@ import { descriptionsFor, type SpotDescription } from "./spot-description";
 import { summariesFor } from "./spot-summary";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 import { storedPinReason, type PinReason } from "./pin-reason";
+import { excursionTravel, type Excursion, type StoredExcursion } from "./excursions";
 
 type Db = typeof dbDefault;
 
@@ -238,6 +239,12 @@ export interface StoredDay {
    * stays at the quarters — which is every ordinary day.
    */
   anchor: StoredDayAnchor | null;
+  /**
+   * Day trips with a time window inside this day (`excursions.ts`),
+   * earliest first. Each one is planned in the block
+   * `excursion:<id>`. Absent on a day without any.
+   */
+  excursions?: StoredExcursion[];
 }
 
 export interface StoredDayAnchor {
@@ -379,6 +386,8 @@ export interface CreateDayInput {
   anchor?: DayAnchor | null;
   /** Breaks on a day of ideas (stage 4), carried through a re-plan. */
   breaks?: readonly DayBreak[];
+  /** Day trips with a time window (`excursions.ts`), each a block of the day. */
+  excursions?: readonly Excursion[];
 }
 
 /** A day trip's destination, as stored beside the day. */
@@ -807,6 +816,8 @@ async function insertDays(
         detailed: dayInput.detailed ?? true,
         buffer_reason: dayInput.bufferReason ?? null,
         breaks: (dayInput.breaks ?? []).map(({ id, label, minutes, blockId, position }) => ({ id, label, minutes, blockId, position })),
+        excursions: (dayInput.excursions ?? []).map(({ id, lat, lon, label, radiusM, departMinutes, returnMinutes }) =>
+          ({ id, lat, lon, label, radiusM, departMinutes, returnMinutes })),
         anchor_lat: dayInput.anchor?.lat ?? null,
         anchor_lon: dayInput.anchor?.lon ?? null,
         anchor_label: dayInput.anchor?.label ?? null,
@@ -1368,6 +1379,14 @@ export async function loadPlan(
       blocks: blocksByDay.get(row.id) ?? [],
       fixpoints: fixpointsByDay.get(row.id) ?? [],
       ...(row.breaks.length > 0 ? { breaks: row.breaks } : {}),
+      ...(row.excursions.length > 0
+        ? {
+          excursions: [...row.excursions]
+            .sort((a, b) => a.departMinutes - b.departMinutes)
+            // Filled in once the leg's anchor and mode are known.
+            .map((e) => ({ ...e, travelMinutes: 0 })),
+        }
+        : {}),
       // Both or neither: half a coordinate is not a place with a gap
       // in it, and a day trip to one would be planned off the coast of
       // Africa.
@@ -1904,13 +1923,25 @@ export async function removeFromPool(
  * Null clears all four columns together: a day trip with a label and no
  * coordinate would be a destination nobody can plan around.
  */
+function withExcursionTravel(
+  day: StoredDay,
+  legAnchor: { lat: number; lon: number },
+  mode: TransportMode,
+): StoredDay {
+  if (!day.excursions) return day;
+  return {
+    ...day,
+    excursions: day.excursions.map((e) => ({ ...e, travelMinutes: excursionTravel(legAnchor, e, mode) })),
+  };
+}
+
 /** The days of one leg, each day trip carrying what the drive costs. */
 function withTravel(
   days: StoredDay[],
   legAnchor: { lat: number; lon: number },
   mode: TransportMode,
 ): StoredDay[] {
-  return days.map((day) =>
+  return days.map((day) => withExcursionTravel(day, legAnchor, mode)).map((day) =>
     day.anchor === null
       ? day
       : {

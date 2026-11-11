@@ -249,8 +249,28 @@ enum TripSpotPicker {
     }
 
     /// The block a place goes into on a day of the stay.
+    /// The block a spot goes to on a day: the day at the quarters, not
+    /// an excursion's window (Mock 16), unless nothing else is left.
     static func spotsBlock(of day: TripDay) -> TripBlock? {
-        day.blocks.first { $0.kind == "spots" } ?? day.blocks.first
+        day.blocks.first { $0.kind == "spots" && day.excursion(ofBlock: $0.id) == nil }
+            ?? day.blocks.first { $0.kind == "spots" } ?? day.blocks.first
+    }
+
+    /// The block for a picker opened on an excursion: its window on its
+    /// day, the ordinary block on every other day.
+    static func block(of day: TripDay, focus: TripDayTripFocus?) -> TripBlock? {
+        if let focus, focus.dayIndex == day.dayIndex, let id = focus.blockId,
+           let block = day.blocks.first(where: { $0.id == id }) {
+            return block
+        }
+        return spotsBlock(of: day)
+    }
+
+    /// Where the search goes from an excursion: around its destination.
+    static func excursionFocus(_ excursion: TripExcursion, dayIndex: Int)
+        -> (focus: TripDayTripFocus, area: TripSearchArea) {
+        (TripDayTripFocus(dayIndex: dayIndex, name: excursion.displayName, blockId: excursion.blockId),
+         TripSearchArea(lat: excursion.lat, lon: excursion.lon, radiusM: Double(excursion.radiusM ?? 3_000)))
     }
 
     /// The day food goes to: the first with an hour left, else the first.
