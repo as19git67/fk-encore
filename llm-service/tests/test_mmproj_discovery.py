@@ -133,3 +133,45 @@ def test_a_generic_projector_type_names_no_family(tmp_path: Path) -> None:
     touch(tmp_path, MODEL)
     write_metadata(tmp_path / "mmproj-F16.gguf", {"general.architecture": "clip", "clip.projector_type": "mlp"})
     assert discover_mmproj(tmp_path, MODEL).endswith("mmproj-F16.gguf")
+
+
+def test_the_projector_a_configuration_downloads_beats_discovery(tmp_path: Path) -> None:
+    """Two models on one volume, each with its own projector from
+    `extra_urls`. Discovery could not tell `mmproj-BF16.gguf` from
+    `mmproj-F16.gguf` and took the alphabetically first one for both."""
+
+    qwen = "Qwen3.6-35B-A3B-UD-Q5_K_M.gguf"
+    touch(tmp_path, MODEL, qwen, "mmproj-BF16.gguf", "mmproj-F16.gguf")
+    gemma_cfg = config(tmp_path, extra_urls=("https://host/gemma/resolve/main/mmproj-F16.gguf",))
+    assert gemma_cfg.resolve_mmproj().endswith("mmproj-F16.gguf")
+    assert gemma_cfg.listed_mmproj().endswith("mmproj-F16.gguf")
+
+    qwen_cfg = LlmConfig(
+        model_path=tmp_path / qwen,
+        backend="server",
+        extra_urls=(
+            "https://host/qwen/resolve/main/Qwen3.6-35B-A3B-00002-of-00002.gguf",
+            "https://host/qwen/resolve/main/mmproj-BF16.gguf?download=true",
+        ),
+    )
+    assert qwen_cfg.resolve_mmproj().endswith("mmproj-BF16.gguf")
+
+
+def test_a_listed_projector_not_yet_on_the_volume_falls_back_to_discovery(tmp_path: Path) -> None:
+    touch(tmp_path, MODEL, "mmproj-gemma-4-26B-A4B-it-qat-F16.gguf")
+    touch(tmp_path, "mmproj-F32.gguf.part")
+    cfg = config(tmp_path, extra_urls=("https://host/mmproj-F32.gguf",))
+    assert cfg.listed_mmproj() == ""
+    assert cfg.resolve_mmproj().endswith("mmproj-gemma-4-26B-A4B-it-qat-F16.gguf")
+
+
+def test_shards_among_extra_urls_are_not_projectors(tmp_path: Path) -> None:
+    touch(tmp_path, MODEL, "gemma-00002-of-00002.gguf")
+    cfg = config(tmp_path, extra_urls=("https://host/gemma-00002-of-00002.gguf",))
+    assert cfg.listed_mmproj() == ""
+
+
+def test_an_explicit_path_still_beats_a_listed_projector(tmp_path: Path) -> None:
+    touch(tmp_path, MODEL, "mmproj-F16.gguf")
+    cfg = config(tmp_path, mmproj_path="/elsewhere/custom.gguf", extra_urls=("https://host/mmproj-F16.gguf",))
+    assert cfg.resolve_mmproj() == "/elsewhere/custom.gguf"

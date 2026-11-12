@@ -1071,6 +1071,7 @@ async def healthz() -> dict[str, Any]:
         # look identical from outside.
         "llm_mmproj_source": (
             "configured" if _state["config"].mmproj_path
+            else "listed" if _state["config"].listed_mmproj()
             else ("discovered" if _state["config"].resolve_mmproj() else None)
         ),
         # Which named configuration is loaded, and whether it came from an
