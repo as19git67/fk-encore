@@ -57,6 +57,12 @@ export interface AddFindRequest {
    */
   dwellMinutes?: number;
   /**
+   * The OSM entry the caller saw in a list (a highlight, a search
+   * result). The lookup takes it when it is there, so a café next to
+   * a basilica whose names differ is not taken for the basilica.
+   */
+  seenOsmRef?: string;
+  /**
    * Where it finishes, when the way is the point (§4.7): a route along
    * a lake, a path up a hill. The day goes on from here rather than
    * from the start. Omitted for the ordinary place, which finishes
@@ -130,7 +136,7 @@ export const addFind = api(
     // give it the viewpoint's reference and hours (§4.7).
     // A find that already knows its reference needs no lookup: the
     // caller took it off the map, not off a tap.
-    const match = extent || req.osmRef ? null : await matchOsmEntry(position, req.name);
+    const match = extent || req.osmRef ? null : await matchOsmEntry(position, req.name, req.seenOsmRef);
 
     // 3. Already there? Merge rather than add.
     // A route and the point it starts from are two things, even under
@@ -252,6 +258,7 @@ export const addFind = api(
 async function matchOsmEntry(
   position: { lat: number; lon: number },
   name: string | undefined,
+  seenOsmRef?: string,
 ): Promise<GeoPoiSearchSpot | null> {
   const region = await pickRegion(position.lat, position.lon);
   if (!region) return null;
@@ -272,12 +279,31 @@ async function matchOsmEntry(
   // Nearest first is what the search returns. Prefer a name match among
   // the close ones: standing between a café and a museum, the name is
   // what says which one was meant.
+  return pickMatch(page.spots, name, seenOsmRef);
+}
+
+/**
+ * Which of the nearby entries a find is: the one the caller saw, then
+ * the one with the name (in any of its languages), and only then the
+ * nearest.
+ */
+export function pickMatch<T extends Pick<GeoPoiSearchSpot, "osmRef" | "name" | "nameDe" | "nameEn">>(
+  spots: readonly T[],
+  name: string | undefined,
+  seenOsmRef?: string,
+): T | null {
+  if (spots.length === 0) return null;
+  const seen = seenOsmRef ? spots.find((s) => s.osmRef === seenOsmRef) : undefined;
+  if (seen) return seen;
   const wanted = name?.trim().toLocaleLowerCase("de");
   if (wanted) {
-    const named = page.spots.find((s) => s.name?.toLocaleLowerCase("de") === wanted);
+    const names = (s: T) => [s.name, s.nameDe, s.nameEn]
+      .filter((n): n is string => Boolean(n))
+      .map((n) => n.trim().toLocaleLowerCase("de"));
+    const named = spots.find((s) => names(s).includes(wanted));
     if (named) return named;
   }
-  return page.spots[0];
+  return spots[0];
 }
 
 function chooseLegFor(

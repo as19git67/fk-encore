@@ -27,10 +27,23 @@ struct TripDayAnchorSheet: View {
     /// "Ganzer Tag" is offered only on a day without other excursions.
     var allowsWholeDay = true
     /// A time window inside the day (Anton, 10./11.11.); nil on a host
-    /// that only knows whole days. True when it was saved.
-    var onSaveWindow: ((TripPlannerViewModel.ExcursionDraft) async -> Bool)? = nil
+    /// that only knows whole days. Nil when it was saved, otherwise what
+    /// went wrong: the sheet says it, since the screen behind is covered.
+    var onSaveWindow: ((TripPlannerViewModel.ExcursionDraft) async -> String?)? = nil
     var onRemoveExcursion: (() async -> Void)? = nil
-    let onSave: (Draft?) async -> Void
+    /// Another day of the stay to move the outing to, with its label;
+    /// empty when there is none.
+    var moveTargets: [MoveTarget] = []
+    var onMove: ((Int) async -> Void)? = nil
+    /// Nil when it was saved, otherwise what went wrong.
+    let onSave: (Draft?) async -> String?
+
+    /// A day the outing can move to.
+    struct MoveTarget: Identifiable {
+        let dayIndex: Int
+        let label: String
+        var id: Int { dayIndex }
+    }
 
     /// How much of the day the outing takes.
     enum Span: String, CaseIterable, Identifiable {
@@ -67,6 +80,8 @@ struct TripDayAnchorSheet: View {
     @State private var back = Self.defaultReturn
     @State private var saving = false
     @State private var span = Span.window
+    /// What the server said when saving failed.
+    @State private var failure: String?
     @Environment(\.dismiss) private var dismiss
 
     private var windowed: Bool { onSaveWindow != nil && span == .window }
@@ -97,6 +112,13 @@ struct TripDayAnchorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let failure {
+                    Section {
+                        Label(failure, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.footnote)
+                    }
+                }
                 Section {
                     if let place, !changingPlace {
                         HStack {
@@ -155,6 +177,28 @@ struct TripDayAnchorSheet: View {
                     hours
                 }
 
+                if let onMove, !moveTargets.isEmpty, excursion != nil || current != nil {
+                    Section {
+                        Menu {
+                            ForEach(moveTargets) { target in
+                                Button(target.label) {
+                                    saving = true
+                                    Task {
+                                        await onMove(target.dayIndex)
+                                        saving = false
+                                        dismiss()
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("Auf anderen Tag", systemImage: "calendar")
+                        }
+                        .disabled(saving)
+                    } footer: {
+                        Text("Die Spots des Ausflugs gehen mit.")
+                    }
+                }
+
                 if let excursion, let onRemoveExcursion {
                     Section {
                         Button(role: .destructive) {
@@ -176,9 +220,9 @@ struct TripDayAnchorSheet: View {
                         Button(role: .destructive) {
                             saving = true
                             Task {
-                                await onSave(nil)
+                                failure = await onSave(nil)
                                 saving = false
-                                dismiss()
+                                if failure == nil { dismiss() }
                             }
                         } label: {
                             Label("Ausflug entfernen", systemImage: "house")
@@ -200,22 +244,21 @@ struct TripDayAnchorSheet: View {
                     Button {
                         guard let place else { return }
                         saving = true
+                        failure = nil
                         Task {
                             if windowed, let onSaveWindow, let depart = departMinutes, let home = returnMinutes {
-                                let saved = await onSaveWindow(TripPlannerViewModel.ExcursionDraft(
+                                failure = await onSaveWindow(TripPlannerViewModel.ExcursionDraft(
                                     place: place, departMinutes: depart, returnMinutes: home, radiusM: reach.radiusM))
-                                saving = false
-                                if saved { dismiss() }
-                                return
+                            } else {
+                                failure = await onSave(Draft(
+                                    place: place,
+                                    departMinutes: departMinutes,
+                                    returnMinutes: returnMinutes,
+                                    radiusM: reach.radiusM,
+                                ))
                             }
-                            await onSave(Draft(
-                                place: place,
-                                departMinutes: departMinutes,
-                                returnMinutes: returnMinutes,
-                                radiusM: reach.radiusM,
-                            ))
                             saving = false
-                            dismiss()
+                            if failure == nil { dismiss() }
                         }
                     } label: {
                         if saving { ProgressView() } else { Text("Sichern") }

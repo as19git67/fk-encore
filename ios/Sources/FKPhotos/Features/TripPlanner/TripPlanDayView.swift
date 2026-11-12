@@ -339,12 +339,19 @@ struct TripPlanDayView: View {
             onRemoveExcursion: editingExcursion.map { editing -> () async -> Void in
                 { await viewModel.removeExcursion(editing, dayIndex: dayIndex) }
             },
+            moveTargets: ideas && (editingExcursion != nil || day?.anchor != nil)
+                ? viewModel.leg.map { TripStayPlan.excursionMoveTargets($0, from: dayIndex,
+                                                                         wholeDay: editingExcursion == nil) } ?? []
+                : [],
+            onMove: { [editingExcursion] toDay in
+                await viewModel.moveExcursion(editingExcursion, from: dayIndex, to: toDay)
+            },
         ) { draft in
             await viewModel.setDayAnchor(draft)
         }
     }
 
-    private func saveWindow(day: TripDay?, dayIndex: Int) -> (TripPlannerViewModel.ExcursionDraft) async -> Bool {
+    private func saveWindow(day: TripDay?, dayIndex: Int) -> (TripPlannerViewModel.ExcursionDraft) async -> String? {
         let editing = editingExcursion
         let replaces = day?.anchor != nil
         return { draft in

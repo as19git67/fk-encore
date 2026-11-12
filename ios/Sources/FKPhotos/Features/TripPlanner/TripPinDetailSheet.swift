@@ -67,6 +67,8 @@ struct TripSpotActionSubmenu: Equatable, Sendable {
     let systemImage: String
 
     static let priority = TripSpotActionSubmenu(title: "Priorität", systemImage: "star")
+    /// The days (and excursions) a spot can go to, in the spot picker.
+    static let days = TripSpotActionSubmenu(title: "Auf einen Tag", systemImage: "calendar")
 }
 
 /// What an action is about, in the order a menu shows them.
@@ -88,6 +90,9 @@ enum TripSpotActionGroup: Int, CaseIterable, Comparable {
 /// A spot's actions as the items of a menu, a section per group.
 struct TripSpotActionMenuItems: View {
     let actions: [TripPinSheetAction]
+    /// How an item runs, when the host does more than run it (the
+    /// details' bar shows a spinner and closes after it).
+    var perform: (@MainActor (TripPinSheetAction) -> Void)? = nil
 
     var body: some View {
         ForEach(TripSpotActionGroup.allCases, id: \.self) { group in
@@ -116,7 +121,11 @@ struct TripSpotActionMenuItems: View {
 extension TripSpotActionMenuItems {
     private func button(_ action: TripPinSheetAction) -> some View {
         Button(role: action.role) {
-            Task { await action.run() }
+            if let perform {
+                perform(action)
+            } else {
+                Task { await action.run() }
+            }
         } label: {
             Label(action.title, systemImage: action.systemImage)
         }

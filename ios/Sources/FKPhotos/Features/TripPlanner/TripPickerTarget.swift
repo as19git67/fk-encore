@@ -12,7 +12,8 @@ struct TripPickerTarget: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable { case stay, excursion, dayTrip }
 
     let kind: Kind
-    /// The day of an excursion or a day out; nil for the stay.
+    /// The day of an excursion or a day out; for the stay the day "+"
+    /// adds to when the picker opened from one, else nil.
     let dayIndex: Int?
     /// "Seestadt": the destination, or the stay's name.
     let name: String
@@ -29,7 +30,7 @@ struct TripPickerTarget: Identifiable, Equatable, Sendable {
 
     var id: String {
         switch kind {
-        case .stay: "stay"
+        case .stay: dayIndex.map { "stay-\($0)" } ?? "stay"
         case .excursion: blockId ?? "excursion"
         case .dayTrip: "day-\(dayIndex ?? -1)"
         }
@@ -46,7 +47,7 @@ struct TripPickerTarget: Identifiable, Equatable, Sendable {
     var line: String {
         switch kind {
         case .stay:
-            return "der Aufenthalt, um die Unterkunft"
+            return dayIndex == nil ? "der Aufenthalt, um die Unterkunft" : "um die Unterkunft"
         case .excursion:
             var parts: [String] = []
             if let window { parts.append(window) }
@@ -59,7 +60,7 @@ struct TripPickerTarget: Identifiable, Equatable, Sendable {
 
     /// "Tag 3 · 10:40–13:00 · noch 1 h 20 frei": the bar names the day too.
     var barLine: String {
-        guard let dayIndex, kind != .stay else { return line }
+        guard let dayIndex else { return line }
         return "Tag \(dayIndex + 1) · \(line)"
     }
 
@@ -71,7 +72,7 @@ struct TripPickerTarget: Identifiable, Equatable, Sendable {
     /// What VoiceOver says for "+" on a row added here.
     var addLabel: String {
         switch kind {
-        case .stay: "Hinzufügen"
+        case .stay: dayIndex.map { "Auf Tag \($0 + 1) legen" } ?? "Hinzufügen"
         case .excursion: "In den Ausflug nach \(name)"
         case .dayTrip: "Auf Tag \((dayIndex ?? 0) + 1) in \(name) legen"
         }
@@ -90,9 +91,10 @@ enum TripPickerTargets {
     /// A spot within this of an excursion's destination is "am Ziel".
     static let atDestinationM = 150.0
 
-    /// The stay itself.
-    static func stay(_ leg: TripLeg) -> TripPickerTarget {
-        TripPickerTarget(kind: .stay, dayIndex: nil, name: leg.displayTitle, title: leg.displayTitle,
+    /// The stay itself; with `day`, one of its days at the quarters,
+    /// for a picker opened from that day.
+    static func stay(_ leg: TripLeg, day: Int? = nil) -> TripPickerTarget {
+        TripPickerTarget(kind: .stay, dayIndex: day, name: leg.displayTitle, title: leg.displayTitle,
                          area: nil, blockId: nil, window: nil, freeMinutes: nil)
     }
 
@@ -144,7 +146,10 @@ enum TripPickerTargets {
     /// the window still holds, or takes the excursion away.
     static func refreshed(_ target: TripPickerTarget, in leg: TripLeg?) -> TripPickerTarget? {
         guard let leg else { return nil }
-        if target.kind == .stay { return stay(leg) }
+        if target.kind == .stay {
+            let day = target.dayIndex.flatMap { index in leg.days.contains { $0.dayIndex == index } ? index : nil }
+            return stay(leg, day: day)
+        }
         return away(of: leg).first { $0.id == target.id }
     }
 
