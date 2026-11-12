@@ -18,6 +18,7 @@ running exactly on its environment values, including across image updates.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from gguf_meta import GgufError, read_metadata
+from model_downloads import DownloadError, filename_from_url
 
 ACTIVE_CONFIG_FILENAME = ".active_config.json"
 
@@ -268,7 +270,35 @@ class LlmConfig:
             return ""
         if self.mmproj_path:
             return self.mmproj_path
+        listed = self.listed_mmproj()
+        if listed:
+            return listed
         return discover_mmproj(self.model_path.parent, self.model_path.name)
+
+    def listed_mmproj(self) -> str:
+        """The projector this configuration downloads itself, if it is on the
+        volume: an `mmproj*.gguf` among `extra_urls`.
+
+        This beats discovery. With several models on one volume, each with
+        its own projector, the names alone often do not say which belongs to
+        which — upstream ships `mmproj-F16.gguf` and `mmproj-BF16.gguf` next
+        to unrelated weights, and two projectors of the same family score
+        alike — so discovery fell back to the alphabetically first one. The
+        configuration names its own; that is the one it meant.
+        """
+
+        models_dir = self.model_path.parent
+        for url in self.extra_urls:
+            try:
+                name = filename_from_url(url)
+            except DownloadError:
+                continue
+            if not fnmatch.fnmatch(name.lower(), MMPROJ_GLOB):
+                continue
+            path = models_dir / name
+            if path.is_file():
+                return str(path)
+        return ""
 
     def validate(self) -> None:
         if self.backend not in BACKENDS:
