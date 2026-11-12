@@ -345,6 +345,12 @@ describe("classifySecuTransaction", () => {
     // Money in with nothing but the identifier: a sale only on the bank's say-so.
     expect(c("1000.00", "WKN AAA111 FONDSNAME")).toBeNull();
     expect(classifySecuTransaction({ amount: "1000.00", transaction_code: "TRAD", purpose: "WKN AAA111" })).toBe("sell");
+    // The bank's own settlement line, both identifiers labelled, over two
+    // lines and with a double space: the sale's credit (synthetic values).
+    expect(c("1000.00", "BEISPIEL WERKE AG ST\nWPKNR: AAA111  ISIN: DE000000AAA1")).toBe("sell");
+    expect(c("-1000.00", "BEISPIEL WERKE AG ST\nWPKNR: AAA111  ISIN: DE000000AAA1")).toBe("buy");
+    // Still not when the user's transfer quotes them.
+    expect(c("1000.00", "UEBERWEISUNG WPKNR: AAA111 ISIN: DE000000AAA1")).toBeNull();
     // MT940's type code is not the bank's say-so.
     expect(classifySecuTransaction({ amount: "1000.00", transaction_code: "NMSC", purpose: "WKN AAA111" })).toBeNull();
     // Money out with "Verkauf" is no sale either.
@@ -464,6 +470,38 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       .from(financeDepotTransaction)
       .where(eq(financeDepotTransaction.account_id, depot));
     expect(row.kind).toBe("sell");
+  });
+
+  it("derives a sell from an MT940 credit that quotes only the bank's settlement line", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-15",
+      isin: "DE000A1EWWW0",
+      wkn: "A1EWWW",
+      name: "ADIDAS",
+    });
+    // Synthetic: name, then both identifiers on a second line, no kind,
+    // no BTC domain (MT940 puts a single letter there).
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-05-20",
+      amount: "1100.00",
+      purpose: "ADIDAS AG NA O.N.\nWPKNR: A1EWWW  ISIN: DE000A1EWWW0",
+      funds_code: "R",
+      transaction_code: null,
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    const [row] = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.account_id, depot));
+    expect(row.kind).toBe("sell");
+    expect(row.net_amount).toBe("1100.00");
   });
 
   it("skips custody fees (CHRG)", async () => {

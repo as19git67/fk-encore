@@ -28,7 +28,9 @@
  *       but only money out becomes a buy (a savings plan's execution
  *       often says nothing); money in is a sale only when the bank or the
  *       text says so — the settlement account of a depot receives
- *       transfers far more often than it books unlabelled sales.
+ *       transfers far more often than it books unlabelled sales. A text
+ *       that quotes both identifiers with their labels ("WPKNR: … ISIN:
+ *       …", the bank's own settlement line) says so.
  *   - ISIN extracted via the ISO 6166 regex from the purpose field.
  *   - WKN extracted via a prefix-anchored "WKN …" pattern. Many German
  *     banks (e.g. MLP) book only WKNs and leave the ISIN field on the
@@ -369,6 +371,11 @@ export function classifySecuTransaction(tx: {
   if (PAYOUT_TEXT_RE.test(text)) return n > 0 ? "dividend" : null;
   if (TRANSFER_TEXT_RE.test(text)) return null;
   if (n < 0) return "buy";
+  // Money in that quotes the security the way the bank prints its own
+  // settlement line ("<NAME> / WPKNR: AAA111 ISIN: DE000000AAA1"), both
+  // identifiers labelled and nothing else: the sale's credit. A transfer
+  // in the user's words names neither label pair.
+  if (quotesSettlementIdentifiers(text)) return "sell";
   // Money in without a word: a sale only on the bank's say-so.
   return bankSaysTrade ? "sell" : null;
 }
@@ -394,6 +401,17 @@ const TRANSFER_TEXT_RE =
 /** Fees, charges and taxes a settlement account books besides trades. */
 const CHARGE_TEXT_RE =
   /geb(?:ü|ue)hr|entgelt|spesen|verwaltungsverg|verg(?:ü|ue)tung|depotpreis|kontof(?:ü|ue)hrung|abschluss|steuer|vorabpauschale|thesaur/i;
+/**
+ * Both identifiers of a security, each after its label, as a bank prints
+ * them on its settlement bookings ("WPKNR: AAA111  ISIN: DE000000AAA1").
+ * One identifier alone ("WKN AAA111 FONDSNAME") is not enough: users
+ * quote a WKN on their own transfers.
+ */
+function quotesSettlementIdentifiers(text: string): boolean {
+  return LABELLED_WKN_RE.test(text) && LABELLED_ISIN_RE.test(text);
+}
+const LABELLED_WKN_RE = /\b(?:WKN|WPKNR|WP-?KENN(?:NR|NUMMER)?)[.:]?\s*[A-Z0-9]{6}\b/i;
+const LABELLED_ISIN_RE = /\bISIN[.:]?\s*(?:[A-Z0-9] ?){11}[0-9](?![A-Z0-9])/i;
 /** A payout: dividend, distribution, interest on a bond. */
 const PAYOUT_TEXT_RE = /dividende|aussch(?:ü|ue)ttung|ertr(?:ä|ae)g|zinsen|kupon/i;
 
