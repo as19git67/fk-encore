@@ -85,14 +85,18 @@ export function setHotelSearchClient(client: HotelSearchClient | null | undefine
   override = client;
 }
 
-export function hotelSearchClient(): HotelSearchClient | null {
-  if (override !== undefined) return override;
-  let key = "";
+/** The deployment's SerpApi key, or null when none is configured (shared with the flight client). */
+export function serpApiKeyValue(): string | null {
   try {
-    key = serpApiKey().trim();
+    return serpApiKey().trim() || null;
   } catch {
     return null;
   }
+}
+
+export function hotelSearchClient(): HotelSearchClient | null {
+  if (override !== undefined) return override;
+  const key = serpApiKeyValue();
   return key ? createSerpApiClient(key) : null;
 }
 

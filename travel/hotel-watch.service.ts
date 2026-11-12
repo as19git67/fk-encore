@@ -22,6 +22,7 @@ import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { travelHotelChecks, travelHotelOffers, travelHotelWatches, users } from "../db/schema";
+import { searchesThisMonth, SearchBudgetExhausted } from "./search-budget";
 import { alertDecision, alertSender, type PriceAlert } from "./hotel-alerts";
 import {
   ADULTS_PER_ROOM,
@@ -407,22 +408,7 @@ export async function deleteWatch(userId: number, id: number): Promise<void> {
 
 // ── Checking ─────────────────────────────────────────────────────────────────
 
-/** SerpApi searches all checks used since the start of `now`'s calendar month (UTC). */
-export async function searchesThisMonth(now: Date = new Date()): Promise<number> {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-  const [row] = await db
-    .select({ n: sql<number>`COALESCE(SUM(${travelHotelChecks.searches}), 0)` })
-    .from(travelHotelChecks)
-    .where(gte(travelHotelChecks.checked_at, start));
-  return Number(row?.n ?? 0);
-}
-
-export class SearchBudgetExhausted extends Error {
-  constructor(used: number, budget: number) {
-    super(`Das Monatskontingent von ${budget} SerpApi-Suchen ist aufgebraucht (${used} verbraucht)`);
-    this.name = "SearchBudgetExhausted";
-  }
-}
+export { searchesThisMonth, SearchBudgetExhausted } from "./search-budget";
 
 /**
  * One check: search the hotel (by its stored token, or by name and then the

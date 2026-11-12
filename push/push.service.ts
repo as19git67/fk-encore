@@ -528,6 +528,21 @@ export function buildHotelPriceNotification(input: {
   };
 }
 
+/** A flight price watch found a price below its limit (travel/flight-alerts.ts). */
+export function buildFlightPriceNotification(input: {
+  watchId: number;
+  title: string;
+  body: string;
+}): PushPayload {
+  return {
+    title: input.title,
+    body: input.body,
+    url: `/app/reise/flugpreise?watch=${input.watchId}`,
+    tag: `flight-price:${input.watchId}`,
+    data: { kind: "flight_price", watchId: input.watchId },
+  };
+}
+
 export type NotificationKind =
   | "photo_added"
   | "album_shared"
@@ -540,7 +555,8 @@ export type NotificationKind =
   | "receipt_booked"
   | "receipt_incomplete"
   | "assistant_answer"
-  | "hotel_price";
+  | "hotel_price"
+  | "flight_price";
 
 export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>;
 
