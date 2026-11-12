@@ -566,20 +566,11 @@ struct TripSpotDetailBarView: View {
                 button(bar.primaryTitle ?? primary.title, systemImage: bar.primaryImage ?? primary.systemImage) { run(primary) }
                     .disabled(running != nil || primary.disabled)
             }
+            // The system menu, with the same submenus as a row's long
+            // press (priority, the days): flat, it grew past the screen
+            // and its lines broke in two (Anton, 12.11.).
             Menu {
-                ForEach(TripSpotActionGroup.allCases, id: \.self) { group in
-                    let members = bar.more.filter { $0.group == group }
-                    if !members.isEmpty {
-                        Section {
-                            ForEach(members) { action in
-                                Button(role: action.role) { run(action) } label: {
-                                    Label(action.title, systemImage: action.systemImage)
-                                }
-                                .disabled(action.disabled)
-                            }
-                        }
-                    }
-                }
+                TripSpotActionMenuItems(actions: bar.more, perform: { action in run(action) })
                 Section {
                     Button(action: google) {
                         Label("In Google Maps öffnen", systemImage: "globe")

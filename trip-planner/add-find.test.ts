@@ -17,7 +17,7 @@ import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
-import { addFind } from "./add-find";
+import { addFind, pickMatch } from "./add-find";
 import { MANUAL_REASON, MANUAL_SCORE } from "./candidates";
 import { HEART_WEIGHT } from "./votes";
 
@@ -379,5 +379,22 @@ describe("a find with an extent (§4.7)", () => {
         end: { lat: WEST.lat + 1.5, lon: WEST.lon },
       }),
     ).rejects.toThrow(/Transfer/);
+  });
+});
+
+describe("which nearby entry a find is", () => {
+  const spot = (osmRef: string, name: string, nameDe: string | null = null) => ({ osmRef, name, nameDe, nameEn: null });
+  const cafe = spot("node:1", "Café am Platz");
+  const church = spot("way:2", "Église Beispielkirche", "Beispielkirche");
+
+  it("takes the entry the list showed, though a café is nearer", () => {
+    expect(pickMatch([cafe, church], "Beispielkirche", "way:2")).toBe(church);
+    expect(pickMatch([cafe, church], "Ganz anders", "way:2")).toBe(church);
+  });
+
+  it("matches a name in any of the entry's languages, then falls back to the nearest", () => {
+    expect(pickMatch([cafe, church], "Beispielkirche")).toBe(church);
+    expect(pickMatch([cafe, church], "Unbekannt")).toBe(cafe);
+    expect(pickMatch([], "Beispielkirche")).toBeNull();
   });
 });

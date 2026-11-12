@@ -100,4 +100,23 @@ final class TripPickerTargetTests: XCTestCase {
         XCTAssertEqual(TripPickerTargets.misfitText(target), "passt nicht, 1 h 20 frei")
         XCTAssertEqual(TripPickerTargets.freeText(0), "nichts mehr frei")
     }
+
+    func testAnOutingMovesOnlyToADayThatCanTakeIt() throws {
+        let plain = TripDay(id: 1, dayIndex: 0, detailed: true, bufferReason: nil, blocks: [block("day")], fixpoints: [])
+        let leg = try leg([plain, excursionDay(), try dayOut()])
+        // A window goes to any day that is not a whole day out.
+        XCTAssertEqual(TripStayPlan.excursionMoveTargets(leg, from: 2, wholeDay: false).map(\.dayIndex), [0])
+        // A whole day out only to a day without any outing.
+        XCTAssertEqual(TripStayPlan.excursionMoveTargets(leg, from: 3, wholeDay: true).map(\.dayIndex), [0])
+    }
+
+    func testOpenedFromADayThePickerAddsToThatDay() throws {
+        let leg = try leg([excursionDay()])
+        let target = TripPickerTargets.stay(leg, day: 2)
+        XCTAssertEqual(target.barLine, "Tag 3 · um die Unterkunft")
+        XCTAssertEqual(target.addLabel, "Auf Tag 3 legen")
+        XCTAssertEqual(target.focus, TripDayTripFocus(dayIndex: 2, name: "Bergdorf", blockId: nil))
+        XCTAssertEqual(TripPickerTargets.refreshed(target, in: leg)?.dayIndex, 2)
+        XCTAssertNil(TripPickerTargets.stay(leg).focus)
+    }
 }

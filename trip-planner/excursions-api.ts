@@ -16,6 +16,7 @@ import { requirePermission } from "../user/auth-handler";
 import { requireOrganiser } from "./plan-access";
 import { parseMinutes } from "./fixpoints";
 import { isIdeasTrip } from "./ideas-mode";
+import { applyStopMoves } from "./stay-weather-api";
 import { loadPlan, setDayAnchor, type StoredDay, type StoredLeg, type StoredPlan } from "./plan-store";
 import { MAX_SEARCH_RADIUS_M } from "./search-reach";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
@@ -142,6 +143,78 @@ export const removeTripExcursion = api(
     }
     // Its spots go back to the ideas with the re-plan (`carry-stops.ts`).
     return await write(plan, day, list.filter((e) => e.id !== req.excursionId), userId);
+  },
+);
+
+export interface MoveExcursionRequest {
+  planId: number;
+  legIndex: number;
+  dayIndex: number;
+  /** The time-window excursion to move; omitted moves the whole-day trip. */
+  excursionId?: string;
+  toDayIndex: number;
+}
+
+/**
+ * An excursion, or a whole-day trip, goes to another day of the stay
+ * and takes its spots along. A window lands on the other day's list
+ * and the re-plan finds its block there (`carry-stops.ts`). A whole
+ * day swaps its spots with the other day's, so what was planned at the
+ * quarters stays at the quarters, and then the destination moves.
+ * A spot with a fixed time belongs to its day: such an excursion is
+ * refused until the time is changed.
+ */
+export const moveTripExcursion = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/trip-planner/plans/:planId/legs/:legIndex/days/:dayIndex/move-excursion",
+    auth: true,
+  },
+  async (req: MoveExcursionRequest): Promise<PlanResponse> => {
+    const userId = requireUser();
+    const { plan, leg, day } = await dayOf(req.planId, req.legIndex, req.dayIndex, userId);
+    if (req.toDayIndex === req.dayIndex) throw APIError.invalidArgument("der Ausflug ist schon an diesem Tag");
+    const to = leg.days.find((d) => d.dayIndex === req.toDayIndex);
+    if (!to) throw APIError.notFound(`day ${req.toDayIndex} not found in leg ${req.legIndex}`);
+    const fixed = (blockIds: (id: string) => boolean): boolean =>
+      day.blocks.some((b) => blockIds(b.id)
+        && b.stops.some((s) => s.status === "planned" && day.fixpoints.some((f) => f.spotRef === s.osmRef)));
+
+    if (req.excursionId !== undefined) {
+      const list = stored(day);
+      const moving = list.find((e) => e.id === req.excursionId);
+      if (!moving) throw APIError.notFound("diesen Ausflug gibt es an diesem Tag nicht");
+      if (to.anchor) throw APIError.failedPrecondition("dieser Tag ist schon ganz ein Ausflug");
+      if (fixed((id) => id === excursionBlockId(moving.id))) {
+        throw APIError.failedPrecondition("ein Spot des Ausflugs hat eine feste Zeit; die bleibt an ihrem Tag");
+      }
+      const target = [...stored(to), moving];
+      refuseProblem(target, leg);
+      await db.update(tripPlanDays).set({ excursions: target }).where(eq(tripPlanDays.id, to.id));
+      return await write(plan, day, list.filter((e) => e.id !== moving.id), userId);
+    }
+
+    if (!day.anchor) throw APIError.failedPrecondition("dieser Tag ist kein ganztägiger Ausflug");
+    if (to.anchor) throw APIError.failedPrecondition("dieser Tag ist schon ganz ein Ausflug");
+    if ((to.excursions ?? []).length > 0) {
+      throw APIError.failedPrecondition("an diesem Tag gibt es schon Ausflüge mit Zeitfenster");
+    }
+    if (fixed(() => true) || to.blocks.some((b) =>
+      b.stops.some((s) => s.status === "planned" && to.fixpoints.some((f) => f.spotRef === s.osmRef)))) {
+      throw APIError.failedPrecondition("ein Spot an einem der Tage hat eine feste Zeit; die bleibt an ihrem Tag");
+    }
+    const refs = (d: StoredDay) => d.blocks.flatMap((b) => b.stops)
+      .filter((s) => s.status === "planned").map((s) => s.osmRef);
+    await applyStopMoves(plan, leg, [
+      ...refs(day).map((osmRef) => ({ osmRef, toDayIndex: to.dayIndex })),
+      ...refs(to).map((osmRef) => ({ osmRef, toDayIndex: day.dayIndex })),
+    ]);
+    await setDayAnchor(to.id, day.anchor);
+    await setDayAnchor(day.id, null);
+    const written = await loadPlan(plan.id, userId);
+    if (!written) throw APIError.internal("plan vanished while moving a day trip");
+    return await replanAfterFrameChange(written, userId);
   },
 );
 

@@ -51,6 +51,8 @@ struct TripStayPlanView: View {
     @State private var picking = false
     /// The day out the picker was opened from, so it searches there.
     @State private var pickingDayTrip: Int?
+    /// The day at the quarters the picker adds to, when opened from one.
+    @State private var pickingDay: Int?
     /// The excursion the picker was opened from ("+ Spot in Seestadt").
     @State private var pickingExcursion: TripExcursionPick?
     /// The excursion whose removal is being confirmed.
@@ -128,6 +130,14 @@ struct TripStayPlanView: View {
                           onCommit: { next in await commitStay(next) })
         }
         .toolbar {
+            // A sign that the server is working, so a change that takes a
+            // moment is not mistaken for one that did nothing.
+            if viewModel.isWorking {
+                ToolbarItem(placement: .primaryAction) {
+                    ProgressView()
+                        .accessibilityLabel("Wird geladen")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Picker("Ansicht", selection: $layout) {
                     Text("Tage").tag(Layout.list.rawValue)
@@ -146,9 +156,11 @@ struct TripStayPlanView: View {
         .sheet(isPresented: $picking, onDismiss: {
             pickingDayTrip = nil
             pickingExcursion = nil
+            pickingDay = nil
         }) {
             TripSpotPickerView(viewModel: viewModel, dayTrip: pickingDayTrip,
-                               excursion: pickingExcursion.map { ($0.dayIndex, $0.excursion) })
+                               excursion: pickingExcursion.map { ($0.dayIndex, $0.excursion) },
+                               day: pickingDay)
         }
         .confirmationDialog(removingExcursion.map { "\($0.excursion.title) entfernen?" } ?? "",
                             isPresented: Binding(get: { removingExcursion != nil },
@@ -499,35 +511,67 @@ struct TripStayPlanView: View {
         }
     }
 
-    /// A day trip, as the row the mock draws over the day: where to, the
-    /// way there and back, and the two things to do about it.
-    private func dayTripRow(_ anchor: TripDayAnchor, day: TripDay, leg: TripLeg) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(anchor.label.map { "Ausflug nach \($0)" } ?? "Ausflug", systemImage: leg.transportMode.systemImage)
-                .font(.subheadline.weight(.semibold))
+    /// A day trip, as a tile like an excursion's (Mock 16 A): where to,
+    /// the way there and back, its "⋯", and — while planning — the
+    /// day's spots inside it with "+ Spot in …", since the whole day
+    /// happens there.
+    private func dayTripRow(_ anchor: TripDayAnchor, day: TripDay, leg: TripLeg,
+                            stops: [TripStop]) -> some View {
+        let place = anchor.label ?? "Ausflugsziel"
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(anchor.label.map { "Ausflug nach \($0)" } ?? "Ausflug", systemImage: leg.transportMode.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .onDrag {
+                        NSItemProvider(object: TripStayPlan.excursionDragId(
+                            dayIndex: day.dayIndex, excursionId: nil) as NSString)
+                    }
+                Spacer()
+                Menu {
+                    Button {
+                        dayAction(.dayTrip, day.dayIndex)
+                    } label: {
+                        Label("Fahrt ändern", systemImage: "clock")
+                    }
+                    moveMenu(nil, day: day, leg: leg)
+                    Button {
+                        wayRequest = TripWayRequest(
+                            from: .init(name: leg.anchorLabel ?? "Unterkunft", coordinate: leg.anchor),
+                            to: .init(name: place, coordinate: TripCoordinate(lat: anchor.lat, lon: anchor.lon)),
+                            check: nil, segment: nil, currentMode: leg.transportMode)
+                    } label: {
+                        Label("Weg zeigen", systemImage: "map")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .frame(minWidth: 44, minHeight: 32)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("Aktionen für den Ausflug nach \(place)")
+            }
             Text(TripStayPlan.dayTripLine(anchor))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            HStack(spacing: 16) {
-                Button("Weg zeigen") {
-                    wayRequest = TripWayRequest(
-                        from: .init(name: leg.anchorLabel ?? "Unterkunft", coordinate: leg.anchor),
-                        to: .init(name: anchor.label ?? "Ausflugsziel",
-                                  coordinate: TripCoordinate(lat: anchor.lat, lon: anchor.lon)),
-                        check: nil, segment: nil, currentMode: leg.transportMode)
-                }
-                Button("Dort suchen") {
-                    pickingDayTrip = day.dayIndex
-                    picking = true
-                }
-                Button("Fahrt ändern") { dayAction(.dayTrip, day.dayIndex) }
+            ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
+                planCard(stop, index: index, day: day, leg: leg)
             }
-            .font(.caption.weight(.semibold))
+            if !stops.isEmpty {
+                insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
+            }
+            Button {
+                pickingDayTrip = day.dayIndex
+                picking = true
+            } label: {
+                Label("Spot in \(place)", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold))
+            }
             .buttonStyle(.borderless)
+            .accessibilityHint("Sucht um \(place) und legt auf diesen Tag")
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 10))
+        .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.5)))
     }
 
     /// "Ideen (6) und Suche": the one way into the spot picker.
@@ -755,12 +799,13 @@ struct TripStayPlanView: View {
             }
 
             if let anchor = day.anchor, phase != .past {
-                dayTripRow(anchor, day: day, leg: leg)
+                dayTripRow(anchor, day: day, leg: leg, stops: onTheRoad ? [] : stops)
             }
 
-            if stops.isEmpty && (day.excursions ?? []).isEmpty {
+            if stops.isEmpty && (day.excursions ?? []).isEmpty && day.anchor == nil {
                 Button {
                     pickingDayTrip = day.anchor == nil ? nil : day.dayIndex
+                    pickingDay = day.anchor == nil ? day.dayIndex : nil
                     picking = true
                 } label: {
                     Text("Spot hierher ziehen oder aus den Ideen hinzufügen")
@@ -804,6 +849,9 @@ struct TripStayPlanView: View {
                         .modifier(reorderable(stop, slot: slot, day: day))
                 }
                 insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
+                if phase == .running {
+                    addSpotButton(day, leg: leg)
+                }
                 if !missed.isEmpty {
                     missedCard(missed, day: day, leg: leg, today: today)
                 }
@@ -814,11 +862,15 @@ struct TripStayPlanView: View {
                     .font(.footnote)
                     .frame(maxWidth: .infinity)
                 }
+            } else if day.anchor != nil {
+                // The spots stand in the day trip's tile.
+                EmptyView()
             } else if (day.excursions ?? []).isEmpty {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
                     planCard(stop, index: index, day: day, leg: leg)
                 }
                 insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
+                addSpotButton(day, leg: leg)
             } else {
                 // A day with excursions (Mock 16): each window is a
                 // section of its own, the rest of the day at the quarters.
@@ -832,14 +884,7 @@ struct TripStayPlanView: View {
                     }
                 }
                 insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
-                Button {
-                    picking = true
-                } label: {
-                    Label("Spot in \(leg.displayTitle)", systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 40)
-                }
-                .buttonStyle(.bordered)
+                addSpotButton(day, leg: leg)
             }
             if phase != .past, day.anchor == nil, !TripOpenSpots.open(of: leg).isEmpty {
                 fillButton(day, running: phase == .running, nowMinutes: nowMinutes)
@@ -865,6 +910,42 @@ struct TripStayPlanView: View {
             .modifier(reorderable(stop, slot: slot, day: day))
     }
 
+    /// "+ Spot" under a day that already has some: the picker opens for
+    /// this day — around the destination of a day out, else at the
+    /// quarters — and "+" puts the spot here.
+    private func addSpotButton(_ day: TripDay, leg: TripLeg) -> some View {
+        Button {
+            pickingDayTrip = day.anchor == nil ? nil : day.dayIndex
+            pickingDay = day.anchor == nil ? day.dayIndex : nil
+            picking = true
+        } label: {
+            Label(day.anchor == nil && !(day.excursions ?? []).isEmpty ? "Spot in \(leg.displayTitle)" : "Spot hinzufügen",
+                  systemImage: "plus")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 40)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    /// "Auf anderen Tag" for an outing: the days it may go to.
+    private func moveMenu(_ excursion: TripExcursion?, day: TripDay, leg: TripLeg) -> some View {
+        Menu {
+            moveMenuItems(excursion, day: day, leg: leg)
+        } label: {
+            Label("Auf anderen Tag", systemImage: "calendar")
+        }
+        .disabled(TripStayPlan.excursionMoveTargets(leg, from: day.dayIndex, wholeDay: excursion == nil).isEmpty)
+    }
+
+    @ViewBuilder
+    private func moveMenuItems(_ excursion: TripExcursion?, day: TripDay, leg: TripLeg) -> some View {
+        ForEach(TripStayPlan.excursionMoveTargets(leg, from: day.dayIndex, wholeDay: excursion == nil)) { target in
+            Button(target.label) {
+                Task { await viewModel.moveExcursion(excursion, from: day.dayIndex, to: target.dayIndex) }
+            }
+        }
+    }
+
     /// An excursion as a section of the day (Mock 16 A): where to, the
     /// hours, its own spots, "+ Spot in …", and below it the way back.
     private func excursionSection(_ excursion: TripExcursion, section: TripStaySection,
@@ -875,6 +956,10 @@ struct TripStayPlanView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Label(excursion.title, systemImage: leg.transportMode.systemImage)
                         .font(.subheadline.weight(.semibold))
+                        .onDrag {
+                            NSItemProvider(object: TripStayPlan.excursionDragId(
+                                dayIndex: day.dayIndex, excursionId: excursion.id) as NSString)
+                        }
                     Spacer()
                     Menu {
                         Button {
@@ -882,6 +967,7 @@ struct TripStayPlanView: View {
                         } label: {
                             Label("Zeiten ändern", systemImage: "clock")
                         }
+                        moveMenu(excursion, day: day, leg: leg)
                         Button {
                             wayRequest = TripWayRequest(
                                 from: .init(name: leg.anchorLabel ?? "Unterkunft", coordinate: leg.anchor),
@@ -1337,6 +1423,17 @@ struct TripStayPlanView: View {
     /// (counted among the day's stops) or to the end.
     private func drop(_ items: [String], onDay day: TripDay, before: Int?) -> Bool {
         dropSlot = nil
+        if let dragged = items.first.flatMap(TripStayPlan.excursion(fromDragId:)) {
+            guard dragged.dayIndex != day.dayIndex, let leg = viewModel.leg else { return false }
+            let excursion = dragged.excursionId.flatMap { id in
+                leg.days.first { $0.dayIndex == dragged.dayIndex }?.excursions?.first { $0.id == id }
+            }
+            guard dragged.excursionId == nil || excursion != nil else { return false }
+            let allowed = TripStayPlan.excursionMoveTargets(leg, from: dragged.dayIndex, wholeDay: excursion == nil)
+            guard allowed.contains(where: { $0.dayIndex == day.dayIndex }) else { return false }
+            Task { await viewModel.moveExcursion(excursion, from: dragged.dayIndex, to: day.dayIndex) }
+            return true
+        }
         if let osmRef = items.first.flatMap(TripOpenSpots.osmRef(fromDragId:)) {
             // An open spot dragged onto a day stands there by hand.
             guard let target = TripStayPlan.dropTarget(day: day, before: before) else { return false }
@@ -1794,6 +1891,18 @@ private struct TripStayMarkerLabel: View {
 /// What the stay's planning view computes, apart from the view so it
 /// can be tested.
 enum TripStayPlan {
+    /// The days an outing of `dayIndex` can move to (the server's
+    /// rules in `excursions-api.ts`): a window goes to any day that is
+    /// not a whole-day trip, a whole-day trip only to a day with no
+    /// outing at all.
+    static func excursionMoveTargets(_ leg: TripLeg, from dayIndex: Int, wholeDay: Bool) -> [TripDayAnchorSheet.MoveTarget] {
+        leg.days
+            .filter { $0.dayIndex != dayIndex && $0.anchor == nil }
+            .filter { !wholeDay || ($0.excursions ?? []).isEmpty }
+            .sorted { $0.dayIndex < $1.dayIndex }
+            .map { TripDayAnchorSheet.MoveTarget(dayIndex: $0.dayIndex, label: dayTitle($0, leg: leg)) }
+    }
+
     /// Every stop of the day in its order, across its spots blocks.
     static func stops(of day: TripDay) -> [TripStop] {
         day.blocks.filter { $0.kind == "spots" }.flatMap(\.stops)
@@ -1910,7 +2019,9 @@ enum TripStayPlan {
         if hasNoTime(day) { return "keine Zeit frei" }
         guard let window = day.window, window.minutes > 0 else { return nil }
         if let over = day.overrunMinutes, over > 0 {
-            return "\(TripClock.duration(over)) zu viel"
+            // When the day would end and when it may: "zu viel" alone
+            // did not say against what (Anton, 11.11.).
+            return "endet \(TripClock.format(window.endMinutes + over)) statt \(TripClock.format(window.endMinutes))"
         }
         let planned = (day.plannedMinutes ?? 0) + (day.waitMinutes ?? 0)
         if planned == 0 { return "noch frei" }
@@ -1935,6 +2046,21 @@ enum TripStayPlan {
     }
 
     static func dragId(_ stop: TripStop) -> String { "trip-stop:\(stop.rowId)" }
+
+    /// An outing dragged onto another day: its day and, for a window,
+    /// its id ("trip-excursion:2:ab12cd34"; empty for a whole-day trip).
+    static func excursionDragId(dayIndex: Int, excursionId: String?) -> String {
+        "trip-excursion:\(dayIndex):\(excursionId ?? "")"
+    }
+
+    static func excursion(fromDragId id: String) -> (dayIndex: Int, excursionId: String?)? {
+        guard id.hasPrefix("trip-excursion:") else { return nil }
+        let parts = id.dropFirst("trip-excursion:".count).split(separator: ":", maxSplits: 1,
+                                                                 omittingEmptySubsequences: false)
+        guard let first = parts.first, let dayIndex = Int(first) else { return nil }
+        let excursionId = parts.count > 1 && !parts[1].isEmpty ? String(parts[1]) : nil
+        return (dayIndex, excursionId)
+    }
 
     static func rowId(fromDragId id: String) -> Int? {
         guard id.hasPrefix("trip-stop:") else { return nil }

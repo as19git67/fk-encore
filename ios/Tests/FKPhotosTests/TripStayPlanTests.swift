@@ -82,7 +82,7 @@ final class TripStayPlanTests: XCTestCase {
     func testTheHeaderSaysPlannedOfAvailable() {
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 200)), "3 h 20 von 9 h")
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 0)), "noch frei")
-        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 600, over: 60)), "1 h zu viel")
+        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 600, over: 60)), "endet 19:00 statt 18:00")
         // An older trip's day without a clock still has its blocks.
         XCTAssertNil(TripStayPlan.fillLine(day(0, [block("day", [])])))
         // Arriving after the day's end leaves no block and no window.
@@ -159,5 +159,15 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertFalse(TripSwipeToDelete.justSwiped(nil, now: now))
         XCTAssertTrue(TripSwipeToDelete.justSwiped(now.addingTimeInterval(-0.2), now: now))
         XCTAssertFalse(TripSwipeToDelete.justSwiped(now.addingTimeInterval(-1), now: now))
+    }
+
+    func testAnOutingsDragIdCarriesItsDayAndWindow() {
+        let window = TripStayPlan.excursionDragId(dayIndex: 2, excursionId: "ab12cd34")
+        XCTAssertEqual(TripStayPlan.excursion(fromDragId: window)?.dayIndex, 2)
+        XCTAssertEqual(TripStayPlan.excursion(fromDragId: window)?.excursionId, "ab12cd34")
+        let wholeDay = TripStayPlan.excursionDragId(dayIndex: 0, excursionId: nil)
+        XCTAssertEqual(TripStayPlan.excursion(fromDragId: wholeDay)?.dayIndex, 0)
+        XCTAssertNil(TripStayPlan.excursion(fromDragId: wholeDay)?.excursionId)
+        XCTAssertNil(TripStayPlan.excursion(fromDragId: "trip-stop:4"))
     }
 }

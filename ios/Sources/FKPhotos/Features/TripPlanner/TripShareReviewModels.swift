@@ -136,6 +136,10 @@ struct TripAddFindRequest: Encodable, Sendable {
     var ascentM: Int? = nil
     /// Muss / Will / Wenn Zeit (ideas plan, stage 3); the server takes Will when absent.
     var priority: String? = nil
+    /// The OSM entry a search or highlight row showed, so the server
+    /// matches that one rather than the nearest entry (a café beside a
+    /// basilica).
+    var seenOsmRef: String? = nil
 }
 
 struct TripAddFindResponse: Decodable, Sendable {

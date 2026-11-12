@@ -39,6 +39,18 @@ export function carryStops(
   const back: ReturnedIdea[] = [];
   const days = fresh.map((day) => ({ ...day, blocks: day.blocks.map((b) => ({ ...b, stops: [...b.stops] })) }));
 
+  // An excursion moved to another day takes its spots along
+  // (`excursions-api.ts`): its block is found by id on whichever day
+  // has it now.
+  const excursionDay = new Map<string, number>();
+  days.forEach((day, index) => {
+    for (const block of day.blocks) {
+      if (excursionIdOf(block.id) !== null) excursionDay.set(block.id, index);
+    }
+  });
+  const touched = new Set<number>();
+  const placed = days.map((day) => new Set(day.blocks.flatMap((b) => b.stops.map((s) => s.osmRef))));
+
   for (const old of before.days) {
     carryBreaks(old, days[old.dayIndex]);
     const stops = old.blocks.flatMap((block) =>
@@ -48,33 +60,46 @@ export function carryStops(
     if (stops.length === 0) continue;
 
     const target = days[old.dayIndex];
-    if (!target || target.blocks.length === 0) {
-      for (const { stop } of stops) back.push(asIdea(stop));
-      continue;
-    }
-
-    const already = new Set(target.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
-    const blocks = target.blocks as unknown as CurrentBlock[];
-    const fallback = blocks.find((b) => b.kind === "spots" && excursionIdOf(b.id) === null)
-      ?? blocks.find((b) => b.kind === "spots") ?? blocks[0];
+    if (target && target.blocks.length > 0) touched.add(old.dayIndex);
     for (const { blockId, stop } of stops) {
-      if (already.has(stop.osmRef)) continue;
-      const own = blocks.find((b) => b.id === blockId);
-      // A spot of an excursion that is gone was chosen around a place
-      // the day no longer goes to (`excursions.ts`): back to the ideas,
-      // not into the day at the quarters.
+      const own = target?.blocks.find((b) => b.id === blockId);
       if (!own && excursionIdOf(blockId) !== null) {
+        const elsewhere = excursionDay.get(blockId);
+        if (elsewhere !== undefined) {
+          put(elsewhere, blockId, stop);
+          continue;
+        }
+        // A spot of an excursion that is gone was chosen around a place
+        // the day no longer goes to (`excursions.ts`): back to the
+        // ideas, not into the day at the quarters.
         back.push(asIdea(stop));
         continue;
       }
-      const block = own ?? fallback;
-      block.stops.push(carried(stop));
-      already.add(stop.osmRef);
+      if (!target || target.blocks.length === 0) {
+        back.push(asIdea(stop));
+        continue;
+      }
+      const blocks = target.blocks as unknown as CurrentBlock[];
+      const fallback = blocks.find((b) => b.kind === "spots" && excursionIdOf(b.id) === null)
+        ?? blocks.find((b) => b.kind === "spots") ?? blocks[0];
+      put(old.dayIndex, (own ?? fallback).id, stop);
     }
-    recomputeDay(blocks, dayWalkOfStored(at.anchor, target), at.mode);
+  }
+
+  for (const index of touched) {
+    const target = days[index];
+    recomputeDay(target.blocks as unknown as CurrentBlock[], dayWalkOfStored(at.anchor, target), at.mode);
     target.detailed = true;
   }
   return { days, back };
+
+  function put(dayIndex: number, blockId: string, stop: CurrentStop): void {
+    if (placed[dayIndex].has(stop.osmRef)) return;
+    const block = (days[dayIndex].blocks as unknown as CurrentBlock[]).find((b) => b.id === blockId)!;
+    block.stops.push(carried(stop));
+    placed[dayIndex].add(stop.osmRef);
+    touched.add(dayIndex);
+  }
 }
 
 /**
