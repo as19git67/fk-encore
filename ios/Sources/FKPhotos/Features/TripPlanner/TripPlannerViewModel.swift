@@ -77,6 +77,16 @@ final class TripPlannerViewModel {
     /// Set while a hard time is being written or removed (§4.4): both
     /// re-plan the trip, which is not instant.
     private(set) var isSavingFixpoint = false
+    /// Requests that change the plan and have no flag of their own
+    /// (moving, placing, ordering); the stay's screen shows a spinner.
+    private(set) var busyRequests = 0
+
+    /// Anything going to or coming from the server that the screen
+    /// should say it is waiting for (Anton, 11.11.: no sign of loading).
+    var isWorking: Bool {
+        busyRequests > 0 || isLoading || isSavingFixpoint || isRedistributing || isFilling
+            || isWeatherReplanning || isDetailing
+    }
 
     /// Set when what is on screen came from the stored bundle rather
     /// than from the server (§3.9), with the moment it was stored. The
@@ -592,6 +602,8 @@ final class TripPlannerViewModel {
     @discardableResult
     func place(osmRef: String, inBlock blockId: String, onDay day: Int) async -> Bool {
         guard requireOnline() else { return false }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable {
             let legIndex: Int
             let dayIndex: Int
@@ -704,6 +716,8 @@ final class TripPlannerViewModel {
     /// `orderAdvice` for the day screen to mark.
     func orderDay() async {
         guard requireOnline() else { return }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable { let legIndex: Int }
         struct Response: Decodable {
             let plan: TripPlan
@@ -891,6 +905,8 @@ final class TripPlannerViewModel {
     /// A break ("Mittag", "Kaffee") on the day on screen, at the end of its line.
     func addBreak(label: String, minutes: Int) async {
         guard requireOnline() else { return }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable {
             let legIndex: Int
             let label: String
@@ -1029,8 +1045,11 @@ final class TripPlannerViewModel {
     /// `nil` clears it. The server re-plans either way: a day whose
     /// destination moved but whose spots did not is a day that no
     /// longer adds up — the pool it was built from is the wrong city's.
-    func setDayAnchor(_ draft: TripDayAnchorSheet.Draft?) async {
-        guard requireOnline() else { return }
+    /// Nil when it was saved, otherwise what went wrong — the sheet
+    /// shows it itself, the banner would sit behind it.
+    @discardableResult
+    func setDayAnchor(_ draft: TripDayAnchorSheet.Draft?) async -> String? {
+        guard offlineSince == nil else { return Self.offlineText }
         struct Body: Encodable {
             let legIndex: Int
             let dayIndex: Int
@@ -1064,8 +1083,9 @@ final class TripPlannerViewModel {
                 ),
             )
             apply(response)
+            return nil
         } catch {
-            errorMessage = TripErrorText.describe(error)
+            return TripErrorText.describe(error)
         }
     }
 
@@ -1080,8 +1100,9 @@ final class TripPlannerViewModel {
     /// A day trip with a time window on a day (Anton, 11.11.: as many
     /// as fit). `replaceDayTrip` turns the day's whole-day trip into
     /// this one; its spots move into the window.
-    func addExcursion(_ draft: ExcursionDraft, dayIndex: Int, replaceDayTrip: Bool = false) async -> Bool {
-        guard requireOnline() else { return false }
+    /// Nil when it was saved, otherwise what went wrong, for the sheet.
+    func addExcursion(_ draft: ExcursionDraft, dayIndex: Int, replaceDayTrip: Bool = false) async -> String? {
+        guard offlineSince == nil else { return Self.offlineText }
         struct Body: Encodable {
             let lat: Double
             let lon: Double
@@ -1102,16 +1123,15 @@ final class TripPlannerViewModel {
                            replaceDayTrip: replaceDayTrip ? true : nil),
             )
             apply(response)
-            return true
+            return nil
         } catch {
-            errorMessage = TripErrorText.describe(error)
-            return false
+            return TripErrorText.describe(error)
         }
     }
 
     /// New hours or a new place for an excursion; the day is cut again.
-    func updateExcursion(_ excursion: TripExcursion, _ draft: ExcursionDraft, dayIndex: Int) async -> Bool {
-        guard requireOnline() else { return false }
+    func updateExcursion(_ excursion: TripExcursion, _ draft: ExcursionDraft, dayIndex: Int) async -> String? {
+        guard offlineSince == nil else { return Self.offlineText }
         struct Body: Encodable {
             let lat: Double
             let lon: Double
@@ -1130,10 +1150,30 @@ final class TripPlannerViewModel {
                            returnAt: TripClock.format(draft.returnMinutes)),
             )
             apply(response)
-            return true
+            return nil
+        } catch {
+            return TripErrorText.describe(error)
+        }
+    }
+
+    /// An excursion, or with `nil` the day's whole-day trip, goes to
+    /// another day of the stay and takes its spots along.
+    func moveExcursion(_ excursion: TripExcursion?, from dayIndex: Int, to toDayIndex: Int) async {
+        guard requireOnline() else { return }
+        struct Body: Encodable {
+            let excursionId: String?
+            let toDayIndex: Int
+        }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/legs/\(legIndex)/days/\(dayIndex)/move-excursion",
+                body: Body(excursionId: excursion?.id, toDayIndex: toDayIndex),
+            )
+            apply(response)
         } catch {
             errorMessage = TripErrorText.describe(error)
-            return false
         }
     }
 
@@ -1431,6 +1471,8 @@ final class TripPlannerViewModel {
     @discardableResult
     func move(_ stop: TripStop, toDayIndex: Int, toBlockId: String, position: Int? = nil) async -> Bool {
         guard let plan, requireOnline() else { return false }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable {
             let stopId: Int
             let legIndex: Int
@@ -1480,9 +1522,11 @@ final class TripPlannerViewModel {
     /// A write needs the server. Offline, the banner said so and every
     /// control kept working — and failing without a word. Now the
     /// refusal is the same sentence, said at the tap.
+    private static let offlineText = "Offline — Änderungen brauchen eine Verbindung. Der Plan bleibt, wie er ist."
+
     private func requireOnline() -> Bool {
         guard offlineSince != nil else { return true }
-        errorMessage = "Offline — Änderungen brauchen eine Verbindung. Der Plan bleibt, wie er ist."
+        errorMessage = Self.offlineText
         return false
     }
 

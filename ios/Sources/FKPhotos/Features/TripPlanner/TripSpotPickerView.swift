@@ -47,8 +47,9 @@ struct TripSpotPickerView: View {
     /// that day goes, and "+ Tag n" adds to that day.
     /// `excursion` opens it from a time window inside a day (Mock 16):
     /// the search goes around its destination and "+" adds into its window.
+    /// `day` opens it from a day at the quarters: "+" puts the spot there.
     init(viewModel: TripPlannerViewModel, chip: TripPickerChip = .all, dayTrip: Int? = nil,
-         excursion: (dayIndex: Int, excursion: TripExcursion)? = nil) {
+         excursion: (dayIndex: Int, excursion: TripExcursion)? = nil, day: Int? = nil) {
         _viewModel = State(initialValue: viewModel)
         let search = TripPlaceSearchViewModel(
             planId: viewModel.planId, legIndex: viewModel.legIndex, ideas: true)
@@ -70,6 +71,10 @@ struct TripSpotPickerView: View {
                 target = TripPickerTargets.dayTrip(day)
             }
             chip = .highlights
+        } else if let day, let leg, !leg.isTransit, leg.days.contains(where: { $0.dayIndex == day }) {
+            let atDay = TripPickerTargets.stay(leg, day: day)
+            target = atDay
+            _tripFocus = State(initialValue: atDay.focus)
         }
         _target = State(initialValue: target)
         _search = State(initialValue: search)
@@ -309,6 +314,17 @@ struct TripSpotPickerView: View {
                 let all = items
                 let ideas = all.filter(\.isOwnIdea)
                 let found = all.filter { !$0.isOwnIdea }
+                // A list already on screen is being replaced (another
+                // target, area or query): say so above it, rather than
+                // let new rows appear later without warning.
+                if !all.isEmpty && chip != .ideas && (search.isSearching || search.isLoadingHighlights) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Wird geladen…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if let away = liveTarget, away.kind != .stay {
                     awaySections(away, ideas: ideas, found: found)
                 } else {
@@ -497,7 +513,7 @@ struct TripSpotPickerView: View {
     /// The excursion or day out a row lies at, while the picker adds to
     /// the stay: its "+" then goes there (Mock 17, B).
     private func nearTarget(_ item: TripPickerItem) -> TripPickerTarget? {
-        guard liveTarget?.kind == .stay, let leg = viewModel.leg else { return nil }
+        guard liveTarget?.kind == .stay, liveTarget?.dayIndex == nil, let leg = viewModel.leg else { return nil }
         return TripPickerTargets.near(item.coordinate, in: TripPickerTargets.away(of: leg))
     }
 
@@ -640,7 +656,7 @@ struct TripSpotPickerView: View {
         } else {
             let suggestion = search.suggestions[item.osmRef]
             let focus = rowFocus(item)
-            let into = liveTarget?.kind == .stay ? nearTarget(item) : liveTarget
+            let into = liveTarget?.kind == .stay && liveTarget?.dayIndex == nil ? nearTarget(item) : liveTarget
             TripAddButton(running: busy == item.id,
                           full: focus == nil && suggestion?.full == true,
                           label: focus != nil ? (into?.addLabel ?? "Hinzufügen")
@@ -707,6 +723,7 @@ struct TripSpotPickerView: View {
                 title: "\(option.title) · Tag \((option.dayIndex ?? 0) + 1)",
                 systemImage: "car",
                 closes: false,
+                submenu: .days,
             ) {
                 await add(item, onDay: option.dayIndex, into: option.focus)
             }
@@ -719,9 +736,10 @@ struct TripSpotPickerView: View {
             let chosen = day.dayIndex == suggested || (focus?.blockId == nil && focus?.dayIndex == day.dayIndex)
             return TripPinSheetAction(
                 id: "day-\(day.dayIndex)",
-                title: chosen ? "Auf \(title) (vorgeschlagen)" : "Auf \(title)",
+                title: chosen ? "\(title) · Vorschlag" : title,
                 systemImage: chosen ? "calendar.badge.plus" : "calendar",
                 closes: false,
+                submenu: .days,
             ) {
                 await add(item, onDay: day.dayIndex,
                           into: dayOut ? TripPickerTargets.dayTrip(day)?.focus : nil)

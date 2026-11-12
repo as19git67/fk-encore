@@ -168,6 +168,11 @@ struct TripSuggestSpot: Encodable, Hashable, Sendable {
 final class TripPlaceSearchViewModel {
     /// How often the highlights were asked again for their pictures.
     @ObservationIgnored private var pictureRetries = 0
+    /// The newest request of each kind: an answer to an older one (another
+    /// area, an earlier query) is dropped rather than shown late over the
+    /// one asked for now.
+    @ObservationIgnored private var highlightsRequest = 0
+    @ObservationIgnored private var searchRequest = 0
     private static let maxPictureRetries = 4
     var query = ""
     var mode: TripPlaceSearchMode
@@ -213,12 +218,20 @@ final class TripPlaceSearchViewModel {
     }
 
     /// The highlights, first page or the next one ("Mehr").
-    func loadHighlights(more: Bool = false) async {
-        guard let legIndex, !isLoadingHighlights else { return }
-        isLoadingHighlights = true
+    /// `quiet` is the retry for pictures: no spinner, and none while a
+    /// load somebody asked for is running.
+    func loadHighlights(more: Bool = false, quiet: Bool = false) async {
+        guard let legIndex else { return }
+        // "Mehr" waits for the page in flight; a new first page replaces it.
+        if (more || quiet) && isLoadingHighlights { return }
+        highlightsRequest += 1
+        let request = highlightsRequest
+        if !quiet { isLoadingHighlights = true }
         defer {
-            isLoadingHighlights = false
-            didLoadHighlights = true
+            if request == highlightsRequest {
+                isLoadingHighlights = false
+                didLoadHighlights = true
+            }
         }
         struct Body: Encodable {
             let legIndex: Int
@@ -230,6 +243,7 @@ final class TripPlaceSearchViewModel {
                 "/trip-planner/plans/\(planId)/highlights",
                 body: Body(legIndex: legIndex, offset: more ? highlights.count : 0, area: area),
             )
+            guard request == highlightsRequest else { return }
             highlights = more ? highlights + response.results : response.results
             highlightsHaveMore = response.hasMore
             highlightsSorting = response.sorting
@@ -244,12 +258,13 @@ final class TripPlaceSearchViewModel {
                 pictureRetries += 1
                 Task { [weak self] in
                     try? await Task.sleep(for: .seconds(6))
-                    await self?.loadHighlights()
+                    await self?.loadHighlights(quiet: true)
                 }
             } else if response.picturesPending != true {
                 pictureRetries = 0
             }
         } catch {
+            guard request == highlightsRequest else { return }
             errorMessage = TripErrorText.describe(error)
         }
     }
@@ -267,10 +282,14 @@ final class TripPlaceSearchViewModel {
     }
 
     private func run(query text: String, categories: [String]?) async {
+        searchRequest += 1
+        let request = searchRequest
         isSearching = true
         defer {
-            isSearching = false
-            hasSearched = true
+            if request == searchRequest {
+                isSearching = false
+                hasSearched = true
+            }
         }
         struct Body: Encodable {
             let query: String
@@ -284,11 +303,13 @@ final class TripPlaceSearchViewModel {
                 body: Body(query: text, legIndex: legIndex, categories: categories,
                            area: legIndex == nil ? nil : area),
             )
+            guard request == searchRequest else { return }
             results = response.results
             hasMore = response.hasMore
             unavailableLegs = response.unavailableLegs
             errorMessage = nil
         } catch {
+            guard request == searchRequest else { return }
             errorMessage = TripErrorText.describe(error)
         }
     }
@@ -388,6 +409,7 @@ final class TripPlaceSearchViewModel {
             // The server derives it from the category where it can. Only
             // where it cannot does a number have to travel.
             dwellMinutes: place.dwellMinutes == nil ? Self.fallbackDwellMinutes : nil,
+            seenOsmRef: place.osmRef,
         )
     }
 }

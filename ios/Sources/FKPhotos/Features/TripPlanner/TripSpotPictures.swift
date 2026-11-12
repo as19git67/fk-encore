@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 
 /// A place's picture, as the card and the sheets draw it (candidate
@@ -16,6 +17,7 @@ struct TripSpotThumbnail: View {
     /// a day): there nothing is better than a box with nothing in it.
     var placeholder: Bool = true
     @State private var failed = false
+    @State private var loaded: UIImage?
 
     var body: some View {
         if !placeholder && failed {
@@ -34,23 +36,52 @@ struct TripSpotThumbnail: View {
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil)
             .overlay {
-                AsyncImage(url: URL(string: image.thumbUrl)) { phase in
-                    switch phase {
-                    case .success(let picture):
-                        picture.resizable().scaledToFill()
-                    case .failure:
-                        if placeholder {
-                            Image(systemName: "photo").foregroundStyle(.secondary)
-                        } else {
-                            Color.clear.onAppear { failed = true }
-                        }
-                    default:
-                        Color.clear
-                    }
+                if let loaded {
+                    Image(uiImage: loaded).resizable().scaledToFill()
+                } else if failed {
+                    Image(systemName: "photo").foregroundStyle(.secondary)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: width == nil ? 0 : 8))
             .contentShape(RoundedRectangle(cornerRadius: width == nil ? 0 : 8))
+            .task(id: image.thumbUrl) { await load() }
+    }
+
+    /// From the app's image cache, else fetched and decoded off the main
+    /// thread: `AsyncImage` kept nothing, so every row scrolled back into
+    /// view fetched and decoded its picture again, and the list stuttered
+    /// (Anton, 11.11.).
+    private func load() async {
+        let key = TripThumbnailCache.key(image.thumbUrl)
+        if let hit = await ImageCache.shared.image(forKey: key) {
+            loaded = hit
+            return
+        }
+        guard let url = URL(string: image.thumbUrl) else {
+            failed = true
+            return
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let raw = UIImage(data: data) else {
+                failed = true
+                return
+            }
+            let prepared = await raw.byPreparingForDisplay() ?? raw
+            await ImageCache.shared.store(prepared, forKey: key)
+            guard !Task.isCancelled else { return }
+            loaded = prepared
+        } catch {
+            if !Task.isCancelled { failed = true }
+        }
+    }
+}
+
+/// Keys of the spot pictures in the app's image cache: a hash, since a
+/// Commons address is longer than a file name may be.
+enum TripThumbnailCache {
+    static func key(_ url: String) -> String {
+        "trip-thumb-" + SHA256.hash(data: Data(url.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
 

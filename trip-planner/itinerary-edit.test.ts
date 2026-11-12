@@ -50,7 +50,8 @@ import { planJournal, undoPlanOp } from "./plan-ops";
 import { tripHighlights } from "./highlights";
 import { suggestTripDay } from "./suggest-day";
 import { placeFromPool } from "./pool";
-import { addTripExcursion, removeTripExcursion, updateTripExcursion } from "./excursions-api";
+import { addTripExcursion, moveTripExcursion, removeTripExcursion, updateTripExcursion } from "./excursions-api";
+import { setTripDayAnchor } from "./day-anchor-edit";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
 const NEXT = { lat: 48.37, lon: 11.4 };
@@ -1031,5 +1032,45 @@ describe("day trips with a time window on a trip of ideas", () => {
     expect(after.days[1].excursions).toHaveLength(1);
     expect(stopRefs(after)).toEqual([turm]);
     expect(after.pool.map((c) => c.osmRef)).toContain(dom);
+  });
+
+  it("moves an excursion or a whole-day trip to another day with its spots", async () => {
+    const { plan } = await createTripPlan({
+      startEmpty: true,
+      legs: [{ title: "Bergdorf", anchor: ANCHOR, anchorLabel: "Hotel", days: 3, startDate: "2027-09-05", mode: "car" }],
+    });
+    const there = { lat: 48.37, lon: 11.0 };
+    const { plan: one } = await addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...there, label: "Seestadt", departAt: "10:00", returnAt: "14:00",
+    });
+    const id = one.legs[0].days[1].excursions![0].id;
+    await addFind({ planId: plan.id, lat: there.lat, lon: there.lon, name: "Dom", legIndex: 0, dwellMinutes: 60 });
+    await addFind({ planId: plan.id, lat: ANCHOR.lat, lon: ANCHOR.lon + 0.001, name: "Turm", legIndex: 0, dwellMinutes: 45 });
+    const pool = (await getTripPlan({ planId: plan.id })).plan.legs[0].pool;
+    const dom = pool.find((c) => c.name === "Dom")!.osmRef;
+    const turm = pool.find((c) => c.name === "Turm")!.osmRef;
+    await placeFromPool({ planId: plan.id, legIndex: 0, dayIndex: 1, blockId: `excursion:${id}`, osmRef: dom });
+    await placeFromPool({ planId: plan.id, legIndex: 0, dayIndex: 1, blockId: "day", osmRef: turm });
+
+    // The window goes to day 3 with its spot; the quarters keep theirs.
+    const { plan: moved } = await moveTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, excursionId: id, toDayIndex: 2,
+    });
+    const [, from, to] = moved.legs[0].days;
+    expect(from.excursions ?? []).toHaveLength(0);
+    expect(from.blocks.flatMap((b) => b.stops.map((s) => s.osmRef))).toEqual([turm]);
+    expect(to.excursions!.map((e) => e.id)).toEqual([id]);
+    expect(to.blocks.find((b) => b.id === `excursion:${id}`)!.stops.map((s) => s.osmRef)).toEqual([dom]);
+
+    // A whole-day trip swaps its spots with the other day's.
+    await setTripDayAnchor({ planId: plan.id, legIndex: 0, dayIndex: 1, ...there, label: "Seestadt" });
+    await expect(moveTripExcursion({ planId: plan.id, legIndex: 0, dayIndex: 1, toDayIndex: 2 }))
+      .rejects.toThrow(/Zeitfenster/);
+    const { plan: swapped } = await moveTripExcursion({ planId: plan.id, legIndex: 0, dayIndex: 1, toDayIndex: 0 });
+    const [first, second] = swapped.legs[0].days;
+    expect(first.anchor?.label).toBe("Seestadt");
+    expect(second.anchor).toBeNull();
+    expect(first.blocks.flatMap((b) => b.stops.map((s) => s.osmRef))).toEqual([turm]);
+    expect(second.blocks.flatMap((b) => b.stops)).toHaveLength(0);
   });
 });
