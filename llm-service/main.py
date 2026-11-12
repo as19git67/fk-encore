@@ -901,6 +901,35 @@ def _get_inference_sem() -> asyncio.Semaphore:
         _inference_sem_loop = loop
     return _inference_sem
 
+# What holds the inference slot right now, and since when (monotonic). Only
+# for the log line of a 503: "inference busy" alone does not say whether one
+# slow request holds the slot (a model that runs half on the CPU) or nothing
+# ever let go of it.
+_inference_holder: tuple[str, float] | None = None
+
+
+def _hold_inference(what: str) -> None:
+    global _inference_holder
+    _inference_holder = (what, time.monotonic())
+
+
+def _let_go_inference() -> None:
+    global _inference_holder
+    _inference_holder = None
+
+
+def _busy(what: str, waited: float) -> HTTPException:
+    holder = _inference_holder
+    if holder is None:
+        log.warning("inference busy: %s waited %.0f s", what, waited)
+    else:
+        log.warning(
+            "inference busy: %s waited %.0f s; %s has held the slot for %.0f s",
+            what, waited, holder[0], time.monotonic() - holder[1],
+        )
+    return HTTPException(status_code=503, detail="inference busy")
+
+
 _T = TypeVar("_T")
 
 
@@ -919,16 +948,19 @@ async def _run_blocking(
     the timeout elapses.
     """
     sem = _get_inference_sem()
+    what = getattr(func, "__name__", "inference")
     try:
         await asyncio.wait_for(sem.acquire(), timeout=acquire_timeout)
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail="inference busy")
+        raise _busy(what, acquire_timeout)
+    _hold_inference(what)
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             _inference_executor, functools.partial(func, *args, **kwargs)
         )
     finally:
+        _let_go_inference()
         sem.release()
 
 
@@ -3406,7 +3438,8 @@ async def _chat_stream(llm: Any, req: chat.ChatRequest, *, server: bool, model: 
     try:
         await asyncio.wait_for(sem.acquire(), timeout=10.0)
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail="inference busy")
+        raise _busy("/chat stream", 10.0)
+    _hold_inference("/chat stream")
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -3442,6 +3475,7 @@ async def _chat_stream(llm: Any, req: chat.ChatRequest, *, server: bool, model: 
         nonlocal released
         if not released:
             released = True
+            _let_go_inference()
             sem.release()
 
     try:
