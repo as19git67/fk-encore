@@ -27,6 +27,8 @@ export interface HotelOffer {
   rooms: number;
   /** The hotel's own offer (SerpApi `official`); not stored. */
   official?: boolean;
+  /** Area watches: the hotel the offer is for. */
+  hotel?: string | null;
 }
 
 export interface OfferConditions {
