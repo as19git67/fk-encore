@@ -1,12 +1,13 @@
 /**
  * SerpApi as the source of flight prices (`engine=google_flights`).
  *
- * Same key as the hotel client (`serpApiKeyValue`), sent only as the
+ * Same key as the hotel client (secret `SerpApiKey`), sent only as the
  * `api_key` URL parameter. The client is a seam: the tests set a fake with
  * `setFlightSearchClient`.
  */
 
-import { HotelSearchError, serpApiKeyValue } from "./serpapi-client";
+import { secret } from "encore.dev/config";
+import { HotelSearchError } from "./serpapi-client";
 
 export interface FlightSearchParams {
   departure_id: string;
@@ -90,6 +91,17 @@ export function createFlightSearchClient(key: string, fetchImpl: typeof fetch = 
   };
 }
 
+/** The same secret the hotel client reads (one key for the deployment). */
+const serpApiKey = secret("SerpApiKey");
+
+function keyValue(): string | null {
+  try {
+    return serpApiKey().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 let override: FlightSearchClient | null | undefined;
 
 /** Tests: a fake client, `null` for "no key configured", `undefined` to reset. */
@@ -99,6 +111,6 @@ export function setFlightSearchClient(client: FlightSearchClient | null | undefi
 
 export function flightSearchClient(): FlightSearchClient | null {
   if (override !== undefined) return override;
-  const key = serpApiKeyValue();
+  const key = keyValue();
   return key ? createFlightSearchClient(key) : null;
 }

@@ -44,14 +44,7 @@ import {
   type FlightOffer,
 } from "./flight-offers";
 import type { FlightSearchClient, FlightSearchParams } from "./flight-search-client";
-import {
-  addDays,
-  comboKey,
-  MAX_COMBINATIONS,
-  rotationPick,
-  stayCombinations,
-  type DateCombination,
-} from "./flexible-dates";
+import { comboKey, MAX_COMBINATIONS, rotationPick, stayCombinations, type DateCombo } from "./flexible-dates";
 import { monthlySearchBudget } from "./serpapi-client";
 import { SearchBudgetExhausted, searchesThisMonth } from "./search-budget";
 import { maxEndDate, MIN_CHECK_GAP_MS, todayIso } from "./hotel-watch.service";
@@ -230,6 +223,22 @@ function validIso(s: unknown): s is string {
   return new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10) === s;
 }
 
+function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** How many combinations a window has; `stayCombinations` stops at MAX_COMBINATIONS. */
+function countCombinations(from: string, until: string, minNights: number | null, maxNights: number | null, today: string): number {
+  let n = 0;
+  for (let start = from; start <= until; start = addDays(start, 1)) {
+    if (start <= today) continue;
+    if (minNights === null || maxNights === null) n++;
+    else for (let k = minNights; k <= maxNights && addDays(start, k) <= until; k++) n++;
+  }
+  return n;
+}
+
 function daysBetween(a: string, b: string): number {
   const t = (s: string) => {
     const [y, m, d] = s.split("-").map(Number);
@@ -244,7 +253,7 @@ type DatesOf = Pick<
 >;
 
 /** The date combinations of a watch that have not begun. */
-export function combinationsOf(w: DatesOf, today: string): DateCombination[] {
+export function combinationsOf(w: DatesOf, today: string): DateCombo[] {
   if (!w.flexible) {
     if (!w.outbound_date || w.outbound_date <= today) return [];
     return [{ start: w.outbound_date, end: w.trip_type === "round" ? w.return_date : null }];
@@ -341,13 +350,10 @@ export function normalizeFlightWatchInput(input: FlightWatchInput, today: string
         bad(`Dauer: 0 bis ${MAX_NIGHTS} Nächte, „von“ nicht größer als „bis“`);
       }
     }
-    const combos = combinationsOf(
-      { trip_type: tripType, flexible, outbound_date: null, return_date: null, date_from: from, date_until: until, min_nights: minNights, max_nights: maxNights },
-      today,
-    );
-    if (!combos.length) bad("Im Zeitraum passt keine Reise mehr, die nach heute beginnt");
-    if (combos.length > MAX_COMBINATIONS) {
-      bad(`Zu viele Kombinationen (${combos.length}, höchstens ${MAX_COMBINATIONS}): Zeitraum oder Dauer enger fassen`);
+    const count = countCombinations(from as string, until as string, minNights, maxNights, today);
+    if (!count) bad("Im Zeitraum passt keine Reise mehr, die nach heute beginnt");
+    if (count > MAX_COMBINATIONS) {
+      bad(`Zu viele Kombinationen (${count}, höchstens ${MAX_COMBINATIONS}): Zeitraum oder Dauer enger fassen`);
     }
   }
 
@@ -739,7 +745,7 @@ export async function deleteFlightWatch(userId: number, id: number): Promise<voi
 
 // ── Checking ─────────────────────────────────────────────────────────────────
 
-function searchParams(w: FlightWatchRow, combo: DateCombination): FlightSearchParams {
+function searchParams(w: FlightWatchRow, combo: DateCombo): FlightSearchParams {
   return {
     departure_id: w.origin,
     arrival_id: w.destination,
@@ -759,9 +765,10 @@ function searchParams(w: FlightWatchRow, combo: DateCombination): FlightSearchPa
 }
 
 /** The combination a check takes: the fixed dates, or the next one in turn. */
-export function nextCombination(w: FlightWatchRow, today: string): { combo: DateCombination; index: number } | null {
+export function nextCombination(w: FlightWatchRow, today: string): { combo: DateCombo; index: number } | null {
   const combos = combinationsOf(w, today);
-  if (!w.flexible) return combos.length ? { combo: combos[0]!, index: 0 } : null;
+  if (!combos.length) return null;
+  if (!w.flexible) return { combo: combos[0]!, index: 0 };
   return rotationPick(combos, w.flex_rotation);
 }
 
@@ -772,7 +779,7 @@ export function nextCombination(w: FlightWatchRow, today: string): { combo: Date
  */
 async function fetchBookings(
   w: FlightWatchRow,
-  combo: DateCombination,
+  combo: DateCombo,
   cheapest: FlightOffer,
   client: FlightSearchClient,
   searchesLeft: number,
@@ -898,7 +905,7 @@ export async function checkFlightWatch(
 async function reportFlightPrice(
   watch: FlightWatchRow,
   check: CheckRow,
-  combo: DateCombination,
+  combo: DateCombo,
   cheapest: FlightOffer | null,
   client: FlightSearchClient,
   searchesLeft: number,
