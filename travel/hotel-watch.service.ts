@@ -35,6 +35,7 @@ import {
   type HotelOffer,
 } from "./hotel-offers";
 import { HotelSearchError, monthlySearchBudget, type HotelSearchClient } from "./serpapi-client";
+import { durableLink, type LinkContext } from "./offer-links";
 
 /** How far ahead a watch may end. */
 export const MAX_END_YEARS = 2;
@@ -237,6 +238,26 @@ export function normalizeWatchInput(input: WatchInput, today: string): Normalize
   };
 }
 
+/** What `durableLink` needs to build a portal search or the hotel's Google page. */
+function linkContext(
+  w: Pick<WatchRow, "query" | "check_in" | "check_out" | "adults" | "children_ages">,
+  hotelName: string | null,
+  token: string | null,
+  rooms: number,
+  hotelSite: string | null = null,
+): LinkContext {
+  return {
+    hotelName: hotelName ?? w.query,
+    checkIn: w.check_in,
+    checkOut: w.check_out,
+    adults: w.adults,
+    childrenAges: w.children_ages ?? [],
+    rooms,
+    propertyToken: token,
+    hotelSite,
+  };
+}
+
 // ── Shaping ──────────────────────────────────────────────────────────────────
 
 function toCheck(c: CheckRow): HotelCheck {
@@ -354,7 +375,8 @@ export async function getWatchDetail(userId: number, id: number, now: Date = new
       cancel_until: o.cancel_until,
       breakfast: o.breakfast,
       guests: o.guests,
-      link: o.link,
+      // Checks before the fix stored Google's redirects; they are replaced on reading.
+      link: durableLink(o.link, o.source, linkContext(row, row.hotel_name, row.property_token, o.rooms)),
       rooms: o.rooms,
     })),
   };
@@ -451,6 +473,7 @@ export async function checkWatch(
   let hotelName = watch.hotel_name;
   let token = watch.property_token;
   let offers: HotelOffer[] = [];
+  let hotelSite: string | null = null;
   let error: string | null = null;
   try {
     searches++;
@@ -466,6 +489,7 @@ export async function checkWatch(
     }
     token = String(answer.property_token);
     hotelName = typeof answer.name === "string" && answer.name.trim() ? answer.name.trim() : hotelName;
+    hotelSite = typeof answer.link === "string" ? answer.link : null;
     offers = offersOf(answer, watch.adults + (watch.children_ages?.length ?? 0));
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
@@ -488,6 +512,12 @@ export async function checkWatch(
       }
     }
   }
+
+  // Google's click redirects die with the session that rendered them: store links that still open later.
+  offers = offers.map((o) => ({
+    ...o,
+    link: durableLink(o.link, o.source, linkContext(watch, hotelName, token, o.rooms, hotelSite), o.official),
+  }));
 
   const summary = summarize(offers, {
     freeCancellationOnly: watch.free_cancellation_only,

@@ -59,6 +59,15 @@ user sees how the price moves and when it falls below a limit.
   price (no rooms, no rates) gets `free_cancellation = null` and is shown
   as "unbekannt" with its link. It never meets "free cancellation only";
   migration 0297 moved the stored room-less offers from `false` to `null`.
+- **Links that still open later:** most provider links SerpApi hands over
+  are Google click redirects (`google.com/aclk`, `google.com/travel/clk`,
+  `googleadservices.com`) bound to the session that rendered Google's page;
+  opened later from the watch page or a mail they fail. `durableLink` in
+  `travel/offer-links.ts` replaces them: the target the redirect carries,
+  the hotel website for the hotel's own offer, a search with hotel, dates
+  and party on Booking.com, Expedia or Hotels.com, otherwise the hotel's
+  Google Hotels page from the property token. Applied before storing and,
+  for checks stored before, when reading.
 
 ## Double rooms
 

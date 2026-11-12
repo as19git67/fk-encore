@@ -3,7 +3,7 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import db from "../db/database";
-import { travelHotelChecks, travelHotelWatches, users } from "../db/schema";
+import { travelHotelChecks, travelHotelOffers, travelHotelWatches, users } from "../db/schema";
 import { DETAIL } from "./hotel-offers.test";
 import { maxEndDate, normalizeWatchInput, runDueChecks, watchStatus, type WatchInput } from "./hotel-watch.service";
 import { setHotelSearchClient, type HotelSearchClient, type HotelSearchParams } from "./serpapi-client";
@@ -139,6 +139,59 @@ describe("endpoints", () => {
     await endpoints.checkHotelWatch({ id: watch.id });
     expect(calls).toHaveLength(3);
     expect(calls[2].property_token).toBe("tok-beispiel");
+  });
+
+  it("store links that still open later instead of Google's click redirects", async () => {
+    const detail = {
+      ...structuredClone(DETAIL),
+      link: "https://hotel-beispiel.example/",
+      featured_prices: [
+        {
+          source: "Hotel Beispiel Musterstadt",
+          official: true,
+          link: "https://www.google.com/aclk?sa=l&ai=beispiel&adurl=",
+          rooms: [{ name: "Doppelzimmer", rates: [{ rate_per_night: { extracted_lowest: 180 }, free_cancellation: true }] }],
+        },
+      ],
+      prices: [
+        { source: "Booking.com", link: "https://www.google.com/travel/clk?pc=beispiel", rate_per_night: { extracted_lowest: 190 } },
+        {
+          source: "Portal E",
+          link: "https://www.googleadservices.com/pagead/aclk?adurl=https%3A%2F%2Fportal-e.example%2Fangebot",
+          rate_per_night: { extracted_lowest: 195 },
+        },
+        { source: "Portal F", link: "https://www.google.com/aclk?sa=l&ai=f", rate_per_night: { extracted_lowest: 199 } },
+      ],
+    };
+    setHotelSearchClient({ search: async (p) => (p.property_token ? detail : { properties: [{ name: "Hotel Beispiel Musterstadt", property_token: "tok-beispiel" }] }) });
+    const { watch } = await endpoints.createHotelWatch(input());
+    await endpoints.checkHotelWatch({ id: watch.id });
+
+    const links = Object.fromEntries((await endpoints.getHotelWatch({ id: watch.id })).offers.map((o) => [o.source, o.link]));
+    expect(links["Hotel Beispiel Musterstadt"]).toBe("https://hotel-beispiel.example/");
+    expect(links["Booking.com"]).toMatch(/^https:\/\/www\.booking\.com\/searchresults\.de\.html\?ss=Hotel\+Beispiel/);
+    expect(links["Booking.com"]).toContain("checkin=2027-05-12");
+    expect(links["Portal E"]).toBe("https://portal-e.example/angebot");
+    expect(links["Portal F"]).toBe("https://www.google.com/travel/hotels/entity/tok-beispiel/prices?hl=de&gl=de");
+  });
+
+  it("replace Google redirects stored by older checks when reading", async () => {
+    const { watch } = await endpoints.createHotelWatch(input());
+    const [check] = await db
+      .insert(travelHotelChecks)
+      .values({ watch_id: watch.id, checked_at: NOW.toISOString(), searches: 1, offer_count: 1, below_limit: false })
+      .returning();
+    await db.insert(travelHotelOffers).values({
+      check_id: check.id,
+      source: "Portal F",
+      room: "(ohne Zimmerangabe)",
+      per_night: 199,
+      breakfast: false,
+      link: "https://www.google.com/aclk?sa=l&ai=f",
+      rooms: 1,
+    });
+    const { offers } = await endpoints.getHotelWatch({ id: watch.id });
+    expect(offers[0].link).toBe("https://www.google.com/travel/search?q=Hotel+Beispiel+Musterstadt&hl=de&gl=de");
   });
 
   it("keep other users' watches apart", async () => {
