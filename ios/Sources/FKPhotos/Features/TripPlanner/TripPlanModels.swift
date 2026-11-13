@@ -340,8 +340,18 @@ struct TripExcursion: Codable, Identifiable, Sendable, Equatable {
     let departMinutes: Int
     /// When they start back from the destination.
     let returnMinutes: Int
-    /// One way, computed by the server from the stay's mode.
+    /// One way, computed by the server from the stay's mode: from the
+    /// quarters, or from the excursion before for one with `from`.
     let travelMinutes: Int
+    /// The excursion of the same day this one goes on from, without the
+    /// way back in between (Mock 18). Nil: from the quarters.
+    var from: String? = nil
+    /// Back to the quarters from here; 0 when the chain goes on from
+    /// here. Nil from a server before chains: the way there.
+    var backMinutes: Int? = nil
+    /// Going on here straight from the excursion before would be shorter
+    /// than the way back and out again (Anton, 13.11.); the server says so.
+    var linkSuggestion: TripExcursionLinkSuggestion? = nil
 
     var blockId: String { "excursion:\(id)" }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
@@ -360,7 +370,22 @@ struct TripExcursion: Codable, Identifiable, Sendable, Equatable {
     }
 
     /// When they are back at the quarters.
-    var backHomeMinutes: Int { returnMinutes + travelMinutes }
+    var backHomeMinutes: Int { returnMinutes + (backMinutes ?? travelMinutes) }
+
+    /// When they arrive at the destination.
+    var arriveMinutes: Int { departMinutes + travelMinutes }
+}
+
+/// "Von Seestadt direkt weiter: 9 min statt 59".
+struct TripExcursionLinkSuggestion: Codable, Sendable, Equatable {
+    /// The excursion to go on from.
+    let from: String
+    /// The hop between the two destinations.
+    let hopMinutes: Int
+    /// Back to the quarters from the one before and out again.
+    let viaQuartersMinutes: Int
+
+    var savedMinutes: Int { max(0, viaQuartersMinutes - hopMinutes) }
 }
 
 /// "Mittag", 60 minutes, after the second stop (ideas plan, stage 4).

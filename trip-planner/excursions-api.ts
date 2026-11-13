@@ -4,6 +4,11 @@
  * trip, like a whole-day trip does (`day-anchor-edit.ts`): the day's
  * blocks follow from the hours, and only the planner cuts them.
  *
+ * An excursion can go on from another one of the same day without the
+ * way back in between (`from`, Mock 18): adding with `from` hangs a new
+ * destination onto a chain, changing `from` links two excursions or
+ * sends the group back to the quarters between them again.
+ *
  * Reserved for the organiser (§6.2), like the rest of the frame.
  */
 
@@ -20,7 +25,9 @@ import { applyStopMoves } from "./stay-weather-api";
 import { loadPlan, setDayAnchor, type StoredDay, type StoredLeg, type StoredPlan } from "./plan-store";
 import { MAX_SEARCH_RADIUS_M } from "./search-reach";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
-import { excursionBlockId, excursionProblem, excursionTravel, type Excursion } from "./excursions";
+import {
+  chainHours, chainOf, excursionBlockId, excursionProblem, excursionWays, withoutExcursion, type Excursion,
+} from "./excursions";
 
 export interface AddExcursionRequest {
   planId: number;
@@ -32,10 +39,15 @@ export interface AddExcursionRequest {
   label?: string;
   /** How far to look around it; omitted is the walking default. */
   radiusM?: number;
-  /** When the group leaves the quarters, HH:MM. */
-  departAt: string;
-  /** When they start back from the destination, HH:MM. */
+  /** When the group leaves the quarters, HH:MM. Ignored with `from`. */
+  departAt?: string;
+  /** When they start back from the destination, or on to the next, HH:MM. */
   returnAt: string;
+  /**
+   * The excursion of this day to go on from, without the way back in
+   * between: the group leaves there when that one starts on.
+   */
+  from?: string;
   /**
    * The day is a whole-day trip and becomes this excursion: the whole
    * day's destination goes, and the spots planned there move into the
@@ -52,14 +64,21 @@ export const addTripExcursion = api(
     if (day.anchor && !req.replaceDayTrip) {
       throw APIError.failedPrecondition("dieser Tag ist schon ganz ein Ausflug");
     }
+    const current = stored(day);
+    const before = req.from === undefined ? undefined : current.find((e) => e.id === req.from);
+    if (req.from !== undefined && !before) throw APIError.notFound("den Ausflug davor gibt es an diesem Tag nicht");
+    if (before && day.anchor) throw APIError.failedPrecondition("dieser Tag ist schon ganz ein Ausflug");
+    const departAt = before ? clock(before.returnMinutes) : req.departAt;
+    if (departAt === undefined) throw APIError.invalidArgument("departAt is required without from");
     const added: Excursion = {
       id: crypto.randomUUID().slice(0, 8),
       ...place(req.lat, req.lon),
       label: label(req.label),
       radiusM: radius(req.radiusM),
-      ...hours(req.departAt, req.returnAt),
+      ...hours(departAt, req.returnAt),
+      ...(before ? { from: before.id } : {}),
     };
-    const list = [...stored(day), added];
+    const list = chainHours([...current, added]);
     refuseProblem(list, leg);
 
     if (day.anchor) {
@@ -89,6 +108,13 @@ export interface UpdateExcursionRequest {
   lon?: number;
   label?: string;
   radiusM?: number;
+  /**
+   * Another excursion of this day to go on from, without the way back
+   * in between; null sends the group back to the quarters first. On a
+   * link `departAt` is ignored; on an unlink without `departAt` the
+   * group leaves again as soon as it is back.
+   */
+  from?: string | null;
 }
 
 export const updateTripExcursion = api(
@@ -108,14 +134,40 @@ export const updateTripExcursion = api(
     if ((req.lat === undefined) !== (req.lon === undefined)) {
       throw APIError.invalidArgument("lat and lon must be given together");
     }
+    let from = old.from ?? null;
+    let departAt = req.departAt ?? clock(old.departMinutes);
+    if (req.from !== undefined && req.from !== from) {
+      if (req.from === null) {
+        // Back to the quarters first: leave again once there, unless a
+        // time is given.
+        const before = list.find((e) => e.id === from);
+        if (before && req.departAt === undefined) {
+          const ways = excursionWays([before], leg.anchor, leg.mode);
+          departAt = clock(Math.min(before.returnMinutes + ways.back(before), 24 * 60 - 1));
+        }
+        from = null;
+      } else {
+        const before = list.find((e) => e.id === req.from);
+        if (!before) throw APIError.notFound("den Ausflug davor gibt es an diesem Tag nicht");
+        // Going on from one that already comes after this one is a circle.
+        for (let at: Excursion | undefined = before; at; at = at.from ? list.find((e) => e.id === at!.from) : undefined) {
+          if (at.id === old.id) throw APIError.invalidArgument("die Ausflüge bilden einen Kreis");
+        }
+        from = before.id;
+        departAt = clock(before.returnMinutes);
+      }
+    }
     list[at] = {
       ...old,
       ...(req.lat !== undefined && req.lon !== undefined ? place(req.lat, req.lon) : {}),
       ...(req.label !== undefined ? { label: label(req.label) } : {}),
       ...(req.radiusM !== undefined ? { radiusM: radius(req.radiusM) } : {}),
-      ...hours(req.departAt ?? clock(old.departMinutes), req.returnAt ?? clock(old.returnMinutes)),
+      ...hours(from ? clock(list.find((e) => e.id === from)!.returnMinutes) : departAt, req.returnAt ?? clock(old.returnMinutes)),
+      from,
     };
-    refuseProblem(list, leg);
+    const chained = chainHours(list);
+    refuseProblem(chained, leg);
+    list.splice(0, list.length, ...chained);
     return await write(plan, day, list, userId);
   },
 );
@@ -141,8 +193,9 @@ export const removeTripExcursion = api(
     if (!list.some((e) => e.id === req.excursionId)) {
       throw APIError.notFound("diesen Ausflug gibt es an diesem Tag nicht");
     }
-    // Its spots go back to the ideas with the re-plan (`carry-stops.ts`).
-    return await write(plan, day, list.filter((e) => e.id !== req.excursionId), userId);
+    // Its spots go back to the ideas with the re-plan (`carry-stops.ts`);
+    // a chain closes over the gap.
+    return await write(plan, day, withoutExcursion(list, req.excursionId), userId);
   },
 );
 
@@ -183,16 +236,18 @@ export const moveTripExcursion = api(
 
     if (req.excursionId !== undefined) {
       const list = stored(day);
-      const moving = list.find((e) => e.id === req.excursionId);
-      if (!moving) throw APIError.notFound("diesen Ausflug gibt es an diesem Tag nicht");
+      // A chain moves as a whole: its destinations follow each other.
+      const moving = chainOf(list, req.excursionId);
+      if (moving.length === 0) throw APIError.notFound("diesen Ausflug gibt es an diesem Tag nicht");
       if (to.anchor) throw APIError.failedPrecondition("dieser Tag ist schon ganz ein Ausflug");
-      if (fixed((id) => id === excursionBlockId(moving.id))) {
+      const ids = new Set(moving.map((e) => excursionBlockId(e.id)));
+      if (fixed((id) => ids.has(id))) {
         throw APIError.failedPrecondition("ein Spot des Ausflugs hat eine feste Zeit; die bleibt an ihrem Tag");
       }
-      const target = [...stored(to), moving];
+      const target = chainHours([...stored(to), ...moving]);
       refuseProblem(target, leg);
-      await db.update(tripPlanDays).set({ excursions: target }).where(eq(tripPlanDays.id, to.id));
-      return await write(plan, day, list.filter((e) => e.id !== moving.id), userId);
+      await db.update(tripPlanDays).set({ excursions: target.map(toRow) }).where(eq(tripPlanDays.id, to.id));
+      return await write(plan, day, list.filter((e) => !moving.includes(e)), userId);
     }
 
     if (!day.anchor) throw APIError.failedPrecondition("dieser Tag ist kein ganztägiger Ausflug");
@@ -220,8 +275,7 @@ export const moveTripExcursion = api(
 
 async function write(plan: StoredPlan, day: StoredDay, list: readonly Excursion[], userId: number): Promise<PlanResponse> {
   await db.update(tripPlanDays)
-    .set({ excursions: list.map(({ id, lat, lon, label, radiusM, departMinutes, returnMinutes }) =>
-      ({ id, lat, lon, label, radiusM, departMinutes, returnMinutes })) })
+    .set({ excursions: chainHours(list).map(toRow) })
     .where(eq(tripPlanDays.id, day.id));
   // From the trip as it is now: the re-planner reads each leg back as
   // the request that would produce it, excursions included.
@@ -231,12 +285,16 @@ async function write(plan: StoredPlan, day: StoredDay, list: readonly Excursion[
 }
 
 function stored(day: StoredDay): Excursion[] {
-  return (day.excursions ?? []).map(({ id, lat, lon, label, radiusM, departMinutes, returnMinutes }) =>
-    ({ id, lat, lon, label, radiusM, departMinutes, returnMinutes }));
+  return (day.excursions ?? []).map(toRow);
+}
+
+/** What is stored of an excursion: nothing derived. */
+function toRow({ id, lat, lon, label, radiusM, departMinutes, returnMinutes, from }: Excursion): Excursion {
+  return { id, lat, lon, label, radiusM, departMinutes, returnMinutes, ...(from ? { from } : {}) };
 }
 
 function refuseProblem(list: readonly Excursion[], leg: StoredLeg): void {
-  const problem = excursionProblem(list, (e) => excursionTravel(leg.anchor, e, leg.mode));
+  const problem = excursionProblem(list, excursionWays(list, leg.anchor, leg.mode));
   if (problem) throw APIError.invalidArgument(problem);
 }
 

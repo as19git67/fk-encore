@@ -54,7 +54,7 @@ import { descriptionsFor, type SpotDescription } from "./spot-description";
 import { summariesFor } from "./spot-summary";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 import { storedPinReason, type PinReason } from "./pin-reason";
-import { excursionTravel, type Excursion, type StoredExcursion } from "./excursions";
+import { excursionWays, linkSuggestions, type Excursion, type StoredExcursion } from "./excursions";
 
 type Db = typeof dbDefault;
 
@@ -816,8 +816,8 @@ async function insertDays(
         detailed: dayInput.detailed ?? true,
         buffer_reason: dayInput.bufferReason ?? null,
         breaks: (dayInput.breaks ?? []).map(({ id, label, minutes, blockId, position }) => ({ id, label, minutes, blockId, position })),
-        excursions: (dayInput.excursions ?? []).map(({ id, lat, lon, label, radiusM, departMinutes, returnMinutes }) =>
-          ({ id, lat, lon, label, radiusM, departMinutes, returnMinutes })),
+        excursions: (dayInput.excursions ?? []).map(({ id, lat, lon, label, radiusM, departMinutes, returnMinutes, from }) =>
+          ({ id, lat, lon, label, radiusM, departMinutes, returnMinutes, ...(from ? { from } : {}) })),
         anchor_lat: dayInput.anchor?.lat ?? null,
         anchor_lon: dayInput.anchor?.lon ?? null,
         anchor_label: dayInput.anchor?.label ?? null,
@@ -1384,7 +1384,7 @@ export async function loadPlan(
           excursions: [...row.excursions]
             .sort((a, b) => a.departMinutes - b.departMinutes)
             // Filled in once the leg's anchor and mode are known.
-            .map((e) => ({ ...e, travelMinutes: 0 })),
+            .map((e) => ({ ...e, travelMinutes: 0, backMinutes: 0 })),
         }
         : {}),
       // Both or neither: half a coordinate is not a place with a gap
@@ -1929,9 +1929,22 @@ function withExcursionTravel(
   mode: TransportMode,
 ): StoredDay {
   if (!day.excursions) return day;
+  const ways = excursionWays(day.excursions, legAnchor, mode);
+  // Something planned at the quarters between two excursions needs the
+  // way back; only then is going straight on no suggestion.
+  const suggestions = linkSuggestions(day.excursions, legAnchor, mode, (id) =>
+    day.blocks.some((b) => b.id === `day@${id}` && b.stops.some((s) => s.status === "planned")));
   return {
     ...day,
-    excursions: day.excursions.map((e) => ({ ...e, travelMinutes: excursionTravel(legAnchor, e, mode) })),
+    excursions: day.excursions.map((e) => {
+      const suggestion = suggestions.get(e.id);
+      return {
+        ...e,
+        travelMinutes: ways.there(e),
+        backMinutes: ways.back(e),
+        ...(suggestion ? { linkSuggestion: suggestion } : {}),
+      };
+    }),
   };
 }
 

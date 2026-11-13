@@ -589,6 +589,37 @@ stage 7 runs in this order, one PR each:
    day-trip targets never go on foot: a stay by car or transit keeps its
    mode, every other goes by transit (`dayTripMode` in `travel.ts`) —
    on foot, a stay in a village found no town within reach.
+   **Excursions one after another (mock 18, Anton 2026-11-13, built).**
+   Two excursions can follow each other without the way back to the
+   quarters in between (one town, straight on to the next, then home).
+   An excursion names the one it goes on from in `from` (stored in the
+   same jsonb, no migration); it leaves there when that one starts on
+   (`chainHours` keeps the stored hour equal), its way there is the hop
+   between the two destinations, and only the last of a chain goes back
+   (`excursionWays`: `travelMinutes` is the hop, `backMinutes` 0 on every
+   link but the last). Each destination stays a block of its own, so "+
+   Spot in …", the window and the picker are unchanged; only the piece
+   at the quarters between them is gone. `excursionProblem` refuses a
+   link to nothing, two links off one destination and a circle. `POST
+   …/excursions` with `from` hangs a destination on, `PATCH` with `from`
+   links two (null goes back to the quarters first and leaves again on
+   arrival, unless `departAt` says otherwise), `DELETE` closes the chain
+   over the gap (`withoutExcursion`), and `move-excursion` moves the
+   whole chain (`chainOf`). iOS: a chain is one frame "Ausflug A → B"
+   with each destination, its hours ("an … · weiter …"), the hop
+   ("weiter 12:00 · 9 min · nicht zurück") and "+ Weiteres Ziel
+   anhängen"; the line "↓ zurück in …" between two excursions carries
+   "Direkt weiter ›", which asks in a small sheet and links them
+   (`TripExcursionChain.swift`); "⋯" at a destination has "Dazwischen
+   zurück zur Unterkunft".
+   The app suggests the link itself when going on is nearer than going
+   home (Anton, 13.11.): `linkSuggestions` marks the next excursion of a
+   day with `linkSuggestion` (hop, way via the quarters) when the hop is
+   shorter than the way back alone and saves at least
+   `LINK_SUGGESTION_MIN_SAVING` (15 min), and never when a spot is
+   planned at the quarters in between. iOS shows it under the excursion
+   as "Direkt weiter nach …? spart ca. …", which opens the same sheet
+   with both ways.
 
 ### Stage 8 — open spots: a day holds only what is fixed (backend + iOS)
 

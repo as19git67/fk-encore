@@ -26,6 +26,9 @@ struct TripDayAnchorSheet: View {
     var excursion: TripExcursion? = nil
     /// "Ganzer Tag" is offered only on a day without other excursions.
     var allowsWholeDay = true
+    /// The destination this excursion goes on from, without the way back
+    /// to the quarters (Mock 18): it leaves there when that one starts on.
+    var after: TripExcursion? = nil
     /// A time window inside the day (Anton, 10./11.11.); nil on a host
     /// that only knows whole days. Nil when it was saved, otherwise what
     /// went wrong: the sheet says it, since the screen behind is covered.
@@ -102,7 +105,8 @@ struct TripDayAnchorSheet: View {
     }
 
     private var departMinutes: Int? {
-        saysDeparture || windowed ? TripDayTimeline.minutesOfDay(departure) : nil
+        if windowed, let after { return after.returnMinutes }
+        return saysDeparture || windowed ? TripDayTimeline.minutesOfDay(departure) : nil
     }
 
     private var returnMinutes: Int? {
@@ -150,7 +154,7 @@ struct TripDayAnchorSheet: View {
                          + "Stunde hin und eine zurück heißt: sechs Stunden statt acht.")
                 }
 
-                if onSaveWindow != nil && excursion == nil && allowsWholeDay {
+                if onSaveWindow != nil && excursion == nil && allowsWholeDay && after == nil {
                     Section {
                         Picker("Wie lange", selection: $span.animation()) {
                             ForEach(Span.allCases) { option in
@@ -234,7 +238,7 @@ struct TripDayAnchorSheet: View {
                     }
                 }
             }
-            .navigationTitle("Ausflug")
+            .navigationTitle(after != nil && excursion == nil ? "Weiteres Ziel" : "Ausflug")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -248,7 +252,8 @@ struct TripDayAnchorSheet: View {
                         Task {
                             if windowed, let onSaveWindow, let depart = departMinutes, let home = returnMinutes {
                                 failure = await onSaveWindow(TripPlannerViewModel.ExcursionDraft(
-                                    place: place, departMinutes: depart, returnMinutes: home, radiusM: reach.radiusM))
+                                    place: place, departMinutes: depart, returnMinutes: home, radiusM: reach.radiusM,
+                                    from: after?.id))
                             } else {
                                 failure = await onSave(Draft(
                                     place: place,
@@ -330,13 +335,21 @@ struct TripDayAnchorSheet: View {
     /// of them (Mock 16 B).
     private var windowHours: some View {
         Section {
-            DatePicker("Abfahrt an der Unterkunft", selection: $departure, displayedComponents: .hourAndMinute)
+            if let after {
+                LabeledContent("Weiter ab \(after.displayName)", value: TripClock.format(after.returnMinutes))
+            } else {
+                DatePicker("Abfahrt an der Unterkunft", selection: $departure, displayedComponents: .hourAndMinute)
+            }
             if let travel = travelMinutes, travel > 0, let depart = departMinutes {
                 LabeledContent("Ankunft am Ziel", value: "ca. \(TripClock.format(depart + travel))")
                     .foregroundStyle(.secondary)
             }
             DatePicker("Rückfahrt um", selection: $back, displayedComponents: .hourAndMinute)
-            if let travel = travelMinutes, travel > 0, let home = returnMinutes {
+            if excursion?.backMinutes == 0 {
+                Text("Von hier geht es zum nächsten Ziel weiter, nicht zurück.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if let travel = excursion?.backMinutes ?? travelMinutes, travel > 0, let home = returnMinutes {
                 LabeledContent("Zurück an der Unterkunft", value: "ca. \(TripClock.format(home + travel))")
                     .foregroundStyle(.secondary)
             }
@@ -388,6 +401,12 @@ struct TripDayAnchorSheet: View {
         }
         if onSaveWindow != nil && (current != nil || !allowsWholeDay) {
             span = current != nil && allowsWholeDay ? .wholeDay : .window
+        }
+        if let after {
+            // Two hours at the next destination, as a start.
+            span = .window
+            back = Self.at(hour: min(23, (after.returnMinutes + 120) / 60), minute: (after.returnMinutes + 120) % 60)
+            return
         }
         if span == .window && current == nil {
             departure = Self.defaultWindowDeparture
