@@ -16,6 +16,7 @@ import { addFind } from "./add-find";
 import { placeFromPool } from "./pool";
 import { addTripBreak, orderTripDay, removeTripBreak } from "./day-order-api";
 import { setTripDayShape } from "./day-blocks";
+import { addTripFixpoint } from "./fixpoint-edit";
 
 const TOWN = { lat: 48.37, lon: 10.9 };
 const MUSEUM = { lat: TOWN.lat + 0.004, lon: TOWN.lon };
@@ -108,6 +109,33 @@ describe("a day of ideas", () => {
     expect(overrunMinutes).toBeGreaterThan(0);
     expect(ordered.legs[0].days[0].overrunMinutes).toBe(overrunMinutes);
     expect(toDrop).toEqual([walk.osmRef]);
+  });
+});
+
+describe("a fixed time on a day of ideas", () => {
+  // The one block of the day used to be cut at the appointment like a
+  // block of the four-part day, with nothing after it to take over: a
+  // ticket at 11:00 ended the day at noon, one at 09:30 left no day at
+  // all ("endet 15:30 statt 09:15").
+  for (const at of ["09:30", "11:00", "15:00"]) {
+    it(`keeps the window of the day around a ticket at ${at}`, async () => {
+      const plan = await tripWithIdeas();
+      const tower = plan.legs[0].days[0].blocks[0].stops.find((s) => s.name === "Beispielturm")!;
+      await addTripFixpoint({ planId: plan.id, dayIndex: 0, at, durationMinutes: 60, spotRef: tower.osmRef, pinReason: "ticket" });
+      const day = (await getTripPlan({ planId: plan.id })).plan.legs[0].days[0];
+      expect(day.window).toEqual({ startMinutes: 9 * 60, endMinutes: 19 * 60 });
+      expect(namesOf(day)).toHaveLength(3);
+      expect(day.overrunMinutes).toBe(0);
+    });
+  }
+
+  it("keeps the window around an appointment without a spot, and nothing is planned into it", async () => {
+    const plan = await tripWithIdeas();
+    await addTripFixpoint({ planId: plan.id, dayIndex: 0, label: "Führung", at: "09:30", durationMinutes: 60 });
+    const day = (await getTripPlan({ planId: plan.id })).plan.legs[0].days[0];
+    expect(day.window).toEqual({ startMinutes: 9 * 60, endMinutes: 19 * 60 });
+    expect(namesOf(day)).toHaveLength(3);
+    for (const stop of day.blocks[0].stops) expect(stop.etaMinutes!).toBeGreaterThanOrEqual(10 * 60 + 30);
   });
 });
 

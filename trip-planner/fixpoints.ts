@@ -144,6 +144,16 @@ export interface ScheduleDayOptions {
    * be a lie the rest of the plan then reasons with.
    */
   nominalStartMinutes?: number;
+  /**
+   * The day of a trip of ideas (one block, `IDEAS_DAY`): an appointment
+   * inside the block stands in it instead of ending it. Cut at the
+   * appointment like a block of the four-part day, the one block had
+   * nothing after it to take over, and a ticket at 11:00 ended the day
+   * at noon ("endet 15:30 statt 09:15", Anton, 13.11.). The window
+   * keeps its hours and the appointment is time nothing else happens in
+   * (`frameOf` in `day-times.ts`). Departures still end the day.
+   */
+  spanAppointments?: boolean;
 }
 
 export interface ScheduledDay {
@@ -306,6 +316,7 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
     // terrace ends the afternoon — and its own block is placed above.
     for (const fix of fixpoints) {
       if (fix.guardStartMinutes <= cursor) continue;
+      if (opts.spanAppointments && fix.kind === "appointment") continue;
       const available = fix.guardStartMinutes - cursor;
       if (available < budget) {
         budget = available;

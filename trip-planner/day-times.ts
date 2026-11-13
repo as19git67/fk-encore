@@ -6,10 +6,11 @@
  * order, the ways, the opening hours and the fixpoints are stored, and
  * a stored "ca. 10:40" could only fall behind them.
  *
- * The window of a spots block is where the frame put it (`scheduleDay`)
- * plus whatever an appointment inside it took out: the scheduler cuts
- * a block around an appointment, and here the appointment stands in the
- * line as time nothing else happens in, so the window gets it back.
+ * The window of a spots block is where the frame put it (`scheduleDay`).
+ * On a trip of ideas the block spans its appointments; a block stored
+ * before that was cut at one, and the window carries on to the
+ * appointment's end. Either way the appointment stands in the line as
+ * time nothing else happens in.
  */
 
 import { isVisit } from "./frame-spots";
@@ -61,9 +62,11 @@ export function frameOf(block: Pick<StoredBlock, "startMinutes" | "budgetMinutes
     if (fix.kind !== "appointment" || fix.blockId) continue;
     if (isVisit(fix)) tickets.set(fix.spotRef!, fix.startMinutes);
     // Only what falls inside: an appointment before or after the block
-    // already moved its edges.
+    // already moved its edges. One the block was cut at (its guard is
+    // the block's end) carries the window on to its own end; one the
+    // block spans (`spanAppointments`) keeps it, unless it runs longer.
     if (fix.guardStartMinutes < start || fix.guardStartMinutes > end) continue;
-    end += fix.endMinutes - fix.guardStartMinutes;
+    end = Math.max(end, fix.endMinutes);
     if (!isVisit(fix)) blocked.push({ from: fix.guardStartMinutes, to: fix.endMinutes });
   }
   return { window: { startMinutes: start, endMinutes: end }, blocked, tickets };

@@ -276,8 +276,13 @@ export function placeFramed(
   const budgetOf = new Map(budgets.map((b) => [b.id, b.budgetMinutes]));
   const missing: FramedSpot[] = [];
 
+  // Every block gets its true budget back, also one whose frame found
+  // no spot: on a trip of ideas the ticketed spot is already a stop
+  // rather than a candidate, and the block kept the solver's smaller
+  // budget — the day ended early by the visit's length.
   const current: CurrentBlock[] = solved.map((block) => ({
     ...block,
+    budgetMinutes: budgetOf.get(block.id) ?? block.budgetMinutes,
     stops: block.stops.map(asCurrent),
   }));
 
@@ -294,7 +299,6 @@ export function placeFramed(
     const stop = { ...stopFor(candidate, frame.dwellMinutes), status: "planned" as const, pinned: true };
     if (frame.at === "end") block.stops.push(stop);
     else block.stops.unshift(stop);
-    block.budgetMinutes = budgetOf.get(block.id) ?? block.budgetMinutes;
   }
 
   // The walks either side of the new stop, and the way home off the
