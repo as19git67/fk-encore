@@ -264,19 +264,29 @@ final class TripSpotEditTests: XCTestCase {
         XCTAssertFalse(TripSpotEdit(detail()).photoStop)
     }
 
-    func testTheSheetOpensWithTheKindAndKeepsItThroughTrimming() {
-        // The kind is changed on this sheet now, not in the detail
-        // screen, so it has to arrive here and survive the save.
-        let edit = TripSpotEdit(detail())
-        XCTAssertEqual(edit.category, detail().category)
-        var picked = edit
-        picked.category = "viewpoint"
-        XCTAssertEqual(picked.trimmed.category, "viewpoint")
+    func testLeavingAFieldUnchangedSendsNothing() {
+        // The detail screen saves whenever a field is left (Anton,
+        // 13.11.), so an untouched one must not write the spot back.
+        let base = TripSpotEdit(detail(note: "Früh hin."))
+        XCTAssertFalse(base.needsSaving(against: base))
+        var padded = base
+        padded.note = "Früh hin.  "
+        XCTAssertFalse(padded.needsSaving(against: base), "trailing spaces are not a change")
+        var changed = base
+        changed.note = "Tickets vorher kaufen."
+        XCTAssertTrue(changed.needsSaving(against: base))
     }
 
-    func testTheKindMenuKeepsAKindNobodyPicks() {
-        XCTAssertEqual(TripSpotEdit.categoryChoices(current: "lighthouse_odd").first, "lighthouse_odd")
-        XCTAssertEqual(TripSpotEdit.categoryChoices(current: TripCategory.pickable[0]), TripCategory.pickable)
+    func testAHalfLinkIsNotSentFromTheField() {
+        let base = TripSpotEdit(detail())
+        var edit = base
+        edit.url = "beispiel.test"
+        XCTAssertFalse(edit.needsSaving(against: base))
+    }
+
+    func testTheStayMenuKeepsAnOddValue() {
+        XCTAssertTrue(TripSpotEdit.dwellChoices(current: 50).contains(50))
+        XCTAssertEqual(TripSpotEdit.dwellChoices(current: 60), TripSpotEdit.dwellChoices(current: 45))
     }
 
     func testWhitespaceIsNotAValue() {
