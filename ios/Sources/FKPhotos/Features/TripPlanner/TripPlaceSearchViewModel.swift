@@ -195,6 +195,12 @@ final class TripPlaceSearchViewModel {
     var area: TripSearchArea?
     /// "+ Tag n" per place, by its ref (stage 4).
     private(set) var suggestions: [String: TripDaySuggestion] = [:]
+    /// The refs whose "+ Tag n" is being asked for right now: their "+"
+    /// waits rather than add to the ideas only because no day came yet.
+    private(set) var suggesting: Set<String> = []
+    /// True while the pictures the server is still looking up are being
+    /// asked for again, so a row without one says it is coming.
+    private(set) var picturesPending = false
     private(set) var added: [String: String] = [:]
     var errorMessage: String?
 
@@ -256,17 +262,25 @@ final class TripPlaceSearchViewModel {
             if response.picturesPending == true, !more, highlights.count == response.results.count,
                pictureRetries < Self.maxPictureRetries {
                 pictureRetries += 1
+                picturesPending = true
                 Task { [weak self] in
                     try? await Task.sleep(for: .seconds(6))
                     await self?.loadHighlights(quiet: true)
                 }
-            } else if response.picturesPending != true {
-                pictureRetries = 0
+            } else if !more {
+                picturesPending = false
+                if response.picturesPending != true { pictureRetries = 0 }
             }
         } catch {
             guard request == highlightsRequest else { return }
+            if quiet { picturesPending = false }
             errorMessage = TripErrorText.describe(error)
         }
+    }
+
+    /// True while the day for this place's "+" is being asked for.
+    func isSuggesting(_ osmRef: String) -> Bool {
+        suggesting.contains(osmRef) && suggestions[osmRef] == nil
     }
 
     /// Every place of one category around the stay, no name needed.
@@ -319,11 +333,14 @@ final class TripPlaceSearchViewModel {
     /// then read "Zur Reise".
     func loadSuggestions(for spots: [TripSuggestSpot], refresh: Bool = false) async {
         guard let legIndex else { return }
-        let wanted = refresh ? spots : spots.filter { suggestions[$0.osmRef] == nil }
+        let wanted = refresh ? spots : spots.filter { suggestions[$0.osmRef] == nil && !suggesting.contains($0.osmRef) }
         guard !wanted.isEmpty else { return }
         struct Body: Encodable {
             let spots: [TripSuggestSpot]
         }
+        let refs = Set(wanted.map(\.osmRef))
+        suggesting.formUnion(refs)
+        defer { suggesting.subtract(refs) }
         do {
             for chunk in stride(from: 0, to: wanted.count, by: 60).map({ Array(wanted[$0..<min($0 + 60, wanted.count)]) }) {
                 let response: TripDaySuggestionsResponse = try await APIClient.shared.post(

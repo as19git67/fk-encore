@@ -88,7 +88,8 @@ struct TripSpotDetailView<Actions: View>: View {
         List {
             // The pictures first, as in the mock (Ablauf 2, step 3): one
             // large, smaller ones beside it, swiped sideways for more.
-            TripSpotGallery(photos: galleryRef == spot.osmRef ? gallery : (spot.image.map { [$0] } ?? []))
+            TripSpotGallery(photos: galleryRef == spot.osmRef ? gallery : (spot.image.map { [$0] } ?? []),
+                            loading: galleryRef != spot.osmRef)
 
             header
 

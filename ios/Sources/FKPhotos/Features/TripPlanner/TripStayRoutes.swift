@@ -30,6 +30,8 @@ struct TripStayRoutesList: View {
     @State private var note: String?
     @State private var loaded = false
     @State private var suggestions: [String: TripDaySuggestion] = [:]
+    /// True while "+ Tag n" is being asked for: "+" waits for its day.
+    @State private var suggesting = false
     @State private var busy: String?
     @State private var done: [String: String] = [:]
     @State private var shown: TripNearbyRoute?
@@ -153,7 +155,8 @@ struct TripStayRoutesList: View {
                     .frame(minWidth: 44, minHeight: 32)
             } else {
                 let suggestion = suggestions[route.osmRef]
-                TripAddButton(running: busy == route.osmRef, full: suggestion?.full == true,
+                TripAddButton(running: busy == route.osmRef, waiting: suggesting && suggestion == nil,
+                              full: suggestion?.full == true,
                               label: TripSpotPicker.addLabel(suggestion)) {
                     Task { await add(route, onDay: suggestion?.dayIndex) }
                 }
@@ -200,6 +203,8 @@ struct TripStayRoutesList: View {
             .prefix(60)
             .map { TripSuggestSpot(osmRef: $0.osmRef, dwellMinutes: $0.estimatedMinutes) }
         guard !spots.isEmpty else { return }
+        suggesting = true
+        defer { suggesting = false }
         let response: TripDaySuggestionsResponse? = try? await APIClient.shared.post(
             "/trip-planner/plans/\(planId)/legs/\(leg.position)/suggest-day", body: Body(spots: Array(spots)))
         for suggestion in response?.suggestions ?? [] { suggestions[suggestion.osmRef] = suggestion }

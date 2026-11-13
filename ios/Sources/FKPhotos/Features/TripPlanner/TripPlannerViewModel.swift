@@ -642,6 +642,8 @@ final class TripPlannerViewModel {
 
     private func drop(osmRef: String) async {
         guard requireOnline() else { return }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable {
             let legIndex: Int
             let osmRef: String
@@ -666,6 +668,8 @@ final class TripPlannerViewModel {
     /// already on a day. The stay length stays as it is.
     func setCategory(osmRef: String, _ category: String) async {
         guard requireOnline() else { return }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable {
             let legIndex: Int
             let osmRef: String
@@ -690,6 +694,8 @@ final class TripPlannerViewModel {
     /// on the list or already on a day.
     func setPriority(osmRef: String, _ priority: TripIdeaPriority) async {
         guard requireOnline() else { return }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable {
             let legIndex: Int
             let osmRef: String
@@ -1380,6 +1386,8 @@ final class TripPlannerViewModel {
     func keepForNextTime(osmRefs: [String]) async {
         guard requireOnline() else { return }
         guard !osmRefs.isEmpty else { return }
+        busyRequests += 1
+        defer { busyRequests -= 1 }
         struct Body: Encodable { let osmRefs: [String] }
         do {
             let response: TripKeptForNextTimeResponse = try await APIClient.shared.post(

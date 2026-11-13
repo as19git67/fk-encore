@@ -12,6 +12,8 @@ final class TripStayBallot {
     private(set) var ballot: TripBallot?
     /// The spot a vote is on its way for.
     private(set) var votingRef: String?
+    /// Set while the votes are being read, so the picker says so.
+    private(set) var isLoading = false
     var errorMessage: String?
 
     init(planId: Int, legIndex: Int) {
@@ -24,6 +26,8 @@ final class TripStayBallot {
     }
 
     func load() async {
+        isLoading = true
+        defer { isLoading = false }
         do {
             ballot = try await APIClient.shared.get(
                 "/trip-planner/plans/\(planId)/votes",
