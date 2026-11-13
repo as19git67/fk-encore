@@ -46,9 +46,9 @@ by push and mail.
 
 ## Flexible dates
 
-Anton asked for an option for travellers who are flexible about when and
-for how long. Searching every possible pair of dates every day would spend
-the month's budget within days, so:
+An option for travellers who are flexible about when and for how long.
+Searching every possible pair of dates every day would spend the month's
+budget within days, so:
 
 - A flexible watch names a window — earliest outbound and latest return
   (one way: latest outbound) — and a range of nights. Every pair that fits
