@@ -201,6 +201,30 @@ describe("a booked slot in the middle of the day", () => {
   });
 });
 
+describe("the one window of a day of ideas", () => {
+  const IDEAS: PlannedBlockShape[] = [block("day", 600)];
+  const ticket = { id: "ticket", label: "Ticket", startMinutes: at(11), durationMinutes: 60 };
+  const ship = { id: "ship", label: "Alle an Bord", kind: "departure" as const, startMinutes: at(17), bufferMinutes: 60 };
+
+  it("spans an appointment instead of ending at it", () => {
+    const { blocks, dropped } = scheduleDay({ blocks: IDEAS, fixpoints: [ticket], spanAppointments: true });
+    expect(dropped).toEqual([]);
+    expect(blocks).toMatchObject([{ id: "day", startMinutes: at(9), budgetMinutes: 600 }]);
+  });
+
+  it("keeps the day around an appointment right after it begins", () => {
+    const early = { ...ticket, startMinutes: at(9, 30) };
+    const { blocks } = scheduleDay({ blocks: IDEAS, fixpoints: [early], spanAppointments: true });
+    expect(blocks).toMatchObject([{ id: "day", startMinutes: at(9), budgetMinutes: 600 }]);
+  });
+
+  it("still ends at a departure", () => {
+    const { blocks } = scheduleDay({ blocks: IDEAS, fixpoints: [ticket, ship], spanAppointments: true });
+    // Guard of the ship at 16:00.
+    expect(blocks).toMatchObject([{ id: "day", startMinutes: at(9), budgetMinutes: 420 }]);
+  });
+});
+
 describe("several fixpoints in one day", () => {
   it("lets the earliest one bind, whatever order they arrive in", () => {
     const dinner = { id: "dinner", label: "Tisch 19:00", startMinutes: at(19) };
