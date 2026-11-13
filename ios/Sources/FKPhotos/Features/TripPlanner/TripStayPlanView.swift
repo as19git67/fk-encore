@@ -47,14 +47,11 @@ struct TripStayPlanView: View {
     /// When a card was last swiped sideways: the lift of that finger
     /// also ends the card's tap, which must not open its details.
     @State private var swipedAt: Date?
-    /// The spot picker (stage 4).
-    @State private var picking = false
-    /// The day out the picker was opened from, so it searches there.
-    @State private var pickingDayTrip: Int?
-    /// The day at the quarters the picker adds to, when opened from one.
-    @State private var pickingDay: Int?
-    /// The excursion the picker was opened from ("+ Spot in Seestadt").
-    @State private var pickingExcursion: TripExcursionPick?
+    /// The spot picker (stage 4) and where it was opened from. One value
+    /// rather than a flag beside the origin: a sheet that reads state only
+    /// inside its content can build from the values before the tap, and
+    /// then "+ Spot in Seestadt" opened on the stay.
+    @State private var picking: TripPickerRequest?
     /// The excursion whose removal is being confirmed.
     @State private var removingExcursion: TripExcursionPick?
     /// Days that are over, opened from their one line (stage 5).
@@ -149,18 +146,14 @@ struct TripStayPlanView: View {
             // The days have their own big button; the map keeps the plus.
             if layout == Layout.map.rawValue {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Ideen und Suche", systemImage: "plus") { picking = true }
+                    Button("Ideen und Suche", systemImage: "plus") { picking = TripPickerRequest() }
                 }
             }
         }
-        .sheet(isPresented: $picking, onDismiss: {
-            pickingDayTrip = nil
-            pickingExcursion = nil
-            pickingDay = nil
-        }) {
-            TripSpotPickerView(viewModel: viewModel, dayTrip: pickingDayTrip,
-                               excursion: pickingExcursion.map { ($0.dayIndex, $0.excursion) },
-                               day: pickingDay)
+        .sheet(item: $picking) { request in
+            TripSpotPickerView(viewModel: viewModel, dayTrip: request.dayTrip,
+                               excursion: request.excursion.map { ($0.dayIndex, $0.excursion) },
+                               day: request.day)
         }
         .confirmationDialog(removingExcursion.map { "\($0.excursion.title) entfernen?" } ?? "",
                             isPresented: Binding(get: { removingExcursion != nil },
@@ -559,8 +552,7 @@ struct TripStayPlanView: View {
                 insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
             }
             Button {
-                pickingDayTrip = day.dayIndex
-                picking = true
+                picking = TripPickerRequest(dayTrip: day.dayIndex)
             } label: {
                 Label("Spot in \(place)", systemImage: "plus")
                     .font(.subheadline.weight(.semibold))
@@ -657,7 +649,7 @@ struct TripStayPlanView: View {
                     }
                 }
                 Divider()
-                Button("Ideen und Suche", systemImage: "magnifyingglass") { picking = true }
+                Button("Ideen und Suche", systemImage: "magnifyingglass") { picking = TripPickerRequest() }
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: 32, height: 32)
@@ -711,7 +703,7 @@ struct TripStayPlanView: View {
 
     private func ideasButton(_ leg: TripLeg) -> some View {
         Button {
-            picking = true
+            picking = TripPickerRequest()
         } label: {
             Label(leg.pool.isEmpty ? "Ideen und Suche" : "Ideen (\(leg.pool.count)) und Suche",
                   systemImage: "plus.circle")
@@ -804,9 +796,8 @@ struct TripStayPlanView: View {
 
             if stops.isEmpty && (day.excursions ?? []).isEmpty && day.anchor == nil {
                 Button {
-                    pickingDayTrip = day.anchor == nil ? nil : day.dayIndex
-                    pickingDay = day.anchor == nil ? day.dayIndex : nil
-                    picking = true
+                    picking = TripPickerRequest(dayTrip: day.anchor == nil ? nil : day.dayIndex,
+                                                day: day.anchor == nil ? day.dayIndex : nil)
                 } label: {
                     Text("Spot hierher ziehen oder aus den Ideen hinzufügen")
                         .font(.subheadline)
@@ -915,9 +906,8 @@ struct TripStayPlanView: View {
     /// quarters — and "+" puts the spot here.
     private func addSpotButton(_ day: TripDay, leg: TripLeg) -> some View {
         Button {
-            pickingDayTrip = day.anchor == nil ? nil : day.dayIndex
-            pickingDay = day.anchor == nil ? day.dayIndex : nil
-            picking = true
+            picking = TripPickerRequest(dayTrip: day.anchor == nil ? nil : day.dayIndex,
+                                        day: day.anchor == nil ? day.dayIndex : nil)
         } label: {
             Label(day.anchor == nil && !(day.excursions ?? []).isEmpty ? "Spot in \(leg.displayTitle)" : "Spot hinzufügen",
                   systemImage: "plus")
@@ -995,8 +985,7 @@ struct TripStayPlanView: View {
                     planCard(stop, index: section.offset + offset, day: day, leg: leg)
                 }
                 Button {
-                    pickingExcursion = pick
-                    picking = true
+                    picking = TripPickerRequest(excursion: pick)
                 } label: {
                     Label("Spot in \(excursion.displayName)", systemImage: "plus")
                         .font(.subheadline.weight(.semibold))
@@ -2153,6 +2142,15 @@ enum TripStayDayAction {
 }
 
 /// An excursion and its day, for the picker and the removal question.
+/// What the spot picker opens on: the stay, a day at the quarters, a
+/// day out, or an excursion's window.
+struct TripPickerRequest: Identifiable {
+    let id = UUID()
+    var dayTrip: Int?
+    var excursion: TripExcursionPick?
+    var day: Int?
+}
+
 struct TripExcursionPick: Equatable {
     let dayIndex: Int
     let excursion: TripExcursion
