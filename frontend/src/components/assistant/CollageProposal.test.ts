@@ -7,6 +7,7 @@ import type { Proposal } from '../../api/assistant'
 vi.mock('../../api/assistant', () => ({
   executeProposal: vi.fn(),
   discardProposal: vi.fn(),
+  getProposal: vi.fn(),
   downloadResult: vi.fn(),
 }))
 vi.mock('../../api/photos', () => ({
@@ -14,6 +15,7 @@ vi.mock('../../api/photos', () => ({
 }))
 
 import { downloadResult, executeProposal } from '../../api/assistant'
+import { __resetProposalStatesForTests } from '../../utils/proposalStates'
 
 const proposal: Proposal = {
   proposal_id: 21,
@@ -68,6 +70,8 @@ function button(el: HTMLElement, label: string): HTMLButtonElement {
 const flushPromises = () => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
+  // One proposal id across the tests; what one test executed is not the next one's start.
+  __resetProposalStatesForTests()
   vi.mocked(executeProposal).mockReset()
   vi.mocked(downloadResult).mockReset()
 })

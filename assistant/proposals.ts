@@ -288,6 +288,11 @@ export class ProposalError extends Error {
  * `executing` in a single UPDATE, so a double click or a second tab finds
  * nothing to take. A failed action goes back to `pending` with its error, so
  * the user can try again after fixing what the error names.
+ *
+ * Asked again for a proposal that ran (the answer to the first click got
+ * lost, or a card still showed the state it was stored in), it hands back
+ * the proposal as it stands instead of an error: the card then shows it as
+ * done. Running it a second time is never what "Ausführen" means.
  */
 export async function executeProposal(
   id: number,
@@ -305,17 +310,25 @@ export async function executeProposal(
       eq(assistantProposal.status, "pending"),
     ))
     .returning();
-  if (!claimed) throw await refusal(id, userId);
+  if (!claimed) {
+    const [row] = await db
+      .select()
+      .from(assistantProposal)
+      .where(and(eq(assistantProposal.id, id), eq(assistantProposal.user_id, userId)))
+      .limit(1);
+    if (row && (row.status === "executed" || row.status === "executing")) return toRow(row);
+    throw refusal(row?.status ?? null);
+  }
 
   const def = tools.get(claimed.tool);
   let args = claimed.arguments;
   try {
-    if (!def) throw new Error(`the action ${claimed.tool} no longer exists`);
+    if (!def) throw new Error(`Die Aktion ${claimed.tool} gibt es nicht mehr.`);
     if (!def.permissions.every((p) => ctx.user.permissions.includes(p))) {
-      throw new Error("you no longer have the permission this action needs");
+      throw new Error("Für diese Aktion fehlt dir inzwischen die Berechtigung.");
     }
     if (edits) {
-      if (!def.edit) throw new Error("this proposal cannot be changed");
+      if (!def.edit) throw new Error("Dieser Vorschlag lässt sich nicht ändern.");
       // Kept even if the action fails below, so the card keeps what was typed.
       args = def.edit(claimed.arguments, edits);
     }
@@ -348,19 +361,38 @@ export async function discardProposal(id: number, ctx: ToolContext): Promise<Pro
       eq(assistantProposal.status, "pending"),
     ))
     .returning();
-  if (!row) throw await refusal(id, userId);
+  if (!row) {
+    const [now] = await db
+      .select({ status: assistantProposal.status })
+      .from(assistantProposal)
+      .where(and(eq(assistantProposal.id, id), eq(assistantProposal.user_id, userId)))
+      .limit(1);
+    throw refusal(now?.status ?? null);
+  }
   return toRow(row);
 }
 
-async function refusal(id: number, userId: number): Promise<ProposalError> {
+/** The proposal as it stands now, for a card that waits on one being executed. */
+export async function readProposal(id: number, userId: number): Promise<ProposalRow> {
   const [row] = await db
-    .select({ status: assistantProposal.status })
+    .select()
     .from(assistantProposal)
     .where(and(eq(assistantProposal.id, id), eq(assistantProposal.user_id, userId)))
     .limit(1);
-  // Someone else's proposal reads as missing, not as "decided".
-  if (!row) return new ProposalError("not_found", "proposal not found");
-  return new ProposalError("decided", `proposal is already ${row.status}`);
+  if (!row) throw refusal(null);
+  return toRow(row);
+}
+
+const DECIDED: Record<Exclude<ProposalStatus, "pending">, string> = {
+  executed: "Dieser Vorschlag ist schon ausgeführt.",
+  executing: "Dieser Vorschlag wird gerade ausgeführt.",
+  discarded: "Dieser Vorschlag ist schon verworfen.",
+};
+
+/** Why a proposal cannot be taken; someone else's reads as missing, not as "decided". */
+function refusal(status: ProposalStatus | null): ProposalError {
+  if (status === null) return new ProposalError("not_found", "Diesen Vorschlag gibt es nicht.");
+  return new ProposalError("decided", status === "pending" ? "Der Vorschlag wartet noch." : DECIDED[status]);
 }
 
 export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {

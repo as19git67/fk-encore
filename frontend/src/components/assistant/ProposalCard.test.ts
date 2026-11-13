@@ -7,13 +7,15 @@ import type { Proposal } from '../../api/assistant'
 vi.mock('../../api/assistant', () => ({
   executeProposal: vi.fn(),
   discardProposal: vi.fn(),
+  getProposal: vi.fn(),
   downloadResult: vi.fn(),
 }))
 
 vi.mock('../../api/documents', () => ({ searchDocuments: vi.fn() }))
 vi.mock('../../api/photos', () => ({ listAlbums: vi.fn(), listPersons: vi.fn(), listPhotoUploaders: vi.fn() }))
 
-import { discardProposal, downloadResult, executeProposal } from '../../api/assistant'
+import { discardProposal, downloadResult, executeProposal, getProposal } from '../../api/assistant'
+import { __resetProposalStatesForTests } from '../../utils/proposalStates'
 import { searchDocuments } from '../../api/documents'
 import { listAlbums } from '../../api/photos'
 import { useReferenceData } from '../../composables/useReferenceData'
@@ -82,6 +84,8 @@ globalThis.ResizeObserver ??= class {
 beforeEach(() => {
   vi.mocked(executeProposal).mockReset()
   vi.mocked(discardProposal).mockReset()
+  vi.mocked(getProposal).mockReset().mockRejectedValue(new Error('offline'))
+  __resetProposalStatesForTests()
 })
 
 describe('ProposalCard', () => {
@@ -119,6 +123,50 @@ describe('ProposalCard', () => {
     await flushPromises()
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('album name already in use')
     expect(button(el, 'Erneut ausführen')).toBeTruthy()
+  })
+
+  it('a later copy of an executed card starts as done', async () => {
+    // The card of the running answer, clicked before the answer was stored…
+    vi.mocked(executeProposal).mockResolvedValue({ ...pending, status: 'executed', result_summary: '3 Fotos hinzugefügt' })
+    const live = mountCard()
+    button(live, 'Ausführen').click()
+    await flushPromises()
+    // …and the stored answer's card, which still carries "pending".
+    const stored = mountCard()
+    expect(stored.textContent).toContain('Ausgeführt')
+    expect(stored.textContent).toContain('3 Fotos hinzugefügt')
+    expect(stored.querySelectorAll('button')).toHaveLength(0)
+    expect(executeProposal).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a card as done when the answer to "Ausführen" got lost but the action ran', async () => {
+    vi.mocked(executeProposal).mockRejectedValue(new TypeError('Load failed'))
+    vi.mocked(getProposal).mockResolvedValue({ ...pending, status: 'executed', result_summary: '3 Fotos hinzugefügt' })
+    const el = mountCard()
+    button(el, 'Ausführen').click()
+    await flushPromises()
+    await flushPromises()
+    expect(getProposal).toHaveBeenCalledWith(7)
+    expect(el.textContent).toContain('Ausgeführt')
+    expect(el.querySelector('[role="alert"]')).toBeNull()
+    expect(el.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('waits while another click is still executing the card', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(executeProposal).mockResolvedValue({ ...pending, status: 'executing' })
+      vi.mocked(getProposal)
+        .mockResolvedValueOnce({ ...pending, status: 'executing' })
+        .mockResolvedValueOnce({ ...pending, status: 'executed', result_summary: 'fertig' })
+      const el = mountCard()
+      button(el, 'Ausführen').click()
+      await vi.advanceTimersByTimeAsync(2500)
+      expect(getProposal).toHaveBeenCalledTimes(2)
+      expect(el.textContent).toContain('Ausgeführt')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('offers the PDF of an executed report', async () => {

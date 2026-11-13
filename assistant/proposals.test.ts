@@ -25,6 +25,7 @@ import {
   createConversation,
   discardAssistantProposal,
   executeAssistantProposal,
+  getAssistantProposal,
   getConversation,
 } from "./assistant";
 import { HAND_TOOLS } from "./catalog";
@@ -307,9 +308,26 @@ describe("deciding", () => {
     expect(clients.photo.createAlbum).toHaveBeenCalledWith({ name: "Sommer", description: undefined });
     expect(clients.photo.batchUpdateAlbumPhotos).toHaveBeenCalledWith({ albumIds: [42], photoIds: [5, 6], action: "add" });
 
-    await expect(executeAssistantProposal({ id })).rejects.toThrow("already executed");
-    await expect(discardAssistantProposal({ id })).rejects.toThrow("already executed");
+    // A second "Ausführen" (the first answer got lost) shows it as done, without running it again.
+    const again = await executeAssistantProposal({ id });
+    expect(again).toMatchObject({ status: "executed", result_route: "/fotos/alben/42", error: null });
+    await expect(discardAssistantProposal({ id })).rejects.toThrow("schon ausgeführt");
     expect(clients.photo.createAlbum).toHaveBeenCalledTimes(1);
+    expect(clients.photo.batchUpdateAlbumPhotos).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a proposal as it stands, only for its owner", async () => {
+    const id = await albumProposal();
+    expect(await getAssistantProposal({ id })).toMatchObject({ proposal_id: id, status: "pending" });
+    setAuth("712");
+    await expect(getAssistantProposal({ id })).rejects.toThrow("gibt es nicht");
+  });
+
+  it("a discarded proposal cannot be executed", async () => {
+    const id = await albumProposal();
+    await discardAssistantProposal({ id });
+    await expect(executeAssistantProposal({ id })).rejects.toThrow("schon verworfen");
+    expect(clients.photo.createAlbum).not.toHaveBeenCalled();
   });
 
   it("fills the user's album of the same name instead of creating a second one", async () => {
@@ -348,8 +366,8 @@ describe("deciding", () => {
   it("is not visible to another user", async () => {
     const id = await albumProposal();
     setAuth("712");
-    await expect(executeAssistantProposal({ id })).rejects.toThrow("proposal not found");
-    await expect(discardAssistantProposal({ id })).rejects.toThrow("proposal not found");
+    await expect(executeAssistantProposal({ id })).rejects.toThrow("gibt es nicht");
+    await expect(discardAssistantProposal({ id })).rejects.toThrow("gibt es nicht");
     expect(clients.photo.createAlbum).not.toHaveBeenCalled();
   });
 
@@ -369,7 +387,7 @@ describe("deciding", () => {
     setAuth("711", PERMS.filter((p) => p !== "albums.manage"));
     const res = await executeAssistantProposal({ id });
     expect(res.status).toBe("pending");
-    expect(res.error).toContain("permission");
+    expect(res.error).toContain("Berechtigung");
     expect(clients.photo.createAlbum).not.toHaveBeenCalled();
   });
 
