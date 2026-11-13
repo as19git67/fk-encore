@@ -27,8 +27,8 @@ import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { loadPlan } from "./plan-store";
 import { addPoolEntry, mergeIntoPoolEntry, type StoredPoolEntry } from "./find-store";
-import { DEFAULT_DWELL_MINUTES, MANUAL_REASON, MANUAL_SCORE } from "./candidates";
-import { chooseLeg, findDuplicate, manualRef } from "./finds";
+import { DEFAULT_DWELL_MINUTES, FALLBACK_DWELL_MINUTES, MANUAL_REASON, MANUAL_SCORE } from "./candidates";
+import { chooseLeg, findDuplicate, isManualRef, manualRef } from "./finds";
 import { extentOf, type SpotExtent } from "./extent";
 import { fameFor } from "./spot-fame";
 
@@ -149,8 +149,11 @@ export const addFind = api(
         ),
       ),
     ].filter((e) => Boolean(e.extent) === Boolean(extent));
+    // The entry the caller saw is the place's identity when the lookup
+    // did not bring it back: a highlight or a search hit is an OSM entry.
+    const seenRef = req.seenOsmRef && !isManualRef(req.seenOsmRef) ? req.seenOsmRef : undefined;
     const duplicate = findDuplicate(
-      { osmRef: req.osmRef ?? match?.osmRef, name: req.name ?? match?.name, ...position },
+      { osmRef: req.osmRef ?? match?.osmRef ?? seenRef, name: req.name ?? match?.name, ...position },
       existing,
     );
 
@@ -183,7 +186,9 @@ export const addFind = api(
     // A route is its own category (§4.7): outdoors, and as long as it
     // takes — the duration was required above.
     const category = extent ? "route" : match ? match.categories[0] ?? null : null;
-    const dwellMinutes = resolveDwell(req.dwellMinutes, category);
+    // A place off a list is not asked about: it had a duration there.
+    const dwellMinutes = resolveDwell(req.dwellMinutes, category)
+      ?? (seenRef && !match ? FALLBACK_DWELL_MINUTES : null);
     if (dwellMinutes === null) {
       // The one question §9.2 has the planner ask. Asking beats
       // inventing a duration and planning a day around it.
@@ -195,7 +200,7 @@ export const addFind = api(
 
     const entry = await addPoolEntry({
       legId: leg.id,
-      osmRef: req.osmRef ?? match?.osmRef
+      osmRef: req.osmRef ?? match?.osmRef ?? seenRef
         ?? manualRef(`${Date.now()}-${Math.round(position.lat * 1e5)}`),
       name: req.name ?? match?.name ?? null,
       lat: position.lat,
@@ -285,7 +290,11 @@ async function matchOsmEntry(
 /**
  * Which of the nearby entries a find is: the one the caller saw, then
  * the one with the name (in any of its languages), and only then the
- * nearest.
+ * nearest — but never the nearest when the caller saw an entry of its
+ * own. A row of a list names its place; when the lookup does not bring
+ * that one back, the café next door is somebody else's place, and
+ * taking it gave the find the café's reference under the row's name:
+ * the café then read as planned while no day showed it.
  */
 export function pickMatch<T extends Pick<GeoPoiSearchSpot, "osmRef" | "name" | "nameDe" | "nameEn">>(
   spots: readonly T[],
@@ -303,7 +312,7 @@ export function pickMatch<T extends Pick<GeoPoiSearchSpot, "osmRef" | "name" | "
     const named = spots.find((s) => names(s).includes(wanted));
     if (named) return named;
   }
-  return spots[0];
+  return seenOsmRef ? null : spots[0];
 }
 
 function chooseLegFor(

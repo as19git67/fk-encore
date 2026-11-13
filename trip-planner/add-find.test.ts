@@ -397,4 +397,9 @@ describe("which nearby entry a find is", () => {
     expect(pickMatch([cafe, church], "Unbekannt")).toBe(cafe);
     expect(pickMatch([], "Beispielkirche")).toBeNull();
   });
+
+  it("takes no other entry when the one the list showed is not nearby", () => {
+    expect(pickMatch([cafe], "Beispielkirche", "way:2")).toBeNull();
+    expect(pickMatch([cafe, church], "Café am Platz", "way:9")).toBe(cafe);
+  });
 });

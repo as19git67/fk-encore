@@ -48,7 +48,7 @@ export const DEFAULT_DWELL_MINUTES: Readonly<Record<string, number>> = {
   producers: 60,
 };
 
-const FALLBACK_DWELL_MINUTES = 30;
+export const FALLBACK_DWELL_MINUTES = 30;
 
 /**
  * What a place somebody brought in is worth: more than anything the

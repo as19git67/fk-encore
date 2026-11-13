@@ -86,4 +86,9 @@ final class TripSpotPickerTests: XCTestCase {
         XCTAssertEqual(TripSpotPicker.markerSize(rank: 0), 34)
         XCTAssertEqual(TripSpotPicker.markerSize(rank: 20), 18)
     }
+
+    func testNamesDifferOnlyWhenAPersonWouldTellThemApart() {
+        XCTAssertFalse(TripSpotPicker.differs("Café am Platz", from: " cafe am platz"))
+        XCTAssertTrue(TripSpotPicker.differs("Beispielkirche", from: "Café am Platz"))
+    }
 }

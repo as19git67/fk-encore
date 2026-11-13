@@ -668,7 +668,7 @@ struct TripSpotPickerView: View {
     /// "passt nicht, 1 h 20 frei"), or the excursion it lies at while
     /// the picker adds to the stay ("nahe Seestadt · Ausflug Tag 3").
     private func placeLine(_ item: TripPickerItem) -> String? {
-        guard !item.isPlanned else { return nil }
+        guard !item.isPlanned else { return plannedAsLine(item) }
         if let away = liveTarget, away.kind != .stay {
             let distance = TripPickerTargets.fromDestination(item.coordinate, away)
             if misfits(item) {
@@ -705,9 +705,26 @@ struct TripSpotPickerView: View {
 
     /// The day a place is planned on in this stay, for "✓ Tag 1".
     private func plannedDay(_ osmRef: String) -> Int? {
-        viewModel.leg?.days.first { day in
-            TripStayPlan.stops(of: day).contains { $0.osmRef == osmRef }
-        }?.dayIndex
+        plannedStop(osmRef)?.dayIndex
+    }
+
+    private func plannedStop(_ osmRef: String) -> (dayIndex: Int, stop: TripStop)? {
+        guard let leg = viewModel.leg else { return nil }
+        for day in leg.days.sorted(by: { $0.dayIndex < $1.dayIndex }) {
+            if let stop = TripStayPlan.stops(of: day).first(where: { $0.osmRef == osmRef }) {
+                return (day.dayIndex, stop)
+            }
+        }
+        return nil
+    }
+
+    /// "Steht an Tag 1 als „Basilika“": the stop that holds this place
+    /// under another name, so the day can be found where it stands.
+    private func plannedAsLine(_ item: TripPickerItem) -> String? {
+        guard let planned = plannedStop(item.osmRef),
+              TripSpotPicker.differs(planned.stop.displayName, from: item.title)
+        else { return nil }
+        return "Steht an Tag \(planned.dayIndex + 1) als „\(planned.stop.displayName)“"
     }
 
     // MARK: - Food
