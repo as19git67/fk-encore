@@ -138,6 +138,7 @@ struct TripItineraryView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
             }
+            .ownBackground()
             ToolbarItem(placement: .primaryAction) {
                 if saving { ProgressView() }
             }
