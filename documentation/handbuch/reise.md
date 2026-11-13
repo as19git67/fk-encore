@@ -139,8 +139,10 @@ Adresse (`?watch=<id>`).
      hin und zurück abgeflogen werden soll.
   4. Optional eine Preisgrenze für alle Reisenden (hin und zurück) und die
      Währung.
-  5. Push und E-Mail für die Meldung wählen (ohne Grenze gesperrt).
-  6. Ende der Beobachtung prüfen: vorbelegt mit dem Tag vor dem letzten
+  5. „Mindestens 1 Aufgabegepäck je Reisendem“ ist vorbelegt; abwählen,
+     wenn Handgepäck reicht.
+  6. Push und E-Mail für die Meldung wählen (ohne Grenze gesperrt).
+  7. Ende der Beobachtung prüfen: vorbelegt mit dem Tag vor dem letzten
      möglichen Hinflug, höchstens zwei Jahre ab heute. „Anlegen“.
 - **Ergebnis:** Der Wächter steht in der Liste und ist gewählt; die erste
   Prüfung macht der Job oder „Jetzt prüfen“.
@@ -182,7 +184,9 @@ Adresse (`?watch=<id>`).
   Prüfung (bei Hin und zurück die Hinflüge mit dem Preis der ganzen Reise);
   nach einer Meldung die Anbieter mit Preis und Tarif; bei flexiblen
   Wächtern „Mögliche Reisen“ mit dem Preis ihrer letzten Prüfung; der
-  Verlauf jeder Prüfung.
+  Verlauf jeder Prüfung. Mit Aufgabegepäck steht unter dem Preis „inkl.
+  Koffer“, im Verlauf „mit Koffer …“ und bei den Anbietern eine Spalte
+  „Gepäck“.
 - **Test:** –
 
 ### REI-FPR-05 Meldung bei günstigem Preis
@@ -198,7 +202,11 @@ Adresse (`?watch=<id>`).
   wieder über der Grenze lag.
 - **Fehler und Grenzfälle:** „Jetzt prüfen“ meldet nichts. Für die
   Anbieter braucht die Prüfung ein bis zwei Suchen mehr; ist das
-  Kontingent knapp, kommt die Meldung ohne Anbieter.
+  Kontingent knapp, kommt die Meldung ohne Anbieter. Mit Aufgabegepäck
+  holt der Wächter die Anbieter vor der Meldung und rechnet die Gebühr für
+  den ersten Koffer je Reisendem ein; liegt der Preis dann nicht mehr unter
+  der Grenze, kommt keine Meldung. Nennt kein Anbieter das Gepäck, kommt
+  die Meldung mit „Aufgabegepäck nicht bestätigt“.
 - **Test:** –
 
 ### REI-FPR-06 Wächter löschen

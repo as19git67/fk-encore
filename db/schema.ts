@@ -5705,6 +5705,8 @@ export const travelFlightWatches = pgTable(
     end_date: date("end_date", { mode: "string" }).notNull(),
     paused: boolean("paused").notNull().default(false),
     notify_push: boolean("notify_push").notNull().default(true),
+    /** Only report a price that includes one checked bag per traveller with a seat. */
+    checked_bag: boolean("checked_bag").notNull().default(true),
     notify_email: boolean("notify_email").notNull().default(true),
     notified_price: doublePrecision("notified_price"),
     notified_at: timestamp("notified_at", { mode: "string", withTimezone: true }),
@@ -5736,6 +5738,8 @@ export const travelFlightChecks = pgTable(
     price_level: text("price_level"),
     typical_low: doublePrecision("typical_low"),
     typical_high: doublePrecision("typical_high"),
+    /** The cheapest price with one checked bag per seated traveller; null when not known. */
+    bag_price: doublePrecision("bag_price"),
     below_limit: boolean("below_limit").notNull().default(false),
     error: text("error"),
   },
@@ -5779,6 +5783,8 @@ export const travelFlightBookings = pgTable(
     price: doublePrecision("price"),
     option_title: text("option_title"),
     extensions: text("extensions").notNull().default(""),
+    /** Google's baggage lines of the option ("1st checked bag: 99"). */
+    baggage: text("baggage").notNull().default(""),
   },
   (table) => [index("travel_flight_booking_check_idx").on(table.check_id)],
 );

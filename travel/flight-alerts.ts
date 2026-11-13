@@ -5,7 +5,7 @@
  */
 import { push } from "~encore/clients";
 import { appUrl, mailConfigured, sendFlightPriceAlertEmail } from "../user/mail";
-import type { BookingOption } from "./flight-offers";
+import { priceWithBag, type BookingOption } from "./flight-offers";
 
 export interface FlightPriceAlert {
   userId: number;
@@ -27,6 +27,14 @@ export interface FlightPriceAlert {
   /** The Google Flights search for these dates. */
   link: string;
   newLow: boolean;
+  /**
+   * The watch wants a checked bag: "included" when the price has one per
+   * seated traveller, "unknown" when Google's options did not say; null
+   * when the watch does not ask for one.
+   */
+  bag: "included" | "unknown" | null;
+  /** Travellers with a seat (and a bag). */
+  seated: number;
 }
 
 export interface FlightAlertSender {
@@ -54,14 +62,34 @@ export function flightAlertText(a: FlightPriceAlert): { title: string; body: str
   const dates = a.return ? `${day(a.outbound)}–${day(a.return)}` : `${day(a.outbound)}, einfach`;
   const who = a.passengers === 1 ? "1 Person" : `${a.passengers} Personen`;
   const level = a.level && LEVEL[a.level] ? `, laut Google ${LEVEL[a.level]}` : "";
+  const bag =
+    a.bag === "included"
+      ? a.seated === 1
+        ? " inkl. 1 Aufgabegepäck"
+        : " inkl. je 1 Aufgabegepäck"
+      : a.bag === "unknown"
+        ? " (Aufgabegepäck nicht bestätigt)"
+        : "";
   const body =
-    `${euro(a.price, a.currency)} für ${who} (Grenze ${euro(a.limit, a.currency)}), ${dates}, ` +
+    `${euro(a.price, a.currency)} für ${who}${bag} (Grenze ${euro(a.limit, a.currency)}), ${dates}, ` +
     `${a.airlines}, ${stopsText(a.stops)}${level}`;
   const bookings = a.bookings.length
     ? "Buchbar bei " +
       a.bookings
         .slice(0, 4)
-        .map((b) => (b.price !== null ? `${b.bookWith} (${euro(b.price, a.currency)})` : b.bookWith))
+        .map((b) => {
+          if (b.price === null) return b.bookWith;
+          const withBag = a.bag !== null ? priceWithBag(b, a.seated) : null;
+          const note =
+            a.bag === null
+              ? ""
+              : b.checkedBag === "included"
+                ? ", Koffer inklusive"
+                : withBag !== null
+                  ? `, mit Koffer ${euro(withBag, a.currency)}`
+                  : ", Koffer unklar";
+          return `${b.bookWith} (${euro(b.price, a.currency)}${note})`;
+        })
         .join(", ")
     : null;
   return { title, body, bookings };

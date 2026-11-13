@@ -180,6 +180,8 @@ export interface FlightCheck {
   price_level: string | null
   typical_low: number | null
   typical_high: number | null
+  /** Cheapest price with one checked bag per seated traveller, once known. */
+  bag_price: number | null
   below_limit: boolean
   error: string | null
 }
@@ -192,6 +194,8 @@ export interface FlightBestKnown {
   stops: number | null
   checked_at: string
   link: string
+  /** The price includes one checked bag per seated traveller. */
+  with_bag: boolean
 }
 
 export interface FlightWatch {
@@ -219,6 +223,8 @@ export interface FlightWatch {
   limit_total: number | null
   end_date: string
   paused: boolean
+  /** Only count fares with one checked bag per seated traveller. */
+  checked_bag: boolean
   notify_push: boolean
   notify_email: boolean
   notified_price: number | null
@@ -252,6 +258,8 @@ export interface FlightBookingEntry {
   price: number | null
   option_title: string | null
   extensions: string
+  /** The provider's baggage lines, joined. */
+  baggage: string
 }
 
 export interface FlightCombinationEntry {
@@ -301,6 +309,8 @@ export interface FlightWatchInput {
   limit_total: number | null
   end_date: string
   paused: boolean
+  /** Only count fares with one checked bag per seated traveller. */
+  checked_bag: boolean
   notify_push: boolean
   notify_email: boolean
 }
