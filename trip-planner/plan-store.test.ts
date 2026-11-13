@@ -35,6 +35,11 @@ function stop(ref: string, metres: number) {
   };
 }
 
+/** A stop reached by a hop at riding pace rather than walking pace. */
+function ride(ref: string, metres: number): ReturnType<typeof stop> {
+  return { ...stop(ref, metres), travelFromPrevious: { minutes: 9, distanceM: 1500, travelClass: "short_walk" } };
+}
+
 function block(id: string, stops: ReturnType<typeof stop>[]): PlannedBlock {
   return {
     id,
@@ -292,9 +297,11 @@ describe("plan persistence", () => {
   });
 
   it("reads a stop's travel class from its own leg's mode", async () => {
-    // The class is derived on load, not stored — five minutes is a
+    // The class is derived on load, not stored — the same hop is a
     // short walk on foot and a short ride on the metro, and the two
-    // legs of one trip must not borrow each other's wording.
+    // legs of one trip must not borrow each other's wording. The hop is
+    // 1.5 km in nine minutes: a ride, not walking pace, which a transit
+    // stay would read back as a walk (`storedTravelClass`).
     const planId = await createPlan({
       ownerId,
       constraints: {},
@@ -303,14 +310,14 @@ describe("plan persistence", () => {
           anchor: ANCHOR,
           regionDb: "nom_bayern",
           mode: "foot",
-          days: [{ blocks: [block("morning", [stop("node:a", 200)])] }],
+          days: [{ blocks: [block("morning", [ride("node:a", 200)])] }],
           pool: [],
         },
         {
           anchor: ANCHOR,
           regionDb: "nom_kansai",
           mode: "transit",
-          days: [{ blocks: [block("morning", [stop("node:b", 200)])] }],
+          days: [{ blocks: [block("morning", [ride("node:b", 200)])] }],
           pool: [],
         },
       ],

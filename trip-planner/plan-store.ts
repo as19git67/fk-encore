@@ -47,7 +47,7 @@ import { placedByOf } from "./placed-by";
 import { capacityOf, type StayCapacity } from "./open-capacity";
 import { localDateIn, zoneAt } from "./time-zone";
 import type { ScoredCandidate } from "./candidates";
-import { travelClassFor, travelLeg, type TransportMode } from "./travel";
+import { storedTravelClass, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
 import { imagesFor, type SpotImage } from "./spot-fame";
 import { descriptionsFor, type SpotDescription } from "./spot-description";
@@ -1309,7 +1309,7 @@ export async function loadPlan(
       travelFromPrevious: {
         minutes: row.travel_minutes,
         distanceM: row.travel_distance_m,
-        travelClass: travelClassFor(row.travel_minutes, mode),
+        travelClass: storedTravelClass(row.travel_minutes, row.travel_distance_m, mode),
       },
       status: row.status as StopStatus,
       pinned: row.pinned,
