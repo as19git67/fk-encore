@@ -66,6 +66,37 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertEqual(TripSpotPicker.block(of: d, focus: focus)?.id, "excursion:a")
     }
 
+    func testExcursionsThatGoOnFromEachOtherAreOneGroup() throws {
+        var d = day(0, [block("day", [stop(1)]), block("excursion:a", []), block("excursion:b", [stop(2)]),
+                        block("day@b", []), block("excursion:c", []), block("day@c", [])])
+        let a = TripExcursion(id: "a", lat: 48.4, lon: 11.0, label: "Seestadt", radiusM: nil,
+                              departMinutes: 570, returnMinutes: 720, travelMinutes: 32, backMinutes: 0)
+        let b = TripExcursion(id: "b", lat: 48.41, lon: 11.0, label: "Hafenstadt", radiusM: nil,
+                              departMinutes: 720, returnMinutes: 870, travelMinutes: 9, from: "a", backMinutes: 27)
+        let c = TripExcursion(id: "c", lat: 48.5, lon: 11.0, label: "Bergdorf", radiusM: nil,
+                              departMinutes: 960, returnMinutes: 1080, travelMinutes: 30, backMinutes: 30)
+        d.excursions = [a, b, c]
+        let groups = TripExcursionChain.groups(TripStayPlan.sections(of: d))
+        XCTAssertEqual(groups.map(\.id), ["day", "excursion:a", "day@b", "excursion:c", "day@c"])
+        XCTAssertEqual(groups[1].excursions.map(\.id), ["a", "b"])
+        XCTAssertEqual(TripExcursionChain.title(groups[1].excursions), "Ausflug Seestadt → Hafenstadt")
+        XCTAssertEqual(TripExcursionChain.line(groups[1].excursions), "Abfahrt 09:30 · zurück 14:30 · 2 Ziele")
+        XCTAssertEqual(TripExcursionChain.stopLine(a, goesOn: true), "an 10:02 · weiter 12:00")
+        XCTAssertEqual(TripExcursionChain.hopLine(b), "weiter 12:00 · 9 min · nicht zurück")
+        XCTAssertEqual(b.backHomeMinutes, 897)
+        // An empty piece at the quarters in between still allows "Direkt weiter".
+        XCTAssertEqual(TripExcursionChain.next(after: 1, in: groups)?.id, "c")
+        XCTAssertTrue(TripExcursionChain.canLink(b, c))
+        XCTAssertFalse(TripExcursionChain.canLink(a, b))
+        XCTAssertEqual(TripExcursionChain.before(b, in: d)?.id, "a")
+        XCTAssertEqual(TripExcursionChain.after(a, in: d)?.id, "b")
+        // The server's suggestion counts only for the pair it names.
+        var suggested = c
+        suggested.linkSuggestion = TripExcursionLinkSuggestion(from: "b", hopMinutes: 10, viaQuartersMinutes: 57)
+        XCTAssertEqual(TripExcursionLink(dayIndex: 0, last: b, next: suggested).suggestion?.savedMinutes, 47)
+        XCTAssertNil(TripExcursionLink(dayIndex: 0, last: a, next: suggested).suggestion)
+    }
+
     func testAnEmptyDayTakesADropAtItsEnd() throws {
         let target = try XCTUnwrap(TripStayPlan.dropTarget(day: day(1, [block("day", [])]), before: nil))
         XCTAssertEqual(target.blockId, "day")

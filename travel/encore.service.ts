@@ -4,8 +4,9 @@ import { startLocalCron } from "../lib/local-cron";
 // scheduler before startLocalCron() runs.
 import "../lib/scheduled-jobs-hooks";
 
-// Expose API endpoints; registers the hotel price job.
+// Expose API endpoints; registers the hotel and flight price jobs.
 import "./hotel-watch";
+import "./flight-watch";
 
 // Arm the timers of the jobs registered above (Encore CronJobs do not fire
 // in the self-hosted setup — see lib/local-cron.ts).

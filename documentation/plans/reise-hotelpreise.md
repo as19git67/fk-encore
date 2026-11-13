@@ -29,7 +29,8 @@ user sees how the price moves and when it falls below a limit.
   today (`MAX_END_YEARS`) and before the check-in. A watch past its end
   or its check-in keeps its history but is never checked again.
 - **Budget:** the job counts the searches of the calendar month across
-  all users (one key per deployment) and stops at
+  all users and the flight watches too (one key per deployment,
+  `travel/search-budget.ts`, see `reise-flugpreise.md`) and stops at
   `TRAVEL_SERPAPI_MONTHLY_SEARCHES` (default 250). A check costs one
   search once the hotel's `property_token` is known, two the first time
   (name search, then the hit).
