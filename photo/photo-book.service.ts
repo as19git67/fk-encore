@@ -71,6 +71,8 @@ import {
   keepSeriesPicks,
   loadSeries,
   loadSubjectShares,
+  seriesMates,
+  similarToPhoto,
   weightedScore,
 } from "./photo-book-subjects";
 
@@ -1148,6 +1150,155 @@ export async function movePhotoToOwnPage(userId: number, bookId: number, pageId:
   const layout = sharpSinglePage(loaded.format, bp, ownPageCaptioned(loaded, page, photoId)) ?? relayoutPage(loaded.format, "photos", [bp])!.layout;
   await writePage(page.id, page.kind, loaded.format, page.photos.filter((p) => p.photo_id !== photoId).map(toBookPhoto));
   await insertOwnPages(bookId, page, [{ photoId, layout }]);
+  await touch(bookId);
+}
+
+// ── a larger photo for a small one ──────────────────────────────────────
+
+/** How far apart in time a replacement may have been taken. */
+const REPLACEMENT_WINDOW_HOURS = 3;
+/** At most this many photos are compared with the small one. */
+const REPLACEMENT_CANDIDATES = 150;
+/** At most this many replacements are offered. */
+const REPLACEMENT_OFFERS = 6;
+
+export interface PhotoBookReplacement {
+  photo_id: number;
+  filename: string;
+  taken_at: string | null;
+  edited_at: string | null;
+  /** The dpi it prints at in the small photo's place. */
+  dpi: number;
+  /** In the same series of near-duplicates as the small photo (else only alike by the embedding). */
+  same_series: boolean;
+}
+
+/** The slot a photo holds on a page, with what it needs for its dpi. */
+async function slotOf(userId: number, bookId: number, pageId: number, photoId: number) {
+  const { loaded, page } = await ownedPage(userId, bookId, pageId);
+  const index = page.photos.findIndex((p) => p.photo_id === photoId);
+  if (index < 0) throw APIError.notFound("photo not on this page");
+  const cell = page.layout.cells[index];
+  if (!cell) throw APIError.failedPrecondition("the photo has no place on this page");
+  const rect = slotGeometry(loaded.format, page.layout, cell, pageCaptioned(loaded, page)).image;
+  return { loaded, page, slot: page.photos[index]!, index, rect };
+}
+
+/**
+ * Photos that could take a small photo's place: the same scene (its series of
+ * near-duplicates, or taken within a few hours and alike by the embedding),
+ * visible to the owner, not hidden by them, not in the book yet, and large
+ * enough to print at `MIN_PRINT_DPI` or more in that place. Best first.
+ */
+export async function suggestPhotoBookReplacements(
+  userId: number,
+  bookId: number,
+  pageId: number,
+  photoId: number,
+): Promise<PhotoBookReplacement[]> {
+  const { loaded, slot, rect } = await slotOf(userId, bookId, pageId, photoId);
+  const inBook = new Set(loaded.pages.flatMap((p) => p.photos.map((s) => s.photo_id)));
+  const mates = new Set((await seriesMates(photoId)).filter((id) => !inBook.has(id)));
+
+  const near: SQL[] = [];
+  if (slot.taken_at) {
+    near.push(sql`${photos.taken_at} BETWEEN ${slot.taken_at}::timestamp - make_interval(hours => ${REPLACEMENT_WINDOW_HOURS})
+      AND ${slot.taken_at}::timestamp + make_interval(hours => ${REPLACEMENT_WINDOW_HOURS})`);
+  }
+  if (mates.size) near.push(inArray(photos.id, [...mates]));
+  if (!near.length) return [];
+
+  const rows = await dbAll<{
+    id: number;
+    filename: string;
+    taken_at: string | null;
+    width: number | null;
+    height: number | null;
+    edit_id: number | null;
+    edit_crop: PhotoEdit["crop"];
+    edit_rotation: number | null;
+    edited_at: string | null;
+    quality: number | null;
+    aesthetic: number | null;
+  }>(
+    db.select({
+      id: photos.id,
+      filename: photos.filename,
+      taken_at: photos.taken_at,
+      width: photos.width,
+      height: photos.height,
+      edit_id: photoTransforms.id,
+      edit_crop: photoTransforms.crop,
+      edit_rotation: photoTransforms.rotation,
+      edited_at: photoTransforms.updated_at,
+      quality: photos.ai_quality_score,
+      aesthetic: aestheticScoreSql,
+    })
+      .from(photos)
+      .leftJoin(photoTransforms, and(eq(photoTransforms.photo_id, photos.id), eq(photoTransforms.user_id, userId)))
+      .where(and(
+        accessiblePhotoCondition(userId),
+        sql`${photos.mime_type} LIKE 'image/%'`,
+        sql`NOT EXISTS (SELECT 1 FROM ${photoCuration} pc WHERE pc.photo_id = ${photos.id} AND pc.user_id = ${userId} AND pc.status = 'hidden')`,
+        sql`(${sql.join(near, sql` OR `)})`,
+      ))
+      .limit(REPLACEMENT_CANDIDATES * 4),
+  );
+
+  const sharp = rows
+    .filter((r) => !inBook.has(r.id))
+    .map((r) => {
+      const edit: PhotoEdit | null = r.edit_id != null ? { crop: r.edit_crop ?? null, rotation: r.edit_rotation ?? 0 } : null;
+      const size = editedSize(r.width, r.height, edit);
+      const dpi = size ? slotDpi(size.width, size.height, rect) : null;
+      return { r, edited: edit ? r.edited_at : null, dpi };
+    })
+    .filter((c): c is typeof c & { dpi: number } => c.dpi != null && c.dpi >= MIN_PRINT_DPI);
+  if (!sharp.length) return [];
+
+  // Closest in time first, so the embedding compares the likeliest ones.
+  const at = slot.taken_at ? Date.parse(slot.taken_at.replace(" ", "T")) : NaN;
+  const gap = (t: string | null) => (t && Number.isFinite(at) ? Math.abs(Date.parse(t.replace(" ", "T")) - at) : Infinity);
+  sharp.sort((a, b) => gap(a.r.taken_at) - gap(b.r.taken_at) || a.r.id - b.r.id);
+  const compared = sharp.filter((c) => !mates.has(c.r.id)).slice(0, REPLACEMENT_CANDIDATES);
+  const alike = await similarToPhoto(photoId, compared.map((c) => c.r.id));
+
+  return sharp
+    .filter((c) => mates.has(c.r.id) || alike.has(c.r.id))
+    .map((c) => ({ ...c, score: photoScore(c.r.aesthetic, c.r.quality) }))
+    .sort((a, b) => Number(mates.has(b.r.id)) - Number(mates.has(a.r.id)) || b.score - a.score || a.r.id - b.r.id)
+    .slice(0, REPLACEMENT_OFFERS)
+    .map((c) => ({
+      photo_id: c.r.id,
+      filename: c.r.filename,
+      taken_at: c.r.taken_at,
+      edited_at: c.edited,
+      dpi: Math.round(c.dpi),
+      same_series: mates.has(c.r.id),
+    }));
+}
+
+/**
+ * Put `newPhotoId` in the place of `photoId` on a page: same slot, same
+ * layout. Only a photo `suggestPhotoBookReplacements` would offer is taken,
+ * so the place prints sharp afterwards. The cover follows; the old photo's
+ * caption goes with it.
+ */
+export async function replacePhotoInBook(userId: number, bookId: number, pageId: number, photoId: number, newPhotoId: number): Promise<void> {
+  const offers = await suggestPhotoBookReplacements(userId, bookId, pageId, photoId);
+  if (!offers.some((o) => o.photo_id === newPhotoId)) {
+    throw APIError.failedPrecondition("this photo cannot take the place: not alike, not larger, or not visible");
+  }
+  const { loaded } = await slotOf(userId, bookId, pageId, photoId);
+  await dbExec(db.update(photoBookSlot).set({ photo_id: newPhotoId })
+    .where(and(eq(photoBookSlot.page_id, pageId), eq(photoBookSlot.photo_id, photoId))));
+  const stillInBook = loaded.pages.some((p) => p.photos.some((s) => s.photo_id === photoId && p.id !== pageId));
+  if (!stillInBook) {
+    await dbExec(db.delete(photoBookCaption).where(and(eq(photoBookCaption.book_id, bookId), eq(photoBookCaption.photo_id, photoId))));
+    if (loaded.book.cover_photo_id === photoId) {
+      await dbExec(db.update(photoBook).set({ cover_photo_id: newPhotoId }).where(eq(photoBook.id, bookId)));
+    }
+  }
   await touch(bookId);
 }
 

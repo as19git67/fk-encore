@@ -327,3 +327,30 @@ export async function dropSimilarPhotos<T extends SimilarCandidate>(list: T[]): 
   if (list.length < 2) return list;
   return thinSimilar(list, await similarLoader(similarityWindows(list)));
 }
+
+/**
+ * Which of `candidates` look like `target` (the same scene, `BOOK_SIMILARITY`);
+ * empty when the embedding service cannot say. Compares all of them with the
+ * target in one window, so pass at most `SIMILAR_WINDOW_MAX - 1`.
+ */
+export async function similarToPhoto(target: number, candidates: number[]): Promise<Set<number>> {
+  const ids = candidates.filter((id) => id !== target).slice(0, SIMILAR_WINDOW_MAX - 1);
+  if (!ids.length) return new Set();
+  const pairs = await similarLoader([[target, ...ids]]);
+  const out = new Set<number>();
+  for (const { a, b } of pairs) {
+    if (a === target) out.add(b);
+    else if (b === target) out.add(a);
+  }
+  return out;
+}
+
+/** The other members of every near-duplicate series `photoId` is in, reviewed or not. */
+export async function seriesMates(photoId: number): Promise<number[]> {
+  const rows = await dbAll<{ photo_id: number }>(
+    db.selectDistinct({ photo_id: photoGroupMembers.photo_id }).from(photoGroupMembers)
+      .where(inArray(photoGroupMembers.group_id,
+        db.select({ id: photoGroupMembers.group_id }).from(photoGroupMembers).where(eq(photoGroupMembers.photo_id, photoId)))),
+  );
+  return rows.map((r) => r.photo_id).filter((id) => id !== photoId);
+}

@@ -36,6 +36,9 @@ import {
   fitPhotoBookToEdits,
   fixPhotoBookLowDpi,
   movePhotoToOwnPage,
+  replacePhotoInBook,
+  suggestPhotoBookReplacements,
+  type PhotoBookReplacement,
   type LowDpiFix,
   getPhotoBookView,
   listPhotoBooks,
@@ -191,6 +194,24 @@ export const movePhotoToOwnPageApi = api(
   async ({ id, pageId, photoId }: { id: number; pageId: number; photoId: number }): Promise<PhotoBookView> => {
     const userId = viewer();
     await movePhotoToOwnPage(userId, id, pageId, photoId);
+    return getPhotoBookView(userId, id);
+  },
+);
+
+/** Larger photos of the same scene that would print a small photo's place sharp. */
+export const suggestPhotoBookReplacementsApi = api(
+  { expose: true, method: "GET", path: "/photo-books/:id/pages/:pageId/photos/:photoId/replacements", auth: true },
+  async ({ id, pageId, photoId }: { id: number; pageId: number; photoId: number }): Promise<{ replacements: PhotoBookReplacement[] }> => {
+    return { replacements: await suggestPhotoBookReplacements(viewer(), id, pageId, photoId) };
+  },
+);
+
+/** One of those in the small photo's place. */
+export const replacePhotoInBookApi = api(
+  { expose: true, method: "PUT", path: "/photo-books/:id/pages/:pageId/photos/:photoId/replace", auth: true },
+  async ({ id, pageId, photoId, newPhotoId }: { id: number; pageId: number; photoId: number; newPhotoId: number }): Promise<PhotoBookView> => {
+    const userId = viewer();
+    await replacePhotoInBook(userId, id, pageId, photoId, newPhotoId);
     return getPhotoBookView(userId, id);
   },
 );

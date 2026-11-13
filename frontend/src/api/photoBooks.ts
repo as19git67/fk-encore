@@ -243,6 +243,23 @@ export function movePhotoToOwnPage(id: number, pageId: number, photoId: number) 
   return apiFetch<PhotoBook>(`/photo-books/${id}/pages/${pageId}/photos/${photoId}/own-page`, { method: 'POST' })
 }
 
+export interface PhotoBookReplacement {
+  photo_id: number
+  filename: string
+  taken_at: string | null
+  edited_at: string | null
+  dpi: number
+  same_series: boolean
+}
+
+export function suggestPhotoBookReplacements(id: number, pageId: number, photoId: number) {
+  return apiFetch<{ replacements: PhotoBookReplacement[] }>(`/photo-books/${id}/pages/${pageId}/photos/${photoId}/replacements`)
+}
+
+export function replacePhotoInBook(id: number, pageId: number, photoId: number, newPhotoId: number) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/pages/${pageId}/photos/${photoId}/replace`, { method: 'PUT', body: JSON.stringify({ newPhotoId }) })
+}
+
 export function deletePhotoBook(id: number) {
   return apiFetch<void>(`/photo-books/${id}`, { method: 'DELETE' })
 }

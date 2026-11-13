@@ -23,7 +23,8 @@
  * Photos that would print under 200 dpi: the warning jumps from one such page
  * to the next ("Zeigen") and fixes what a layout can ("Beheben": another
  * layout or order, else a page of its own). What is too small even alone
- * stays marked; its menu offers to take it out.
+ * stays marked; its menu offers a larger photo of the same scene in its
+ * place (its series, or alike and taken within a few hours) or to take it out.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -59,6 +60,8 @@ import {
   fitPhotoBookToEdits,
   fixPhotoBookLowDpi,
   movePhotoToOwnPage,
+  replacePhotoInBook,
+  suggestPhotoBookReplacements,
   getPhotoBook,
   photoBookImageUrl,
   rebuildPhotoBook,
@@ -71,6 +74,7 @@ import {
   type PhotoBook,
   type PhotoBookFormat,
   type PhotoBookLowDpiFix,
+  type PhotoBookReplacement,
   type PhotoBookPage,
   type PhotoBookSlot,
 } from '../api/photoBooks'
@@ -218,8 +222,46 @@ const lowDpiFixText = computed(() => {
   const joined = parts.join(' und ')
   const done = joined ? `${joined.charAt(0).toUpperCase()}${joined.slice(1)}.` : 'Am Layout ließ sich nichts verbessern.'
   if (!f.remaining) return `${done} Alle Fotos drucken jetzt mit mindestens 200 dpi.`
-  return `${done} ${f.remaining === 1 ? 'Ein Foto ist' : `${f.remaining} Fotos sind`} selbst allein auf einer Seite zu klein. Ersetze ${f.remaining === 1 ? 'es' : 'sie'} durch ein größeres Foto oder nimm ${f.remaining === 1 ? 'es' : 'sie'} über das Menü des Fotos aus dem Buch.`
+  return `${done} ${f.remaining === 1 ? 'Ein Foto ist' : `${f.remaining} Fotos sind`} selbst allein auf einer Seite zu klein. Im Menü des Fotos findest du größere Fotos derselben Szene zum Ersetzen, oder du nimmst ${f.remaining === 1 ? 'es' : 'sie'} aus dem Buch.`
 })
+
+// A larger photo of the same scene in a small one's place.
+const replaceOpen = ref(false)
+const replaceTarget = ref<{ page: PhotoBookPage; slot: PhotoBookSlot } | null>(null)
+const replacements = ref<PhotoBookReplacement[]>([])
+const replaceLoading = ref(false)
+const replaceError = ref('')
+
+async function openReplace(page: PhotoBookPage, slot: PhotoBookSlot) {
+  replaceTarget.value = { page, slot }
+  replacements.value = []
+  replaceError.value = ''
+  replaceLoading.value = true
+  replaceOpen.value = true
+  try {
+    replacements.value = (await suggestPhotoBookReplacements(bookId.value, page.id, slot.photo_id)).replacements
+  } catch (err: any) {
+    replaceError.value = err?.message ?? 'Die Vorschläge konnten nicht geladen werden.'
+  } finally {
+    replaceLoading.value = false
+  }
+}
+
+async function chooseReplacement(r: PhotoBookReplacement) {
+  const t = replaceTarget.value
+  if (!t) return
+  await apply(() => replacePhotoInBook(bookId.value, t.page.id, t.slot.photo_id, r.photo_id))
+  if (!actionError.value) replaceOpen.value = false
+}
+
+function replacementUrl(r: PhotoBookReplacement): string {
+  return photoBookImageUrl({ photoId: r.photo_id, filename: r.filename, editedAt: r.edited_at }, auth.user?.id, 320)
+}
+
+function replacementLabel(r: PhotoBookReplacement): string {
+  const when = r.taken_at ? new Date(r.taken_at.replace(' ', 'T')).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : 'ohne Datum'
+  return `Dieses Foto einsetzen: ${when}, druckt mit ${r.dpi} dpi${r.same_series ? ', aus derselben Serie' : ''}`
+}
 
 function misfitHint(page: PhotoBookPage): string {
   return page.edit_misfit === 'own_layout'
@@ -343,6 +385,13 @@ const slotMenuItems = computed<MenuItem[]>(() => {
       disabled: book.value?.cover_photo_id === t.slot.photo_id,
       command: (): void => { void apply(() => updatePhotoBook(bookId.value, { coverPhotoId: t.slot.photo_id })) },
     },
+    ...(t.slot.low_dpi
+      ? [{
+          label: 'Durch größeres Foto ersetzen …',
+          icon: 'pi pi-images',
+          command: (): void => { void openReplace(t.page, t.slot) },
+        }]
+      : []),
     ...(t.slot.low_dpi && t.page.kind === 'photos' && t.page.slots.length > 1
       ? [{
           label: 'Auf eigene Seite',
@@ -590,6 +639,28 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
       @close="showOpen = false"
     />
 
+    <Dialog v-model:visible="replaceOpen" class="dialog-md" modal header="Durch größeres Foto ersetzen">
+      <p class="pbd-hint">
+        Fotos derselben Szene, die an dieser Stelle mit mindestens 200 dpi gedruckt würden: aus derselben Serie oder ähnlich und kurz davor oder danach aufgenommen.
+      </p>
+      <p v-if="replaceLoading" class="pbd-hint"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> Suche ähnliche Fotos …</p>
+      <Message v-else-if="replaceError" severity="error" :closable="false">{{ replaceError }}</Message>
+      <p v-else-if="!replacements.length" class="pbd-hint">
+        Kein ähnliches Foto ist groß genug. Setze das Foto auf eine eigene Seite oder nimm es aus dem Buch.
+      </p>
+      <ul v-else class="pbd-replacements">
+        <li v-for="r in replacements" :key="r.photo_id">
+          <button type="button" class="pbd-replacement" :disabled="busy" :aria-label="replacementLabel(r)" @click="chooseReplacement(r)">
+            <img :src="replacementUrl(r)" alt="" loading="lazy" />
+            <span class="pbd-replacement-dpi">{{ r.dpi }} dpi<template v-if="r.same_series"> · Serie</template></span>
+          </button>
+        </li>
+      </ul>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" text @click="replaceOpen = false" />
+      </template>
+    </Dialog>
+
     <Dialog v-model:visible="captionOpen" class="dialog-sm" modal header="Bildunterschrift">
       <label class="pbd-field">
         <span>Text unter dem Foto</span>
@@ -720,6 +791,46 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
 }
 .pbd-page--flash {
   box-shadow: 0 0 0 4px var(--p-primary-color);
+}
+.pbd-replacements {
+  list-style: none;
+  margin: 0;
+  padding: var(--focus-ring-reach);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+.pbd-replacement {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+  cursor: pointer;
+  overflow: hidden;
+}
+.pbd-replacement:hover {
+  background: var(--p-content-hover-background);
+}
+.pbd-replacement:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.pbd-replacement img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+}
+.pbd-replacement-dpi {
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+  padding: 0 var(--space-2) var(--space-2);
+  text-align: left;
 }
 .pbd-warn-actions {
   display: flex;

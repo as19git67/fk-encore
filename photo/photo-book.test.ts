@@ -45,10 +45,13 @@ import {
   movePhotoToOwnPage,
   rebuildPhotoBook,
   removePhotoFromBookPage,
+  replacePhotoInBook,
+  suggestPhotoBookReplacements,
   setPhotoBookPageLayout,
   updatePhotoBook,
   updatePhotoBookChapter,
 } from "./photo-book.service";
+import { setSimilarPairsLoader } from "./photo-book-subjects";
 import { renderCoverPdf, renderHomePdf, renderInsidePdf, type RenderBook } from "./photo-book-pdf";
 import { toRenderBook } from "./photo-book-export";
 
@@ -504,6 +507,53 @@ describe("photo book service", () => {
       expect(view.pages[at + 1]!.slots.map((s) => s.photo_id)).toEqual([tiny]);
       expect(view.pages[at + 1]!.chapter_id).toBe(holder.chapter_id);
       expect(view.photo_count).toBe(9);
+    }
+  });
+
+  it("offers a larger photo of the same scene for a small one, and puts it in its place", async () => {
+    const list = [];
+    for (let i = 0; i < 5; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`));
+    const id = await createPhotoBook(user.id, { title: "Ersatz", photoIds: list.map((p) => p.id) });
+    let view = await getPhotoBookView(user.id, id);
+    const page = view.pages.find((p) => p.kind === "photos" && p.slots.length > 1)!;
+    const small = page.slots[0]!.photo_id;
+    await db.update(photos).set({ width: 300, height: 200 }).where(eq(photos.id, small));
+    await updatePhotoBook(user.id, id, { coverPhotoId: small });
+
+    const [{ takenAt }] = await db.select({ takenAt: photos.taken_at }).from(photos).where(eq(photos.id, small));
+    const at = new Date(`${takenAt!.replace(" ", "T")}Z`);
+    const shifted = (min: number) => new Date(at.getTime() + min * 60_000).toISOString().replace("T", " ").slice(0, 19);
+    const alike = await upload(user.id, shifted(20));
+    const alikeSmall = await upload(user.id, shifted(25), { width: 320, height: 210 });
+    const unlike = await upload(user.id, shifted(30));
+    const hidden = await upload(user.id, shifted(35));
+    const later = await upload(user.id, shifted(60 * 24));
+    const foreign = await upload(other.id, shifted(40));
+    await db.insert(photoCuration).values({ user_id: user.id, photo_id: hidden.id, status: "hidden" });
+
+    setSimilarPairsLoader(async (windows) => {
+      const ids = new Set(windows.flat());
+      return [alike.id, alikeSmall.id, hidden.id, later.id, foreign.id]
+        .filter((o) => ids.has(o) && ids.has(small))
+        .map((o) => ({ a: small, b: o }));
+    });
+    try {
+      const offers = await suggestPhotoBookReplacements(user.id, id, page.id, small);
+      expect(offers.map((o) => o.photo_id)).toEqual([alike.id]);
+      expect(offers[0]!.dpi).toBeGreaterThanOrEqual(200);
+      expect(offers[0]!.same_series).toBe(false);
+
+      await expect(replacePhotoInBook(user.id, id, page.id, small, unlike.id)).rejects.toThrow(/cannot take the place/);
+      await replacePhotoInBook(user.id, id, page.id, small, alike.id);
+      view = await getPhotoBookView(user.id, id);
+      const after = view.pages.find((p) => p.id === page.id)!;
+      expect(after.slots.map((s) => s.photo_id)).toContain(alike.id);
+      expect(after.slots.map((s) => s.photo_id)).not.toContain(small);
+      expect(after.layout).toBe(page.layout);
+      expect(view.cover_photo_id).toBe(alike.id);
+      expect(view.low_dpi_count).toBe(0);
+    } finally {
+      setSimilarPairsLoader(null);
     }
   });
 
