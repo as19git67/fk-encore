@@ -7,6 +7,7 @@ import {
   WALKING_SPEED_M_PER_MIN,
   haversineMeters,
   legLimitFor,
+  storedTravelClass,
   travelLeg,
   walkingLeg,
 } from "./travel";
@@ -148,6 +149,31 @@ describe("transit means public transport and walking", () => {
       expect(travelLeg(FROM, to, "transit").minutes)
         .toBeLessThanOrEqual(walkingLeg(FROM, to).minutes);
     }
+  });
+
+  it("walks across the square even where the tram would be a minute", () => {
+    // Below the overhead floor the ride carries no wait, and its speed
+    // alone used to beat walking: 270 m read "1 min ÖPNV".
+    const ACROSS_THE_SQUARE = { lat: FROM.lat + 180 / 111_320, lon: FROM.lon };
+    expect(travelLeg(FROM, ACROSS_THE_SQUARE, "transit")).toEqual(walkingLeg(FROM, ACROSS_THE_SQUARE));
+  });
+
+  it("tells a stored walked hop from a stored ride, at any distance", () => {
+    // A stop row keeps only minutes and metres; reading it back must
+    // say what `travelLeg` chose, or the list shows a walk as a tram.
+    for (let metres = 0; metres <= 60_000; metres += metres < 3_000 ? 10 : 500) {
+      for (const extraM of [0, 800]) {
+        const to = { lat: FROM.lat + metres / 111_320, lon: FROM.lon };
+        const leg = travelLeg(FROM, to, "transit", extraM);
+        expect(storedTravelClass(leg.minutes, leg.distanceM, "transit"), `${metres} m`).toBe(leg.travelClass);
+      }
+    }
+  });
+
+  it("reads a stored hop on a car or bike stay as a ride", () => {
+    // Only transit walks a hop; 300 m in 4 min by car is still the car.
+    expect(storedTravelClass(4, 300, "car")).toBe("short_ride");
+    expect(storedTravelClass(4, 300, "foot")).toBe("short_walk");
   });
 
   it("leaves the car and the bicycle alone", () => {
