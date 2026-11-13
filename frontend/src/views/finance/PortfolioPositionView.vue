@@ -708,6 +708,7 @@ function transactionCash(tx: PortfolioTransaction): string {
         <template v-if="data.holding_gaps.length > 0">
           <p class="pp-muted">
             Zwischen diesen Depotständen hat sich die Stückzahl geändert, ohne dass eine Transaktion das erklärt — etwa ein Depotübertrag, ein Split oder eine fehlende Abrechnung.
+            Stammt ein Stand aus einem alten Auszug, den du nicht mehr betrachten willst: Portfolio › ⋮ › „Betrachten ab …“.
           </p>
           <ScrollX>
             <table class="pp-table">

@@ -1060,6 +1060,24 @@ und die Transaktionen.
 - **Fehler und Grenzfälle:** keine
 - **Test:** –
 
+### FIN-POR-09 Depot erst ab einem Tag betrachten
+
+- **Wo:** Mehr-Menü (⋮) › „Betrachten ab …“
+- **Recht:** `finance.view` mit Schreibzugriff auf das Depot
+- **Vorbedingung:** ein Depot mit alter Geschichte (etwa ein
+  Jahresdepotauszug aus einer früheren Zeit)
+- **Schritte:**
+  1. Beim Depot einen Tag wählen und „Übernehmen“ drücken.
+  2. Die Nachfrage bestätigen.
+- **Ergebnis:** Bestände und aus Belegen oder Buchungen gelesene
+  Transaktionen vor dem Tag werden gelöscht und nicht mehr eingelesen;
+  Bestandsabgleich, Performance und Transaktionen beginnen an dem Tag.
+  Die Belege bleiben im Dokumentmodul.
+- **Fehler und Grenzfälle:** Von Hand erfasste Transaktionen bleiben,
+  zählen aber nicht. Ein leeres Feld betrachtet wieder die ganze
+  Geschichte; „Belege einlesen“ holt die älteren Stände dann zurück.
+- **Test:** –
+
 ---
 
 ## POS: Position (`/finanzen/portfolio/:key`)

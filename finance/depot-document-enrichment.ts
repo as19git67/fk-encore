@@ -49,6 +49,7 @@ import {
 } from "./depot-settlement-parser";
 import type { SettlementValues } from "./depot-settlement-merge";
 import { admitSecurity } from "./depot-securities";
+import { beforeWatch, watchFromByAccount } from "./depot-watch-from";
 import { isinChecksumValid } from "./isin";
 import { documentsOfPaperType, SETTLEMENT_PAPER_TYPES } from "./depot-paper-type";
 import { reportTrades, type ReportTrade } from "./depot-statement-parser";
@@ -84,7 +85,9 @@ export type EnrichOutcome =
   /** The security is only proposed (or ignored) in the depot's master: nothing booked until the user decides. */
   | "unknown_security"
   /** The model could not be reached: nothing is booked on the rules alone, the paper is read again later. */
-  | "model_unavailable";
+  | "model_unavailable"
+  /** Executed before the depot's start day: nothing is booked. */
+  | "before_watch";
 
 export interface EnrichResult {
   document_id: number;
@@ -954,6 +957,10 @@ export async function enrichDocument(
   }
   result.account_id = holding.account_id;
   result.matched_by = holding.via;
+  if (beforeWatch(await watchFromByAccount([holding.account_id]), holding.account_id, parsed.executedAt)) {
+    result.outcome = "before_watch";
+    return result;
+  }
 
   // The depot's securities master has the last word. A paper that found
   // its depot by the depot number or by earlier rows may name any security

@@ -14,6 +14,7 @@ import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
+import DepotWatchFromDialog from '../../components/finance/DepotWatchFromDialog.vue'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
 import PortfolioReview from '../../components/finance/PortfolioReview.vue'
 import PortfolioPerformance from '../../components/finance/PortfolioPerformance.vue'
@@ -615,6 +616,13 @@ async function deriveFromAccountBookings() {
   }
 }
 
+// ── Start day per depot ──────────────────────────────────────────────
+const watchFromOpen = ref(false)
+
+async function watchFromChanged() {
+  await Promise.all([loadPortfolio(), loadTransactions()])
+}
+
 // ── "More" menu beside the title ─────────────────────────────────────
 const moreMenu = ref<InstanceType<typeof Menu> | null>(null)
 
@@ -632,6 +640,11 @@ const moreItems = computed(() => [
     icon: deriving.value ? 'pi pi-spin pi-spinner' : 'pi pi-sync',
     disabled: noDepots.value || deriving.value,
     command: () => { void deriveFromAccountBookings() },
+  },
+  {
+    label: 'Betrachten ab …',
+    icon: 'pi pi-calendar',
+    command: () => { watchFromOpen.value = true },
   },
   { separator: true },
   {
@@ -669,6 +682,7 @@ onBeforeUnmount(() => {
         @click="toggleMoreMenu"
       />
       <Menu ref="moreMenu" :model="moreItems" :popup="true" />
+      <DepotWatchFromDialog v-model:visible="watchFromOpen" @changed="watchFromChanged" />
     </template>
 
     <template #toolbar>

@@ -50,6 +50,7 @@ import {
 } from "../db/schema";
 import { ownFinanceAccountIds } from "./account-acl";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
+import { notBeforeWatch, setWatchFrom, watchFromByAccount } from "./depot-watch-from";
 import { dedupeSnapshotRows, securityIdentity, type SecurityIdentity } from "./security-identity";
 import { closesAfter, latestQuotes, quoteDay, quoteFitsCurrency, type StoredQuote } from "./quote-store";
 import {
@@ -1027,7 +1028,13 @@ export async function loadTransactions(accountIds: number[], identity?: Security
       note: financeDepotTransaction.note,
     })
     .from(financeDepotTransaction)
-    .where(inArray(financeDepotTransaction.account_id, accountIds));
+    .where(
+      and(
+        inArray(financeDepotTransaction.account_id, accountIds),
+        // Hand-entered rows before the depot's start day stay, but do not count.
+        notBeforeWatch(financeDepotTransaction.account_id, financeDepotTransaction.executed_at),
+      ),
+    );
   return rows.map((r) => ident.complete(r));
 }
 
@@ -3100,5 +3107,73 @@ export const deriveFromBookings = api(
       total.errors.push(...s.errors);
     }
     return total;
+  },
+);
+
+// ----------------------------------------------------------------------
+// Start day per depot (depot-watch-from)
+// ----------------------------------------------------------------------
+
+interface DepotWatchFrom {
+  account_id: number;
+  label: string;
+  closed: boolean;
+  /** First day looked at (YYYY-MM-DD); null: the whole history counts. */
+  watch_from: string | null;
+}
+
+interface ListWatchFromResponse {
+  depots: DepotWatchFrom[];
+}
+
+/** The caller's depots with the day each is looked at from. */
+export const listDepotWatchFrom = api(
+  { expose: true, method: "GET", path: "/finance/portfolio/watch-from", auth: true },
+  async (): Promise<ListWatchFromResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const depots = await visibleDepots(auth, null);
+    const watch = await watchFromByAccount(depots.map((d) => d.id));
+    return {
+      depots: depots.map((d) => ({ account_id: d.id, label: d.label, closed: d.closed, watch_from: watch.get(d.id) ?? null })),
+    };
+  },
+);
+
+interface SetWatchFromParams {
+  accountId: number;
+  /** YYYY-MM-DD, or null to look at the whole history again. */
+  watch_from: string | null;
+}
+
+interface SetWatchFromResponse {
+  account_id: number;
+  watch_from: string | null;
+  holdings_removed: number;
+  transactions_removed: number;
+}
+
+/**
+ * Set the day a depot is looked at from. What was read in before it —
+ * holdings and transactions from papers or bookings — is deleted; the
+ * papers stay. Hand-entered transactions stay but do not count.
+ */
+export const setDepotWatchFrom = api(
+  { expose: true, method: "PUT", path: "/finance/portfolio/depots/:accountId/watch-from", auth: true },
+  async ({ accountId, watch_from }: SetWatchFromParams): Promise<SetWatchFromResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const [depot] = await writableDepots(auth, [accountId]);
+    if (!depot) throw APIError.permissionDenied("write access to this depot is required");
+    let day: string | null = null;
+    if (watch_from !== null && watch_from !== "") {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(watch_from);
+      const parsed = m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
+      if (!parsed || parsed.toISOString().slice(0, 10) !== watch_from) {
+        throw APIError.invalidArgument(`watch_from must be a day YYYY-MM-DD, got '${watch_from}'`);
+      }
+      day = watch_from;
+    }
+    return setWatchFrom(accountId, day);
   },
 );

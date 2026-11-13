@@ -139,6 +139,7 @@ export const listAccounts = api(
           account_number: financeAccount.account_number,
           label: financeAccount.label,
           closed_at: financeAccount.closed_at,
+          watch_from: financeAccount.watch_from,
           created_at: financeAccount.created_at,
         })
         .from(financeAccount)
