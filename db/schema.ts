@@ -5567,6 +5567,17 @@ export const travelHotelWatches = pgTable(
     breakfast_required: boolean("breakfast_required").notNull().default(false),
     /** Also price the party in double rooms (two adults each): a second search per check. */
     split_rooms: boolean("split_rooms").notNull().default(false),
+    /** 'hotel': one hotel; 'area': `query` is a place, narrowed by stars and rating (migration 0313). */
+    kind: text("kind").$type<"hotel" | "area">().notNull().default("hotel"),
+    min_stars: integer("min_stars"),
+    /** Google's guest rating, 1–5 scale. */
+    min_rating: doublePrecision("min_rating"),
+    /** Any stay of `min_nights`–`max_nights` between `check_in` (earliest arrival) and `check_out` (latest departure). */
+    flexible: boolean("flexible").notNull().default(false),
+    min_nights: integer("min_nights"),
+    max_nights: integer("max_nights"),
+    /** The stay an area watch with flexible dates checked last; -1 before the first. */
+    flex_rotation: integer("flex_rotation").notNull().default(-1),
     /** Last day the job checks this watch. */
     end_date: date("end_date", { mode: "string" }).notNull(),
     paused: boolean("paused").notNull().default(false),
@@ -5604,6 +5615,13 @@ export const travelHotelChecks = pgTable(
     matching_source: text("matching_source"),
     below_limit: boolean("below_limit").notNull().default(false),
     error: text("error"),
+    /** The stay this check priced; null on checks before migration 0313 (the watch's dates). */
+    check_in: date("check_in", { mode: "string" }),
+    check_out: date("check_out", { mode: "string" }),
+    /** Area watches: the hotel of the matching offer. */
+    matching_hotel: text("matching_hotel"),
+    /** Hotel with flexible dates: the cheapest stays the price calendar estimated. */
+    stays: jsonb("stays").$type<{ start: string; end: string; perNight: number }[]>(),
   },
   (table) => [
     index("travel_hotel_check_watch_idx").on(table.watch_id, table.checked_at),
@@ -5632,6 +5650,8 @@ export const travelHotelOffers = pgTable(
     link: text("link"),
     /** Rooms the offer books; prices above are for all of them together. */
     rooms: integer("rooms").notNull().default(1),
+    /** Area watches: the hotel of the offer. */
+    hotel: text("hotel"),
   },
   (table) => [index("travel_hotel_offer_check_idx").on(table.check_id)],
 );
