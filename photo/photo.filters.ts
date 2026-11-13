@@ -48,6 +48,10 @@ export interface PhotoFilterParams {
   albumMode?: MembershipMode;
   personIds?: number[];
   personMode?: MembershipMode;
+  /** With `personIds` included: `any` (default) is one of them, `all` is every one on the same photo. */
+  personMatch?: "any" | "all";
+  /** None of these persons is on the photo; works next to `personIds`. */
+  withoutPersonIds?: number[];
   mediaTypes?: MediaType[];
   hasGps?: boolean;
   hasFaces?: boolean;
@@ -135,6 +139,8 @@ export interface PhotoFilterQuery {
   albumMode?: string;
   personIds?: string;
   personMode?: string;
+  personMatch?: string;
+  withoutPersonIds?: string;
   mediaTypes?: string;
   hasGps?: boolean;
   hasFaces?: boolean;
@@ -207,6 +213,8 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
   if (q.albumMode === "include" || q.albumMode === "exclude") f.albumMode = q.albumMode;
   if (q.personIds) f.personIds = parseIntArray(q.personIds);
   if (q.personMode === "include" || q.personMode === "exclude") f.personMode = q.personMode;
+  if (q.personMatch === "any" || q.personMatch === "all") f.personMatch = q.personMatch;
+  if (q.withoutPersonIds) f.withoutPersonIds = parseIntArray(q.withoutPersonIds);
   if (q.mediaTypes) f.mediaTypes = parseMediaTypes(q.mediaTypes);
   if (q.hasGps !== undefined) f.hasGps = Boolean(q.hasGps);
   if (q.hasFaces !== undefined) f.hasFaces = Boolean(q.hasFaces);
@@ -360,21 +368,28 @@ export function buildPhotoFilterConditions(
     conds.push(m === "include" ? clause : sql`NOT (${clause})`);
   }
 
-  if (filter.personIds && filter.personIds.length > 0) {
-    const m = filter.personMode ?? "include";
-    const idList = sql.join(
-      filter.personIds.map((id) => sql`${id}`),
-      sql`, `
-    );
-    const clause = sql`EXISTS (
+  // A face of `ids` on the photo, as the caller named it (their own assignment).
+  const personOnPhoto = (ids: number[]) => sql`EXISTS (
       SELECT 1 FROM ${faces} f
       JOIN ${userFaceAssignments} ufa
         ON ufa.face_id = f.id AND ufa.user_id = ${userId}
       WHERE f.photo_id = ${photos.id}
         AND ufa.ignored = false
-        AND ufa.person_id IN (${idList})
+        AND ufa.person_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
     )`;
-    conds.push(m === "include" ? clause : sql`NOT (${clause})`);
+
+  if (filter.personIds && filter.personIds.length > 0) {
+    const m = filter.personMode ?? "include";
+    if (m === "include" && filter.personMatch === "all") {
+      for (const id of new Set(filter.personIds)) conds.push(personOnPhoto([id]));
+    } else {
+      const clause = personOnPhoto(filter.personIds);
+      conds.push(m === "include" ? clause : sql`NOT (${clause})`);
+    }
+  }
+
+  if (filter.withoutPersonIds && filter.withoutPersonIds.length > 0) {
+    conds.push(sql`NOT (${personOnPhoto(filter.withoutPersonIds)})`);
   }
 
   if (filter.mediaTypes && filter.mediaTypes.length > 0) {

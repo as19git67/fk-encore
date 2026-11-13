@@ -92,9 +92,9 @@ export function budgetForWindow(window: number): number {
 /**
  * Up to this size every schema goes along with every request; past it the
  * model gets the one-line catalog and fetches schemas with describe_tools.
- * The full catalog of a user with every module is about 10,400 tokens (49
- * tools, ranking and grouping on the three list tools and the photo book
- * included); the budget leaves room for a few more before a round goes to
+ * The full catalog of a user with every module is about 11,000 tokens (48
+ * tools, ranking and grouping on the three list tools, the photo book and
+ * the person filters of the photo tools included); the budget leaves room for a few more before a round goes to
  * fetching — and only a turn with every area in play sends the full
  * catalog, since the router (assistent-wegfindung.md) offers the areas'
  * tools. A deployment with a small
@@ -102,7 +102,7 @@ export function budgetForWindow(window: number): number {
  * ASSISTANT_CONTEXT_TOKENS along with the model's window, since the
  * schemas count against that budget on every round.
  */
-const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "11000", 10);
+const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "11500", 10);
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 

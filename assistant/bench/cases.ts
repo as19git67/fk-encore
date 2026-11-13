@@ -326,6 +326,32 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "photos-without-person",
+    title: "Fotos eines Orts ohne eine Person",
+    question: "Zeig mir die Fotos aus Beispielland, auf denen Lena nicht drauf ist.",
+    expect: [
+      { tool: "list_persons" },
+      { tool: "list_photos", args: { place: { $contains: "Beispielland" }, without_person_ids: { $contains: "42" }, person_ids: { $absent: true } } },
+    ],
+    results: {
+      list_persons: { rows: [{ id: 41, name: "Max", faces: 318 }, { id: 42, name: "Lena", faces: 402 }], total: 2 },
+      list_photos: { rows: [{ id: 950, taken: "2024-08-03", place: "Beispielland" }, { id: 951, taken: "2024-08-04", place: "Beispielland" }], total: 2 },
+    },
+  },
+  {
+    id: "photos-two-persons-together",
+    title: "Fotos mit zwei Personen zusammen",
+    question: "Welche Fotos zeigen Lena und Max zusammen?",
+    expect: [
+      { tool: "list_persons" },
+      { tool: "list_photos", args: { person_ids: { $all: [{ $contains: "41" }, { $contains: "42" }] }, person_match: "all" } },
+    ],
+    results: {
+      list_persons: { rows: [{ id: 41, name: "Max", faces: 318 }, { id: 42, name: "Lena", faces: 402 }], total: 2 },
+      list_photos: { rows: [{ id: 960, taken: "2023-06-10", place: "Beispielstadt" }], total: 1 },
+    },
+  },
+  {
     id: "best-per-person-and-year-distinct",
     title: "Je Person und Jahr die besten, nicht zu ähnlich, ins Album",
     question: "Für Lena und Max je Jahr die 5 besten Bilder, nicht zu ähnlich, ins Album \"Lieblingsbilder\".",

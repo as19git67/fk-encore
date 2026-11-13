@@ -316,7 +316,9 @@ these parameters as given.
 - Also in this PR: the schema budget rises from 10000 to 11000 tokens —
   the photo-book tool took the full catalog (49 tools, about 10,400
   estimated tokens) past it, so a turn with every area in play went to
-  `describe_tools` first; only such turns send the full catalog.
+  `describe_tools` first; only such turns send the full catalog. The
+  person filters of the photo tools (`without_person_ids`, `person_match`)
+  took it to about 11,000, so the budget rose again to 11500.
 
 ### Stage 4 (implemented)
 

@@ -205,6 +205,19 @@ describe("list_photos", () => {
     expect(out.block?.route).toBeUndefined();
   });
 
+  it("passes persons to leave out and 'all of them together' on, and links no gallery for them", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 3, taken_at: "2024-08-03T10:00:00Z" }] });
+    const out = await tool("list_photos").run({ place: "Beispielland", person_ids: [41, 42], person_match: "all", without_person_ids: [43] }, ctx());
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({
+      personIds: "41,42", personMode: "include", personMatch: "all", withoutPersonIds: "43",
+    }));
+    expect(out.block?.route).toBeUndefined();
+  });
+
+  it("refuses a person both on and off the photo", async () => {
+    await expect(tool("list_photos").run({ person_ids: [41], without_person_ids: [41] }, ctx())).rejects.toThrow(/person_ids and in without_person_ids/);
+  });
+
   it("asks newest first by default", async () => {
     clients.photo.listPhotos.mockResolvedValue({ photos: [] });
     await tool("list_photos").run({ favorite: true }, ctx());
@@ -397,7 +410,7 @@ describe("list_photos", () => {
     expect(checkArguments(tool("list_transactions"), { rank_by: "amount", direction: "out" })).toEqual([expect.stringMatching(/^order is required with rank_by/)]);
     expect(checkArguments(tool("list_transactions"), { rank_by: "amount", direction: "out", order: "desc" })).toEqual([]);
     // The model's copy of the schema has no dependentRequired: llama-server's grammar builder does not know the keyword.
-    expect(tool("list_photos").parameters.dependentRequired).toEqual({ rank_by: ["direction"] });
+    expect(tool("list_photos").parameters.dependentRequired).toEqual({ rank_by: ["direction"], person_match: ["person_ids"] });
     expect(toolDefinition(tool("list_photos")).function.parameters).not.toHaveProperty("dependentRequired");
   });
 
