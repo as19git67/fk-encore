@@ -30,17 +30,21 @@
  * (a row OCR garbled) was not read that day, not sold: the day is left out
  * for it instead of counting as 0.
  *
+ * Nothing before the depot's start day counts (see depot-watch-from):
+ * an old yearly statement would otherwise open every position it lists.
+ *
  * A security the depot ignores (taken out by the user, or a proposal
  * turned down) is left out: its read transactions are gone, so the
  * bank's old snapshots of it would otherwise show as gaps forever.
  */
 
-import { asc, inArray } from "drizzle-orm";
+import { and, asc, inArray } from "drizzle-orm";
 
 import db from "../db/database";
 import { documents, financeAccountHolding, financeDepotTransaction } from "../db/schema";
 import { statementNamesPosition } from "./depot-statement-parser";
 import { ignoredSecurities, isIgnoredIn } from "./depot-securities";
+import { notBeforeWatch } from "./depot-watch-from";
 import { dedupeSnapshotRows, securityIdentity } from "./security-identity";
 
 /** Shares below this are rounding noise, not a gap. */
@@ -230,7 +234,12 @@ export async function reconcileHoldings(
         document_id: financeAccountHolding.document_id,
       })
       .from(financeAccountHolding)
-      .where(inArray(financeAccountHolding.account_id, accountIds))
+      .where(
+        and(
+          inArray(financeAccountHolding.account_id, accountIds),
+          notBeforeWatch(financeAccountHolding.account_id, financeAccountHolding.as_of),
+        ),
+      )
       .orderBy(asc(financeAccountHolding.as_of)),
     db
       .select({
@@ -243,7 +252,12 @@ export async function reconcileHoldings(
         amount: financeDepotTransaction.amount,
       })
       .from(financeDepotTransaction)
-      .where(inArray(financeDepotTransaction.account_id, accountIds)),
+      .where(
+        and(
+          inArray(financeDepotTransaction.account_id, accountIds),
+          notBeforeWatch(financeDepotTransaction.account_id, financeDepotTransaction.executed_at),
+        ),
+      ),
     ignoredSecurities(accountIds),
     securityIdentity(),
   ]);

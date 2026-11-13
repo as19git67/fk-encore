@@ -261,6 +261,7 @@ const statementOutcomeLine = computed(() => {
   if (!r) return null
   if (r.ignored) return 'Der Beleg ist für die Depots ignoriert.'
   if (r.outcome === 'no_depot') return 'Kein Depot gefunden: weder über die Depotnummer noch über ein bestätigtes Wertpapier.'
+  if (r.outcome === 'before_watch') return 'Der Stand liegt vor dem Tag, ab dem das Depot betrachtet wird: nichts wird übernommen.'
   const lines: string[] = []
   if (r.outcome === 'stored') lines.push('Erneutes Einlesen würde Positionen ergänzen, die im Bestand dieses Tages fehlen.')
   const parts: string[] = []
@@ -318,6 +319,7 @@ function outcomeText(d: NonNullable<SettlementInspection['depot']>): string | nu
     case 'enriched': return 'Einlesen würde die vorhandene Transaktion um fehlende Werte ergänzen.'
     case 'linked': return 'Einlesen würde den Beleg mit der passenden Transaktion verknüpfen.'
     case 'already_linked': return 'Der Beleg ist bereits mit einer Transaktion verknüpft.'
+    case 'before_watch': return 'Die Transaktion liegt vor dem Tag, ab dem das Depot betrachtet wird: nichts wird gebucht.'
     case 'unverified': return 'Einlesen bucht nichts, solange Regel und KI sich widersprechen und keine Rechnung aufgeht.'
     case 'conflict':
       return `Der Betrag weicht ab: Beleg ${formatSignedCurrency(d.statement_net, cur)}, Transaktion ${formatSignedCurrency(d.transaction_net, cur)}. Nichts wurde überschrieben.`

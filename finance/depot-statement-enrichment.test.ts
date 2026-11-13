@@ -49,12 +49,14 @@ import {
 } from "../db/schema";
 import { enrichPendingStatements, inspectStatement, pruneStatementHoldings, readDepotStatement } from "./depot-statement-enrichment";
 import { reconcileHoldings } from "./depot-holding-reconciliation";
+import { setWatchFrom, watchFromOf } from "./depot-watch-from";
 import { admitSecurity, listSecurities, removeSecurity } from "./depot-securities";
 import {
   awaitDocumentEnrichRun,
   decideDepotSecurity,
   documentEnrichRunStatus,
   getPortfolioReview,
+  loadTransactions,
   resetDocumentEnrichRuns,
   resetDocumentReadings,
   startDocumentEnrichRun,
@@ -404,6 +406,58 @@ Alpha Industries AG ${ISIN_A}
     expect(gaps[0]).toMatchObject({ from: "2025-12-31", to: "2026-03-01", unexplained: "5.00000000" });
     // The stand read from the statement names it; the bank's sync names none.
     expect(gaps[0]).toMatchObject({ from_document_id: docId, to_document_id: null });
+  });
+
+  it("leaves out what lies before the depot's start day", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(STATEMENT_WITH_NUMBER);
+    await readDepotStatement(docId);
+    await db.insert(financeDepotTransaction).values([
+      // Read from a paper before the start day: deleted with it.
+      {
+        account_id: depot,
+        isin: ISIN_A,
+        name: "Alpha Industries AG",
+        kind: "dividend",
+        executed_at: "2025-11-20",
+        net_amount: "12.00",
+        currency: "EUR",
+        source: "document",
+      },
+      // Entered by hand before the start day: kept, but no longer counted.
+      {
+        account_id: depot,
+        isin: ISIN_A,
+        name: "Alpha Industries AG",
+        kind: "buy",
+        executed_at: "2025-10-01",
+        amount: "1",
+        net_amount: "-100.00",
+        currency: "EUR",
+        source: "manual",
+      },
+    ]);
+    // 20 on 2025-12-31 (the statement), 25 on 2026-03-01 (the bank): a gap of 5.
+    expect((await reconcileHoldings([depot])).gaps).toHaveLength(1);
+
+    const r = await setWatchFrom(depot, "2026-01-01");
+    expect(r).toMatchObject({ holdings_removed: 1, transactions_removed: 1 });
+    expect((await holdingsOf(depot)).map((h) => h.as_of.slice(0, 10))).toEqual(["2026-03-01"]);
+    expect((await reconcileHoldings([depot])).gaps).toHaveLength(0);
+
+    const left = await db.select().from(financeDepotTransaction).where(eq(financeDepotTransaction.account_id, depot));
+    expect(left.map((t) => t.source)).toEqual(["manual"]);
+    expect(await loadTransactions([depot])).toHaveLength(0);
+
+    // Read again, the paper states a day before the start: nothing is taken in.
+    expect((await readDepotStatement(docId)).outcome).toBe("before_watch");
+    expect(await holdingsOf(depot)).toHaveLength(1);
+
+    // Cleared, the whole history counts again and the paper reads in.
+    await setWatchFrom(depot, null);
+    expect(await watchFromOf(depot)).toBeNull();
+    expect(await loadTransactions([depot])).toHaveLength(1);
+    expect((await readDepotStatement(docId)).outcome).toBe("stored");
   });
 
   it("takes a position a statement names but could not read as not read that day, not as sold", async () => {

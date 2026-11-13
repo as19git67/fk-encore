@@ -59,6 +59,8 @@
  *   - Unmatched SECU bookings are skipped silently (counted, not errored —
  *     re-running after the next sync may match).
  *
+ *   - A booking before the depot's start day (depot-watch-from) is skipped.
+ *
  * Idempotency: `dedupe_hash = "giro:<linked_transaction_id>"` and the
  * partial unique index `(account_id, dedupe_hash) WHERE dedupe_hash IS
  * NOT NULL` makes re-runs no-ops.
@@ -67,6 +69,7 @@
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import db from "../db/database";
+import { beforeWatch, watchFromByAccount } from "./depot-watch-from";
 import {
   financeAccount,
   financeAccountHolding,
@@ -532,6 +535,7 @@ export async function deriveDepotTransactionsForBankcontact(
   const accountIds = accounts.map((a) => a.id);
   /** Bookings a new row was derived from: their papers are read below. */
   const derivedBookings: number[] = [];
+  const watch = await watchFromByAccount(accountIds);
 
   const txs = await db
     .select({
@@ -659,6 +663,12 @@ export async function deriveDepotTransactionsForBankcontact(
       stats.skipped++;
       if (isin || wkn) stats.skipped_no_holding++;
       else stats.skipped_no_identifier++;
+      continue;
+    }
+
+    // Before the depot's start day nothing is taken in (depot-watch-from).
+    if (beforeWatch(watch, holding.account_id, (tx.value_date ?? tx.booking_date).slice(0, 10))) {
+      stats.skipped++;
       continue;
     }
 
