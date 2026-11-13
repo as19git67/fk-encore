@@ -2129,15 +2129,17 @@ enum TripStayPlan {
         day.window == nil && !day.blocks.contains { $0.kind == "spots" }
     }
 
-    /// "3 h 20 von 9 h", "40 min zu viel", "noch frei", "keine Zeit frei",
+    /// "3 h 20 von 9 h", "Plan bis 19:40, Tag endet 19:00", "noch frei", "keine Zeit frei",
     /// or nil for a day without a clock.
     static func fillLine(_ day: TripDay) -> String? {
         if hasNoTime(day) { return "keine Zeit frei" }
         guard let window = day.window, window.minutes > 0 else { return nil }
         if let over = day.overrunMinutes, over > 0 {
-            // When the day would end and when it may: "zu viel" alone
-            // did not say against what (Anton, 11.11.).
-            return "endet \(TripClock.format(window.endMinutes + over)) statt \(TripClock.format(window.endMinutes))"
+            // When the plan would end and when the day may: "zu viel"
+            // alone did not say against what (Anton, 11.11.), and
+            // "endet 15:30 statt 09:15" not which of the two ends where
+            // (13.11.).
+            return "Plan bis \(TripClock.format(window.endMinutes + over)), Tag endet \(TripClock.format(window.endMinutes))"
         }
         let planned = (day.plannedMinutes ?? 0) + (day.waitMinutes ?? 0)
         if planned == 0 { return "noch frei" }

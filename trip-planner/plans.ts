@@ -1811,6 +1811,7 @@ async function planLeg(
       // assumes; a leg that simply starts at half past seven moves the
       // whole day forward rather than losing its front.
       nominalStartMinutes: arrival !== null ? dayStartMinutes ?? undefined : undefined,
+      spanAppointments: trip.ideas === true,
     });
     for (const d of framed.dropped) dropped.push({ ...d, dayIndex });
 

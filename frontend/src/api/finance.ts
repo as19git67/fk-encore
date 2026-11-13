@@ -826,6 +826,8 @@ export type DepotEnrichOutcome =
   | 'unverified'
   /** A tax statement with no transaction of the same security, kind and quantity to add its tax to. */
   | 'no_transaction'
+  /** Executed before the depot's start day: nothing was booked. */
+  | 'before_watch'
 
 export interface DepotEnrichResult {
   document_id: number
@@ -1150,6 +1152,33 @@ export async function decideDepotSecurity(
   return apiFetch(`/finance/portfolio/securities/${securityId}/decision`, {
     method: 'POST',
     body: JSON.stringify({ decision }),
+  })
+}
+
+/** A depot with the day it is looked at from (null: the whole history). */
+export interface DepotWatchFrom {
+  account_id: number
+  label: string
+  closed: boolean
+  watch_from: string | null
+}
+
+export async function listDepotWatchFrom(): Promise<{ depots: DepotWatchFrom[] }> {
+  return apiFetch('/finance/portfolio/watch-from')
+}
+
+export interface SetDepotWatchFromResponse {
+  account_id: number
+  watch_from: string | null
+  holdings_removed: number
+  transactions_removed: number
+}
+
+/** Set the day a depot is looked at from; what was read in before it is deleted. */
+export async function setDepotWatchFrom(accountId: number, watchFrom: string | null): Promise<SetDepotWatchFromResponse> {
+  return apiFetch(`/finance/portfolio/depots/${accountId}/watch-from`, {
+    method: 'PUT',
+    body: JSON.stringify({ watch_from: watchFrom }),
   })
 }
 

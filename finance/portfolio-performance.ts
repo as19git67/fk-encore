@@ -20,6 +20,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { financeAccountHolding, financeQuote } from "../db/schema";
+import { notBeforeWatch } from "./depot-watch-from";
 import { dedupeSnapshotRows, securityIdentity } from "./security-identity";
 import { isoTimestamp, latestQuotes, quoteDay, quoteFitsCurrency } from "./quote-store";
 import {
@@ -169,7 +170,12 @@ async function loadSnapshots(
       source: financeAccountHolding.source,
     })
     .from(financeAccountHolding)
-    .where(inArray(financeAccountHolding.account_id, accountIds))
+    .where(
+      and(
+        inArray(financeAccountHolding.account_id, accountIds),
+        notBeforeWatch(financeAccountHolding.account_id, financeAccountHolding.as_of),
+      ),
+    )
     .orderBy(asc(financeAccountHolding.as_of), asc(financeAccountHolding.id));
 
   // A depot synced twice a day: the later picture of that day stands.

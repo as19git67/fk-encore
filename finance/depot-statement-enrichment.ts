@@ -58,6 +58,7 @@ import {
 import { extractStatementPositions, LlmServiceUnavailableError } from "./llm-client";
 import { documentsOfPaperType, paperTypeOf } from "./depot-paper-type";
 import { enrichDocument } from "./depot-document-enrichment";
+import { beforeWatch, watchFromByAccount } from "./depot-watch-from";
 import { securityIdentity, type SecurityIdentity } from "./security-identity";
 
 console.log("[boot] finance/depot-statement-enrichment.ts: all imports resolved");
@@ -73,7 +74,9 @@ export type StatementOutcome =
   /** A statement, but no position with an identifier and a quantity. */
   | "no_positions"
   /** The user marked the document "ignore for depots". */
-  | "ignored";
+  | "ignored"
+  /** The paper states a day before the depot's start day: not taken in. */
+  | "before_watch";
 
 export type StatementMatchedBy = "depot_number" | "securities";
 
@@ -373,6 +376,10 @@ export async function readDepotStatement(
     return result;
   }
   result.account_id = accountId;
+  if (beforeWatch(await watchFromByAccount([accountId]), accountId, result.as_of)) {
+    result.outcome = "before_watch";
+    return result;
+  }
 
   let inserted = 0;
   let existing = 0;
@@ -619,6 +626,7 @@ export async function enrichPendingStatements(
         case "no_depot": stats.no_depot++; break;
         case "no_positions": stats.no_positions++; break;
         case "ignored": break;
+        case "before_watch": break;
       }
     } catch (err) {
       stats.errors.push(`document ${c.id}: ${(err as Error).message ?? String(err)}`);

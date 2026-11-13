@@ -504,6 +504,29 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     expect(row.net_amount).toBe("1100.00");
   });
 
+  it("skips a booking before the depot's start day", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({ accountId: depot, asOf: "2026-05-15", isin: "DE000A1EWWW0", wkn: "A1EWWW", name: "ADIDAS" });
+    await db.update(financeAccount).set({ watch_from: "2026-05-01" }).where(eq(financeAccount.id, depot));
+    for (const bookingDate of ["2026-04-20", "2026-05-20"]) {
+      await insertTx({
+        accountId: giro,
+        bookingDate,
+        amount: "1100.00",
+        purpose: "ADIDAS AG NA O.N.\nWPKNR: A1EWWW  ISIN: DE000A1EWWW0",
+        funds_code: "R",
+        transaction_code: null,
+      });
+    }
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    const rows = await db.select().from(financeDepotTransaction).where(eq(financeDepotTransaction.account_id, depot));
+    expect(rows.map((r) => r.executed_at.slice(0, 10))).toEqual(["2026-05-20"]);
+  });
+
   it("skips custody fees (CHRG)", async () => {
     const bcId = await insertBankcontact();
     const giro = await insertAccount(bcId, "giro", "GIRO-1");

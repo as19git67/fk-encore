@@ -113,7 +113,7 @@ final class TripStayPlanTests: XCTestCase {
     func testTheHeaderSaysPlannedOfAvailable() {
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 200)), "3 h 20 von 9 h")
         XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 0)), "noch frei")
-        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 600, over: 60)), "endet 19:00 statt 18:00")
+        XCTAssertEqual(TripStayPlan.fillLine(day(0, [], planned: 600, over: 60)), "Plan bis 19:00, Tag endet 18:00")
         // An older trip's day without a clock still has its blocks.
         XCTAssertNil(TripStayPlan.fillLine(day(0, [block("day", [])])))
         // Arriving after the day's end leaves no block and no window.

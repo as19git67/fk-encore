@@ -114,20 +114,20 @@ budget within days, so:
 - Turning the option off prices and reports as before.
 - Changing `checked_bag` is a change of criteria and clears the last report.
 
-## Data model (migrations 0312, 0314)
+## Data model (migrations 0312, 0315)
 
 - `travel_flight_watch`: owner, route, trip type, fixed dates or window
   and nights, `flex_rotation`, passengers, class, stops, airlines and mode,
   departure hours, currency, `limit_total`, end, pause, `checked_bag`
-  (0314), ways to report,
+  (0315), ways to report,
   `notified_price`/`notified_at`, last check and error.
 - `travel_flight_check`: one row per check — the dates searched, searches
   used, number of flights, cheapest price with airlines and stops, Google's
-  level and typical range, `bag_price` (0314, price with one checked bag
+  level and typical range, `bag_price` (0315, price with one checked bag
   per seated traveller once known), `below_limit`, error.
 - `travel_flight_offer`: the 20 cheapest flights of a check (no links).
 - `travel_flight_booking`: sellers of the reported flight, with their
-  `baggage` lines (0314).
+  `baggage` lines (0315).
 - `travel_flight_price_point`: Google's price history per date combination
   and day.
 

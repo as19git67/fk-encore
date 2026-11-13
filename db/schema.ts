@@ -2406,6 +2406,9 @@ export const financeAccount = pgTable(
     // (rather than a boolean) so the UI can show *when* it happened
     // without a separate audit table.
     closed_at: timestamp("closed_at", { mode: "string", withTimezone: true }),
+    // A depot is looked at from this day on: holdings and transactions
+    // before it are neither read in nor counted (finance/depot-watch-from.ts).
+    watch_from: date("watch_from", { mode: "string" }),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()
       .defaultNow(),
