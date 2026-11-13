@@ -1095,6 +1095,9 @@ final class TripPlannerViewModel {
         let departMinutes: Int
         let returnMinutes: Int
         let radiusM: Int?
+        /// The excursion to go on from, without the way back in between
+        /// (Mock 18); its return is then this one's departure.
+        var from: String? = nil
     }
 
     /// A day trip with a time window on a day (Anton, 11.11.: as many
@@ -1111,6 +1114,7 @@ final class TripPlannerViewModel {
             let departAt: String
             let returnAt: String
             let replaceDayTrip: Bool?
+            let from: String?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -1120,7 +1124,7 @@ final class TripPlannerViewModel {
                 body: Body(lat: draft.place.latitude, lon: draft.place.longitude, label: draft.place.name,
                            radiusM: draft.radiusM, departAt: TripClock.format(draft.departMinutes),
                            returnAt: TripClock.format(draft.returnMinutes),
-                           replaceDayTrip: replaceDayTrip ? true : nil),
+                           replaceDayTrip: replaceDayTrip ? true : nil, from: draft.from),
             )
             apply(response)
             return nil
@@ -1148,6 +1152,33 @@ final class TripPlannerViewModel {
                 body: Body(lat: draft.place.latitude, lon: draft.place.longitude, label: draft.place.name,
                            radiusM: draft.radiusM, departAt: TripClock.format(draft.departMinutes),
                            returnAt: TripClock.format(draft.returnMinutes)),
+            )
+            apply(response)
+            return nil
+        } catch {
+            return TripErrorText.describe(error)
+        }
+    }
+
+    /// Go on from `before` to `excursion` without the way back to the
+    /// quarters in between, or with `nil` go back there first (Mock 18).
+    func linkExcursion(_ excursion: TripExcursion, after before: TripExcursion?, dayIndex: Int) async -> String? {
+        guard offlineSince == nil else { return Self.offlineText }
+        struct Body: Encodable {
+            let from: String?
+            enum CodingKeys: String, CodingKey { case from }
+            // An explicit null unlinks; an absent key would change nothing.
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(from, forKey: .from)
+            }
+        }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.patch(
+                "/trip-planner/plans/\(planId)/legs/\(legIndex)/days/\(dayIndex)/excursions/\(excursion.id)",
+                body: Body(from: before?.id),
             )
             apply(response)
             return nil

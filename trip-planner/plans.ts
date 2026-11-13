@@ -71,7 +71,7 @@ import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
 import { legLimitFor, type TransportMode } from "./travel";
 import { planTransitLeg } from "./transit-leg";
-import { excursionTravel, withExcursions, type Excursion } from "./excursions";
+import { chainHours, excursionWays, withExcursions, type Excursion } from "./excursions";
 import { parsePinReason } from "./pin-reason";
 import {
   DEFAULT_DAY_START_MINUTES,
@@ -302,6 +302,12 @@ export interface ExcursionRequest {
   departAt: string;
   /** When they start back from the destination, "HH:MM". */
   returnAt: string;
+  /**
+   * The excursion of the same day this one goes on from, without the
+   * way back in between (`excursions.ts`). Its `departAt` is then that
+   * one's `returnAt`.
+   */
+  from?: string;
 }
 
 export interface CreatePlanRequest {
@@ -926,6 +932,7 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
       radiusM: e.radiusM ?? undefined,
       departAt: formatMinutesOfDay(e.departMinutes),
       returnAt: formatMinutesOfDay(e.returnMinutes),
+      ...(e.from ? { from: e.from } : {}),
     }))),
   };
 }
@@ -1831,7 +1838,7 @@ async function planLeg(
     // already.
     const excursions = dayTrip === null ? excursionsByDay.get(dayIndex) ?? [] : [];
     if (excursions.length > 0) {
-      framed.blocks = withExcursions(framed.blocks, excursions, (e) => excursionTravel(anchor, e, mode));
+      framed.blocks = withExcursions(framed.blocks, excursions, excursionWays(excursions, anchor, mode));
     }
 
     // Beyond the detail horizon the day keeps its frame and stays
@@ -2184,9 +2191,12 @@ function groupExcursions(
       radiusM: req.radiusM === undefined ? null : Math.round(req.radiusM),
       departMinutes,
       returnMinutes,
+      ...(typeof req.from === "string" && req.from.length > 0 ? { from: req.from } : {}),
     });
     byDay.set(req.dayIndex, list);
   }
+  // A chained excursion leaves when the one before starts on.
+  for (const [dayIndex, list] of byDay) byDay.set(dayIndex, chainHours(list));
   return byDay;
 }
 

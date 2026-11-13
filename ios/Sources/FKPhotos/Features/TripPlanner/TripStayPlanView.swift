@@ -52,6 +52,8 @@ struct TripStayPlanView: View {
     /// inside its content can build from the values before the tap, and
     /// then "+ Spot in Seestadt" opened on the stay.
     @State private var picking: TripPickerRequest?
+    /// Two excursions about to go on from each other (Mock 18 B).
+    @State private var linking: TripExcursionLink?
     /// The excursion whose removal is being confirmed.
     @State private var removingExcursion: TripExcursionPick?
     /// Days that are over, opened from their one line (stage 5).
@@ -148,6 +150,11 @@ struct TripStayPlanView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Ideen und Suche", systemImage: "plus") { picking = TripPickerRequest() }
                 }
+            }
+        }
+        .sheet(item: $linking) { link in
+            TripExcursionLinkSheet(link: link, stayTitle: viewModel.leg?.displayTitle ?? "Unterkunft") {
+                await viewModel.linkExcursion(link.next, after: link.last, dayIndex: link.dayIndex)
             }
         }
         .sheet(item: $picking) { request in
@@ -865,13 +872,18 @@ struct TripStayPlanView: View {
             } else {
                 // A day with excursions (Mock 16): each window is a
                 // section of its own, the rest of the day at the quarters.
-                ForEach(TripStayPlan.sections(of: day)) { section in
-                    if let excursion = section.excursion {
-                        excursionSection(excursion, section: section, day: day, leg: leg)
-                    } else {
+                // Excursions that go on from each other (Mock 18) are one
+                // frame with a destination per window.
+                let groups = TripExcursionChain.groups(TripStayPlan.sections(of: day))
+                ForEach(Array(groups.enumerated()), id: \.element.id) { at, group in
+                    switch group {
+                    case .home(let section):
                         ForEach(Array(section.block.stops.enumerated()), id: \.element.id) { offset, stop in
                             planCard(stop, index: section.offset + offset, day: day, leg: leg)
                         }
+                    case .chain(let links):
+                        excursionSection(links, next: TripExcursionChain.next(after: at, in: groups),
+                                         day: day, leg: leg)
                     }
                 }
                 insertionLine(TripDropSlot(dayIndex: day.dayIndex, before: nil))
@@ -938,69 +950,184 @@ struct TripStayPlanView: View {
 
     /// An excursion as a section of the day (Mock 16 A): where to, the
     /// hours, its own spots, "+ Spot in …", and below it the way back.
-    private func excursionSection(_ excursion: TripExcursion, section: TripStaySection,
+    /// A chain (Mock 18 A) is one frame with each destination under the
+    /// one before, the hop between them, and "+ Weiteres Ziel anhängen";
+    /// `next` is an excursion right after it that could go on from it
+    /// instead of from the quarters (Mock 18 B, "Direkt weiter").
+    private func excursionSection(_ links: [TripStaySection], next: TripExcursion?,
                                   day: TripDay, leg: TripLeg) -> some View {
-        let pick = TripExcursionPick(dayIndex: day.dayIndex, excursion: excursion)
+        let chain = links.compactMap(\.excursion)
+        let first = chain.first
+        let last = chain.last
         return VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline) {
-                    Label(excursion.title, systemImage: leg.transportMode.systemImage)
+                    Label(TripExcursionChain.title(chain), systemImage: leg.transportMode.systemImage)
                         .font(.subheadline.weight(.semibold))
                         .onDrag {
                             NSItemProvider(object: TripStayPlan.excursionDragId(
-                                dayIndex: day.dayIndex, excursionId: excursion.id) as NSString)
+                                dayIndex: day.dayIndex, excursionId: first?.id ?? "") as NSString)
                         }
                     Spacer()
-                    Menu {
-                        Button {
-                            dayAction(.excursion(excursion), day.dayIndex)
+                    if chain.count == 1, let first {
+                        excursionMenu(first, day: day, leg: leg)
+                    } else if let first {
+                        Menu {
+                            moveMenu(first, day: day, leg: leg)
                         } label: {
-                            Label("Zeiten ändern", systemImage: "clock")
+                            Image(systemName: "ellipsis.circle")
+                                .frame(minWidth: 44, minHeight: 32)
+                                .contentShape(.rect)
                         }
-                        moveMenu(excursion, day: day, leg: leg)
-                        Button {
-                            wayRequest = TripWayRequest(
-                                from: .init(name: leg.anchorLabel ?? "Unterkunft", coordinate: leg.anchor),
-                                to: .init(name: excursion.displayName, coordinate: excursion.coordinate),
-                                check: nil, segment: nil, currentMode: leg.transportMode)
-                        } label: {
-                            Label("Weg zeigen", systemImage: "map")
-                        }
-                        Button(role: .destructive) {
-                            removingExcursion = pick
-                        } label: {
-                            Label("Ausflug entfernen", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .frame(minWidth: 44, minHeight: 32)
-                            .contentShape(.rect)
+                        .accessibilityLabel("Aktionen für \(TripExcursionChain.title(chain))")
                     }
-                    .accessibilityLabel("Aktionen für \(excursion.title)")
                 }
-                Text(excursion.line)
+                Text(TripExcursionChain.line(chain))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ForEach(Array(section.block.stops.enumerated()), id: \.element.id) { offset, stop in
-                    planCard(stop, index: section.offset + offset, day: day, leg: leg)
+                ForEach(Array(links.enumerated()), id: \.element.id) { at, section in
+                    if let excursion = section.excursion {
+                        if chain.count > 1 {
+                            if at > 0 {
+                                Label(TripExcursionChain.hopLine(excursion), systemImage: leg.transportMode.systemImage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.accentColor.opacity(0.10), in: .rect(cornerRadius: 8))
+                            }
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label(excursion.displayName, systemImage: "mappin.circle.fill")
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(TripExcursionChain.stopLine(excursion, goesOn: at < links.count - 1))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                excursionMenu(excursion, day: day, leg: leg)
+                            }
+                        }
+                        ForEach(Array(section.block.stops.enumerated()), id: \.element.id) { offset, stop in
+                            planCard(stop, index: section.offset + offset, day: day, leg: leg)
+                        }
+                        Button {
+                            picking = TripPickerRequest(excursion: TripExcursionPick(dayIndex: day.dayIndex,
+                                                                                     excursion: excursion))
+                        } label: {
+                            Label("Spot in \(excursion.displayName)", systemImage: "plus")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityHint("Sucht um \(excursion.displayName) und legt in dieses Zeitfenster")
+                    }
                 }
-                Button {
-                    picking = TripPickerRequest(excursion: pick)
-                } label: {
-                    Label("Spot in \(excursion.displayName)", systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
+                if let last {
+                    Button {
+                        dayAction(.appendExcursion(last), day.dayIndex)
+                    } label: {
+                        Label("Weiteres Ziel anhängen", systemImage: "plus")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityHint("Fährt von \(last.displayName) direkt weiter, ohne Rückfahrt dazwischen")
                 }
-                .buttonStyle(.borderless)
-                .accessibilityHint("Sucht um \(excursion.displayName) und legt in dieses Zeitfenster")
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.5)))
-            Text("↓ zurück in \(leg.displayTitle) ca. \(TripClock.format(excursion.backHomeMinutes))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let last {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("↓ zurück in \(leg.displayTitle) ca. \(TripClock.format(last.backHomeMinutes))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let next, TripExcursionChain.canLink(last, next),
+                       TripExcursionLink(dayIndex: day.dayIndex, last: last, next: next).suggestion == nil {
+                        Button {
+                            linking = TripExcursionLink(dayIndex: day.dayIndex, last: last, next: next)
+                        } label: {
+                            Text("Direkt weiter ›")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityHint("Von \(last.displayName) direkt nach \(next.displayName), ohne Rückfahrt")
+                    }
+                }
+                // The app suggests it when going on is nearer than going
+                // home (Anton, 13.11.).
+                if let next, TripExcursionChain.canLink(last, next),
+                   let suggestion = TripExcursionLink(dayIndex: day.dayIndex, last: last, next: next).suggestion {
+                    Button {
+                        linking = TripExcursionLink(dayIndex: day.dayIndex, last: last, next: next)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline) {
+                            Label("Direkt weiter nach \(next.displayName)?", systemImage: "arrow.turn.down.right")
+                                .font(.footnote.weight(.semibold))
+                            Spacer()
+                            Text("spart ca. \(TripClock.duration(suggestion.savedMinutes))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.accentColor.opacity(0.12), in: .rect(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("\(TripClock.duration(suggestion.hopMinutes)) statt \(TripClock.duration(suggestion.viaQuartersMinutes)) über \(leg.displayTitle)")
+                }
+            }
         }
+    }
+
+    /// The "⋯" of one destination: its hours, the day it is on, the way
+    /// there, going back to the quarters before it, and taking it off.
+    private func excursionMenu(_ excursion: TripExcursion, day: TripDay, leg: TripLeg) -> some View {
+        let pick = TripExcursionPick(dayIndex: day.dayIndex, excursion: excursion)
+        let before = TripExcursionChain.before(excursion, in: day)
+        return Menu {
+            Button {
+                dayAction(.excursion(excursion), day.dayIndex)
+            } label: {
+                Label("Zeiten ändern", systemImage: "clock")
+            }
+            if before == nil {
+                moveMenu(excursion, day: day, leg: leg)
+            }
+            Button {
+                wayRequest = TripWayRequest(
+                    from: before.map { TripWayRequest.End(name: $0.displayName, coordinate: $0.coordinate) }
+                        ?? TripWayRequest.End(name: leg.anchorLabel ?? "Unterkunft", coordinate: leg.anchor),
+                    to: .init(name: excursion.displayName, coordinate: excursion.coordinate),
+                    check: nil, segment: nil, currentMode: leg.transportMode)
+            } label: {
+                Label("Weg zeigen", systemImage: "map")
+            }
+            if before != nil {
+                Button {
+                    Task {
+                        if let failure = await viewModel.linkExcursion(excursion, after: nil, dayIndex: day.dayIndex) {
+                            viewModel.errorMessage = failure
+                        }
+                    }
+                } label: {
+                    Label("Dazwischen zurück zur Unterkunft", systemImage: "house")
+                }
+            }
+            Button(role: .destructive) {
+                removingExcursion = pick
+            } label: {
+                Label(before == nil && TripExcursionChain.after(excursion, in: day) == nil
+                      ? "Ausflug entfernen" : "Ziel entfernen", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .frame(minWidth: 44, minHeight: 32)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel("Aktionen für \(excursion.title)")
     }
 
     /// Dragging a card to another place (the system's lift, a line where
@@ -2139,6 +2266,8 @@ enum TripStayDayAction {
     case dayTrip
     /// Change an excursion's hours or place (Mock 16).
     case excursion(TripExcursion)
+    /// Add a destination that goes on from this excursion (Mock 18).
+    case appendExcursion(TripExcursion)
 }
 
 /// An excursion and its day, for the picker and the removal question.

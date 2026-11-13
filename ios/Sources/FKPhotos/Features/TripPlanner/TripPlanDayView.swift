@@ -45,6 +45,8 @@ struct TripPlanDayView: View {
     @State private var settingDayAnchor = false
     /// The excursion whose sheet is open from its "⋯", if any.
     @State private var editingExcursion: TripExcursion?
+    /// The destination a new excursion goes on from (Mock 18).
+    @State private var appendingAfter: TripExcursion?
     /// The block being split (§6.5), while its sheet is open.
     @State private var splitting: TripSplitTarget?
     /// A stay's planning view, pushed from the itinerary, which is where
@@ -184,7 +186,10 @@ struct TripPlanDayView: View {
                 candidates: viewModel.leg?.pool ?? [],
             ) { Task { await viewModel.load() } }
         }
-        .sheet(isPresented: $settingDayAnchor, onDismiss: { editingExcursion = nil }) {
+        .sheet(isPresented: $settingDayAnchor, onDismiss: {
+            editingExcursion = nil
+            appendingAfter = nil
+        }) {
             excursionSheet
         }
         .sheet(isPresented: $addingFixpoint, onDismiss: {
@@ -330,11 +335,13 @@ struct TripPlanDayView: View {
         let dayIndex = viewModel.dayIndex
         let ideas = viewModel.plan?.isIdeasTrip ?? false
         let others = (day?.excursions ?? []).filter { $0.id != editingExcursion?.id }
+        let after = appendingAfter ?? editingExcursion.flatMap { editing in day.flatMap { TripExcursionChain.before(editing, in: $0) } }
         TripDayAnchorSheet(
             dayLabel: dayLabel(),
             current: editingExcursion == nil ? day?.anchor : nil,
             excursion: editingExcursion,
             allowsWholeDay: others.isEmpty,
+            after: after,
             onSaveWindow: ideas ? saveWindow(day: day, dayIndex: dayIndex) : nil,
             onRemoveExcursion: editingExcursion.map { editing -> () async -> Void in
                 { await viewModel.removeExcursion(editing, dayIndex: dayIndex) }
@@ -378,6 +385,11 @@ struct TripPlanDayView: View {
                     Self.afterMenu { settingDayAnchor = true }
                 case .excursion(let excursion):
                     editingExcursion = excursion
+                    appendingAfter = nil
+                    Self.afterMenu { settingDayAnchor = true }
+                case .appendExcursion(let excursion):
+                    editingExcursion = nil
+                    appendingAfter = excursion
                     Self.afterMenu { settingDayAnchor = true }
                 }
             },

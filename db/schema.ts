@@ -3740,6 +3740,9 @@ export const tripPlanDays = pgTable(
       radiusM: number | null;
       departMinutes: number;
       returnMinutes: number;
+      // The excursion this one goes on from, without the way back
+      // in between; absent or null leaves from the quarters.
+      from?: string | null;
     }[]>().notNull().default([]),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
