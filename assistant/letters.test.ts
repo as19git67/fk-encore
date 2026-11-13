@@ -230,7 +230,7 @@ describe("render_letter", () => {
       .returning({ id: assistantProposal.id });
     const row = await executeAssistantProposal({ id: stored.id, edits: { body: "x" } });
     expect(row.status).toBe("pending");
-    expect(row.error).toBe("this proposal cannot be changed");
+    expect(row.error).toBe("Dieser Vorschlag lässt sich nicht ändern.");
     expect(row.letter).toBeNull();
   });
 });

@@ -29,6 +29,7 @@ import {
   discardProposal,
   executeProposal,
   ProposalError,
+  readProposal,
   refreshProposalBlocks,
   currentProposalText,
   proposalStates,
@@ -737,6 +738,15 @@ export const executeAssistantProposal = api(
     const row = await executeProposal(id, ctx, WRITE_TOOLS_BY_NAME, edits).catch(proposalError);
     log.info("assistant proposal decided", { proposal_id: id, tool: row.tool, status: row.status, failed: row.error !== null });
     return row;
+  },
+);
+
+/** A proposal as it stands now; the card asks while another click is still executing it. */
+export const getAssistantProposal = api(
+  { expose: true, method: "GET", path: "/assistant/proposals/:id", auth: true },
+  async ({ id }: { id: number }): Promise<ProposalRow> => {
+    const auth = assistantUser();
+    return readProposal(id, Number(auth.userID)).catch(proposalError);
   },
 );
 

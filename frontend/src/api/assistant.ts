@@ -253,6 +253,11 @@ export async function downloadResult(path: string, fallbackName = 'ergebnis.pdf'
   URL.revokeObjectURL(url)
 }
 
+/** A proposal as it stands now; never runs it. */
+export function getProposal(id: number): Promise<Proposal> {
+  return apiFetch(`/assistant/proposals/${id}`)
+}
+
 export function discardProposal(id: number): Promise<Proposal> {
   return apiFetch(`/assistant/proposals/${id}/discard`, { method: 'POST' })
 }

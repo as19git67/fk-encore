@@ -10,17 +10,25 @@
 import { computed, inject, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import { discardProposal, downloadResult, executeProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
+import { discardProposal, downloadResult, executeProposal, getProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
 import { letterGaps } from '../../utils/letterGaps'
 import { CONTINUE_AFTER_PROPOSAL, continuationQuestion, refreshAfterProposal } from '../../utils/proposalEffects'
+import { decidedProposal, latestProposal, rememberProposal } from '../../utils/proposalStates'
 import LetterEditor, { type LetterForm } from './LetterEditor.vue'
 import CollageProposal, { type CollageForm } from './CollageProposal.vue'
 import MarkdownView from '../documents/MarkdownView.vue'
 
 const props = defineProps<{ proposal: Proposal }>()
 
-const current = ref<Proposal>({ ...props.proposal })
-watch(() => props.proposal, (p) => { current.value = { ...p } })
+// A card arrives with the state its answer carried; what this session saw
+// it become since (another copy of the same card was executed) wins.
+const current = ref<Proposal>({ ...latestProposal(props.proposal) })
+watch(() => props.proposal, (p) => { current.value = { ...latestProposal(p) } })
+watch(() => decidedProposal(current.value.proposal_id), (d) => {
+  if (d && (current.value.status === 'pending' || current.value.status === 'executing')) {
+    current.value = { ...d, count: d.count ?? current.value.count }
+  }
+})
 
 function formOf(p: Proposal): LetterForm | null {
   const l = p.letter
@@ -107,26 +115,57 @@ async function download() {
 }
 const error = computed(() => requestError.value ?? current.value.error)
 
+/** How long a card waits on another click that is still executing it. */
+const EXECUTING_POLL_MS = 1000
+const EXECUTING_POLLS = 120
+
+/** The proposal once it is no longer being executed; reading never runs it. */
+async function settled(p: Proposal): Promise<Proposal> {
+  let next = p
+  for (let i = 0; next.status === 'executing' && i < EXECUTING_POLLS; i++) {
+    await new Promise((r) => setTimeout(r, EXECUTING_POLL_MS))
+    next = await getProposal(p.proposal_id)
+  }
+  return next
+}
+
+function show(next: Proposal) {
+  current.value = { ...next, count: next.count ?? current.value.count }
+}
+
+/** A card that ran: the app's caches, and the rest of the question if the assistant said it goes on. */
+function afterExecuted(next: Proposal) {
+  refreshAfterProposal(next.tool)
+  if (next.continuation && continueConversation) {
+    continueConversation(continuationQuestion(next.result_summary ?? next.summary, next.continuation))
+  }
+}
+
 async function decide(action: 'execute' | 'discard') {
   if (busy.value) return
   busy.value = action
   requestError.value = null
+  const id = current.value.proposal_id
   try {
-    const id = current.value.proposal_id
     const edits = action === 'execute' ? letterEdits() ?? collageEdits() : undefined
-    const next = action === 'execute'
+    const answer = action === 'execute'
       ? await (edits ? executeProposal(id, edits) : executeProposal(id))
       : await discardProposal(id)
-    current.value = { ...next, count: next.count ?? current.value.count }
-    if (action === 'execute' && next.status === 'executed') {
-      refreshAfterProposal(next.tool)
-      // The assistant said it goes on once the card ran; ask it to.
-      if (next.continuation && continueConversation) {
-        continueConversation(continuationQuestion(next.result_summary ?? next.summary, next.continuation))
-      }
-    }
+    const next = await settled(answer)
+    show(next)
+    rememberProposal(next)
+    if (action === 'execute' && next.status === 'executed') afterExecuted(next)
   } catch (e) {
-    requestError.value = e instanceof Error ? e.message : 'Der Vorschlag konnte nicht bearbeitet werden.'
+    // The answer may be lost while the action ran (a dropped connection):
+    // the card asks what became of it before it offers to try again.
+    const now = await getProposal(id).then(settled).catch(() => null)
+    if (now && now.status !== 'pending') {
+      show(now)
+      rememberProposal(now)
+      if (action === 'execute' && now.status === 'executed') afterExecuted(now)
+    } else {
+      requestError.value = e instanceof Error ? e.message : 'Der Vorschlag konnte nicht bearbeitet werden.'
+    }
   } finally {
     busy.value = null
   }
