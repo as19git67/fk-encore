@@ -146,6 +146,35 @@ export function hiddenOf(v: unknown): HiddenChoice {
   return s === "include" || s === "only" ? s : "exclude";
 }
 
+/**
+ * Who is on a photo beyond "one of person_ids": all of them together, and
+ * persons who must not be on it ("ohne Lena"). Shared by every tool that
+ * picks photos by a filter, so a question reads the same in each.
+ */
+export const PERSON_FILTER_PARAMS = {
+  person_match: { type: "string", enum: ["any", "all"], description: "all = every person_ids on the same photo ('A und B zusammen')" },
+  without_person_ids: { type: "array", items: { type: "integer" }, description: "persons NOT on the photo ('ohne Lena')" },
+} as const;
+
+/** The same two, bare: a write tool's `photos` filter says "as list_photos" once for all. */
+export const PERSON_FILTER_PARAMS_BARE = {
+  person_match: { type: "string", enum: ["any", "all"] },
+  without_person_ids: { type: "array", items: { type: "integer" } },
+} as const;
+
+/** `person_match` needs persons to match; `without_person_ids` stands alone. */
+export const PERSON_FILTER_REQUIRES: Record<string, string[]> = { person_match: ["person_ids"] };
+
+export function personFilterOf(args: Record<string, unknown>, personIds: number[]): { personMatch: "any" | "all"; withoutPersonIds: number[] } {
+  const personMatch = str(args.person_match) === "all" ? "all" : "any";
+  const withoutPersonIds = Array.isArray(args.without_person_ids)
+    ? [...new Set(args.without_person_ids.map((v) => int(v)).filter((v): v is number => v !== undefined && v > 0))]
+    : [];
+  const both = withoutPersonIds.filter((id) => personIds.includes(id));
+  if (both.length) throw new Error(`person ${both.join(", ")} is in person_ids and in without_person_ids: a photo cannot show and not show a person; drop it from one of them`);
+  return { personMatch, withoutPersonIds };
+}
+
 /** Whether a photo with this curation status belongs into a result under `hidden`. */
 export function passesHidden(status: string | null | undefined, hidden: HiddenChoice): boolean {
   const isHidden = status === "hidden";
@@ -166,7 +195,7 @@ function excerpt(text: string | undefined, max = 60): string | undefined {
 
 /** The filters of one `list_photos` call, as the photo service takes them. */
 interface PhotoFilter {
-  favorite?: boolean; dateFrom?: string; dateTo?: string; personIds?: string; personMode?: string;
+  favorite?: boolean; dateFrom?: string; dateTo?: string; personIds?: string; personMode?: string; personMatch?: string; withoutPersonIds?: string;
   locationText?: string; hasDescription?: boolean; text?: string; keyword?: string; sight?: string;
   orientation?: string; mediaTypes?: string; hasGps?: boolean; qualityMin?: number;
 }
@@ -191,7 +220,9 @@ async function emptyPhotosHint(filter: PhotoFilter, hidden: HiddenChoice, previo
   const without = (patch: Partial<PhotoFilter>): (() => Promise<ProbeCount>) => () => photoCount({ ...filter, ...patch }, hidden);
   if (filter.favorite) probes.push({ label: "favorite", args: ["favorite"], count: without({ favorite: undefined }) });
   if (filter.dateFrom || filter.dateTo) probes.push({ label: periodLabel(filter.dateFrom, filter.dateTo), args: ["date_from", "date_to"], count: without({ dateFrom: undefined, dateTo: undefined }) });
-  if (filter.personIds) probes.push({ label: `person_ids ${filter.personIds}`, args: ["person_ids"], count: without({ personIds: undefined, personMode: undefined }) });
+  if (filter.personIds) probes.push({ label: `person_ids ${filter.personIds}`, args: ["person_ids"], count: without({ personIds: undefined, personMode: undefined, personMatch: undefined }) });
+  if (filter.personMatch === "all") probes.push({ label: "person_match all", args: ["person_match"], count: without({ personMatch: undefined }) });
+  if (filter.withoutPersonIds) probes.push({ label: `without_person_ids ${filter.withoutPersonIds}`, args: ["without_person_ids"], count: without({ withoutPersonIds: undefined }) });
   if (filter.locationText) probes.push({ label: `place ${JSON.stringify(filter.locationText)}`, args: ["place"], count: without({ locationText: undefined }) });
   if (filter.text) probes.push({ label: `text ${JSON.stringify(filter.text)}`, args: ["text"], count: without({ text: undefined }) });
   if (filter.keyword) probes.push({ label: `keyword ${JSON.stringify(filter.keyword)}`, args: ["keyword"], count: without({ keyword: undefined }) });
@@ -209,7 +240,7 @@ async function emptyPhotosHint(filter: PhotoFilter, hidden: HiddenChoice, previo
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: `Photos by metadata (favorite, dates, persons, place, description, keywords, text, sights, shape, type, GPS, quality), ranked by date, quality, aesthetics, a person's face, favourites of all users or comments (rank_by, direction), ${groupSummary(GROUPS)}; or narrows the previous photo result. For what the image shows ('Strand', 'Hund') use search_photos instead.`,
+  summary: `Photos by metadata (favorite, dates, persons (any, all, or without), place, description, keywords, text, sights, shape, type, GPS, quality), ranked by date, quality, aesthetics, a person's face, favourites of all users or comments (rank_by, direction), ${groupSummary(GROUPS)}; or narrows the previous photo result. For what the image shows ('Strand', 'Hund') use search_photos instead.`,
   permissions: PHOTOS,
   source: "hand",
   parameters: {
@@ -219,6 +250,7 @@ export const listPhotos: ToolSpec = {
       date_from: { type: "string", description: "taken on or after, YYYY-MM-DD" },
       date_to: { type: "string", description: "taken on or before, YYYY-MM-DD" },
       person_ids: { type: "array", items: { type: "integer" }, description: "ids from list_persons" },
+      ...PERSON_FILTER_PARAMS,
       place: { type: "string", description: "country, region or city, any language, e.g. 'Italien', 'Rom'" },
       has_description: { type: "boolean", description: "with (true) or without (false) a description" },
       text: { type: "string", description: "word in description, keywords, file name or text in the photo" },
@@ -235,7 +267,7 @@ export const listPhotos: ToolSpec = {
       from_previous_result: { type: "boolean", description: "narrow the previous answer's photos" },
       hidden: HIDDEN_PARAM,
     },
-    dependentRequired: rankRequires(),
+    dependentRequired: { ...rankRequires(), ...PERSON_FILTER_REQUIRES },
   },
   async run(args, ctx) {
     const hidden = hiddenOf(args.hidden);
@@ -245,6 +277,7 @@ export const listPhotos: ToolSpec = {
     const personIds = Array.isArray(args.person_ids)
       ? args.person_ids.map((v) => int(v)).filter((v): v is number => v !== undefined)
       : [];
+    const { personMatch, withoutPersonIds } = personFilterOf(args, personIds);
     const placeTerm = str(args.place);
     const hasDescription = bool(args.has_description);
     const text = str(args.text);
@@ -259,6 +292,7 @@ export const listPhotos: ToolSpec = {
     const grouping = parseGrouping(args, GROUPS);
     const perPerson = grouping?.by === "person" || grouping?.thenBy === "person";
     if (perPerson && personIds.length === 0) throw new Error("group_by person needs person_ids (ids from list_persons)");
+    if (perPerson && personMatch === "all") throw new Error("group_by person reads each person on its own, so person_match all would give every group the same photos: leave out group_by person, or use person_match any");
     const distinct = bool(args.distinct) === true;
     const oldest = ranking.direction === "asc";
     const limit = int(args.limit, { min: 1, max: 60 }) ?? 15;
@@ -269,6 +303,8 @@ export const listPhotos: ToolSpec = {
       dateTo,
       personIds: personIds.length ? personIds.join(",") : undefined,
       personMode: personIds.length ? "include" : undefined,
+      personMatch: personMatch === "all" ? "all" : undefined,
+      withoutPersonIds: withoutPersonIds.length ? withoutPersonIds.join(",") : undefined,
       // The place is matched on the server, which knows its other names and
       // outline: filtering the newest 2000 here missed every older photo.
       locationText: placeTerm,
@@ -383,7 +419,7 @@ export const listPhotos: ToolSpec = {
     const truncated = !picks && capped;
     const countText = capped ? `more than ${PHOTO_COUNT_CAP}` : String(count);
     // The gallery knows neither a place by name, the text filters, nor "the previous result".
-    const galleryCanShow = !previous && !placeTerm && hasDescription === undefined && !text && !keyword && !sight && !orientation;
+    const galleryCanShow = !previous && !withoutPersonIds.length && personMatch !== "all" && !placeTerm && hasDescription === undefined && !text && !keyword && !sight && !orientation;
     // The gallery sorts by date, quality and aesthetics; a grouped result is no gallery page.
     const gallerySort = ranking.field === "quality" ? "ai_quality_score" : ranking.field === "aesthetics" ? "aesthetics" : ranking.field === "taken_at" ? undefined : null;
     const route = galleryCanShow && !groups && gallerySort !== null ? `/fotos/galerie${query({

@@ -83,6 +83,10 @@ type PhotoFilterQueryParams = {
   albumMode?: Query<string>;
   personIds?: Query<string>;
   personMode?: Query<string>;
+  /** With personIds: any (default) or all of them on the same photo. */
+  personMatch?: Query<string>;
+  /** Comma-separated person ids none of which is on the photo. */
+  withoutPersonIds?: Query<string>;
   mediaTypes?: Query<string>;
   hasGps?: Query<boolean>;
   hasFaces?: Query<boolean>;
@@ -145,6 +149,8 @@ function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
     albumMode: p.albumMode,
     personIds: p.personIds,
     personMode: p.personMode,
+    personMatch: p.personMatch,
+    withoutPersonIds: p.withoutPersonIds,
     mediaTypes: p.mediaTypes,
     hasGps: p.hasGps,
     hasFaces: p.hasFaces,
@@ -481,6 +487,8 @@ function parsePhotoIndexQuery(url: URL): PhotoFilterQueryParams {
     albumMode: readStr("albumMode"),
     personIds: readStr("personIds"),
     personMode: readStr("personMode"),
+    personMatch: readStr("personMatch"),
+    withoutPersonIds: readStr("withoutPersonIds"),
     mediaTypes: readStr("mediaTypes"),
     hasGps: readBool("hasGps"),
     hasFaces: readBool("hasFaces"),
