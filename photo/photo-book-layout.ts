@@ -816,3 +816,68 @@ export function repeatedCaptions(captions: (string | null | undefined)[]): boole
     return false;
   });
 }
+
+// ── print resolution ────────────────────────────────────────────────────
+
+/** How many photos of a page print under `MIN_PRINT_DPI` in `layout`, photos in cell order. */
+export function lowDpiSlots(
+  format: PhotoBookFormat,
+  layout: BookLayout,
+  photos: Pick<BookPhoto, "width" | "height">[],
+  captioned: boolean,
+): number {
+  let low = 0;
+  photos.forEach((p, i) => {
+    const c = layout.cells[i];
+    if (!c) return;
+    const dpi = slotDpi(p.width, p.height, slotGeometry(format, layout, c, captioned).image);
+    if (dpi != null && dpi < MIN_PRINT_DPI) low += 1;
+  });
+  return low;
+}
+
+export interface SharpArrangement<T extends BookPhoto> {
+  layout: BookLayout;
+  /** The photos in cell order. */
+  photos: T[];
+  /** Photos still under `MIN_PRINT_DPI`. */
+  low: number;
+}
+
+/**
+ * The arrangement of a page's photos that leaves the fewest of them under
+ * `MIN_PRINT_DPI`: every layout for the same number of photos, every cell
+ * order (a small photo goes to a smaller cell). Among those as sharp, the one
+ * that crops least, keeping the current layout and order when they are as good.
+ */
+export function sharpestArrangement<T extends BookPhoto>(
+  format: PhotoBookFormat,
+  kind: PageKind,
+  current: BookLayout,
+  photos: T[],
+  captioned: boolean,
+): SharpArrangement<T> {
+  let best: (SharpArrangement<T> & { cost: number }) | null = null;
+  for (const layout of bookLayouts(kind, photos.length)) {
+    for (const order of permutations(photos)) {
+      const low = lowDpiSlots(format, layout, order, captioned);
+      let cost = pageCropLoss(format, layout, order);
+      if (layout.id !== current.id) cost += 0.02;
+      order.forEach((p, i) => { if (p.id !== photos[i].id) cost += 0.005; });
+      if (!best || low < best.low || (low === best.low && cost < best.cost - 1e-9)) best = { layout, photos: order, low, cost };
+    }
+  }
+  return best ? { layout: best.layout, photos: best.photos, low: best.low } : { layout: current, photos, low: lowDpiSlots(format, current, photos, captioned) };
+}
+
+/**
+ * The layout a photo gets on a page of its own when it is to print sharp
+ * there: the rule's choice when that is sharp enough, else the other one
+ * (full bleed is the larger); null when it prints under `MIN_PRINT_DPI` even
+ * alone — then only a larger photo helps.
+ */
+export function sharpSinglePage(format: PhotoBookFormat, p: BookPhoto, captioned: boolean): string | null {
+  const preferred = singlePage(format, p).layout;
+  const layouts = [...bookLayouts("photos", 1)].sort((a, b) => (a.id === preferred ? -1 : b.id === preferred ? 1 : 0));
+  return layouts.find((l) => lowDpiSlots(format, l, [p], captioned) === 0)?.id ?? null;
+}

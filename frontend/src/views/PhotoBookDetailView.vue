@@ -19,6 +19,11 @@
  * (crop, rotation). The layout follows only on request: when an edit leaves
  * pages that would fit better laid out again, a notice offers "Seiten
  * anpassen"; a page with a layout the user chose keeps it and only says so.
+ *
+ * Photos that would print under 200 dpi: the warning jumps from one such page
+ * to the next ("Zeigen") and fixes what a layout can ("Beheben": another
+ * layout or order, else a page of its own). What is too small even alone
+ * stays marked; its menu offers to take it out.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -52,6 +57,8 @@ import {
   acceptPhotoBookChapterSuggestion,
   deletePhotoBook,
   fitPhotoBookToEdits,
+  fixPhotoBookLowDpi,
+  movePhotoToOwnPage,
   getPhotoBook,
   photoBookImageUrl,
   rebuildPhotoBook,
@@ -63,6 +70,7 @@ import {
   updatePhotoBookChapter,
   type PhotoBook,
   type PhotoBookFormat,
+  type PhotoBookLowDpiFix,
   type PhotoBookPage,
   type PhotoBookSlot,
 } from '../api/photoBooks'
@@ -160,6 +168,58 @@ const coverFocal = computed(() => {
 function fitToEdits() {
   void apply(() => fitPhotoBookToEdits(bookId.value))
 }
+
+// ── photos under 200 dpi ────────────────────────────────────────────────
+
+const lowDpiPages = computed(() => (book.value?.pages ?? []).filter((p) => p.slots.some((s) => s.low_dpi)))
+const lowDpiCursor = ref(-1)
+const flashPage = ref<number | null>(null)
+const lowDpiFix = ref<PhotoBookLowDpiFix | null>(null)
+
+/** Scroll to the next page with a photo under 200 dpi, round and round. */
+function showNextLowDpi() {
+  const list = lowDpiPages.value
+  if (!list.length) return
+  lowDpiCursor.value = (lowDpiCursor.value + 1) % list.length
+  const page = list[lowDpiCursor.value]!
+  const el = document.getElementById(`pbd-page-${page.id}`)
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el?.focus({ preventScroll: true })
+  flashPage.value = page.id
+  window.setTimeout(() => { if (flashPage.value === page.id) flashPage.value = null }, 1600)
+}
+
+function pageNumberOf(pageId: number): number {
+  return (book.value?.pages.findIndex((p) => p.id === pageId) ?? -1) + 1
+}
+
+const lowDpiPagesText = computed(() => {
+  const numbers = lowDpiPages.value.map((p) => pageNumberOf(p.id))
+  if (!numbers.length) return ''
+  return numbers.length === 1 ? `Seite ${numbers[0]}` : `Seiten ${numbers.slice(0, -1).join(', ')} und ${numbers[numbers.length - 1]}`
+})
+
+function fixLowDpi() {
+  lowDpiFix.value = null
+  lowDpiCursor.value = -1
+  void apply(async () => {
+    const { book: next, fix } = await fixPhotoBookLowDpi(bookId.value)
+    lowDpiFix.value = fix
+    return next
+  })
+}
+
+const lowDpiFixText = computed(() => {
+  const f = lowDpiFix.value
+  if (!f) return ''
+  const parts: string[] = []
+  if (f.rearranged) parts.push(f.rearranged === 1 ? 'eine Seite neu angeordnet' : `${f.rearranged} Seiten neu angeordnet`)
+  if (f.own_pages) parts.push(f.own_pages === 1 ? 'ein Foto auf eine eigene Seite gesetzt' : `${f.own_pages} Fotos auf eine eigene Seite gesetzt`)
+  const joined = parts.join(' und ')
+  const done = joined ? `${joined.charAt(0).toUpperCase()}${joined.slice(1)}.` : 'Am Layout ließ sich nichts verbessern.'
+  if (!f.remaining) return `${done} Alle Fotos drucken jetzt mit mindestens 200 dpi.`
+  return `${done} ${f.remaining === 1 ? 'Ein Foto ist' : `${f.remaining} Fotos sind`} selbst allein auf einer Seite zu klein. Ersetze ${f.remaining === 1 ? 'es' : 'sie'} durch ein größeres Foto oder nimm ${f.remaining === 1 ? 'es' : 'sie'} über das Menü des Fotos aus dem Buch.`
+})
 
 function misfitHint(page: PhotoBookPage): string {
   return page.edit_misfit === 'own_layout'
@@ -283,6 +343,13 @@ const slotMenuItems = computed<MenuItem[]>(() => {
       disabled: book.value?.cover_photo_id === t.slot.photo_id,
       command: (): void => { void apply(() => updatePhotoBook(bookId.value, { coverPhotoId: t.slot.photo_id })) },
     },
+    ...(t.slot.low_dpi && t.page.kind === 'photos' && t.page.slots.length > 1
+      ? [{
+          label: 'Auf eigene Seite',
+          icon: 'pi pi-window-maximize',
+          command: (): void => { void apply(() => movePhotoToOwnPage(bookId.value, t.page.id, t.slot.photo_id)) },
+        }]
+      : []),
     {
       label: 'Aus dem Buch nehmen',
       icon: 'pi pi-times',
@@ -387,7 +454,19 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
         <template v-if="book.subtitle"> · {{ book.subtitle }}</template>
       </p>
       <Message v-if="book.low_dpi_count" severity="warn" :closable="false" class="pbd-warn">
-        {{ book.low_dpi_count === 1 ? 'Ein Foto ist' : `${book.low_dpi_count} Fotos sind` }} für seinen Platz zu klein und würde unter 200 dpi gedruckt (markiert mit <i class="pi pi-exclamation-triangle" aria-label="Warnsymbol" />).
+        <div class="pbd-misfit">
+          <span>
+            {{ book.low_dpi_count === 1 ? 'Ein Foto ist' : `${book.low_dpi_count} Fotos sind` }} für {{ book.low_dpi_count === 1 ? 'seinen' : 'ihren' }} Platz zu klein und {{ book.low_dpi_count === 1 ? 'würde' : 'würden' }} unter 200 dpi gedruckt ({{ lowDpiPagesText }}, markiert mit <i class="pi pi-exclamation-triangle" aria-label="Warnsymbol" />).
+            „Beheben“ ordnet die Seiten so, dass ein kleines Foto einen kleineren Platz bekommt, und setzt es sonst auf eine eigene Seite.
+          </span>
+          <span class="pbd-warn-actions">
+            <Button label="Zeigen" icon="pi pi-arrow-down" size="small" severity="secondary" outlined @click="showNextLowDpi" />
+            <Button label="Beheben" icon="pi pi-wrench" size="small" :loading="busy" @click="fixLowDpi" />
+          </span>
+        </div>
+      </Message>
+      <Message v-if="lowDpiFix" severity="success" closable class="pbd-warn" @close="lowDpiFix = null">
+        {{ lowDpiFixText }}
       </Message>
       <Message v-if="book.edit_misfit_count" severity="info" :closable="false" class="pbd-warn">
         <div class="pbd-misfit">
@@ -431,7 +510,14 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
           <Button label="Übernehmen" size="small" text :disabled="busy" @click="acceptSuggestion(ch.id)" />
         </p>
         <ul class="pbd-pages">
-          <li v-for="{ page, number } in ch.pages" :key="page.id" class="pbd-page">
+          <li
+            v-for="{ page, number } in ch.pages"
+            :id="`pbd-page-${page.id}`"
+            :key="page.id"
+            class="pbd-page scroll-anchor"
+            :class="{ 'pbd-page--flash': flashPage === page.id }"
+            tabindex="-1"
+          >
             <PhotoBookPagePreview
               :page="page"
               :width-mm="book.width_mm"
@@ -624,6 +710,20 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
 .pbd-page {
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
+  border-radius: 6px;
+  transition: box-shadow 0.3s;
+}
+.pbd-page:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.pbd-page--flash {
+  box-shadow: 0 0 0 4px var(--p-primary-color);
+}
+.pbd-warn-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 .pbd-page-foot {

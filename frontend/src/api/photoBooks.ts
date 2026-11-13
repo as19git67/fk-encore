@@ -229,6 +229,20 @@ export function fitPhotoBookToEdits(id: number) {
   return apiFetch<PhotoBook>(`/photo-books/${id}/fit-edits`, { method: 'POST' })
 }
 
+export interface PhotoBookLowDpiFix {
+  rearranged: number
+  own_pages: number
+  remaining: number
+}
+
+export function fixPhotoBookLowDpi(id: number) {
+  return apiFetch<{ book: PhotoBook; fix: PhotoBookLowDpiFix }>(`/photo-books/${id}/fix-low-dpi`, { method: 'POST' })
+}
+
+export function movePhotoToOwnPage(id: number, pageId: number, photoId: number) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/pages/${pageId}/photos/${photoId}/own-page`, { method: 'POST' })
+}
+
 export function deletePhotoBook(id: number) {
   return apiFetch<void>(`/photo-books/${id}`, { method: 'DELETE' })
 }

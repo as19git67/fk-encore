@@ -139,6 +139,7 @@ struct TripSpotPickerView: View {
                         .pickerStyle(.segmented)
                         .frame(width: 160)
                     }
+                    .ownBackground()
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Fertig") { dismiss() }
                     }

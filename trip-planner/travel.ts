@@ -296,7 +296,33 @@ export function travelLeg(
   const ride = rawLeg(from, to, mode, extraM);
   if (!WALKABLE_MODES.has(mode)) return ride;
   const walk = rawLeg(from, to, "foot", extraM);
+  // Across the square nobody takes the tram, whatever the arithmetic
+  // says: below the overhead floor the ride carries no wait, so its
+  // higher speed would beat walking and a 270 m hop read "1 min ÖPNV".
+  if (haversineMeters(from, to) < OVERHEAD_FLOOR_M) return walk;
   return walk.minutes <= ride.minutes ? walk : ride;
+}
+
+/**
+ * The travel class of a stored hop.
+ *
+ * A stop row keeps the minutes and metres of the way to it, not
+ * whether `travelLeg` walked it, and the class used to be rebuilt from
+ * the leg's mode alone. On a transit stay that made every hop a ride
+ * on reading, so the list said "ÖPNV & zu Fuß" for the 640 m the
+ * planner had in fact walked.
+ *
+ * A walked hop is the one whose minutes are its metres at walking
+ * pace (`travelLeg` rounds to the minute, so within half a minute).
+ * A ride only wins where it is clearly quicker than that pace — it
+ * carries ten minutes of waiting — so the two never meet; the test
+ * pins it over the whole range.
+ */
+export function storedTravelClass(minutes: number, distanceM: number, mode: TransportMode): TravelClass {
+  if (WALKABLE_MODES.has(mode) && Math.abs(minutes - distanceM / WALKING_SPEED_M_PER_MIN) <= 0.5 + 1e-9) {
+    return travelClassFor(minutes, "foot");
+  }
+  return travelClassFor(minutes, mode);
 }
 
 /** What is in the way, as `osm-admin/geo-client` reports it. */

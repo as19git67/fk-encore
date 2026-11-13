@@ -145,6 +145,7 @@ struct TripStayPlanView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
             }
+            .ownBackground()
             // The days have their own big button; the map keeps the plus.
             if layout == Layout.map.rawValue {
                 ToolbarItem(placement: .primaryAction) {
