@@ -84,6 +84,11 @@ struct TripSpotPickerView: View {
 
     private var votes: Bool { viewModel.plan?.isVoting == true }
 
+    /// Anything the picker waits for that no row or list shows itself.
+    private var working: Bool {
+        viewModel.isWorking || ballot.isLoading
+    }
+
     private var legIndex: Int { viewModel.legIndex }
 
     private var link: TripSearchedPlace? {
@@ -143,6 +148,14 @@ struct TripSpotPickerView: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Fertig") { dismiss() }
                     }
+                    // The plan, the votes or a change on their way: a
+                    // sign, so nothing changes on screen without warning.
+                    if working {
+                        ToolbarItem(placement: .topBarLeading) {
+                            ProgressView()
+                                .accessibilityLabel("Wird geladen")
+                        }
+                    }
                 }
                 .plannerErrorBanner(errorText, dismiss: {
                     search.errorMessage = nil
@@ -185,6 +198,7 @@ struct TripSpotPickerView: View {
                     search.area = area
                     Task { await reload() }
                 },
+                loading: search.isSearching || search.isLoadingHighlights,
             )
         } else {
             list
@@ -321,7 +335,7 @@ struct TripSpotPickerView: View {
                 if !all.isEmpty && chip != .ideas && (search.isSearching || search.isLoadingHighlights) {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("Wird geladen…")
+                        Text(search.isSearching ? "Suche läuft…" : "Wird geladen…")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -335,8 +349,18 @@ struct TripSpotPickerView: View {
                     emptyRow
                 }
                 if chip != .ideas && search.query.isEmpty && search.highlightsHaveMore {
-                    Button("Mehr Highlights") { Task { await search.loadHighlights(more: true) } }
-                        .disabled(search.isLoadingHighlights)
+                    Button {
+                        Task { await search.loadHighlights(more: true) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Mehr Highlights")
+                            if search.isLoadingHighlights && !search.highlights.isEmpty {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(search.isLoadingHighlights)
                 }
             }
         }
@@ -532,8 +556,11 @@ struct TripSpotPickerView: View {
 
     @ViewBuilder
     private var emptyRow: some View {
-        if search.isSearching || (search.isLoadingHighlights && search.highlights.isEmpty) {
-            HStack { ProgressView(); Text("Wird geladen…") }
+        if chip == .ideas && viewModel.isLoading {
+            HStack { ProgressView(); Text("Ideen werden geladen…") }
+        } else if chip != .ideas
+                    && (search.isSearching || (search.isLoadingHighlights && search.highlights.isEmpty)) {
+            HStack { ProgressView(); Text(search.isSearching ? "Suche läuft…" : "Wird geladen…") }
         } else if chip == .ideas {
             Text("Noch keine Ideen für diesen Aufenthalt.")
                 .foregroundStyle(.secondary)
@@ -556,6 +583,13 @@ struct TripSpotPickerView: View {
                     // Strecken (Anton, 10.11.).
                     if let picture = item.picture {
                         TripSpotThumbnail(image: picture, height: 44, width: 44)
+                    } else if search.picturesPending, case .highlight = item.source {
+                        // The server is still looking for its picture.
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 44, height: 44)
+                            .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+                            .accessibilityHidden(true)
                     } else {
                         Image(systemName: item.isIdea ? "lightbulb" : "mappin")
                             .foregroundStyle(.secondary)
@@ -659,6 +693,7 @@ struct TripSpotPickerView: View {
             let focus = rowFocus(item)
             let into = liveTarget?.kind == .stay && liveTarget?.dayIndex == nil ? nearTarget(item) : liveTarget
             TripAddButton(running: busy == item.id,
+                          waiting: focus == nil && search.isSuggesting(item.osmRef),
                           full: focus == nil && suggestion?.full == true,
                           label: focus != nil ? (into?.addLabel ?? "Hinzufügen")
                               : TripSpotPicker.addLabel(suggestion, onTheWay: viewModel.leg?.isTransit == true)) {
@@ -894,13 +929,16 @@ struct TripSpotPickerView: View {
 /// long press on the row picks another.
 struct TripAddButton: View {
     let running: Bool
+    /// The day "+" would add to is still being asked for: the button
+    /// waits, rather than put the place only among the ideas.
+    var waiting = false
     let full: Bool
     let label: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            if running {
+            if running || waiting {
                 ProgressView()
             } else {
                 Image(systemName: "plus.circle.fill")
@@ -911,7 +949,8 @@ struct TripAddButton: View {
         .buttonStyle(.borderless)
         .frame(minWidth: 44, minHeight: 44)
         .contentShape(.rect)
-        .accessibilityLabel(label)
+        .disabled(waiting)
+        .accessibilityLabel(waiting ? "Tag wird gesucht" : label)
         .accessibilityHint(full ? "Der Tag ist schon voll. Lange drücken für einen anderen Tag"
                                 : "Lange drücken für einen anderen Tag")
     }
@@ -925,6 +964,9 @@ struct TripSpotPickerMap: View {
     let leg: TripLeg?
     let open: (TripPickerItem) -> Void
     let searchHere: (TripSearchArea) -> Void
+    /// A search or the highlights on their way: the map says so, as the
+    /// list does above its rows.
+    var loading = false
 
     @State private var region: MKCoordinateRegion?
     @State private var moved = false
@@ -966,6 +1008,20 @@ struct TripSpotPickerMap: View {
         .onMapCameraChange(frequency: .onEnd) { context in
             if region != nil { moved = true }
             region = context.region
+        }
+        .overlay(alignment: .bottom) {
+            if loading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Suche läuft…")
+                        .font(.subheadline)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.regularMaterial, in: .capsule)
+                .padding(.bottom, 16)
+                .accessibilityElement(children: .combine)
+            }
         }
         .overlay(alignment: .top) {
             if moved, let region {

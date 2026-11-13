@@ -109,14 +109,22 @@ struct TripStayDayTripsList: View {
                 Section("Schon geplant") {
                     ForEach(planned, id: \.dayIndex) { day in
                         if let anchor = day.anchor {
+                            let key = "day-\(day.dayIndex)"
                             Button {
                                 Task {
+                                    guard busy == nil else { return }
+                                    busy = key
+                                    defer { busy = nil }
                                     await choose(TripDayTripFocus(dayIndex: day.dayIndex, name: anchor.label ?? "Ausflug"),
                                                  TripSearchArea(lat: anchor.lat, lon: anchor.lon, radiusM: radius))
                                 }
                             } label: {
                                 LabeledContent {
-                                    Text("Dort suchen")
+                                    if busy == key {
+                                        ProgressView()
+                                    } else {
+                                        Text("Dort suchen")
+                                    }
                                 } label: {
                                     Label(anchor.label ?? "Ausflug", systemImage: "car")
                                     Text(TripStayPlan.dayTitle(day, leg: leg))
@@ -127,6 +135,16 @@ struct TripStayDayTripsList: View {
                 }
             }
             Section {
+                if response != nil && loading {
+                    // A list on screen is being read again (after
+                    // "Nicht mehr vorschlagen").
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Wird aktualisiert…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if let response {
                     ForEach(response.targets) { target in
                         row(target, suggested: response.suggestedDayIndex)
@@ -176,7 +194,11 @@ struct TripStayDayTripsList: View {
                 }
             }
             Spacer(minLength: 0)
-            if let day = suggested {
+            if busy == "dismiss-\(target.key)" {
+                ProgressView()
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("Wird entfernt")
+            } else if let day = suggested {
                 TripAddButton(running: busy == target.key, full: false, label: "Tag \(day + 1) zum Ausflug machen") {
                     Task { await accept(target, day: day) }
                 }
@@ -231,6 +253,9 @@ struct TripStayDayTripsList: View {
         struct Answer: Decodable {
             let dismissed: Bool
         }
+        guard busy == nil else { return }
+        busy = "dismiss-\(target.key)"
+        defer { busy = nil }
         do {
             let _: Answer = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/day-trip/dismiss",

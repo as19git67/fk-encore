@@ -92,6 +92,9 @@ enum TripThumbnailCache {
 struct TripSpotGallery: View {
     /// The place's own first, as the server orders the gallery.
     let photos: [TripRoutePhoto]
+    /// The gallery is still being asked for: a spot without a picture
+    /// yet says so, one with a picture shows a small spinner under it.
+    var loading = false
 
     private let height: CGFloat = 172
     private let gap: CGFloat = 6
@@ -117,14 +120,31 @@ struct TripSpotGallery: View {
                         .padding(.horizontal, 16)
                     }
                     .frame(height: height)
-                    Text(first.credit)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 16)
+                    HStack(spacing: 6) {
+                        Text(first.credit)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if loading {
+                            Spacer(minLength: 0)
+                            ProgressView()
+                                .controlSize(.mini)
+                                .accessibilityLabel("Weitere Bilder werden geladen")
+                        }
+                    }
+                    .padding(.horizontal, 16)
                 }
                 .padding(.vertical, 8)
                 .listRowInsets(EdgeInsets())
+            }
+        } else if loading {
+            Section {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Bilder werden gesucht…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
