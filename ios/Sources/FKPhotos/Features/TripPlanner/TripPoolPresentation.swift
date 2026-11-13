@@ -162,12 +162,8 @@ struct TripPresentationToolbarItem: ToolbarContent {
     @Binding var presentation: TripPoolPresentation
 
     var body: some ToolbarContent {
-        if #available(iOS 26, *) {
-            ToolbarItem(placement: .topBarTrailing) { picker }
-                .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .topBarTrailing) { picker }
-        }
+        ToolbarItem(placement: .topBarTrailing) { picker }
+            .ownBackground()
     }
 
     private var picker: some View {
@@ -180,5 +176,21 @@ struct TripPresentationToolbarItem: ToolbarContent {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+    }
+}
+
+extension ToolbarContent {
+    /// For a toolbar item whose control draws its own capsule — a
+    /// segmented picker. iOS 26 puts a glass capsule around every
+    /// toolbar item, and nested in it the picker shows two rims on
+    /// either side. Hiding the shared background leaves the picker's
+    /// own; earlier systems draw none and need nothing.
+    @ToolbarContentBuilder
+    func ownBackground() -> some ToolbarContent {
+        if #available(iOS 26, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
     }
 }
