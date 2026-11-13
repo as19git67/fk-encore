@@ -230,7 +230,12 @@ struct TripSpotPickerView: View {
     @ViewBuilder
     private func detailSheet(_ item: TripPickerItem) -> some View {
         NavigationStack {
+            // "Bearbeiten" for whatever belongs to the trip, as from the
+            // stay's own detail screen: a spot reached through the picker
+            // should not lose its note and title on the way (Anton, 13.11.).
             TripSpotDetailView(spot: pickerDetail(item), mode: viewModel.leg?.transportMode ?? .foot,
+                               onSave: item.isIdea || item.isPlanned
+                                   ? { await viewModel.saveNote($0) } : nil,
                                onCategory: item.isIdea || item.isPlanned
                                    ? { await viewModel.setCategory(osmRef: item.osmRef, $0) } : nil,
                                stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,

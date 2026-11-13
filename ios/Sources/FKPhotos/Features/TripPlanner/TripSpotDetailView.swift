@@ -17,8 +17,9 @@ struct TripSpotDetailView<Actions: View>: View {
     /// Which leg this belongs to, for the route's travel mode.
     let mode: TripTransportMode
     /// Where an edit goes. Nil where nothing can take one — a spot
-    /// looked up on the map belongs to no leg, and offering a pencil
-    /// that saves nowhere is worse than not offering one.
+    /// looked up on the map belongs to no leg, and offering a field
+    /// that saves nowhere is worse than not offering one. Everything is
+    /// edited in place, like the kind (Anton, 13.11.): no edit sheet.
     let onSave: ((TripSpotEdit) async -> Void)?
     /// Where a new kind goes ("Art"). Nil where nothing can take one.
     let onCategory: ((String) async -> Void)?
@@ -53,7 +54,10 @@ struct TripSpotDetailView<Actions: View>: View {
     /// page to the next spot, and its pictures are not this one's.
     @State private var gallery: [TripRoutePhoto] = []
     @State private var galleryRef: String?
-    @State private var editing: TripSpotEdit?
+    /// What the fields hold while somebody types. Saved when a field
+    /// is left, a switch or menu changes, or the screen goes away.
+    @State private var draft: TripSpotEdit
+    @FocusState private var focus: TripSpotEditField?
     /// The kind just picked, shown until the caller hands a new spot.
     @State private var shownCategory: String?
     @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
@@ -73,6 +77,7 @@ struct TripSpotDetailView<Actions: View>: View {
     ) {
         self.bar = bar
         self.spot = spot
+        _draft = State(initialValue: TripSpotEdit(spot))
         self.mode = mode
         self.onSave = onSave
         self.onCategory = onCategory
@@ -97,6 +102,12 @@ struct TripSpotDetailView<Actions: View>: View {
             // mock "Spot-Details"): the ticket, whether it is open, when it
             // is planned, and why somebody saved it.
             planFacts
+
+            // Your own words about the place, right where you read
+            // them: written in place, saved when you leave the field.
+            if onSave != nil {
+                notesSection
+            }
 
             // Bilder, Karte, then the text: the order of a way's details,
             // so a spot and a route read alike (Anton, 10.11.).
@@ -192,23 +203,20 @@ struct TripSpotDetailView<Actions: View>: View {
             galleryRef = ref
         }
         .onChange(of: spot.category) { shownCategory = nil }
+        // A new spot (the pager) or a saved one coming back: the
+        // fields follow, unless somebody is typing in one right now.
+        .onChange(of: TripSpotEdit(spot)) { _, fresh in
+            if focus == nil || draft.osmRef != fresh.osmRef { draft = fresh }
+        }
+        .onChange(of: focus) { old, new in
+            if old != nil, old != new { save() }
+        }
+        .onDisappear { save() }
         .toolbar {
             if onSave != nil {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Bearbeiten", systemImage: "square.and.pencil") {
-                        editing = TripSpotEdit(spot)
-                    }
-                }
-            }
-        }
-        .sheet(item: $editing) { edit in
-            NavigationStack {
-                TripSpotEditView(edit: edit, spotName: spot.name,
-                                 showsPhotoStop: spot.supportsPhotoStop) { saved in
-                    editing = nil
-                    await onSave?(saved)
-                } onCancel: {
-                    editing = nil
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Fertig") { focus = nil }
                 }
             }
         }
@@ -301,7 +309,8 @@ struct TripSpotDetailView<Actions: View>: View {
     private var planFacts: some View {
         let today = spot.openingHours.flatMap { $0.isEmpty ? nil : TripOpeningHours.display($0) }
         let hoursBelow = shortHours == nil ? today : nil
-        if spot.ticket != nil || spot.planned != nil || hoursBelow != nil || !(spot.note ?? "").isEmpty {
+        let noteBelow = onSave == nil && !(spot.note ?? "").isEmpty
+        if spot.ticket != nil || spot.planned != nil || hoursBelow != nil || noteBelow {
             Section {
                 if let ticket = spot.ticket {
                     LabeledContent("Ticket", value: ticket)
@@ -316,7 +325,7 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
                 // Why it was saved beats what it is called, when you are
                 // deciding what to do with an afternoon (§9.2).
-                if let note = spot.note, !note.isEmpty {
+                if onSave == nil, let note = spot.note, !note.isEmpty {
                     LabeledContent("Notiz") {
                         Text(note).multilineTextAlignment(.trailing)
                     }
@@ -423,7 +432,15 @@ struct TripSpotDetailView<Actions: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
+            dwellRow
+            if onSave != nil, spot.supportsPhotoStop {
+                Toggle(isOn: Binding(get: { draft.photoStop }, set: { on in
+                    draft.photoStop = on
+                    save()
+                })) {
+                    Label("Fotostopp", systemImage: "camera")
+                }
+            }
             if let extent = spot.extent {
                 // The way is the point: the day goes on from its end,
                 // not from where it starts (§4.7).
@@ -448,6 +465,68 @@ struct TripSpotDetailView<Actions: View>: View {
             }
         }
 
+    }
+
+    /// Title, note and link, as fields. The map's name stays the
+    /// placeholder of the title, so an empty field reads as "the name
+    /// from OpenStreetMap", which is what saving it empty means.
+    private var notesSection: some View {
+        Section {
+            TextField(spot.name ?? "Eigener Name", text: $draft.title)
+                .focused($focus, equals: .title)
+                .submitLabel(.done)
+                .onSubmit { focus = nil }
+            TextField("Notiz: was man wissen sollte", text: $draft.note, axis: .vertical)
+                .lineLimit(2...8)
+                .focused($focus, equals: .note)
+            TextField("Link: https://…", text: $draft.url)
+                .focused($focus, equals: .url)
+                .textContentType(.URL)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .onSubmit { focus = nil }
+            if !draft.urlIsUsable {
+                Text("Das ist keine Adresse, die sich öffnen lässt.")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Titel, Notiz und Link")
+        } footer: {
+            Text("Leerer Titel heißt: Name aus OpenStreetMap. Gespeichert wird, "
+                 + "sobald ihr das Feld verlasst.")
+        }
+    }
+
+    /// How long you stay: a menu where the caller takes a change, the
+    /// value where it does not.
+    @ViewBuilder
+    private var dwellRow: some View {
+        if onSave != nil {
+            Picker("Aufenthalt", selection: Binding(get: { draft.dwellMinutes }, set: { minutes in
+                draft.dwellMinutes = minutes
+                save()
+            })) {
+                ForEach(TripSpotEdit.dwellChoices(current: draft.dwellMinutes), id: \.self) { minutes in
+                    Text(TripClock.duration(minutes)).tag(minutes)
+                }
+            }
+            .pickerStyle(.menu)
+        } else {
+            LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
+        }
+    }
+
+    /// Sends what changed, once. Called when a field is left, a switch
+    /// or menu moves, and when the screen goes away mid-sentence.
+    private func save() {
+        guard let onSave else { return }
+        let base = TripSpotEdit(spot)
+        guard draft.osmRef == base.osmRef, draft.needsSaving(against: base) else { return }
+        let edit = draft.trimmed
+        Task { await onSave(edit) }
     }
 
     /// "Art", which the people planning can change where the caller
@@ -826,4 +905,9 @@ extension CLLocationCoordinate2D {
     init(_ coordinate: TripCoordinate) {
         self.init(latitude: coordinate.lat, longitude: coordinate.lon)
     }
+}
+
+/// The text fields of the detail screen, for the keyboard focus.
+enum TripSpotEditField: Hashable {
+    case title, note, url
 }

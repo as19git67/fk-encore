@@ -264,6 +264,31 @@ final class TripSpotEditTests: XCTestCase {
         XCTAssertFalse(TripSpotEdit(detail()).photoStop)
     }
 
+    func testLeavingAFieldUnchangedSendsNothing() {
+        // The detail screen saves whenever a field is left (Anton,
+        // 13.11.), so an untouched one must not write the spot back.
+        let base = TripSpotEdit(detail(note: "Früh hin."))
+        XCTAssertFalse(base.needsSaving(against: base))
+        var padded = base
+        padded.note = "Früh hin.  "
+        XCTAssertFalse(padded.needsSaving(against: base), "trailing spaces are not a change")
+        var changed = base
+        changed.note = "Tickets vorher kaufen."
+        XCTAssertTrue(changed.needsSaving(against: base))
+    }
+
+    func testAHalfLinkIsNotSentFromTheField() {
+        let base = TripSpotEdit(detail())
+        var edit = base
+        edit.url = "beispiel.test"
+        XCTAssertFalse(edit.needsSaving(against: base))
+    }
+
+    func testTheStayMenuKeepsAnOddValue() {
+        XCTAssertTrue(TripSpotEdit.dwellChoices(current: 50).contains(50))
+        XCTAssertEqual(TripSpotEdit.dwellChoices(current: 60), TripSpotEdit.dwellChoices(current: 45))
+    }
+
     func testWhitespaceIsNotAValue() {
         var edit = TripSpotEdit(osmRef: "node:1")
         edit.note = "   \n "
