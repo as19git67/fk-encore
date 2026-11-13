@@ -83,6 +83,7 @@ const endDate = ref<Date | null>(null)
 const paused = ref(false)
 const notifyPush = ref(true)
 const notifyEmail = ref(true)
+const checkedBag = ref(true)
 const endTouched = ref(false)
 
 const round = computed(() => tripType.value === 'round')
@@ -138,6 +139,7 @@ watch(
     paused.value = w?.paused ?? false
     notifyPush.value = w?.notify_push ?? true
     notifyEmail.value = w?.notify_email ?? true
+    checkedBag.value = w?.checked_bag ?? true
     endTouched.value = !!w
   },
   { immediate: true },
@@ -247,6 +249,7 @@ function save() {
     paused: paused.value,
     notify_push: notifyPush.value,
     notify_email: notifyEmail.value,
+    checked_bag: checkedBag.value,
   })
 }
 </script>
@@ -382,6 +385,16 @@ function save() {
       <div class="field">
         <label for="fw-currency">Währung</label>
         <InputText id="fw-currency" v-model="currency" maxlength="3" />
+      </div>
+      <div class="field field-wide">
+        <div class="field-check">
+          <Checkbox v-model="checkedBag" input-id="fw-bag" binary />
+          <label for="fw-bag">Mindestens 1 Aufgabegepäck je Reisendem</label>
+        </div>
+        <small class="muted">
+          Google Flights filtert nicht danach. Bevor der Wächter meldet, holt er die Anbieter und rechnet die Gebühr
+          für den ersten Koffer ein; liegt der Preis dann über der Grenze, meldet er nicht.
+        </small>
       </div>
 
       <fieldset class="field field-wide notify">

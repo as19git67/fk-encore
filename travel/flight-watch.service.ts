@@ -17,6 +17,14 @@
  * the check spend one or two more searches on who sells the flight
  * (booking options), if the month's budget allows.
  *
+ * Checked bag (`checked_bag`, on by default): Google Flights cannot filter
+ * for it, so before a report the check reads the booking options of the
+ * flight and adds the fee of one checked bag per seated traveller
+ * (`bag_price` on the check). The limit then compares that price; a combination
+ * whose price with a bag stands above the limit is not reported. A later
+ * check of the same dates that is not cheaper reuses the known fee instead
+ * of spending the searches again.
+ *
  * Every watch ends: `end_date` is required, at most two years ahead and
  * before the last possible departure.
  */
@@ -36,6 +44,7 @@ import { alertDecision } from "./hotel-alerts";
 import { flightAlertSender, type FlightPriceAlert } from "./flight-alerts";
 import {
   bookingOptionsOf,
+  cheapestWithBag,
   flightsOf,
   googleFlightsLink,
   insightOf,
@@ -102,6 +111,8 @@ export interface FlightWatchInput {
   paused?: boolean;
   notify_push?: boolean;
   notify_email?: boolean;
+  /** Only report prices with one checked bag per seated traveller (default true). */
+  checked_bag?: boolean;
 }
 
 export interface FlightCheck {
@@ -118,6 +129,8 @@ export interface FlightCheck {
   typical_low: number | null;
   typical_high: number | null;
   below_limit: boolean;
+  /** The cheapest price with a checked bag per seated traveller, when known. */
+  bag_price: number | null;
   error: string | null;
 }
 
@@ -130,6 +143,8 @@ export interface BestKnown {
   stops: number | null;
   checked_at: string;
   link: string;
+  /** The price includes one checked bag per seated traveller. */
+  with_bag: boolean;
 }
 
 export interface FlightWatch {
@@ -159,6 +174,7 @@ export interface FlightWatch {
   paused: boolean;
   notify_push: boolean;
   notify_email: boolean;
+  checked_bag: boolean;
   notified_price: number | null;
   status: FlightWatchStatus;
   last_checked_at: string | null;
@@ -190,6 +206,7 @@ export interface FlightBookingEntry {
   price: number | null;
   option_title: string | null;
   extensions: string;
+  baggage: string;
 }
 
 export interface FlightCombinationEntry {
@@ -429,6 +446,7 @@ export function normalizeFlightWatchInput(input: FlightWatchInput, today: string
     paused: input.paused ?? false,
     notify_push: input.notify_push ?? true,
     notify_email: input.notify_email ?? true,
+    checked_bag: input.checked_bag ?? true,
   };
 }
 
@@ -460,6 +478,7 @@ function toCheck(c: CheckRow): FlightCheck {
     typical_low: c.typical_low,
     typical_high: c.typical_high,
     below_limit: c.below_limit,
+    bag_price: c.bag_price,
     error: c.error,
   };
 }
@@ -480,23 +499,38 @@ async function latestPerCombination(watchIds: number[]): Promise<CheckRow[]> {
     );
 }
 
+/**
+ * What a check's price counts as: with a checked bag when the watch wants
+ * one and the check knows its price, else the price Google showed.
+ */
+export function countedPrice(w: Pick<FlightWatchRow, "checked_bag">, c: Pick<CheckRow, "lowest_price" | "bag_price">): number | null {
+  if (c.lowest_price === null) return null;
+  return w.checked_bag && c.bag_price !== null ? c.bag_price : c.lowest_price;
+}
+
 /** The cheapest of the latest checks of combinations still ahead. */
 export function bestOf(w: FlightWatchRow, latest: CheckRow[], today: string): BestKnown | null {
   const ahead = new Set(combinationsOf(w, today).map(comboKey));
   let best: CheckRow | null = null;
+  let bestPrice = Infinity;
   for (const c of latest) {
-    if (c.lowest_price === null || !ahead.has(comboKey({ start: c.outbound_date, end: c.return_date }))) continue;
-    if (!best || c.lowest_price < best.lowest_price!) best = c;
+    const price = countedPrice(w, c);
+    if (price === null || !ahead.has(comboKey({ start: c.outbound_date, end: c.return_date }))) continue;
+    if (price < bestPrice) {
+      best = c;
+      bestPrice = price;
+    }
   }
   if (!best) return null;
   return {
-    price: best.lowest_price!,
+    price: bestPrice,
     outbound_date: best.outbound_date,
     return_date: best.return_date,
     airlines: best.lowest_airlines,
     stops: best.lowest_stops,
     checked_at: best.checked_at,
     link: linkFor(w, best.outbound_date, best.return_date),
+    with_bag: w.checked_bag && best.bag_price !== null,
   };
 }
 
@@ -531,6 +565,7 @@ function toWatch(w: FlightWatchRow, today: string, latest: CheckRow | null, perC
     paused: w.paused,
     notify_push: w.notify_push,
     notify_email: w.notify_email,
+    checked_bag: w.checked_bag,
     notified_price: w.notified_price,
     status: flightWatchStatus(w, today),
     last_checked_at: w.last_checked_at,
@@ -619,7 +654,13 @@ export async function getFlightWatchDetail(userId: number, id: number, now: Date
       checked_at: withBookings.check.checked_at,
       outbound_date: withBookings.check.outbound_date,
       return_date: withBookings.check.return_date,
-      options: options.map((o) => ({ book_with: o.book_with, price: o.price, option_title: o.option_title, extensions: o.extensions })),
+      options: options.map((o) => ({
+        book_with: o.book_with,
+        price: o.price,
+        option_title: o.option_title,
+        extensions: o.extensions,
+        baggage: o.baggage,
+      })),
     };
   }
 
@@ -645,7 +686,7 @@ export async function getFlightWatchDetail(userId: number, id: number, now: Date
         return {
           outbound_date: combo.start,
           return_date: combo.end,
-          price: c?.lowest_price ?? null,
+          price: c ? countedPrice(row, c) : null,
           price_level: c?.price_level ?? null,
           checked_at: c?.checked_at ?? null,
           link: linkFor(row, combo.start, combo.end),
@@ -706,6 +747,7 @@ const CRITERIA = [
   "return_times",
   "currency",
   "limit_total",
+  "checked_bag",
 ] as const;
 
 export async function updateFlightWatch(
@@ -898,9 +940,90 @@ export async function checkFlightWatch(
   return toCheck(check);
 }
 
+/** Travellers with a seat of their own, each with a checked bag. */
+export function seatedTravellers(w: Pick<FlightWatchRow, "adults" | "children">): number {
+  return w.adults + w.children;
+}
+
+/**
+ * The price of this check's cheapest flight with a checked bag, written to
+ * the check. A previous check of the same dates whose flight was not
+ * cheaper lends its bag fee (no searches); otherwise the booking options are
+ * fetched. Returns the options read and the searches spent.
+ */
+async function priceTheBag(
+  watch: FlightWatchRow,
+  check: CheckRow,
+  combo: DateCombo,
+  cheapest: FlightOffer,
+  client: FlightSearchClient,
+  searchesLeft: number,
+): Promise<{ bookings: BookingOption[]; searches: number; fetched: boolean }> {
+  const [previous] = await db
+    .select()
+    .from(travelFlightChecks)
+    .where(
+      and(
+        eq(travelFlightChecks.watch_id, watch.id),
+        eq(travelFlightChecks.outbound_date, combo.start),
+        combo.end === null ? sql`${travelFlightChecks.return_date} IS NULL` : eq(travelFlightChecks.return_date, combo.end),
+        sql`${travelFlightChecks.id} <> ${check.id}`,
+        sql`${travelFlightChecks.bag_price} IS NOT NULL`,
+        sql`${travelFlightChecks.error} IS NULL`,
+      ),
+    )
+    .orderBy(desc(travelFlightChecks.checked_at), desc(travelFlightChecks.id))
+    .limit(1);
+  let bagPrice: number | null = null;
+  let bookings: BookingOption[] = [];
+  let searches = 0;
+  let fetched = false;
+  if (previous && previous.lowest_price !== null && previous.lowest_price <= cheapest.price) {
+    bagPrice = cheapest.price + (previous.bag_price! - previous.lowest_price);
+  } else {
+    try {
+      const got = await fetchBookings(watch, combo, cheapest, client, searchesLeft);
+      bookings = got.options;
+      searches = got.searches;
+      fetched = true;
+      bagPrice = cheapestWithBag(bookings, seatedTravellers(watch));
+    } catch (err) {
+      console.warn(`[travel.flight-watch] booking options for watch ${watch.id}: ${err instanceof Error ? err.message : err}`);
+      searches = Math.max(searches, 1);
+    }
+  }
+  if (bagPrice !== null) {
+    check.bag_price = bagPrice;
+    check.below_limit = watch.limit_total !== null && bagPrice < watch.limit_total;
+    await db
+      .update(travelFlightChecks)
+      .set({ bag_price: bagPrice, below_limit: check.below_limit })
+      .where(eq(travelFlightChecks.id, check.id));
+  }
+  return { bookings, searches, fetched };
+}
+
+async function keepBookings(checkId: number, bookings: BookingOption[]): Promise<void> {
+  if (!bookings.length) return;
+  await db.insert(travelFlightBookings).values(
+    bookings.map((b) => ({
+      check_id: checkId,
+      book_with: b.bookWith,
+      price: b.price,
+      option_title: b.optionTitle,
+      extensions: b.extensions,
+      baggage: b.baggage,
+    })),
+  );
+}
+
 /**
  * Report the best known price if `alertDecision` says so. Returns the
  * searches spent on booking options. The report counts as made once tried.
+ *
+ * With `checked_bag`, a price about to be reported that is this check's
+ * flight first gets its price with a bag (`priceTheBag`), and the decision
+ * is made again on that.
  */
 async function reportFlightPrice(
   watch: FlightWatchRow,
@@ -912,43 +1035,48 @@ async function reportFlightPrice(
   now: Date,
 ): Promise<number> {
   const today = todayIso(now);
-  const best = bestOf(watch, await latestPerCombination([watch.id]), today);
-  const decision = alertDecision(watch.limit_total, best?.price ?? null, watch.notified_price);
-  if (decision.kind === "none") return 0;
+  const isThisCheck = (b: BestKnown) =>
+    b.outbound_date === combo.start && b.return_date === combo.end && cheapest !== null;
+
+  let best = bestOf(watch, await latestPerCombination([watch.id]), today);
+  let decision = alertDecision(watch.limit_total, best?.price ?? null, watch.notified_price);
+  let bookings: BookingOption[] = [];
+  let searches = 0;
+  let bookingsFetched = false;
+
+  if (decision.kind === "report" && watch.checked_bag && best && isThisCheck(best) && check.bag_price === null) {
+    const priced = await priceTheBag(watch, check, combo, cheapest!, client, searchesLeft);
+    bookings = priced.bookings;
+    searches = priced.searches;
+    bookingsFetched = priced.fetched;
+    await keepBookings(check.id, bookings);
+    best = bestOf(watch, await latestPerCombination([watch.id]), today);
+    decision = alertDecision(watch.limit_total, best?.price ?? null, watch.notified_price);
+  }
+
+  if (decision.kind === "none") return searches;
   if (decision.kind === "reset") {
     await db
       .update(travelFlightWatches)
       .set({ notified_price: null, notified_at: null })
       .where(eq(travelFlightWatches.id, watch.id));
-    return 0;
+    return searches;
   }
   const found = best!;
   await db
     .update(travelFlightWatches)
     .set({ notified_price: found.price, notified_at: now.toISOString() })
     .where(eq(travelFlightWatches.id, watch.id));
-  if (!watch.notify_push && !watch.notify_email) return 0;
+  if (!watch.notify_push && !watch.notify_email) return searches;
 
   // Who sells it: only for the flight of this check, the tokens of others are gone.
-  let bookings: BookingOption[] = [];
-  let searches = 0;
-  const thisCheck = found.outbound_date === combo.start && found.return_date === combo.end;
-  if (thisCheck && cheapest && cheapest.price === found.price) {
+  const thisCheck = isThisCheck(found);
+  if (thisCheck && !bookingsFetched && !bookings.length) {
     try {
-      const fetched = await fetchBookings(watch, combo, cheapest, client, searchesLeft);
+      const fetched = await fetchBookings(watch, combo, cheapest!, client, searchesLeft - searches);
       bookings = fetched.options;
-      searches = fetched.searches;
-      if (bookings.length) {
-        await db.insert(travelFlightBookings).values(
-          bookings.map((b) => ({
-            check_id: check.id,
-            book_with: b.bookWith,
-            price: b.price,
-            option_title: b.optionTitle,
-            extensions: b.extensions,
-          })),
-        );
-      }
+      searches += fetched.searches;
+      await keepBookings(check.id, bookings);
     } catch (err) {
       console.warn(`[travel.flight-watch] booking options for watch ${watch.id}: ${err instanceof Error ? err.message : err}`);
       searches = Math.max(searches, 1);
@@ -971,6 +1099,8 @@ async function reportFlightPrice(
     bookings,
     link: found.link,
     newLow: decision.newLow,
+    bag: watch.checked_bag ? (found.with_bag ? "included" : "unknown") : null,
+    seated: seatedTravellers(watch),
   };
   const sender = flightAlertSender();
   const failed = (channel: string) => (err: unknown) =>

@@ -47,7 +47,16 @@ export interface BookingOption {
   price: number | null;
   optionTitle: string | null;
   extensions: string;
+  /** Google's baggage lines of the option, joined ("1 free carry-on, 1st checked bag: 99"). */
+  baggage: string;
+  /**
+   * The first checked bag per traveller: "included", its fee, or null when
+   * the lines do not say. Separate tickets add the fees of both parts.
+   */
+  checkedBag: CheckedBag;
 }
+
+export type CheckedBag = "included" | number | null;
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -122,11 +131,14 @@ export function bookingOptionsOf(answer: any): BookingOption[] {
     if (together) {
       const bookWith = str(together.book_with);
       if (!bookWith) continue;
+      const lines = baggageLines(together.baggage_prices);
       out.push({
         bookWith,
         price: num(together.price),
         optionTitle: str(together.option_title),
         extensions: unique(((together.extensions ?? []) as unknown[]).map(str)).join(", "),
+        baggage: lines.join(", "),
+        checkedBag: checkedBagOf(lines),
       });
       continue;
     }
@@ -134,14 +146,72 @@ export function bookingOptionsOf(answer: any): BookingOption[] {
     const names = unique(parts.map((p: any) => str(p?.book_with)));
     if (!names.length) continue;
     const prices = parts.map((p: any) => num(p?.price));
+    const partLines = parts.map((p: any) => baggageLines(p?.baggage_prices));
     out.push({
       bookWith: names.join(" + "),
       price: prices.every((p) => p !== null) ? prices.reduce<number>((s, p) => s + (p as number), 0) : null,
       optionTitle: "Getrennte Tickets",
       extensions: "",
+      baggage: unique(partLines.flat()).join(", "),
+      checkedBag: sumBags(partLines.map(checkedBagOf)),
     });
   }
   return out.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+}
+
+function baggageLines(v: unknown): string[] {
+  if (Array.isArray(v)) return unique(v.map(str));
+  const one = str(v);
+  return one ? [one] : [];
+}
+
+/** A line about the checked bag, in English or German (the search asks with hl=de). */
+const CHECKED = /checked|aufgegeben|aufgabe|koffer|reisegep[äa]ck/i;
+const FREE = /\bfree\b|kostenlos|kostenfrei|gratis|inklusive|inkl\.|inbegriffen|included/i;
+const NOT_OFFERED = /not (allowed|available|included)|nicht (enthalten|inbegriffen|m[öo]glich|erlaubt|verf[üu]gbar)/i;
+
+/**
+ * The first checked bag of an option from Google's baggage lines: free,
+ * its fee (the first amount on the line), or null when no line says.
+ * "1st checked bag up to 23 kg free" → included, "1st checked bag: 99" → 99.
+ */
+export function checkedBagOf(lines: string[]): CheckedBag {
+  const line = lines.find((l) => CHECKED.test(l));
+  if (!line || NOT_OFFERED.test(line)) return null;
+  if (FREE.test(line)) return "included";
+  // The fee: the first number after the colon (or the line's first), ranges
+  // ("99-187") take the low end. Skip a leading count ("1st", "1.").
+  const tail = line.includes(":") ? line.slice(line.indexOf(":") + 1) : line.replace(/^\s*\d+\s*(st|\.)?/i, "");
+  const m = tail.match(/(\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)/);
+  if (!m) return null;
+  const raw = m[1]!;
+  const value = /,\d{1,2}$/.test(raw)
+    ? Number(raw.replace(/[.\s]/g, "").replace(",", "."))
+    : Number(raw.replace(/[.\s]/g, ""));
+  if (!Number.isFinite(value)) return null;
+  return value === 0 ? "included" : value;
+}
+
+function sumBags(parts: CheckedBag[]): CheckedBag {
+  if (!parts.length || parts.some((p) => p === null)) return null;
+  const fees = parts.filter((p): p is number => typeof p === "number");
+  return fees.length ? fees.reduce((s, f) => s + f, 0) : "included";
+}
+
+/** An option's price with one checked bag for each of `seated` travellers; null when unknown. */
+export function priceWithBag(option: BookingOption, seated: number): number | null {
+  if (option.price === null || option.checkedBag === null) return null;
+  return option.checkedBag === "included" ? option.price : option.price + option.checkedBag * seated;
+}
+
+/** The cheapest option's price with a checked bag, or null when no option says what the bag costs. */
+export function cheapestWithBag(options: BookingOption[], seated: number): number | null {
+  let best: number | null = null;
+  for (const o of options) {
+    const p = priceWithBag(o, seated);
+    if (p !== null && (best === null || p < best)) best = p;
+  }
+  return best;
 }
 
 /** The watch's "max stops" (null any, 0–2) as SerpApi's `stops` parameter. */

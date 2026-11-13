@@ -139,6 +139,7 @@ function conditions(w: FlightWatch): string {
   if (w.airlines) parts.push(`${w.airlines_mode === 'exclude' ? 'ohne' : 'nur'} ${w.airlines}`)
   if (w.outbound_times) parts.push(`hin ${w.outbound_times.replace(',', '–')} Uhr`)
   if (w.return_times) parts.push(`zurück ${w.return_times.replace(',', '–')} Uhr`)
+  if (w.checked_bag) parts.push('mit Koffer')
   if (w.flexible) parts.push('flexibel')
   return parts.join(', ')
 }
@@ -356,6 +357,7 @@ const chart = computed(() => {
                   <td class="num">{{ money(w.limit_total, w.currency) }}</td>
                   <td :class="['num', { 'below-limit': w.best && w.limit_total !== null && w.best.price < w.limit_total }]">
                     {{ money(w.best?.price, w.currency) }}
+                    <small v-if="w.best?.with_bag" class="muted block">inkl. Koffer</small>
                     <small v-if="w.flexible && w.best" class="muted block">{{ dates(w.best.outbound_date, w.best.return_date) }}</small>
                   </td>
                   <td>
@@ -430,6 +432,7 @@ const chart = computed(() => {
                 <dd v-if="selected.best" class="tile-note">
                   {{ dates(selected.best.outbound_date, selected.best.return_date) }}, {{ stops(selected.best.stops) }}
                 </dd>
+                <dd v-if="selected.best?.with_bag" class="tile-note">inklusive Aufgabegepäck</dd>
               </div>
               <div class="tile">
                 <dt>Letzte Prüfung</dt>
@@ -537,6 +540,7 @@ const chart = computed(() => {
                       <th scope="col" class="num">Preis</th>
                       <th scope="col">Tarif</th>
                       <th scope="col">Bedingungen</th>
+                      <th scope="col">Gepäck</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -545,6 +549,7 @@ const chart = computed(() => {
                       <td class="num">{{ money(b.price, selected.currency) }}</td>
                       <td>{{ b.option_title ?? '–' }}</td>
                       <td class="muted">{{ b.extensions || '–' }}</td>
+                      <td class="muted">{{ b.baggage || '–' }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -617,7 +622,10 @@ const chart = computed(() => {
                     <td colspan="3" class="failure">{{ c.error }}</td>
                   </template>
                   <template v-else>
-                    <td :class="['num', { 'below-limit': c.below_limit }]">{{ money(c.lowest_price, selected.currency) }}</td>
+                    <td :class="['num', { 'below-limit': c.below_limit }]">
+                      {{ money(c.lowest_price, selected.currency) }}
+                      <small v-if="c.bag_price !== null" class="muted block">mit Koffer {{ money(c.bag_price, selected.currency) }}</small>
+                    </td>
                     <td>{{ c.lowest_airlines ?? '–' }}</td>
                     <td>{{ c.price_level && LEVEL[c.price_level] ? LEVEL[c.price_level]!.label : '–' }}</td>
                   </template>

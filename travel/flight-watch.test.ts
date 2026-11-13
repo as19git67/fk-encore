@@ -246,6 +246,82 @@ describe("job and reports", () => {
     expect(row!.notified_price).toBe(350);
   });
 
+  it("counts a checked bag: no report when the fee lifts the price over the limit", async () => {
+    const calls: FlightSearchParams[] = [];
+    const prices: Record<string, number> = { "2027-05-01": 389 };
+    const base = fakeClient(calls, prices);
+    // Two seated travellers, 389 + 2 × 30 = 449 > 400.
+    const client: FlightSearchClient = {
+      async search(params) {
+        if (params.booking_token) {
+          calls.push(params);
+          return {
+            booking_options: [
+              {
+                together: {
+                  book_with: "Beispiel Air",
+                  price: prices["2027-05-01"],
+                  baggage_prices: ["1 free carry-on", "1st checked bag: 30"],
+                },
+              },
+            ],
+          };
+        }
+        return base.search(params);
+      },
+    };
+    const sent: FlightPriceAlert[] = [];
+    setFlightAlertSender({ push: async (a) => void sent.push(a), email: async () => {} });
+    const { watch } = await endpoints.createFlightWatchApi(input({ notify_email: false }));
+    expect(watch.checked_bag).toBe(true);
+
+    await runDueFlightChecks(client, NOW);
+    expect(sent).toHaveLength(0);
+    const [first] = await db.select().from(travelFlightChecks).where(eq(travelFlightChecks.watch_id, watch.id));
+    expect(first).toMatchObject({ lowest_price: 389, bag_price: 449, below_limit: false, searches: 3 });
+    let detail = await endpoints.getFlightWatch({ id: watch.id });
+    expect(detail.watch.best).toMatchObject({ price: 449, with_bag: true });
+    expect(detail.bookings!.options[0]).toMatchObject({ book_with: "Beispiel Air", baggage: "1 free carry-on, 1st checked bag: 30" });
+
+    // Same price the next day: the known fee is reused, no further searches.
+    const later = new Date(NOW.getTime() + 24 * 3600_000);
+    calls.length = 0;
+    await runDueFlightChecks(client, later);
+    expect(calls).toHaveLength(1);
+    expect(sent).toHaveLength(0);
+
+    // Cheaper: the options are read again; 340 + 2 × 30 = 400 is not below 400 either …
+    prices["2027-05-01"] = 340;
+    calls.length = 0;
+    await runDueFlightChecks(client, new Date(later.getTime() + 24 * 3600_000));
+    expect(calls).toHaveLength(3);
+    expect(sent).toHaveLength(0);
+
+    // … 330 + 60 = 390 is.
+    prices["2027-05-01"] = 330;
+    await runDueFlightChecks(client, new Date(later.getTime() + 2 * 24 * 3600_000));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ price: 390, bag: "included", seated: 2 });
+    detail = await endpoints.getFlightWatch({ id: watch.id });
+    expect(detail.watch.notified_price).toBe(390);
+  });
+
+  it("reports the plain price when the watch does not ask for a checked bag", async () => {
+    const calls: FlightSearchParams[] = [];
+    setFlightSearchClient(fakeClient(calls));
+    const sent: FlightPriceAlert[] = [];
+    setFlightAlertSender({ push: async (a) => void sent.push(a), email: async () => {} });
+    const { watch } = await endpoints.createFlightWatchApi(
+      input({ notify_email: false, checked_bag: false, limit_total: 1000 }),
+    );
+    expect(watch.checked_bag).toBe(false);
+    await runDueFlightChecks(fakeClient(calls), NOW);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ bag: null });
+    const [row] = await db.select().from(travelFlightChecks).where(eq(travelFlightChecks.watch_id, watch.id));
+    expect(row!.bag_price).toBeNull();
+  });
+
   it("skip paused and ended watches", async () => {
     const calls: FlightSearchParams[] = [];
     await endpoints.createFlightWatchApi(input({ paused: true }));

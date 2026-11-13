@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { bookingOptionsOf, flightsOf, googleFlightsLink, insightOf, stopsParam } from "./flight-offers";
+import {
+  bookingOptionsOf,
+  cheapestWithBag,
+  checkedBagOf,
+  flightsOf,
+  googleFlightsLink,
+  insightOf,
+  priceWithBag,
+  stopsParam,
+} from "./flight-offers";
 import { flightQuery } from "./flight-search-client";
 
 /** A synthetic Google Flights answer: two outbound flights of a round trip. Airports and airlines are made up. */
@@ -96,9 +105,60 @@ describe("reading Google Flights", () => {
       ],
     });
     expect(options).toEqual([
-      { bookWith: "Portal A + Portal B", price: 370, optionTitle: "Getrennte Tickets", extensions: "" },
-      { bookWith: "Beispiel Air", price: 412, optionTitle: "Basic", extensions: "Keine Erstattung" },
+      {
+        bookWith: "Portal A + Portal B",
+        price: 370,
+        optionTitle: "Getrennte Tickets",
+        extensions: "",
+        baggage: "",
+        checkedBag: null,
+      },
+      {
+        bookWith: "Beispiel Air",
+        price: 412,
+        optionTitle: "Basic",
+        extensions: "Keine Erstattung",
+        baggage: "",
+        checkedBag: null,
+      },
     ]);
+  });
+
+  it("reads the first checked bag from Google's baggage lines", () => {
+    expect(checkedBagOf(["1 free carry-on", "1st checked bag: 99"])).toBe(99);
+    expect(checkedBagOf(["1 free carry-on", "1st checked bag up to 23 kg free"])).toBe("included");
+    expect(checkedBagOf(["1st checked bag: 99-187"])).toBe(99);
+    expect(checkedBagOf(["1. aufgegebenes Gepäckstück: 45 €"])).toBe(45);
+    expect(checkedBagOf(["1. aufgegebenes Gepäckstück: 1.040 €"])).toBe(1040);
+    expect(checkedBagOf(["1. aufgegebenes Gepäckstück: 39,50 €"])).toBe(39.5);
+    expect(checkedBagOf(["1. aufgegebenes Gepäckstück kostenlos"])).toBe("included");
+    expect(checkedBagOf(["1st checked bag: 0"])).toBe("included");
+    expect(checkedBagOf(["1 free carry-on"])).toBeNull();
+    expect(checkedBagOf(["Checked bag not included"])).toBeNull();
+    expect(checkedBagOf([])).toBeNull();
+  });
+
+  it("prices an option with a checked bag per seated traveller", () => {
+    const options = bookingOptionsOf({
+      booking_options: [
+        { together: { book_with: "Beispiel Air", price: 300, baggage_prices: ["1 free carry-on", "1st checked bag: 50"] } },
+        { together: { book_with: "Portal A", price: 380, baggage_prices: ["1st checked bag up to 23 kg free"] } },
+        { together: { book_with: "Portal B", price: 250 } },
+        {
+          departing: { book_with: "Portal C", price: 150, baggage_prices: ["1st checked bag: 20"] },
+          returning: { book_with: "Portal C", price: 160, baggage_prices: ["1st checked bag: 25"] },
+        },
+      ],
+    });
+    const byName = Object.fromEntries(options.map((o) => [o.bookWith, o]));
+    expect(byName["Beispiel Air"]).toMatchObject({ checkedBag: 50, baggage: "1 free carry-on, 1st checked bag: 50" });
+    expect(byName["Portal C"]).toMatchObject({ price: 310, checkedBag: 45 });
+    expect(priceWithBag(byName["Beispiel Air"]!, 2)).toBe(400);
+    expect(priceWithBag(byName["Portal A"]!, 2)).toBe(380);
+    expect(priceWithBag(byName["Portal B"]!, 2)).toBeNull();
+    // Cheapest with a bag: Portal A (380) before Portal C (310 + 2 × 45) and Beispiel Air (400).
+    expect(cheapestWithBag(options, 2)).toBe(380);
+    expect(cheapestWithBag([byName["Portal B"]!], 2)).toBeNull();
   });
 
   it("maps the stops and links a Google Flights search, never a redirect", () => {

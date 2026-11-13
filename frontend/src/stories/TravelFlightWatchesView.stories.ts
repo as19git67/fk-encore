@@ -29,13 +29,14 @@ const check = (id: number, at: string, outbound: string, ret: string, price: num
   price_level: price < 420 ? 'low' : 'typical',
   typical_low: 420,
   typical_high: 610,
+  bag_price: null,
   below_limit: price < 400,
   error: null,
   ...over,
 })
 
 const CHECKS: FlightCheck[] = [
-  check(4, '2026-11-12T05:15:00Z', '2027-05-02', '2027-05-06', 389, { searches: 3 }),
+  check(4, '2026-11-12T05:15:00Z', '2027-05-02', '2027-05-06', 349, { searches: 3, bag_price: 389 }),
   check(3, '2026-11-11T05:15:00Z', '2027-05-02', '2027-05-05', 455, { lowest_airlines: 'Muster Wings', lowest_stops: 1 }),
   check(2, '2026-11-10T05:15:00Z', '2027-05-01', '2027-05-05', 0, {
     error: 'SerpApi nicht erreichbar: timeout',
@@ -72,6 +73,7 @@ const FLEX: FlightWatch = {
   limit_total: 400,
   end_date: '2027-05-02',
   paused: false,
+  checked_bag: true,
   notify_push: true,
   notify_email: true,
   notified_price: 389,
@@ -88,6 +90,7 @@ const FLEX: FlightWatch = {
     stops: 0,
     checked_at: '2026-11-12T05:15:00Z',
     link: 'https://www.google.com/travel/flights?q=Flights',
+    with_bag: true,
   },
   link: 'https://www.google.com/travel/flights?q=Flights',
   created_at: '2026-11-09T05:00:00Z',
@@ -136,8 +139,8 @@ const DETAIL: FlightWatchDetail = {
     outbound_date: '2027-05-02',
     return_date: '2027-05-06',
     options: [
-      { book_with: 'Portal A', price: 381, option_title: null, extensions: '' },
-      { book_with: 'Beispiel Air', price: 389, option_title: 'Basic', extensions: 'Keine Erstattung, Handgepäck' },
+      { book_with: 'Portal A', price: 349, option_title: null, extensions: '', baggage: '1 Handgepäck inklusive' },
+      { book_with: 'Beispiel Air', price: 349, option_title: 'Basic', extensions: 'Keine Erstattung, Handgepäck', baggage: '1. Aufgabegepäck: 20 €' },
     ],
   },
   history: {

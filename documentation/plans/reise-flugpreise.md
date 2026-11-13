@@ -88,17 +88,46 @@ budget within days, so:
   `sendFlightPriceAlertEmail` with a button to the Google Flights search and
   one to the watch.
 
-## Data model (migration 0312)
+## Checked bag
+
+- Google Flights (and SerpApi) only filters carry-on bags (`bags`); there is
+  no filter for a checked bag. The watch therefore has `checked_bag`
+  ("at least one checked bag per traveller"), on by default.
+- With it on, a price about to be reported is priced with the bag first:
+  the check fetches the booking options of the cheapest flight (one or two
+  searches, the same as for the sellers) and reads `baggage_prices` of
+  each option (`checkedBagOf` in `flight-offers.ts`: a line about a checked
+  bag that says free or included counts as included, otherwise its first
+  amount is the fee per seated traveller; nothing readable counts as
+  unknown). The cheapest option with a known bag (`cheapestWithBag`) is the
+  check's `bag_price`; the limit, `below_limit`, the best price and the
+  report compare that price (`countedPrice`). Is it at or above the limit,
+  nothing is reported.
+- The fee found once is reused: a later check of the same dates whose
+  cheapest price is not below the one priced then adds the same difference
+  without a search. Only when the price drops below it does the next report
+  fetch the options again.
+- Seated travellers are adults and children; infants on lap carry no bag.
+- No seller states a bag: the report goes out with "Aufgabegepäck nicht
+  bestätigt" at the plain price, so a cheap fare is never hidden for want of
+  data.
+- Turning the option off prices and reports as before.
+- Changing `checked_bag` is a change of criteria and clears the last report.
+
+## Data model (migrations 0312, 0315)
 
 - `travel_flight_watch`: owner, route, trip type, fixed dates or window
   and nights, `flex_rotation`, passengers, class, stops, airlines and mode,
-  departure hours, currency, `limit_total`, end, pause, ways to report,
+  departure hours, currency, `limit_total`, end, pause, `checked_bag`
+  (0315), ways to report,
   `notified_price`/`notified_at`, last check and error.
 - `travel_flight_check`: one row per check — the dates searched, searches
   used, number of flights, cheapest price with airlines and stops, Google's
-  level and typical range, `below_limit`, error.
+  level and typical range, `bag_price` (0315, price with one checked bag
+  per seated traveller once known), `below_limit`, error.
 - `travel_flight_offer`: the 20 cheapest flights of a check (no links).
-- `travel_flight_booking`: sellers of the reported flight.
+- `travel_flight_booking`: sellers of the reported flight, with their
+  `baggage` lines (0315).
 - `travel_flight_price_point`: Google's price history per date combination
   and day.
 
@@ -122,6 +151,9 @@ budget within days, so:
 - Check against the first real answers that Google's price is for all
   travellers (the docs and the web page say so) and that the history's
   timestamps are seconds.
+- Check against the first real answers how `baggage_prices` reads with
+  `hl=de` and whether its fee is per traveller and direction or for the
+  whole trip; `checkedBagOf` takes it per traveller for the whole trip.
 - From the itinerary: "watch the flight" on a journey of the trip planner.
 - Price chart across checks (stage 5 of the hotel plan) and a tool for the
   assistant.
