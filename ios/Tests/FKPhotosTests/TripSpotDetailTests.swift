@@ -264,6 +264,21 @@ final class TripSpotEditTests: XCTestCase {
         XCTAssertFalse(TripSpotEdit(detail()).photoStop)
     }
 
+    func testTheSheetOpensWithTheKindAndKeepsItThroughTrimming() {
+        // The kind is changed on this sheet now, not in the detail
+        // screen, so it has to arrive here and survive the save.
+        let edit = TripSpotEdit(detail())
+        XCTAssertEqual(edit.category, detail().category)
+        var picked = edit
+        picked.category = "viewpoint"
+        XCTAssertEqual(picked.trimmed.category, "viewpoint")
+    }
+
+    func testTheKindMenuKeepsAKindNobodyPicks() {
+        XCTAssertEqual(TripSpotEdit.categoryChoices(current: "lighthouse_odd").first, "lighthouse_odd")
+        XCTAssertEqual(TripSpotEdit.categoryChoices(current: TripCategory.pickable[0]), TripCategory.pickable)
+    }
+
     func testWhitespaceIsNotAValue() {
         var edit = TripSpotEdit(osmRef: "node:1")
         edit.note = "   \n "

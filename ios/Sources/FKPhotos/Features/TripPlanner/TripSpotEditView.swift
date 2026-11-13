@@ -20,12 +20,16 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
     /// "We come here for the light" (§7.3) — the one thing that lets
     /// the sun weigh in on where this spot lands.
     var photoStop: Bool
+    /// What the place is ("Art"). Corrected here and nowhere else, so
+    /// the detail screen has one rule: it shows, "Bearbeiten" changes.
+    var category: String
 
     var id: String { osmRef }
 
     init(osmRef: String, title: String = "", note: String = "", url: String = "",
-         dwellMinutes: Int = 45, photoStop: Bool = false) {
+         dwellMinutes: Int = 45, photoStop: Bool = false, category: String = "") {
         self.osmRef = osmRef
+        self.category = category
         self.title = title
         self.note = note
         self.url = url
@@ -45,6 +49,7 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
             url: spot.sourceUrl ?? "",
             dwellMinutes: spot.dwellMinutes,
             photoStop: spot.photoStop,
+            category: spot.category,
         )
     }
 
@@ -75,7 +80,14 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
             // switch on every save, so "Fotostopp" could be turned on
             // but never kept.
             photoStop: photoStop,
+            category: category,
         )
+    }
+
+    /// The kinds to offer, with the current one kept even if it is not
+    /// one a person picks, so the menu shows what is set.
+    static func categoryChoices(current: String) -> [String] {
+        TripCategory.pickable.contains(current) ? TripCategory.pickable : [current] + TripCategory.pickable
     }
 }
 
@@ -89,6 +101,12 @@ struct TripSpotEditView: View {
     /// cannot yet — the ideas endpoint does not take the flag — and a
     /// switch that is silently ignored is worse than no switch.
     var showsPhotoStop: Bool = true
+    /// Whether the kind can be changed here. A route is always a route,
+    /// and an idea in the collection has nowhere to save one.
+    var showsCategory: Bool = false
+    /// Whether title, note, link, stay and photo stop can be saved. Off
+    /// only where the caller takes nothing but the kind.
+    var showsNoteFields: Bool = true
     let onSave: (TripSpotEdit) async -> Void
     let onCancel: () -> Void
 
@@ -96,15 +114,29 @@ struct TripSpotEditView: View {
 
     var body: some View {
         Form {
-            Section {
+            if showsNoteFields { Section {
                 TextField(spotName ?? "Eigener Name", text: $edit.title)
             } header: {
                 Text("Titel")
             } footer: {
                 Text("Wie ihr den Ort nennt. Leer lassen, dann bleibt es beim Namen "
                      + "aus OpenStreetMap — der steht ohnehin weiterhin daneben.")
+            } }
+
+            if showsCategory {
+                Section {
+                    Picker("Art", selection: $edit.category) {
+                        ForEach(TripSpotEdit.categoryChoices(current: edit.category), id: \.self) { id in
+                            Label(TripCategory.label(id), systemImage: TripCategory.symbol(id)).tag(id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                } footer: {
+                    Text("Die Karte irrt sich manchmal, was ein Ort ist.")
+                }
             }
 
+            if showsNoteFields {
             Section {
                 TextField("Was man wissen sollte", text: $edit.note, axis: .vertical)
                     .lineLimit(3...8)
@@ -155,6 +187,7 @@ struct TripSpotEditView: View {
                      + "steht — ein Vorzug, kein Termin, und ohne Berücksichtigung von "
                      + "Bergen oder Häusern.")
             } }
+            }
         }
         .navigationTitle("Ort bearbeiten")
         .navigationBarTitleDisplayMode(.inline)

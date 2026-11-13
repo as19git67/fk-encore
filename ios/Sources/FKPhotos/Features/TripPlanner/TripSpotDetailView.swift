@@ -193,10 +193,12 @@ struct TripSpotDetailView<Actions: View>: View {
         }
         .onChange(of: spot.category) { shownCategory = nil }
         .toolbar {
-            if onSave != nil {
+            if onSave != nil || canChangeCategory {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Bearbeiten", systemImage: "square.and.pencil") {
-                        editing = TripSpotEdit(spot)
+                        var edit = TripSpotEdit(spot)
+                        edit.category = shownCategory ?? spot.category
+                        editing = edit
                     }
                 }
             }
@@ -204,9 +206,23 @@ struct TripSpotDetailView<Actions: View>: View {
         .sheet(item: $editing) { edit in
             NavigationStack {
                 TripSpotEditView(edit: edit, spotName: spot.name,
-                                 showsPhotoStop: spot.supportsPhotoStop) { saved in
+                                 showsPhotoStop: spot.supportsPhotoStop,
+                                 showsCategory: canChangeCategory,
+                                 showsNoteFields: onSave != nil) { saved in
                     editing = nil
-                    await onSave?(saved)
+                    if let onCategory, canChangeCategory, saved.category != edit.category {
+                        // Shown at once: the caller hands the new spot
+                        // only after the plan has come back.
+                        shownCategory = saved.category
+                        await onCategory(saved.category)
+                    }
+                    // The rest only when it changed: a new kind alone
+                    // should not write the note back as well.
+                    var rest = saved
+                    rest.category = edit.category
+                    if let onSave, rest != edit.trimmed {
+                        await onSave(saved)
+                    }
                 } onCancel: {
                     editing = nil
                 }
@@ -450,34 +466,16 @@ struct TripSpotDetailView<Actions: View>: View {
 
     }
 
-    /// "Art", which the people planning can change where the caller
-    /// takes it — the map is sometimes wrong about what a place is.
-    @ViewBuilder
+    /// "Art", read here and changed under "Bearbeiten" like everything
+    /// else about the spot (Anton, 13.11.) — the map is sometimes wrong
+    /// about what a place is.
     private var categoryRow: some View {
-        let category = shownCategory ?? spot.category
-        if let onCategory, category != "route" {
-            Picker("Art", selection: Binding(
-                get: { category },
-                set: { picked in
-                    guard picked != category else { return }
-                    shownCategory = picked
-                    Task { await onCategory(picked) }
-                },
-            )) {
-                ForEach(Self.categoryChoices(current: category), id: \.self) { id in
-                    Label(TripCategory.label(id), systemImage: TripCategory.symbol(id)).tag(id)
-                }
-            }
-            .pickerStyle(.menu)
-        } else {
-            LabeledContent("Art", value: TripCategory.label(category))
-        }
+        LabeledContent("Art", value: TripCategory.label(shownCategory ?? spot.category))
     }
 
-    /// The kinds to offer, with the current one kept even if it is not
-    /// one a person picks, so the menu shows what is set.
-    static func categoryChoices(current: String) -> [String] {
-        TripCategory.pickable.contains(current) ? TripCategory.pickable : [current] + TripCategory.pickable
+    /// Whether the caller takes a new kind. A route stays a route.
+    private var canChangeCategory: Bool {
+        onCategory != nil && (shownCategory ?? spot.category) != "route"
     }
 
     private func offerRoute() {
