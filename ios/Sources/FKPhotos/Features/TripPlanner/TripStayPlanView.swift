@@ -597,24 +597,22 @@ struct TripStayPlanView: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            HStack(alignment: .firstTextBaseline) {
-                Text(open.isEmpty ? "Noch offen" : "Noch offen · \(open.count) \(open.count == 1 ? "Spot" : "Spots")")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                if !open.isEmpty, !fillable.isEmpty {
-                    Button("Alle Tage füllen") {
-                        fillRequest = TripFillRequest(dayIndex: nil, fromMinutes: nil)
+            // Nothing open, no heading: the button below is the way in.
+            if !open.isEmpty {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Noch offen · \(open.count) \(open.count == 1 ? "Spot" : "Spots")")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    if !fillable.isEmpty {
+                        Button("Alle Tage füllen") {
+                            fillRequest = TripFillRequest(dayIndex: nil, fromMinutes: nil)
+                        }
+                        .font(.footnote)
                     }
-                    .font(.footnote)
                 }
-            }
-            if open.isEmpty {
-                Text("Alles, was ihr sehen wollt, steht auf einem Tag oder kommt über „Spot hinzufügen“ dazu.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             ForEach(shown) { candidate in
                 openCard(candidate, days: fillable, leg: leg)

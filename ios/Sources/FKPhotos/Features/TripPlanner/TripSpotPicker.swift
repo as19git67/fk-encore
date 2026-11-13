@@ -248,6 +248,15 @@ enum TripSpotPicker {
         return "Auf Tag \(day + 1) legen"
     }
 
+    /// Two names for one place that a person would not take for the same.
+    static func differs(_ name: String, from other: String) -> Bool {
+        let normalise = { (text: String) in
+            text.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de"))
+        }
+        return normalise(name) != normalise(other)
+    }
+
     /// The block a place goes into on a day of the stay.
     /// The block a spot goes to on a day: the day at the quarters, not
     /// an excursion's window (Mock 16), unless nothing else is left.
