@@ -461,3 +461,51 @@ export async function sendHotelPriceAlertEmail(params: HotelPriceAlertMailParams
     html,
   });
 }
+
+export interface FlightPriceAlertMailParams {
+  to: string;
+  subject: string;
+  /** One line: price, passengers, limit, dates, airline, stops. */
+  text: string;
+  /** "Buchbar bei …", when the booking options were fetched. */
+  bookings: string | null;
+  /** The Google Flights search for the dates (a search page, not a redirect). */
+  searchLink: string;
+  watchUrl: string;
+}
+
+/** A flight price watch found a price below its limit (travel/flight-alerts.ts). */
+export async function sendFlightPriceAlertEmail(params: FlightPriceAlertMailParams): Promise<void> {
+  if (!mailConfigured()) throw new Error("SMTP_NOT_CONFIGURED");
+  const note = "Die Preise stammen von Google Flights und können sich bis zur Buchung ändern.";
+  const lines = [
+    params.text,
+    ...(params.bookings ? [params.bookings] : []),
+    "",
+    `In Google Flights öffnen: ${params.searchLink}`,
+    `Wächter in ${APP_NAME}: ${params.watchUrl}`,
+    "",
+    note,
+  ];
+  const button = (href: string, label: string) =>
+    `<a href="${escapeHtml(href)}" style="display: inline-block; margin: 0 0.5em 0.5em 0; padding: 0.75em 1.5em; background: #4f46e5; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">${escapeHtml(label)}</a>`;
+  const html = `
+    <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">
+      <p><strong>${escapeHtml(params.subject)}</strong></p>
+      <p>${escapeHtml(params.text)}</p>
+      ${params.bookings ? `<p>${escapeHtml(params.bookings)}</p>` : ""}
+      <p style="margin: 1.5em 0;">
+        ${button(params.searchLink, "In Google Flights öffnen")}
+        ${button(params.watchUrl, "Wächter öffnen")}
+      </p>
+      <p style="font-size: 0.85em; color: #666;">${escapeHtml(note)}</p>
+    </div>
+  `;
+  await (testTransport ?? getTransporter()).sendMail({
+    from: SMTP_FROM,
+    to: params.to,
+    subject: params.subject,
+    text: lines.join("\n"),
+    html,
+  });
+}

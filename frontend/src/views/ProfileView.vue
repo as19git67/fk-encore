@@ -327,6 +327,7 @@ const NOTIFICATION_TYPES: NotificationTypeConfig[] = [
   { kind: 'document_failed', label: 'Dokumentverarbeitung fehlgeschlagen', description: 'Ein Dokument konnte nicht automatisch verarbeitet werden' },
   { kind: 'assistant_answer', label: 'Assistent', description: 'Der Assistent hat eine Frage beantwortet, während niemand zugeschaut hat' },
   { kind: 'hotel_price', label: 'Hotelpreise', description: 'Ein Hotelpreis-Wächter hat einen Preis unter deiner Grenze gefunden' },
+  { kind: 'flight_price', label: 'Flugpreise', description: 'Ein Flugpreis-Wächter hat einen Preis unter deiner Grenze gefunden' },
 ]
 
 const notifPrefs = ref<NotificationPrefs>({})

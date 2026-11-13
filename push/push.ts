@@ -395,3 +395,25 @@ export const notifyHotelPrice = api(
     );
   },
 );
+
+interface NotifyFlightPriceRequest {
+  userId: number;
+  watchId: number;
+  title: string;
+  body: string;
+}
+
+/** Called by `travel/flight-alerts.ts` when a flight watch's price fell below its limit. */
+export const notifyFlightPrice = api(
+  { expose: false },
+  async (req: NotifyFlightPriceRequest): Promise<FanoutFeedResponse> => {
+    const prefs = await svc.getNotificationPrefs(req.userId);
+    if (!svc.isKindEnabled(prefs, "flight_price")) {
+      return { sent: 0, pruned: 0 };
+    }
+    return await svc.sendToUser(
+      req.userId,
+      svc.buildFlightPriceNotification({ watchId: req.watchId, title: req.title, body: req.body }),
+    );
+  },
+);
