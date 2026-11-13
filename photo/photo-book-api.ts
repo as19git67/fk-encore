@@ -34,6 +34,9 @@ import {
   createPhotoBook,
   deletePhotoBook,
   fitPhotoBookToEdits,
+  fixPhotoBookLowDpi,
+  movePhotoToOwnPage,
+  type LowDpiFix,
   getPhotoBookView,
   listPhotoBooks,
   photoBookFormats,
@@ -164,6 +167,30 @@ export const fitPhotoBookToEditsApi = api(
   async ({ id }: { id: number }): Promise<PhotoBookView> => {
     const userId = viewer();
     await fitPhotoBookToEdits(userId, id);
+    return getPhotoBookView(userId, id);
+  },
+);
+
+/**
+ * "Beheben" for photos that would print under 200 dpi: another layout or
+ * order on their page, else a page of their own; what is too small even alone
+ * is counted in `fix.remaining`.
+ */
+export const fixPhotoBookLowDpiApi = api(
+  { expose: true, method: "POST", path: "/photo-books/:id/fix-low-dpi", auth: true },
+  async ({ id }: { id: number }): Promise<{ book: PhotoBookView; fix: LowDpiFix }> => {
+    const userId = viewer();
+    const fix = await fixPhotoBookLowDpi(userId, id);
+    return { book: await getPhotoBookView(userId, id), fix };
+  },
+);
+
+/** One photo onto a page of its own right after its page. */
+export const movePhotoToOwnPageApi = api(
+  { expose: true, method: "POST", path: "/photo-books/:id/pages/:pageId/photos/:photoId/own-page", auth: true },
+  async ({ id, pageId, photoId }: { id: number; pageId: number; photoId: number }): Promise<PhotoBookView> => {
+    const userId = viewer();
+    await movePhotoToOwnPage(userId, id, pageId, photoId);
     return getPhotoBookView(userId, id);
   },
 );
