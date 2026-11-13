@@ -24,7 +24,10 @@ import {
   formatDayRange,
   isRecognisableFace,
   limitPhotos,
+  lowDpiSlots,
   photoScore,
+  sharpSinglePage,
+  sharpestArrangement,
   relayoutPage,
   slotDpi,
   spineWidthMm,
@@ -35,9 +38,11 @@ import {
   createPhotoBook,
   deletePhotoBook,
   fitPhotoBookToEdits,
+  fixPhotoBookLowDpi,
   getPhotoBookView,
   listPhotoBooks,
   loadPhotoBook,
+  movePhotoToOwnPage,
   rebuildPhotoBook,
   removePhotoFromBookPage,
   setPhotoBookPageLayout,
@@ -233,6 +238,34 @@ describe("photo book pages", () => {
   });
 });
 
+describe("photo book print resolution", () => {
+  it("gives a small photo the smaller cell when that prints it sharp", () => {
+    const grid = findBookLayout("photos", 4, "grid")!;
+    // 900 × 600 prints under 200 dpi in a quarter of A4 landscape, but above it in a small cell of "Groß links".
+    const small = photo(1, null, { width: 900, height: 600, score: 10 });
+    const big = [2, 3, 4].map((id) => photo(id, null, { score: 90 }));
+    const photos = [small, ...big];
+    expect(lowDpiSlots("a4-landscape", grid, photos, false)).toBe(1);
+    const best = sharpestArrangement("a4-landscape", "photos", grid, photos, false);
+    expect(best.low).toBe(0);
+    expect(best.layout.id).not.toBe("grid");
+    expect(lowDpiSlots("a4-landscape", best.layout, best.photos, false)).toBe(0);
+  });
+
+  it("keeps the layout and order when every photo prints sharp already", () => {
+    const grid = findBookLayout("photos", 4, "grid")!;
+    const photos = [1, 2, 3, 4].map((id) => photo(id, null));
+    const best = sharpestArrangement("a4-landscape", "photos", grid, photos, false);
+    expect(best.layout.id).toBe("grid");
+    expect(best.photos.map((p) => p.id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("finds a single page only for a photo that is sharp there", () => {
+    expect(sharpSinglePage("a4-landscape", photo(1, null), false)).not.toBeNull();
+    expect(sharpSinglePage("a4-landscape", photo(1, null, { width: 300, height: 200 }), false)).toBeNull();
+  });
+});
+
 describe("photo book pages after an edit", () => {
   const stack = findBookLayout("photos", 2, "stack")!;
   const landscape = (id: number) => ({ ...photo(id, null), originalWidth: 3000, originalHeight: 2000 });
@@ -421,6 +454,57 @@ describe("photo book service", () => {
     expect(rebuilt.photo_count).toBe(4);
     await deletePhotoBook(user.id, id);
     await expect(getPhotoBookView(user.id, id)).rejects.toThrow(/not found/);
+  });
+
+  it("counts pages and photos in the list of books", async () => {
+    const list = [];
+    for (let i = 0; i < 7; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`));
+    const id = await createPhotoBook(user.id, { title: "Zählen", photoIds: list.map((p) => p.id) });
+    const view = await getPhotoBookView(user.id, id);
+    expect(view.page_count).toBeGreaterThan(1);
+    const [summary] = await listPhotoBooks(user.id);
+    expect(summary.page_count).toBe(view.page_count);
+    expect(summary.photo_count).toBe(7);
+  });
+
+  it("fixes photos that would print under 200 dpi, and leaves what is too small even alone", async () => {
+    const list = [];
+    for (let i = 0; i < 9; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`, { ai_quality_score: 0.5 + i / 100 }));
+    const id = await createPhotoBook(user.id, { title: "Schärfe", photoIds: list.map((p) => p.id) });
+    let view = await getPhotoBookView(user.id, id);
+    const multi = view.pages.filter((p) => p.kind === "photos" && p.slots.length > 1);
+    expect(multi.length).toBeGreaterThan(0);
+    // One photo small enough that a smaller cell or its own page saves it, one too small for anything.
+    const medium = multi[0].slots[0];
+    const scale = 170 / medium.dpi!; // prints at 170 dpi where it is now, sharp in a smaller cell
+    await db.update(photos).set({ width: Math.round(3000 * scale), height: Math.round(2000 * scale) }).where(eq(photos.id, medium.photo_id));
+    const tiny = multi[multi.length - 1].slots[multi[multi.length - 1].slots.length - 1].photo_id;
+    await db.update(photos).set({ width: 300, height: 200 }).where(eq(photos.id, tiny));
+    view = await getPhotoBookView(user.id, id);
+    expect(view.low_dpi_count).toBe(2);
+    const pagesBefore = view.page_count;
+
+    const fix = await fixPhotoBookLowDpi(user.id, id);
+    expect(fix.remaining).toBe(1);
+    expect(fix.rearranged + fix.own_pages).toBeGreaterThan(0);
+    view = await getPhotoBookView(user.id, id);
+    expect(view.low_dpi_count).toBe(1);
+    expect(view.pages.flatMap((p) => p.slots).find((s) => s.low_dpi)!.photo_id).toBe(tiny);
+    expect(view.photo_count).toBe(9);
+    expect(view.page_count).toBe(pagesBefore + fix.own_pages);
+    expect(view.pages.map((p) => p.position)).toEqual([...view.pages.map((p) => p.position)].sort((a, b) => a - b));
+    for (const p of view.pages) expect(p.layout_options.some((o) => o.id === p.layout)).toBe(true);
+
+    // The tiny one onto a page of its own, by hand: right after its page, in the same chapter.
+    const holder = view.pages.find((p) => p.slots.some((s) => s.photo_id === tiny))!;
+    if (holder.kind === "photos" && holder.slots.length > 1) {
+      await movePhotoToOwnPage(user.id, id, holder.id, tiny);
+      view = await getPhotoBookView(user.id, id);
+      const at = view.pages.findIndex((p) => p.id === holder.id);
+      expect(view.pages[at + 1]!.slots.map((s) => s.photo_id)).toEqual([tiny]);
+      expect(view.pages[at + 1]!.chapter_id).toBe(holder.chapter_id);
+      expect(view.photo_count).toBe(9);
+    }
   });
 
   it("hands the PDF the chapter titles on openers", async () => {

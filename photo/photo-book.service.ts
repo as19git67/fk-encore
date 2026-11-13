@@ -47,7 +47,10 @@ import {
   findBookLayout,
   isPhotoBookFormat,
   limitPhotos,
+  lowDpiSlots,
   photoScore,
+  sharpSinglePage,
+  sharpestArrangement,
   relayoutPage,
   slotDpi,
   repeatedCaptions,
@@ -872,8 +875,6 @@ export async function listPhotoBooks(userId: number): Promise<PhotoBookSummary[]
     subtitle: string | null;
     format: string;
     updated_at: string;
-    page_count: number;
-    photo_count: number;
     cover_filename: string | null;
   }>(
     db.select({
@@ -882,12 +883,35 @@ export async function listPhotoBooks(userId: number): Promise<PhotoBookSummary[]
       subtitle: photoBook.subtitle,
       format: photoBook.format,
       updated_at: photoBook.updated_at,
-      page_count: sql<number>`(SELECT COUNT(*)::int FROM ${photoBookPage} pg WHERE pg.book_id = ${photoBook.id})`,
-      photo_count: sql<number>`(SELECT COUNT(DISTINCT s.photo_id)::int FROM ${photoBookSlot} s JOIN ${photoBookPage} pg ON pg.id = s.page_id WHERE pg.book_id = ${photoBook.id})`,
       cover_filename: sql<string | null>`(SELECT p.filename FROM ${photos} p WHERE p.id = ${photoBook.cover_photo_id} AND ${accessiblePhotoConditionFor(userId, sql`p.id`, sql`p.user_id`)})`,
     }).from(photoBook).where(eq(photoBook.user_id, userId)).orderBy(sql`${photoBook.updated_at} DESC`),
   );
-  return rows.map((r) => ({ ...r, format: isPhotoBookFormat(r.format) ? r.format : "a4-landscape" }));
+  // Counted in their own grouped queries: a correlated subquery here would
+  // see `${photoBook.id}` rendered without its table (Drizzle leaves a
+  // single-table select unqualified), so `pg.book_id = "id"` compared the
+  // page with itself and every book showed 0 pages and 0 photos.
+  const ids = rows.map((r) => r.id);
+  const counts = new Map<number, { pages: number; photos: number }>();
+  if (ids.length) {
+    const pages = await dbAll<{ book_id: number; n: number }>(
+      db.select({ book_id: photoBookPage.book_id, n: sql<number>`COUNT(*)::int` })
+        .from(photoBookPage).where(inArray(photoBookPage.book_id, ids)).groupBy(photoBookPage.book_id),
+    );
+    const slots = await dbAll<{ book_id: number; n: number }>(
+      db.select({ book_id: photoBookPage.book_id, n: sql<number>`COUNT(DISTINCT ${photoBookSlot.photo_id})::int` })
+        .from(photoBookSlot).innerJoin(photoBookPage, eq(photoBookPage.id, photoBookSlot.page_id))
+        .where(inArray(photoBookPage.book_id, ids)).groupBy(photoBookPage.book_id),
+    );
+    for (const id of ids) counts.set(id, { pages: 0, photos: 0 });
+    for (const r of pages) counts.get(r.book_id)!.pages = Number(r.n);
+    for (const r of slots) counts.get(r.book_id)!.photos = Number(r.n);
+  }
+  return rows.map((r) => ({
+    ...r,
+    format: isPhotoBookFormat(r.format) ? r.format : "a4-landscape",
+    page_count: counts.get(r.id)?.pages ?? 0,
+    photo_count: counts.get(r.id)?.photos ?? 0,
+  }));
 }
 
 // ── edits ───────────────────────────────────────────────────────────────
@@ -1012,6 +1036,118 @@ export async function removePhotoFromBookPage(userId: number, bookId: number, pa
     const stillInBook = loaded.pages.some((p) => p.photos.some((s) => s.photo_id === photoId && p.id !== pageId));
     if (!stillInBook) await dbExec(db.update(photoBook).set({ cover_photo_id: null }).where(eq(photoBook.id, bookId)));
   }
+  await touch(bookId);
+}
+
+// ── print resolution ────────────────────────────────────────────────────
+
+export interface LowDpiFix {
+  /** Pages whose layout or photo order changed so every photo prints sharp. */
+  rearranged: number;
+  /** Photos moved onto a page of their own right after the one they were on. */
+  own_pages: number;
+  /** Photos still under `MIN_PRINT_DPI`: too small even alone on a page. */
+  remaining: number;
+}
+
+/** Make room for `count` pages right after `page` and add them, one photo each. */
+async function insertOwnPages(bookId: number, page: LoadedPage, singles: { photoId: number; layout: string }[]): Promise<void> {
+  if (!singles.length) return;
+  await dbExec(db.update(photoBookPage).set({ position: sql`${photoBookPage.position} + ${singles.length}` })
+    .where(and(eq(photoBookPage.book_id, bookId), sql`${photoBookPage.position} > ${page.position}`)));
+  let position = page.position + 1;
+  for (const s of singles) {
+    const row = await dbInsertReturning<{ id: number }>(
+      db.insert(photoBookPage).values({
+        book_id: bookId,
+        chapter_id: page.chapter_id,
+        position: position++,
+        kind: "photos",
+        layout: s.layout,
+        rule_layout: s.layout,
+      }).returning({ id: photoBookPage.id }),
+    );
+    await dbExec(db.insert(photoBookSlot).values({ page_id: row!.id, slot: 0, photo_id: s.photoId }));
+  }
+}
+
+/** Write a page's layout and photo order as `sharpestArrangement` found it. */
+async function writeArrangement(page: LoadedPage, layout: BookLayout, photoIds: number[]): Promise<void> {
+  await dbExec(db.delete(photoBookSlot).where(eq(photoBookSlot.page_id, page.id)));
+  await dbExec(db.update(photoBookPage).set({ layout: layout.id, layout_source: "rule", layout_origin: "rule", rule_layout: layout.id, layout_reason: null })
+    .where(eq(photoBookPage.id, page.id)));
+  await dbExec(db.insert(photoBookSlot).values(photoIds.map((photo_id, slot) => ({ page_id: page.id, slot, photo_id }))));
+}
+
+/** Whether a page of its own for a photo of `page` would show captions. */
+function ownPageCaptioned(loaded: LoadedBook, page: LoadedPage, photoId: number): boolean {
+  const on = page.captions ?? bookSettings(loaded.book.settings).captions;
+  return on && loaded.captions.has(photoId);
+}
+
+/**
+ * "Beheben" for photos that would print under `MIN_PRINT_DPI`. Per page,
+ * first another layout or cell order of the same photos (a small photo into a
+ * smaller cell); a photo that still prints too small moves onto a page of its
+ * own right after, when it is sharp enough there. What stays too small even
+ * alone is left as it is: only a larger photo or taking it out helps.
+ * Chapter openers have a single layout and only count as remaining.
+ */
+export async function fixPhotoBookLowDpi(userId: number, bookId: number): Promise<LowDpiFix> {
+  const loaded = await loadPhotoBook(userId, bookId);
+  const { format } = loaded;
+  const fix: LowDpiFix = { rearranged: 0, own_pages: 0, remaining: 0 };
+  // From the back, so the positions a later page shifts are never ones still to come.
+  const pages = [...loaded.pages].sort((a, b) => b.position - a.position || b.id - a.id);
+  for (const page of pages) {
+    const photosNow = page.photos.map(toBookPhoto);
+    const captioned = pageCaptioned(loaded, page);
+    const lowNow = lowDpiSlots(format, page.layout, photosNow, captioned);
+    if (!lowNow) continue;
+    if (page.kind !== "photos") {
+      fix.remaining += lowNow;
+      continue;
+    }
+    const best = sharpestArrangement(format, page.kind, page.layout, photosNow, captioned);
+    if (best.low === 0) {
+      await writeArrangement(page, best.layout, best.photos.map((p) => p.id));
+      fix.rearranged += 1;
+      continue;
+    }
+    // Which photos are still too small in the sharpest arrangement, and which of them a page of their own saves.
+    const singles: { photoId: number; layout: string }[] = [];
+    best.photos.forEach((p, i) => {
+      const cell = best.layout.cells[i]!;
+      const dpi = slotDpi(p.width, p.height, slotGeometry(format, best.layout, cell, captioned).image);
+      if (dpi == null || dpi >= MIN_PRINT_DPI) return;
+      const alone = best.photos.length > 1 ? sharpSinglePage(format, p, ownPageCaptioned(loaded, page, p.id)) : null;
+      if (alone) singles.push({ photoId: p.id, layout: alone });
+      else fix.remaining += 1;
+    });
+    if (singles.length) {
+      const moved = new Set(singles.map((s) => s.photoId));
+      await writePage(page.id, page.kind, format, photosNow.filter((p) => !moved.has(p.id)));
+      await insertOwnPages(bookId, page, singles);
+      fix.own_pages += singles.length;
+    } else if (best.low < lowNow) {
+      await writeArrangement(page, best.layout, best.photos.map((p) => p.id));
+      fix.rearranged += 1;
+    }
+  }
+  if (fix.rearranged || fix.own_pages) await touch(bookId);
+  return fix;
+}
+
+/** One photo of a page onto a page of its own right after it; the page is laid out again for the rest. */
+export async function movePhotoToOwnPage(userId: number, bookId: number, pageId: number, photoId: number): Promise<void> {
+  const { loaded, page } = await ownedPage(userId, bookId, pageId);
+  const photo = page.photos.find((p) => p.photo_id === photoId);
+  if (!photo) throw APIError.notFound("photo not on this page");
+  if (page.kind !== "photos" || page.photos.length < 2) throw APIError.failedPrecondition("the photo has a page of its own already");
+  const bp = toBookPhoto(photo);
+  const layout = sharpSinglePage(loaded.format, bp, ownPageCaptioned(loaded, page, photoId)) ?? relayoutPage(loaded.format, "photos", [bp])!.layout;
+  await writePage(page.id, page.kind, loaded.format, page.photos.filter((p) => p.photo_id !== photoId).map(toBookPhoto));
+  await insertOwnPages(bookId, page, [{ photoId, layout }]);
   await touch(bookId);
 }
 
