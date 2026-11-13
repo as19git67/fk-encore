@@ -2182,8 +2182,22 @@
     {
       "idx": 312,
       "version": "7",
+      "when": 1790870000000,
+      "tag": "0312_travel_flight_watch",
+      "breakpoints": true
+    },
+    {
+      "idx": 313,
+      "version": "7",
       "when": 1790790000000,
-      "tag": "0312_finance_depot_watch_from",
+      "tag": "0313_travel_hotel_area_flex",
+      "breakpoints": true
+    },
+    {
+      "idx": 314,
+      "version": "7",
+      "when": 1790800000000,
+      "tag": "0314_finance_depot_watch_from",
       "breakpoints": true
     }
   ]

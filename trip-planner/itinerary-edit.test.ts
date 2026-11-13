@@ -1034,6 +1034,75 @@ describe("day trips with a time window on a trip of ideas", () => {
     expect(after.pool.map((c) => c.osmRef)).toContain(dom);
   });
 
+  it("goes from one excursion straight on to the next and back to the quarters only from the last", async () => {
+    const { plan } = await createTripPlan({
+      startEmpty: true,
+      legs: [{ title: "Bergdorf", anchor: ANCHOR, anchorLabel: "Hotel", days: 3, startDate: "2027-09-05", mode: "foot" }],
+    });
+    const first = { lat: 48.37, lon: 11.0 };
+    const second = { lat: 48.39, lon: 11.0 };
+    const { plan: one } = await addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...first, label: "Seestadt", departAt: "09:30", returnAt: "12:00",
+    });
+    const a = one.legs[0].days[1].excursions![0];
+    const { plan: two } = await addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...second, label: "Hafenstadt", departAt: "13:30", returnAt: "15:00",
+    });
+    const b = two.legs[0].days[1].excursions!.find((e) => e.id !== a.id)!;
+    expect(two.legs[0].days[1].blocks.map((x) => x.id)).toContain(`day@${a.id}`);
+
+    // Linked: no piece at the quarters between, b leaves when a starts on.
+    const { plan: linked } = await updateTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, excursionId: b.id, from: a.id,
+    });
+    const day = linked.legs[0].days[1];
+    expect(day.blocks.map((x) => x.id)).toEqual(["day", `excursion:${a.id}`, `excursion:${b.id}`, `day@${b.id}`]);
+    const [la, lb] = [a.id, b.id].map((id) => day.excursions!.find((e) => e.id === id)!);
+    expect(lb.from).toBe(a.id);
+    expect(lb.departMinutes).toBe(12 * 60);
+    expect(la.backMinutes).toBe(0);
+    expect(lb.backMinutes).toBeGreaterThan(0);
+    // The hop between two places 2 km apart is shorter than the way out.
+    expect(lb.travelMinutes).toBeLessThan(la.travelMinutes);
+
+    // a's return moves b's departure along.
+    const { plan: later } = await updateTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, excursionId: a.id, returnAt: "12:30",
+    });
+    expect(later.legs[0].days[1].excursions!.find((e) => e.id === b.id)!.departMinutes).toBe(12 * 60 + 30);
+
+    // A third destination hangs on with `from`; a second one off the same is refused.
+    const { plan: three } = await addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...first, label: "Dritte", from: b.id, returnAt: "16:30",
+    });
+    const c = three.legs[0].days[1].excursions!.find((e) => e.from === b.id)!;
+    expect(c.departMinutes).toBe(15 * 60);
+    await expect(addTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, ...first, from: b.id, returnAt: "17:00",
+    })).rejects.toThrow(/nur zu einem nächsten/);
+
+    // The chain moves as a whole.
+    const { plan: moved } = await moveTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 1, excursionId: b.id, toDayIndex: 2,
+    });
+    expect(moved.legs[0].days[1].excursions ?? []).toHaveLength(0);
+    expect(moved.legs[0].days[2].excursions!.map((e) => e.id).sort()).toEqual([a.id, b.id, c.id].sort());
+
+    // Removing the middle closes the chain; unlinking sends the group home first.
+    const { plan: closed } = await removeTripExcursion({ planId: plan.id, legIndex: 0, dayIndex: 2, excursionId: b.id });
+    const rest = closed.legs[0].days[2].excursions!;
+    expect(rest.find((e) => e.id === c.id)!.from).toBe(a.id);
+    const { plan: apart } = await updateTripExcursion({
+      planId: plan.id, legIndex: 0, dayIndex: 2, excursionId: c.id, from: null,
+    });
+    const split = apart.legs[0].days[2];
+    const home = split.excursions!.find((e) => e.id === a.id)!;
+    const cc = split.excursions!.find((e) => e.id === c.id)!;
+    expect(cc.from ?? null).toBeNull();
+    expect(home.backMinutes).toBeGreaterThan(0);
+    expect(cc.departMinutes).toBe(home.returnMinutes + home.backMinutes);
+  });
+
   it("moves an excursion or a whole-day trip to another day with its spots", async () => {
     const { plan } = await createTripPlan({
       startEmpty: true,

@@ -3,8 +3,9 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import db from "../db/database";
-import { travelHotelChecks, travelHotelWatches, users } from "../db/schema";
+import { travelHotelChecks, travelHotelOffers, travelHotelWatches, users } from "../db/schema";
 import { DETAIL } from "./hotel-offers.test";
+import { AREA_LIST } from "./hotel-area.test";
 import { maxEndDate, normalizeWatchInput, runDueChecks, watchStatus, type WatchInput } from "./hotel-watch.service";
 import { setHotelSearchClient, type HotelSearchClient, type HotelSearchParams } from "./serpapi-client";
 import { setAlertSender, type PriceAlert } from "./hotel-alerts";
@@ -139,6 +140,59 @@ describe("endpoints", () => {
     await endpoints.checkHotelWatch({ id: watch.id });
     expect(calls).toHaveLength(3);
     expect(calls[2].property_token).toBe("tok-beispiel");
+  });
+
+  it("store links that still open later instead of Google's click redirects", async () => {
+    const detail = {
+      ...structuredClone(DETAIL),
+      link: "https://hotel-beispiel.example/",
+      featured_prices: [
+        {
+          source: "Hotel Beispiel Musterstadt",
+          official: true,
+          link: "https://www.google.com/aclk?sa=l&ai=beispiel&adurl=",
+          rooms: [{ name: "Doppelzimmer", rates: [{ rate_per_night: { extracted_lowest: 180 }, free_cancellation: true }] }],
+        },
+      ],
+      prices: [
+        { source: "Booking.com", link: "https://www.google.com/travel/clk?pc=beispiel", rate_per_night: { extracted_lowest: 190 } },
+        {
+          source: "Portal E",
+          link: "https://www.googleadservices.com/pagead/aclk?adurl=https%3A%2F%2Fportal-e.example%2Fangebot",
+          rate_per_night: { extracted_lowest: 195 },
+        },
+        { source: "Portal F", link: "https://www.google.com/aclk?sa=l&ai=f", rate_per_night: { extracted_lowest: 199 } },
+      ],
+    };
+    setHotelSearchClient({ search: async (p) => (p.property_token ? detail : { properties: [{ name: "Hotel Beispiel Musterstadt", property_token: "tok-beispiel" }] }) });
+    const { watch } = await endpoints.createHotelWatch(input());
+    await endpoints.checkHotelWatch({ id: watch.id });
+
+    const links = Object.fromEntries((await endpoints.getHotelWatch({ id: watch.id })).offers.map((o) => [o.source, o.link]));
+    expect(links["Hotel Beispiel Musterstadt"]).toBe("https://hotel-beispiel.example/");
+    expect(links["Booking.com"]).toMatch(/^https:\/\/www\.booking\.com\/searchresults\.de\.html\?ss=Hotel\+Beispiel/);
+    expect(links["Booking.com"]).toContain("checkin=2027-05-12");
+    expect(links["Portal E"]).toBe("https://portal-e.example/angebot");
+    expect(links["Portal F"]).toBe("https://www.google.com/travel/hotels/entity/tok-beispiel/prices?hl=de&gl=de");
+  });
+
+  it("replace Google redirects stored by older checks when reading", async () => {
+    const { watch } = await endpoints.createHotelWatch(input());
+    const [check] = await db
+      .insert(travelHotelChecks)
+      .values({ watch_id: watch.id, checked_at: NOW.toISOString(), searches: 1, offer_count: 1, below_limit: false })
+      .returning();
+    await db.insert(travelHotelOffers).values({
+      check_id: check.id,
+      source: "Portal F",
+      room: "(ohne Zimmerangabe)",
+      per_night: 199,
+      breakfast: false,
+      link: "https://www.google.com/aclk?sa=l&ai=f",
+      rooms: 1,
+    });
+    const { offers } = await endpoints.getHotelWatch({ id: watch.id });
+    expect(offers[0].link).toBe("https://www.google.com/travel/search?q=Hotel+Beispiel+Musterstadt&hl=de&gl=de");
   });
 
   it("keep other users' watches apart", async () => {
@@ -345,3 +399,139 @@ describe("reports", () => {
   });
 });
 
+
+describe("area watches", () => {
+  /** The list for the area, the detail of every hotel: Portal A at the list price, free cancellation. */
+  function areaClient(calls: HotelSearchParams[]): HotelSearchClient {
+    return {
+      async search(params) {
+        calls.push(params);
+        if (!params.property_token) return AREA_LIST;
+        const hit = AREA_LIST.properties.find((p) => p.property_token === params.property_token)!;
+        return {
+          name: hit.name,
+          property_token: hit.property_token,
+          featured_prices: [
+            {
+              source: "Portal A",
+              link: "https://portal-a.example/" + hit.property_token,
+              rooms: [{ name: "Doppelzimmer", rates: [{ rate_per_night: { extracted_lowest: hit.rate_per_night!.extracted_lowest }, free_cancellation: true }] }],
+            },
+          ],
+        };
+      },
+    };
+  }
+
+  it("check the cheapest hotels of the area that meet stars and rating", async () => {
+    const calls: HotelSearchParams[] = [];
+    const { watch } = await endpoints.createHotelWatch(
+      input({ kind: "area", query: "Altstadt Musterstadt", min_stars: 4, min_rating: 4, limit_per_night: 150 }),
+    );
+    expect(watch).toMatchObject({ kind: "area", min_stars: 4, min_rating: 4 });
+    await runDueChecks(areaClient(calls), NOW);
+
+    expect(calls[0]).toMatchObject({ q: "Altstadt Musterstadt", hotel_class: [4, 5], rating: 8, free_cancellation: true, sort_by: 3 });
+    expect(calls.slice(1).map((c) => c.property_token)).toEqual(["tok-sued", "tok-nord"]);
+    const detail = await endpoints.getHotelWatch({ id: watch.id });
+    expect(detail.checks[0]).toMatchObject({ searches: 3, matching_per_night: 120, matching_hotel: "Hotel Süd", below_limit: true });
+    expect(detail.offers.map((o) => [o.hotel, o.per_night])).toEqual([
+      ["Hotel Süd", 120],
+      ["Hotel Nord", 180],
+    ]);
+    // An area has no single hotel.
+    expect(detail.watch.hotel_name).toBeNull();
+  });
+
+  it("report the hotel of the price", async () => {
+    const pushed: PriceAlert[] = [];
+    setAlertSender({ push: async (a) => void pushed.push(a), email: async () => {} });
+    await endpoints.createHotelWatch(input({ kind: "area", query: "Altstadt Musterstadt", min_stars: 4, limit_per_night: 150 }));
+    await runDueChecks(areaClient([]), NOW);
+    expect(pushed[0]).toMatchObject({ hotel: "Hotel Süd", perNight: 120 });
+  });
+
+  it("fail the check when no hotel meets the criteria", async () => {
+    const { watch } = await endpoints.createHotelWatch(input({ kind: "area", query: "Altstadt Musterstadt", min_stars: 5, min_rating: 4.5 }));
+    await runDueChecks(areaClient([]), NOW);
+    const [check] = await db.select().from(travelHotelChecks).where(eq(travelHotelChecks.watch_id, watch.id));
+    expect(check.error).toMatch(/erfüllt die Kriterien/);
+  });
+
+  it("refuse filters out of range and double rooms", () => {
+    expect(() => normalizeWatchInput(input({ kind: "area", min_stars: 1 }), TODAY)).toThrow(/Sterne/);
+    expect(() => normalizeWatchInput(input({ kind: "area", min_rating: 8 }), TODAY)).toThrow(/Bewertung/);
+    expect(() => normalizeWatchInput(input({ kind: "area", adults: 4, split_rooms: true }), TODAY)).toThrow(/einzelnes Hotel/);
+    // A hotel watch ignores area filters.
+    expect(normalizeWatchInput(input({ min_stars: 4 }), TODAY).min_stars).toBeNull();
+  });
+});
+
+describe("flexible dates", () => {
+  const flex = (over: Partial<WatchInput> = {}) =>
+    input({ flexible: true, check_in: "2027-05-10", check_out: "2027-05-16", min_nights: 2, max_nights: 3, end_date: "2027-05-09", ...over });
+
+  it("span earliest arrival to latest departure and end before the last possible arrival", () => {
+    expect(normalizeWatchInput(flex(), TODAY)).toMatchObject({ flexible: true, min_nights: 2, max_nights: 3 });
+    expect(normalizeWatchInput(flex({ end_date: "2027-05-13" }), TODAY).end_date).toBe("2027-05-13");
+    expect(() => normalizeWatchInput(flex({ end_date: "2027-05-14" }), TODAY)).toThrow(/letztmöglichen Anreise/);
+    expect(() => normalizeWatchInput(flex({ min_nights: 7, max_nights: 7 }), TODAY)).toThrow(/kürzer/);
+    expect(() => normalizeWatchInput(flex({ max_nights: 1 }), TODAY)).toThrow(/Höchstens/);
+    expect(() => normalizeWatchInput(flex({ check_out: "2027-12-31", end_date: "2027-05-09" }), TODAY)).toThrow(/höchstens 120 Tage/);
+    expect(watchStatus({ paused: false, end_date: "2027-05-13", check_in: "2027-05-10", check_out: "2027-05-16", flexible: true, min_nights: 2 }, "2027-05-12")).toBe("active");
+  });
+
+  it("price one hotel's stays from the calendar and read the cheapest for real", async () => {
+    const calls: Array<HotelSearchParams | { calendar: string }> = [];
+    const inner = fakeClient(calls as HotelSearchParams[]);
+    const client: HotelSearchClient = {
+      search: inner.search,
+      async calendar(params) {
+        calls.push({ calendar: `${params.start_date}..${params.end_date}` });
+        const day = (d: string, p: number) => ({ date: d, extracted_after_taxes_fees: p });
+        return {
+          prices: [
+            day("2027-05-10", 300),
+            day("2027-05-11", 300),
+            day("2027-05-12", 150),
+            day("2027-05-13", 140),
+            day("2027-05-14", 160),
+            day("2027-05-15", 400),
+          ],
+        };
+      },
+    };
+    const { watch } = await endpoints.createHotelWatch(flex());
+    await runDueChecks(client, NOW);
+
+    // Name search, detail for the first stay (the token), the calendar, the detail of the cheapest stay.
+    expect(calls).toHaveLength(4);
+    expect(calls[2]).toEqual({ calendar: "2027-05-10..2027-05-14" });
+    expect(calls[3]).toMatchObject({ property_token: "tok-beispiel", check_in_date: "2027-05-12", check_out_date: "2027-05-14" });
+    const detail = await endpoints.getHotelWatch({ id: watch.id });
+    expect(detail.checks[0]).toMatchObject({ check_in: "2027-05-12", check_out: "2027-05-14", searches: 4 });
+    expect(detail.checks[0].stays?.[0]).toEqual({ start: "2027-05-12", end: "2027-05-14", perNight: 145 });
+
+    // With the token known, a check costs two searches: calendar and detail.
+    calls.length = 0;
+    await runDueChecks(client, new Date(NOW.getTime() + 24 * 60 * 60_000));
+    expect(calls).toHaveLength(2);
+  });
+
+  it("let an area's stays take turns", async () => {
+    const calls: HotelSearchParams[] = [];
+    const client: HotelSearchClient = {
+      async search(params) {
+        calls.push(params);
+        if (!params.property_token) return AREA_LIST;
+        return { ...structuredClone(DETAIL), property_token: params.property_token };
+      },
+    };
+    await endpoints.createHotelWatch(
+      flex({ kind: "area", query: "Altstadt Musterstadt", min_nights: 2, max_nights: 2, check_out: "2027-05-13", end_date: "2027-05-09" }),
+    );
+    for (const hours of [0, 24, 48]) await runDueChecks(client, new Date(NOW.getTime() + hours * 60 * 60_000));
+    const lists = calls.filter((c) => !c.property_token).map((c) => c.check_in_date);
+    expect(lists).toEqual(["2027-05-10", "2027-05-11", "2027-05-10"]);
+  });
+});

@@ -86,6 +86,24 @@ function when(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '–'
 }
 
+/** The watch's name: the hotel found, its query, or the area. */
+function title(w: HotelWatch): string {
+  return w.kind === 'area' ? `Gebiet: ${w.query}` : (w.hotel_name ?? w.query)
+}
+
+/** "12.05.2027 – 14.05.2027", for a flexible watch with the nights it allows. */
+function period(w: HotelWatch): string {
+  const span = `${day(w.check_in)} – ${day(w.check_out)}`
+  if (!w.flexible) return span
+  const n = w.min_nights === w.max_nights ? `${w.min_nights}` : `${w.min_nights}–${w.max_nights}`
+  return `${span}, flexibel ${n} ${w.max_nights === 1 ? 'Nacht' : 'Nächte'}`
+}
+
+/** The stay a check priced, when the watch is flexible. */
+function stay(c: { check_in: string | null; check_out: string | null }): string {
+  return c.check_in && c.check_out ? `${day(c.check_in)} – ${day(c.check_out)}` : '–'
+}
+
 function guests(w: HotelWatch): string {
   const kids = w.children_ages.length
   return `${w.adults} Erw.` + (kids ? `, ${kids} ${kids === 1 ? 'Kind' : 'Kinder'}` : '')
@@ -103,7 +121,12 @@ function reporting(w: HotelWatch): string {
 }
 
 function conditions(w: HotelWatch): string {
-  const parts = [w.free_cancellation_only ? 'stornierbar' : 'jeder Tarif']
+  const parts: string[] = []
+  if (w.kind === 'area') {
+    if (w.min_stars !== null) parts.push(w.min_stars === 5 ? '5 Sterne' : `ab ${w.min_stars} Sterne`)
+    if (w.min_rating !== null) parts.push(`Bewertung ab ${w.min_rating.toLocaleString('de-DE', { minimumFractionDigits: 1 })}`)
+  }
+  parts.push(w.free_cancellation_only ? 'stornierbar' : 'jeder Tarif')
   if (w.breakfast_required) parts.push('mit Frühstück')
   if (w.split_rooms) parts.push('auch Doppelzimmer')
   return parts.join(', ')
@@ -202,7 +225,7 @@ async function checkNow(w: HotelWatch) {
 
 function remove(w: HotelWatch) {
   confirm.require({
-    message: `Den Wächter für „${w.hotel_name ?? w.query}“ (${day(w.check_in)} bis ${day(w.check_out)}) mit seinem ganzen Preisverlauf löschen?`,
+    message: `Den Wächter für „${title(w)}“ (${day(w.check_in)} bis ${day(w.check_out)}) mit seinem ganzen Preisverlauf löschen?`,
     header: 'Wächter löschen',
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: 'Abbrechen',
@@ -222,12 +245,13 @@ function remove(w: HotelWatch) {
 
 const selected = computed(() => detail.value?.watch ?? null)
 const latest = computed(() => selected.value?.latest ?? null)
+const isArea = computed(() => selected.value?.kind === 'area')
 </script>
 
 <template>
   <PageLayout
     title="Hotelpreise"
-    hint="Beobachtet die Preise einzelner Hotels für feste Daten über Google Hotels und schreibt bei jeder Prüfung den Verlauf. Jeder Wächter endet spätestens zwei Jahre nach heute."
+    hint="Beobachtet die Preise eines Hotels oder der besten Hotels eines Gebiets über Google Hotels, für feste oder flexible Daten, und schreibt bei jeder Prüfung den Verlauf. Jeder Wächter endet spätestens zwei Jahre nach heute."
     width="wide"
     :ready="loaded"
   >
@@ -285,10 +309,10 @@ const latest = computed(() => selected.value?.latest ?? null)
                   :aria-current="selectedId === w.id ? 'true' : undefined"
                 >
                   <td class="hotel">
-                    <button type="button" class="link" @click="select(w.id)">{{ w.hotel_name ?? w.query }}</button>
+                    <button type="button" class="link" @click="select(w.id)">{{ title(w) }}</button>
                     <span class="muted block">{{ conditions(w) }} · bis {{ day(w.end_date) }}</span>
                   </td>
-                  <td class="num">{{ day(w.check_in) }} – {{ day(w.check_out) }}</td>
+                  <td class="num">{{ period(w) }}</td>
                   <td>{{ guests(w) }}</td>
                   <td><Tag :value="STATUS[w.status].label" :severity="STATUS[w.status].severity" /></td>
                   <td class="num">{{ money(w.limit_per_night, w.currency) }}</td>
@@ -308,7 +332,7 @@ const latest = computed(() => selected.value?.latest ?? null)
                         rounded
                         severity="secondary"
                         size="small"
-                        :aria-label="`Preis für ${w.hotel_name ?? w.query} jetzt prüfen`"
+                        :aria-label="`Preis für ${title(w)} jetzt prüfen`"
                         :disabled="w.status === 'ended' || !status?.configured"
                         :loading="checking === w.id"
                         @click="checkNow(w)"
@@ -319,7 +343,7 @@ const latest = computed(() => selected.value?.latest ?? null)
                         rounded
                         severity="secondary"
                         size="small"
-                        :aria-label="`Wächter für ${w.hotel_name ?? w.query} bearbeiten`"
+                        :aria-label="`Wächter für ${title(w)} bearbeiten`"
                         :disabled="w.status === 'ended'"
                         @click="openEdit(w)"
                       />
@@ -329,7 +353,7 @@ const latest = computed(() => selected.value?.latest ?? null)
                         rounded
                         severity="secondary"
                         size="small"
-                        :aria-label="`Wächter für ${w.hotel_name ?? w.query} löschen`"
+                        :aria-label="`Wächter für ${title(w)} löschen`"
                         @click="remove(w)"
                       />
                     </template>
@@ -342,16 +366,22 @@ const latest = computed(() => selected.value?.latest ?? null)
 
         <section v-if="selected" class="card" aria-labelledby="hotels-prices">
           <header class="card-head">
-            <h2 id="hotels-prices" class="card-title">{{ selected.hotel_name ?? selected.query }}</h2>
+            <h2 id="hotels-prices" class="card-title">{{ title(selected) }}</h2>
             <span class="muted">
-              {{ day(selected.check_in) }} – {{ day(selected.check_out) }} · {{ selected.nights }}
-              {{ selected.nights === 1 ? 'Nacht' : 'Nächte' }} · {{ guests(selected) }}
+              <template v-if="selected.flexible">{{ period(selected) }}</template>
+              <template v-else>
+                {{ day(selected.check_in) }} – {{ day(selected.check_out) }} · {{ selected.nights }}
+                {{ selected.nights === 1 ? 'Nacht' : 'Nächte' }}
+              </template>
+              · {{ guests(selected) }}
             </span>
           </header>
           <p v-if="!latest" class="muted">Noch keine erfolgreiche Prüfung.</p>
           <template v-else>
             <p class="muted">
-              Stand {{ when(latest.checked_at) }}. Preise pro Nacht inklusive Steuern; eine Resort- oder
+              Stand {{ when(latest.checked_at) }}<template v-if="selected.flexible && latest.check_in">, geprüft für {{ stay(latest) }}</template>.
+              <template v-if="isArea">Geprüft werden die günstigsten Hotels der Trefferliste, die die Kriterien erfüllen.</template>
+              Preise pro Nacht inklusive Steuern; eine Resort- oder
               Destination-Fee, die das Hotel vor Ort verlangt, ist nicht enthalten.
               <template v-if="selected.split_rooms">
                 Doppelzimmer stehen mit dem Preis für alle Zimmer zusammen; ob so viele frei sind, zeigt erst der Anbieter.
@@ -376,11 +406,37 @@ const latest = computed(() => selected.value?.latest ?? null)
               <div class="tile"><dt>Bisher bester</dt><dd>{{ money(selected.best_matching_per_night, selected.currency) }}</dd></div>
             </dl>
 
+            <template v-if="latest.stays?.length">
+              <h3 class="sub-title">Günstigste Zeiträume</h3>
+              <p class="muted">
+                Geschätzt aus dem Preiskalender des Hotels (Mittel der Einzelnächte); die Tarife unten gelten für den günstigsten.
+              </p>
+              <ScrollX>
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Zeitraum</th>
+                      <th scope="col" class="num">Nächte</th>
+                      <th scope="col" class="num">etwa pro Nacht</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="st in latest.stays" :key="st.start + st.end">
+                      <td>{{ stay({ check_in: st.start, check_out: st.end }) }}</td>
+                      <td class="num">{{ Math.round((parseLocalDate(st.end).getTime() - parseLocalDate(st.start).getTime()) / 86_400_000) }}</td>
+                      <td class="num">{{ money(st.perNight, selected.currency) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </ScrollX>
+            </template>
+
             <h3 class="sub-title">Tarife der letzten Prüfung</h3>
             <ScrollX>
               <table class="table">
                 <thead>
                   <tr>
+                    <th v-if="isArea" scope="col">Hotel</th>
                     <th scope="col">Anbieter</th>
                     <th scope="col">Zimmer</th>
                     <th scope="col" class="num">pro Nacht</th>
@@ -391,6 +447,7 @@ const latest = computed(() => selected.value?.latest ?? null)
                 </thead>
                 <tbody>
                   <tr v-for="(o, i) in detail?.offers ?? []" :key="i">
+                    <td v-if="isArea">{{ o.hotel ?? '–' }}</td>
                     <td>
                       <a v-if="o.link" :href="o.link" target="_blank" rel="noopener noreferrer">{{ o.source }}</a>
                       <template v-else>{{ o.source }}</template>
@@ -425,6 +482,7 @@ const latest = computed(() => selected.value?.latest ?? null)
               <thead>
                 <tr>
                   <th scope="col">Geprüft</th>
+                  <th v-if="selected.flexible" scope="col">Aufenthalt</th>
                   <th scope="col" class="num">Passend</th>
                   <th scope="col">Anbieter</th>
                   <th scope="col" class="num">Günstigster</th>
@@ -437,12 +495,13 @@ const latest = computed(() => selected.value?.latest ?? null)
               <tbody>
                 <tr v-for="c in detail.checks" :key="c.id">
                   <td>{{ when(c.checked_at) }}</td>
+                  <td v-if="selected.flexible">{{ stay(c) }}</td>
                   <template v-if="c.error">
                     <td colspan="5" class="failure">{{ c.error }}</td>
                   </template>
                   <template v-else>
                     <td :class="['num', { 'below-limit': c.below_limit }]">{{ money(c.matching_per_night, selected.currency) }}</td>
-                    <td>{{ c.matching_source ?? '–' }}</td>
+                    <td>{{ c.matching_hotel ? `${c.matching_hotel} · ` : '' }}{{ c.matching_source ?? '–' }}</td>
                     <td class="num">{{ money(c.lowest_per_night, selected.currency) }}</td>
                     <td class="num">{{ money(c.lowest_free_per_night, selected.currency) }}</td>
                     <td class="num">{{ money(c.lowest_free_breakfast_per_night, selected.currency) }}</td>

@@ -13,6 +13,7 @@ import { useBasketStore } from './stores/basket'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
 import { useAccountsStore } from './stores/finance/accounts'
+import { useBankcontactsStore } from './stores/finance/bankcontacts'
 import { useMeterAnomalyStore } from './stores/meterAnomalies'
 import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
@@ -40,6 +41,18 @@ const anomalyStore = useAnomalyStore()
 // Kurse and Portfolio hide without a depot among the readable accounts.
 const accountsStore = useAccountsStore()
 const meterAnomalyStore = useMeterAnomalyStore()
+// Bank contacts waiting for a TAN put a warning badge on the "Bankkontakte"
+// icon, so a stalled sync shows from every finance page, not only on the
+// contacts page itself. The count is the same as on its "TAN offen" card.
+const bankcontactsStore = useBankcontactsStore()
+const pendingTanCount = computed(
+  () => bankcontactsStore.items.filter((b) => b.last_sync_status === 'tan-required').length,
+)
+function refreshBankcontacts() {
+  if (auth.isAuthenticated && auth.hasPermission('finance.accounts.manage')) {
+    void bankcontactsStore.refresh()
+  }
+}
 const feedBadgeStore = useFeedBadgeStore()
 const router = useRouter()
 const route = useRoute()
@@ -59,6 +72,7 @@ watch(
     if (authenticated && auth.hasPermission('meters.view')) {
       void meterAnomalyStore.refresh()
     }
+    refreshBankcontacts()
   },
   { immediate: true },
 )
@@ -76,6 +90,15 @@ watch(
 )
 
 const activeModule = computed<ModuleConfig | null>(() => detectModule(route.path))
+
+// The scheduled sync can ask for a TAN while the user is elsewhere; entering
+// the finance module reads the contacts again so the badge is current.
+watch(
+  () => activeModule.value?.id,
+  (id, prev) => {
+    if (id === 'finanzen' && prev !== undefined && prev !== 'finanzen') refreshBankcontacts()
+  },
+)
 
 // ── Hamburger module menu ────────────────────────────────────────────────────
 const hamburgerMenuRef = ref()
@@ -138,7 +161,15 @@ function visibleItems(items: ModuleMenuItem[]) {
               ? String(feedBadgeStore.count)
               : item.routeName === 'zaehler-anomalien' && meterAnomalyStore.count > 0
                 ? String(meterAnomalyStore.count)
-                : undefined,
+                : item.routeName === 'finance-bankcontacts' && pendingTanCount.value > 0
+                  ? String(pendingTanCount.value)
+                  : undefined,
+        badgeSeverity:
+          item.routeName === 'finance-bankcontacts' && pendingTanCount.value > 0 ? ('warn' as const) : undefined,
+        warnLabel:
+          item.routeName === 'finance-bankcontacts' && pendingTanCount.value > 0
+            ? `${item.label} – ${pendingTanCount.value === 1 ? 'eine TAN offen' : `${pendingTanCount.value} TANs offen`}`
+            : undefined,
       }
     })
     .filter((item) => item.routeName || item.children)
@@ -483,14 +514,15 @@ onBeforeUnmount(() => navbarObserver?.disconnect())
               :label="item.label"
               :icon="item.icon"
               :badge="item.badge"
+              :badge-severity="item.badgeSeverity"
               text
               size="small"
-              :severity="route.name === item.routeName ? 'primary' : 'secondary'"
+              :severity="route.name === item.routeName ? 'primary' : item.badgeSeverity ?? 'secondary'"
               class="submenu-item"
               :class="{ 'submenu-item--active': route.name === item.routeName }"
               :aria-current="route.name === item.routeName ? 'page' : undefined"
-              :aria-label="item.label"
-              v-tooltip.bottom="item.label"
+              :aria-label="item.warnLabel ?? item.label"
+              v-tooltip.bottom="item.warnLabel ?? item.label"
               @pointerenter="prefetchSubMenu(item.routeName)"
               @focus="prefetchSubMenu(item.routeName)"
               @click="navigateSubMenu(item.routeName)"

@@ -3743,6 +3743,9 @@ export const tripPlanDays = pgTable(
       radiusM: number | null;
       departMinutes: number;
       returnMinutes: number;
+      // The excursion this one goes on from, without the way back
+      // in between; absent or null leaves from the quarters.
+      from?: string | null;
     }[]>().notNull().default([]),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
@@ -5570,6 +5573,17 @@ export const travelHotelWatches = pgTable(
     breakfast_required: boolean("breakfast_required").notNull().default(false),
     /** Also price the party in double rooms (two adults each): a second search per check. */
     split_rooms: boolean("split_rooms").notNull().default(false),
+    /** 'hotel': one hotel; 'area': `query` is a place, narrowed by stars and rating (migration 0313). */
+    kind: text("kind").$type<"hotel" | "area">().notNull().default("hotel"),
+    min_stars: integer("min_stars"),
+    /** Google's guest rating, 1–5 scale. */
+    min_rating: doublePrecision("min_rating"),
+    /** Any stay of `min_nights`–`max_nights` between `check_in` (earliest arrival) and `check_out` (latest departure). */
+    flexible: boolean("flexible").notNull().default(false),
+    min_nights: integer("min_nights"),
+    max_nights: integer("max_nights"),
+    /** The stay an area watch with flexible dates checked last; -1 before the first. */
+    flex_rotation: integer("flex_rotation").notNull().default(-1),
     /** Last day the job checks this watch. */
     end_date: date("end_date", { mode: "string" }).notNull(),
     paused: boolean("paused").notNull().default(false),
@@ -5607,6 +5621,13 @@ export const travelHotelChecks = pgTable(
     matching_source: text("matching_source"),
     below_limit: boolean("below_limit").notNull().default(false),
     error: text("error"),
+    /** The stay this check priced; null on checks before migration 0313 (the watch's dates). */
+    check_in: date("check_in", { mode: "string" }),
+    check_out: date("check_out", { mode: "string" }),
+    /** Area watches: the hotel of the matching offer. */
+    matching_hotel: text("matching_hotel"),
+    /** Hotel with flexible dates: the cheapest stays the price calendar estimated. */
+    stays: jsonb("stays").$type<{ start: string; end: string; perNight: number }[]>(),
   },
   (table) => [
     index("travel_hotel_check_watch_idx").on(table.watch_id, table.checked_at),
@@ -5635,8 +5656,150 @@ export const travelHotelOffers = pgTable(
     link: text("link"),
     /** Rooms the offer books; prices above are for all of them together. */
     rooms: integer("rooms").notNull().default(1),
+    /** Area watches: the hotel of the offer. */
+    hotel: text("hotel"),
   },
   (table) => [index("travel_hotel_offer_check_idx").on(table.check_id)],
+);
+
+// A flight price watch (documentation/plans/reise-flugpreise.md): airports,
+// passengers and filters, either fixed dates or a flexible window walked one
+// combination per check (`flex_rotation`), checked until `end_date`
+// (migration 0312).
+export const travelFlightWatches = pgTable(
+  "travel_flight_watch",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** IATA codes, several separated by commas ("MUC,NUE"). */
+    origin: text("origin").notNull(),
+    destination: text("destination").notNull(),
+    /** "round" or "oneway". */
+    trip_type: text("trip_type").notNull().default("round"),
+    /** Fixed dates; null on a flexible watch. */
+    outbound_date: date("outbound_date", { mode: "string" }),
+    return_date: date("return_date", { mode: "string" }),
+    /** Flexible: earliest outbound, latest return (latest outbound one way), nights. */
+    flexible: boolean("flexible").notNull().default(false),
+    date_from: date("date_from", { mode: "string" }),
+    date_until: date("date_until", { mode: "string" }),
+    min_nights: integer("min_nights"),
+    max_nights: integer("max_nights"),
+    /** Index of the combination checked last; -1 before the first check. */
+    flex_rotation: integer("flex_rotation").notNull().default(-1),
+    adults: integer("adults").notNull().default(1),
+    children: integer("children").notNull().default(0),
+    infants_on_lap: integer("infants_on_lap").notNull().default(0),
+    /** 1 economy, 2 premium economy, 3 business, 4 first. */
+    travel_class: integer("travel_class").notNull().default(1),
+    /** Null any; 0 nonstop, 1 or 2 at most that many stops. */
+    max_stops: integer("max_stops"),
+    /** Airline IATA codes or an alliance, comma separated; `airlines_mode` include/exclude. */
+    airlines: text("airlines"),
+    airlines_mode: text("airlines_mode"),
+    /** Departure hours "from,to" for the outbound and the return flight. */
+    outbound_times: text("outbound_times"),
+    return_times: text("return_times"),
+    currency: text("currency").notNull().default("EUR"),
+    /** For all passengers and both ways; null records the history without a limit. */
+    limit_total: doublePrecision("limit_total"),
+    end_date: date("end_date", { mode: "string" }).notNull(),
+    paused: boolean("paused").notNull().default(false),
+    notify_push: boolean("notify_push").notNull().default(true),
+    notify_email: boolean("notify_email").notNull().default(true),
+    notified_price: doublePrecision("notified_price"),
+    notified_at: timestamp("notified_at", { mode: "string", withTimezone: true }),
+    last_checked_at: timestamp("last_checked_at", { mode: "string", withTimezone: true }),
+    last_error: text("last_error"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("travel_flight_watch_user_idx").on(table.user_id)],
+);
+
+/** One check of a flight watch: one date combination, its cheapest flight and Google's price insight. */
+export const travelFlightChecks = pgTable(
+  "travel_flight_check",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    watch_id: integer("watch_id")
+      .notNull()
+      .references(() => travelFlightWatches.id, { onDelete: "cascade" }),
+    checked_at: timestamp("checked_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    searches: integer("searches").notNull().default(0),
+    outbound_date: date("outbound_date", { mode: "string" }).notNull(),
+    return_date: date("return_date", { mode: "string" }),
+    flight_count: integer("flight_count").notNull().default(0),
+    lowest_price: doublePrecision("lowest_price"),
+    lowest_airlines: text("lowest_airlines"),
+    lowest_stops: integer("lowest_stops"),
+    /** Google's assessment: "low", "typical", "high". */
+    price_level: text("price_level"),
+    typical_low: doublePrecision("typical_low"),
+    typical_high: doublePrecision("typical_high"),
+    below_limit: boolean("below_limit").notNull().default(false),
+    error: text("error"),
+  },
+  (table) => [
+    index("travel_flight_check_watch_idx").on(table.watch_id, table.checked_at),
+    index("travel_flight_check_time_idx").on(table.checked_at),
+  ],
+);
+
+/** The flights a check saw, cheapest first; no booking link is stored (Google's are redirects that expire). */
+export const travelFlightOffers = pgTable(
+  "travel_flight_offer",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    check_id: bigint("check_id", { mode: "number" })
+      .notNull()
+      .references(() => travelFlightChecks.id, { onDelete: "cascade" }),
+    price: doublePrecision("price").notNull(),
+    airlines: text("airlines").notNull(),
+    flight_numbers: text("flight_numbers").notNull().default(""),
+    departs_at: text("departs_at"),
+    arrives_at: text("arrives_at"),
+    duration_min: integer("duration_min"),
+    stops: integer("stops").notNull().default(0),
+    layovers: text("layovers").notNull().default(""),
+    /** Listed by Google under "best flights". */
+    best: boolean("best").notNull().default(false),
+  },
+  (table) => [index("travel_flight_offer_check_idx").on(table.check_id)],
+);
+
+/** Who sells the cheapest flight at what price; fetched only when a price is reported. */
+export const travelFlightBookings = pgTable(
+  "travel_flight_booking",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    check_id: bigint("check_id", { mode: "number" })
+      .notNull()
+      .references(() => travelFlightChecks.id, { onDelete: "cascade" }),
+    book_with: text("book_with").notNull(),
+    price: doublePrecision("price"),
+    option_title: text("option_title"),
+    extensions: text("extensions").notNull().default(""),
+  },
+  (table) => [index("travel_flight_booking_check_idx").on(table.check_id)],
+);
+
+/** Google's price history of a date combination: one price per day, kept across checks. */
+export const travelFlightPricePoints = pgTable(
+  "travel_flight_price_point",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    watch_id: integer("watch_id")
+      .notNull()
+      .references(() => travelFlightWatches.id, { onDelete: "cascade" }),
+    /** `comboKey` of the dates: "outbound|return". */
+    combo: text("combo").notNull(),
+    day: date("day", { mode: "string" }).notNull(),
+    price: doublePrecision("price").notNull(),
+  },
+  (table) => [uniqueIndex("travel_flight_price_point_uniq").on(table.watch_id, table.combo, table.day)],
 );
 
 // ========== Label ==========

@@ -3,6 +3,15 @@ import { apiFetch } from './client'
 /** Reise › Hotelpreise (travel/hotel-watch.ts). */
 
 export type HotelWatchStatus = 'active' | 'paused' | 'ended'
+/** 'area': the watch names a place, narrowed by stars and guest rating. */
+export type HotelWatchKind = 'hotel' | 'area'
+
+/** A stay the price calendar estimated (hotel with flexible dates). */
+export interface StayEstimate {
+  start: string
+  end: string
+  perNight: number
+}
 
 export interface HotelCheck {
   id: number
@@ -14,8 +23,15 @@ export interface HotelCheck {
   lowest_free_breakfast_per_night: number | null
   matching_per_night: number | null
   matching_source: string | null
+  /** Area watches: the hotel of the matching offer. */
+  matching_hotel: string | null
   below_limit: boolean
   error: string | null
+  /** The stay this check priced; null on checks from before flexible dates. */
+  check_in: string | null
+  check_out: string | null
+  /** Hotel with flexible dates: the cheapest stays of the price calendar (estimates). */
+  stays: StayEstimate[] | null
 }
 
 export interface HotelWatch {
@@ -33,6 +49,15 @@ export interface HotelWatch {
   breakfast_required: boolean
   /** Also price the party in double rooms (two adults each). */
   split_rooms: boolean
+  kind: HotelWatchKind
+  min_stars: number | null
+  /** Google's guest rating, 1–5. */
+  min_rating: number | null
+  /** check_in/check_out are earliest arrival and latest departure; a stay lasts min_nights–max_nights. */
+  flexible: boolean
+  min_nights: number | null
+  max_nights: number | null
+  last_arrival: string
   end_date: string
   paused: boolean
   notify_push: boolean
@@ -60,6 +85,8 @@ export interface HotelOfferEntry {
   link: string | null
   /** Rooms the offer books; prices are for all of them together. */
   rooms: number
+  /** Area watches: the hotel of the offer. */
+  hotel: string | null
 }
 
 export interface HotelWatchDetail {
@@ -79,6 +106,12 @@ export interface HotelWatchInput {
   free_cancellation_only: boolean
   breakfast_required: boolean
   split_rooms: boolean
+  kind: HotelWatchKind
+  min_stars: number | null
+  min_rating: number | null
+  flexible: boolean
+  min_nights: number | null
+  max_nights: number | null
   end_date: string
   paused: boolean
   notify_push: boolean
@@ -126,4 +159,178 @@ export function checkHotelWatch(id: number) {
 
 export function getHotelSearchStatus() {
   return apiFetch<HotelSearchStatus>('/travel/hotel-search-status')
+}
+
+/** Reise › Flugpreise (travel/flight-watch.ts). Key, budget and today come from getHotelSearchStatus. */
+
+export type FlightTripType = 'round' | 'oneway'
+export type AirlinesMode = 'include' | 'exclude'
+
+export interface FlightCheck {
+  id: number
+  checked_at: string
+  searches: number
+  outbound_date: string
+  return_date: string | null
+  flight_count: number
+  lowest_price: number | null
+  lowest_airlines: string | null
+  lowest_stops: number | null
+  /** Google's assessment: 'low', 'typical', 'high'. */
+  price_level: string | null
+  typical_low: number | null
+  typical_high: number | null
+  below_limit: boolean
+  error: string | null
+}
+
+export interface FlightBestKnown {
+  price: number
+  outbound_date: string
+  return_date: string | null
+  airlines: string | null
+  stops: number | null
+  checked_at: string
+  link: string
+}
+
+export interface FlightWatch {
+  id: number
+  origin: string
+  destination: string
+  trip_type: FlightTripType
+  flexible: boolean
+  outbound_date: string | null
+  return_date: string | null
+  date_from: string | null
+  date_until: string | null
+  min_nights: number | null
+  max_nights: number | null
+  adults: number
+  children: number
+  infants_on_lap: number
+  travel_class: number
+  max_stops: number | null
+  airlines: string | null
+  airlines_mode: AirlinesMode | null
+  outbound_times: string | null
+  return_times: string | null
+  currency: string
+  limit_total: number | null
+  end_date: string
+  paused: boolean
+  notify_push: boolean
+  notify_email: boolean
+  notified_price: number | null
+  status: HotelWatchStatus
+  last_checked_at: string | null
+  last_error: string | null
+  /** Date combinations still ahead (1 for fixed dates). */
+  combinations: number
+  latest: FlightCheck | null
+  /** The cheapest of the latest checks of the combinations still ahead. */
+  best: FlightBestKnown | null
+  /** Google Flights search for the fixed dates (or the best combination). */
+  link: string | null
+  created_at: string
+}
+
+export interface FlightOfferEntry {
+  price: number
+  airlines: string
+  flight_numbers: string
+  departs_at: string | null
+  arrives_at: string | null
+  duration_min: number | null
+  stops: number
+  layovers: string
+  best: boolean
+}
+
+export interface FlightBookingEntry {
+  book_with: string
+  price: number | null
+  option_title: string | null
+  extensions: string
+}
+
+export interface FlightCombinationEntry {
+  outbound_date: string
+  return_date: string | null
+  price: number | null
+  price_level: string | null
+  checked_at: string | null
+  link: string
+}
+
+export interface FlightWatchDetail {
+  watch: FlightWatch
+  checks: FlightCheck[]
+  offers: FlightOfferEntry[]
+  bookings: {
+    checked_at: string
+    outbound_date: string
+    return_date: string | null
+    options: FlightBookingEntry[]
+  } | null
+  history: { outbound_date: string; return_date: string | null; points: { day: string; price: number }[] } | null
+  combinations: FlightCombinationEntry[]
+}
+
+export interface FlightWatchInput {
+  origin: string
+  destination: string
+  trip_type: FlightTripType
+  flexible: boolean
+  outbound_date: string | null
+  return_date: string | null
+  date_from: string | null
+  date_until: string | null
+  min_nights: number | null
+  max_nights: number | null
+  adults: number
+  children: number
+  infants_on_lap: number
+  travel_class: number
+  max_stops: number | null
+  airlines: string | null
+  airlines_mode: AirlinesMode | null
+  outbound_times: string | null
+  return_times: string | null
+  currency: string
+  limit_total: number | null
+  end_date: string
+  paused: boolean
+  notify_push: boolean
+  notify_email: boolean
+}
+
+export function listFlightWatches() {
+  return apiFetch<{ watches: FlightWatch[] }>('/travel/flight-watches')
+}
+
+export function getFlightWatch(id: number) {
+  return apiFetch<FlightWatchDetail>(`/travel/flight-watches/${id}`)
+}
+
+export function createFlightWatch(input: FlightWatchInput) {
+  return apiFetch<{ watch: FlightWatch }>('/travel/flight-watches', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateFlightWatch(id: number, input: FlightWatchInput) {
+  return apiFetch<{ watch: FlightWatch }>(`/travel/flight-watches/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteFlightWatch(id: number) {
+  return apiFetch<{ deleted: boolean }>(`/travel/flight-watches/${id}`, { method: 'DELETE' })
+}
+
+export function checkFlightWatch(id: number) {
+  return apiFetch<{ check: FlightCheck }>(`/travel/flight-watches/${id}/check`, { method: 'POST' })
 }

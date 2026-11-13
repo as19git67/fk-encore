@@ -682,9 +682,16 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/TravelHotelWatchesView.vue'),
         meta: { permission: 'travel.view' },
       },
+      {
+        path: 'flugpreise',
+        name: 'reise-flugpreise',
+        component: () => import('../views/TravelFlightWatchesView.vue'),
+        meta: { permission: 'travel.view' },
+      },
     ],
     menuItems: [
       { label: 'Hotelpreise', icon: 'pi pi-building', routeName: 'reise-hotelpreise', permission: 'travel.view' },
+      { label: 'Flugpreise', icon: 'pi pi-send', routeName: 'reise-flugpreise', permission: 'travel.view' },
     ],
   },
   {

@@ -25,6 +25,10 @@ export interface HotelOffer {
   link: string | null;
   /** Rooms the offer books; `perNight` and `total` are for all of them. */
   rooms: number;
+  /** The hotel's own offer (SerpApi `official`); not stored. */
+  official?: boolean;
+  /** Area watches: the hotel the offer is for. */
+  hotel?: string | null;
 }
 
 export interface OfferConditions {
@@ -71,6 +75,7 @@ export function offersOf(detail: any, guests: number): HotelOffer[] {
           guests: num(rate.num_guests ?? room.num_guests),
           link: url(rate.link) ?? url(room.link) ?? url(fp.link),
           rooms: 1,
+          official: fp.official === true,
         });
       }
     }
@@ -92,6 +97,7 @@ export function offersOf(detail: any, guests: number): HotelOffer[] {
       guests: num(p.num_guests),
       link: url(p.link),
       rooms: 1,
+      official: p.official === true,
     });
   }
   return offers

@@ -734,7 +734,10 @@ früheren Buchungen derselben Gegenseite.
 
 Tabelle der FinTS-Zugänge mit Name, Bank, letztem Sync, nächstem
 geplanten Sync und Knopf „Sync jetzt“. Darüber Karten „TAN offen“ (ein
-Sync wartet auf eine TAN) und „Nächster Sync“. Hintergrund in `HLF`.
+Sync wartet auf eine TAN) und „Nächster Sync“. Hintergrund in `HLF`. Wartet ein Bankkontakt auf
+eine TAN, trägt das Gebäude-Symbol „Bankkontakte“ in der Untermenü-Zeile
+der Finanzen eine gelbe Zahl (so viele wie auf der Karte „TAN offen“), auf
+jeder Seite des Moduls.
 
 ### FIN-BKL-01 Bankkontakt anlegen
 
