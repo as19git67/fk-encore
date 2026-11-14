@@ -325,7 +325,7 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   einen Tag kam, trägt „von der App“ und ist abends wieder offen, wenn der
   Tag es nicht erreicht hat. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
   „Feste Zeit …“ (legt sie auf den Tag und hält die Uhrzeit), „Für später
-  merken“, die Priorität und „Aus den Ideen entfernen“.
+  merken“, die Priorität, die Aufenthaltsdauer und „Aus den Ideen entfernen“.
 - **Regen.** Regnet es laut Vorhersage an einem Tag mit Spots draußen,
   steht oben am Tag in der Planung des Aufenthalts ein Hinweis. „Mit Fr
   tauschen“ zeigt erst ein Blatt, welcher Tag was bekommt und was mit
@@ -386,7 +386,12 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Zeit, rückt ein Spot davor, der sonst in die feste Zeit liefe, dahinter.
 - Ein Pin steht nur an einer Karte mit fester Zeit. „Feste Zeit …“ im
   „⋯“ öffnet ihr Blatt: dort wird sie mit Grund eingetragen, geändert
-  oder unten mit „Feste Zeit entfernen“ wieder weggenommen. Ohne Foto zeigt die Karte kein
+  oder unten mit „Feste Zeit entfernen“ wieder weggenommen. Unter
+  „Aufenthaltsdauer“ im selben „⋯“ steht, wie lange man bleibt (15 min
+  bis 8 h, die aktuelle mit Haken); die Uhrzeiten des Tags rücken sofort
+  nach. Die Zeile über dem Tag nennt Wege und Besuche („3 h 20 von 10 h“)
+  und, wo man vor einer Tür auf die Öffnung wartet, die Wartezeit extra
+  („…, 1 h warten“). Ohne Foto zeigt die Karte kein
   Bild und keinen Platzhalter.
 - Die Details eines Spots sind ein Blatt: oben die Bilder (das Bild des
   Orts groß, weitere von Wikimedia Commons kleiner daneben, seitlich zum

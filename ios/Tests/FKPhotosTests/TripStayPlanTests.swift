@@ -121,6 +121,27 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertEqual(TripStayPlan.fill(day(0, [], planned: 270)) ?? 0, 0.5, accuracy: 1e-9)
     }
 
+    func testTheHeaderKeepsTheWaitApartFromThePlan() {
+        // A shorter visit before a door that opens later only moves time
+        // from the plan into the wait; the plan must still say so.
+        var d = day(0, [], planned: 200)
+        d.waitMinutes = 60
+        XCTAssertEqual(TripStayPlan.fillLine(d), "3 h 20 von 9 h, 1 h warten")
+        d.plannedMinutes = 170
+        d.waitMinutes = 90
+        XCTAssertEqual(TripStayPlan.fillLine(d), "2 h 50 von 9 h, 1 h 30 warten")
+    }
+
+    @MainActor
+    func testTheStayIsAChoiceWithTheCurrentOneTicked() {
+        let actions = TripSpotEdit.dwellActions(current: 50) { _ in }
+        XCTAssertTrue(actions.allSatisfy { $0.submenu == .dwell })
+        XCTAssertEqual(actions.filter(\.disabled).map(\.id), ["dwell-50"])
+        XCTAssertEqual(actions.first { $0.id == "dwell-50" }?.systemImage, "checkmark")
+        XCTAssertEqual(TripSpotEdit(osmRef: "node:1", note: "x", dwellMinutes: 45).with(dwellMinutes: 15),
+                       TripSpotEdit(osmRef: "node:1", note: "x", dwellMinutes: 15))
+    }
+
     func testTheCardSaysWhenAndHowLong() {
         let d = day(0, [block("day", [stop(1, eta: 630, dwell: 90), stop(2, dwell: 45)])])
         let stops = TripStayPlan.stops(of: d)

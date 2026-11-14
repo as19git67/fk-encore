@@ -822,6 +822,9 @@ struct TripSpotPickerView: View {
                                           closes: false) {
                 await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
             })
+            out.append(contentsOf: TripSpotEdit.dwellActions(current: candidate.dwellMinutes) { minutes in
+                await viewModel.saveNote(TripSpotEdit(TripSpotDetail(candidate)).with(dwellMinutes: minutes))
+            })
             out.append(contentsOf: TripIdeaPriority.actions(current: candidate.ideaPriority) { priority in
                 await viewModel.setPriority(osmRef: candidate.osmRef, priority)
             })
