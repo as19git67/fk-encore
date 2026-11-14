@@ -129,18 +129,27 @@ bash /path/to/prod/data/backup/host-scripts/test-refresh.sh "$PWD/.env"
   Extra photo libraries outside the prod dataset are mounted read-only in
   test's `docker-compose.volumes.yml`. Directories prod keeps outside its
   dataset (thumbnails or OSM data on a dataset without backup) are not in
-  the snapshot: mirror them with `TEST_SYNC_DIRS` (`source:target` pairs,
-  rsync while the stack is down), or give test a directory of its own
-  outside the copy for data it keeps (its imported OSM regions).
+  the snapshot: give test a directory of its own outside the copy, created
+  before the first start (an empty one for thumbnails, which the app
+  creates on their first request; its imported OSM regions for geo-db, geo
+  and routing), or mirror them with `TEST_SYNC_DIRS` (`source:target`
+  pairs, rsync while the stack is down). Point those lines of test's
+  `docker-compose.volumes.yml` at the fixed paths, not at
+  `${DEPLOY_DATA_ROOT}`.
 - **Refresh.** `scripts/host/test-refresh.sh` stops the stack, destroys the
   previous clone (only when everything in `TEST_DATASET` is a clone of
-  `PROD_DATASET`), clones the newest `daily-*` snapshot (`TEST_SNAPSHOT_PREFIX=weekly-`
-  for the weekly one when the daily retention is short; each child dataset
-  too), mirrors `TEST_SYNC_DIRS`, removes prod's env files, dumps and backup token from the copy,
+  `PROD_DATASET`), clones the newest `daily-*` snapshot (`TEST_SNAPSHOT_PREFIX` picks the
+  weekly or monthly tier; each child dataset too), mirrors `TEST_SYNC_DIRS`, removes prod's env files, dumps and backup token from the copy,
   sets the passwords of both Postgres clusters to the test env file's,
   runs `test-scrub.sql` and starts the stack. The app migrates the copy to
-  its image at boot. Run it weekly from a TrueNAS cron job (Sunday, after
-  the nightly backup) and by hand for a newer copy; `--snapshot <label>`
+  its image at boot. Run it weekly from a TrueNAS cron job as root, a few
+  hours after the nightly backup, and by hand for a newer copy. Cron's PATH
+  lacks `/usr/sbin`, where `zfs` lives, so give it one:
+  `PATH=/usr/sbin:/usr/bin:/sbin:/bin …/test-refresh.sh /path/to/test/.env >> /path/to/test/test-refresh.log 2>&1`
+  (the log next to the env file survives every refresh). On the first
+  refresh after switching an existing test stack, compose asks once per
+  volume whether to recreate it, because its bind path moved into the
+  clone; answering yes only replaces Docker's record, not the files; `--snapshot <label>`
   picks another snapshot, `--dry-run` shows the steps. It refuses an env
   file without `APP_ENVIRONMENT=dev`, a suffix without "test", a
   `TEST_DATASET` without "test" or inside `PROD_DATASET`, or a data root
@@ -162,10 +171,9 @@ bash /path/to/prod/data/backup/host-scripts/test-refresh.sh "$PWD/.env"
 - **Reachable only on the LAN or VPN**, never through the public reverse
   proxy: the copy holds everyone's data. Passkeys of prod do not work on
   test (other `RP_ID`); sign in with the password.
-- **Snapshots.** The clone pins its snapshot. The weekly refresh keeps it
-  younger than the 14 days the backup keeps a daily snapshot; should it
-  not run, the backup's prune keeps the pinned snapshot and says so in the
-  log instead of failing on it.
+- **Snapshots.** The clone pins its snapshot, so the backup's prune keeps
+  it past its retention (and says so in the log) until the next refresh
+  replaces the clone; the next backup then prunes it.
 
 ### Demo stack
 

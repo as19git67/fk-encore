@@ -164,7 +164,7 @@ outside the prod dataset are mounted read-only in dev's
 Shipped in the image and copied to `backup/host-scripts/` like the backup
 hook, so the host needs no checkout. Called from prod's copy of that
 folder (the refresh destroys test's own) with the path to the test env
-file, from a weekly TrueNAS cron job (Sunday night, after the backup) or by
+file, from a weekly TrueNAS cron job (a few hours after the nightly backup) or by
 hand. It reads `PROD_DATASET` and `TEST_DATASET` from the env file and
 refuses to run when `TEST_DATASET` equals `PROD_DATASET`, lies inside it,
 does not contain "test", when `DEPLOY_DATA_ROOT` is not inside the clone,
