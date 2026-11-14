@@ -80,7 +80,7 @@ describe("scripts/host/test-refresh.sh", () => {
   const bin = path.join(base, "bin");
   mkdirSync(bin);
   // A zfs that knows prod (with a child dataset and two snapshots) and a
-  // previous copy; a docker that does nothing.
+  // previous copy; a docker and an rsync that do nothing.
   writeFileSync(
     path.join(bin, "zfs"),
     `#!/usr/bin/env bash
@@ -97,9 +97,11 @@ case "$args" in
 esac
 `,
   );
-  writeFileSync(path.join(bin, "docker"), "#!/bin/sh\nexit 0\n");
+  for (const tool of ["docker", "rsync"]) {
+    writeFileSync(path.join(bin, tool), "#!/bin/sh\nexit 0\n");
+    chmodSync(path.join(bin, tool), 0o755);
+  }
   chmodSync(path.join(bin, "zfs"), 0o755);
-  chmodSync(path.join(bin, "docker"), 0o755);
 
   const prod = "tank/f4mil";
   const fake = {
@@ -142,6 +144,17 @@ esac
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain(`would clone ${prod}@weekly-2026-11-13_01-30 to tank/f4mil_test/prod-copy\n`);
     expect(run(withLine("TEST_SNAPSHOT_PREFIX", "hourly-"), {}, "--dry-run").status).toBe(1);
+  });
+
+  it("mirrors the directories prod keeps outside its dataset, only into targets of test", () => {
+    const pair = "TEST_SYNC_DIRS";
+    const ok = run(withLine(pair, "/mnt/nobackup/thumbnails:/mnt/nobackup/thumbnails-test"), {}, "--dry-run");
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain("would mirror /mnt/nobackup/thumbnails to /mnt/nobackup/thumbnails-test");
+    expect(run(withLine(pair, "/mnt/nobackup/thumbnails:/mnt/nobackup/thumbs-copy"), {}, "--dry-run").status).toBe(1);
+    expect(run(withLine(pair, "/mnt/nobackup/thumbnails-test:/mnt/tank/f4mil/thumbnails-test"), {}, "--dry-run").status).toBe(1);
+    expect(run(withLine(pair, "/mnt/nobackup/thumbnails:/mnt/tank/f4mil_test/prod-copy/thumbnails"), {}, "--dry-run").status).toBe(1);
+    expect(run(withLine(pair, "relative:/mnt/nobackup/x-test"), {}, "--dry-run").status).toBe(1);
   });
 
   it("refuses an env file that is not the test stack's", () => {

@@ -127,11 +127,16 @@ bash /path/to/prod/data/backup/host-scripts/test-refresh.sh "$PWD/.env"
   prod's data root has inside `PROD_DATASET`. The database names are
   prod's (`encore`, `embeddings`), because the clone carries prod's cluster.
   Extra photo libraries outside the prod dataset are mounted read-only in
-  test's `docker-compose.volumes.yml`.
+  test's `docker-compose.volumes.yml`. Directories prod keeps outside its
+  dataset (thumbnails or OSM data on a dataset without backup) are not in
+  the snapshot: mirror them with `TEST_SYNC_DIRS` (`source:target` pairs,
+  rsync while the stack is down), or give test a directory of its own
+  outside the copy for data it keeps (its imported OSM regions).
 - **Refresh.** `scripts/host/test-refresh.sh` stops the stack, destroys the
   previous clone (only when everything in `TEST_DATASET` is a clone of
-  `PROD_DATASET`), clones the newest `daily-*` snapshot (each child dataset
-  too), removes prod's env files, dumps and backup token from the copy,
+  `PROD_DATASET`), clones the newest `daily-*` snapshot (`TEST_SNAPSHOT_PREFIX=weekly-`
+  for the weekly one when the daily retention is short; each child dataset
+  too), mirrors `TEST_SYNC_DIRS`, removes prod's env files, dumps and backup token from the copy,
   sets the passwords of both Postgres clusters to the test env file's,
   runs `test-scrub.sql` and starts the stack. The app migrates the copy to
   its image at boot. Run it weekly from a TrueNAS cron job (Sunday, after

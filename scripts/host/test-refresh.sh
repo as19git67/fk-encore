@@ -16,7 +16,9 @@
 #      snapshot of PROD_DATASET; anything else is never destroyed
 #   4. clone the snapshot to TEST_DATASET, and each child dataset to the
 #      matching child (a clone is not recursive)
-#   5. remove from the clone what belongs to prod alone: prod's env files at
+#   5. mirror the directories of TEST_SYNC_DIRS that prod keeps outside its
+#      dataset (e.g. thumbnails), and remove from the clone what belongs to
+#      prod alone: prod's env files at
 #      the top of the dataset, the dumps and the backup token
 #   6. start postgres and geo-db on the clone, set their passwords to the
 #      ones in the test env file, run test-scrub.sql on the main database
@@ -97,6 +99,12 @@ GEO_PASSWORD="${GEO_PASSWORD:-postgres}"
 # prune from having to step around it.
 SNAPSHOT_PREFIX="$(env_value TEST_SNAPSHOT_PREFIX)"
 SNAPSHOT_PREFIX="${SNAPSHOT_PREFIX:-daily-}"
+# Directories prod keeps outside PROD_DATASET (thumbnails or OSM data on a
+# dataset without backup) are not in the snapshot. Each "source:target" pair
+# in TEST_SYNC_DIRS is mirrored with `rsync -a --delete` while the stack is
+# down, into a target of the test stack's own (its path must contain "test");
+# rsync copies only what changed since the last refresh.
+read -r -a SYNC_PAIRS <<< "$(env_value TEST_SYNC_DIRS)"
 
 # -- the env file must be the test stack's ---------------------------------
 [[ "$APP_ENVIRONMENT" == "dev" ]] || refuse "$ENV_FILE does not set APP_ENVIRONMENT=dev, so it is not the test stack on a copy of prod"
@@ -117,6 +125,17 @@ done
 [[ "$SNAPSHOT_PREFIX" =~ ^(daily|weekly|monthly)-$ ]] || refuse "TEST_SNAPSHOT_PREFIX must be daily-, weekly- or monthly- (is \"$SNAPSHOT_PREFIX\")"
 [[ -z "$SNAPSHOT" || "$SNAPSHOT" =~ ^[A-Za-z0-9_.:-]+$ ]] || refuse "--snapshot takes a label like daily-2026-11-14_01-30"
 [[ -r "$SCRIPT_DIR/test-scrub.sql" ]] || refuse "test-scrub.sql is missing next to this script ($SCRIPT_DIR)"
+
+for pair in "${SYNC_PAIRS[@]}"; do
+  src="${pair%%:*}"; dst="${pair#*:}"
+  [[ "$pair" == *:* && "$src" == /* && "$dst" == /* && "$pair" != *..* ]] \
+    || refuse "TEST_SYNC_DIRS takes absolute source:target pairs (got \"$pair\")"
+  src="${src%/}"; dst="${dst%/}"
+  [[ "$dst" == *test* ]] || refuse "the sync target $dst must contain \"test\""
+  [[ "$src" != "$dst" && "$dst" != "$src"/* && "$src" != "$dst"/* ]] || refuse "sync source and target overlap: $pair"
+done
+[[ ${#SYNC_PAIRS[@]} -eq 0 ]] || command -v rsync >/dev/null 2>&1 \
+  || { echo "FATAL: TEST_SYNC_DIRS is set but rsync is not on PATH" >&2; exit 1; }
 
 for bin in zfs docker; do
   command -v "$bin" >/dev/null 2>&1 || { echo "FATAL: $bin not found on PATH — this script must run on the host" >&2; exit 1; }
@@ -143,6 +162,12 @@ fi
   || refuse "this script runs from inside the copy it would destroy; call it from prod's backup/host-scripts/"
 [[ "$ENV_FILE" != "$TEST_MNT"/* ]] \
   || refuse "the env file lies inside the copy it would destroy; keep it next to the test stack's compose files"
+PROD_MNT="$(zfs get -H -o value mountpoint "$PROD_DATASET")"
+for pair in "${SYNC_PAIRS[@]}"; do
+  dst="${pair#*:}"; dst="${dst%/}"
+  [[ "$dst" != "$PROD_MNT" && "$dst" != "$PROD_MNT"/* ]] || refuse "the sync target $dst lies inside prod's dataset"
+  [[ "$dst" != "$TEST_MNT"/* ]] || refuse "the sync target $dst lies inside the copy; the refresh would destroy it every time"
+done
 
 # Everything in TEST_DATASET must be a clone of a snapshot of PROD_DATASET —
 # a dataset that holds data of its own is never destroyed.
@@ -175,6 +200,9 @@ if [[ $DRY -eq 1 ]]; then
     else
       echo "would skip $ds (no snapshot $SNAPSHOT)"
     fi
+  done
+  for pair in "${SYNC_PAIRS[@]}"; do
+    echo "would mirror ${pair%%:*} to ${pair#*:}"
   done
   echo "would remove $TEST_MNT/.env*, $DATA_ROOT/backup/*.dump and $DATA_ROOT/backup/host-scripts/backup-token"
   echo "would set the passwords of postgres and geo-db and scrub database $PG_DATABASE"
@@ -219,6 +247,17 @@ if [[ -d "$DATA_ROOT/backup" ]]; then
   find "$DATA_ROOT/backup" -maxdepth 1 -type f -name '*.dump' -delete
   rm -f "$DATA_ROOT/backup/host-scripts/backup-token"
 fi
+
+for pair in "${SYNC_PAIRS[@]}"; do
+  src="${pair%%:*}"; dst="${pair#*:}"
+  if [[ ! -d "$src" ]]; then
+    log "WARN: sync source $src does not exist, skipped"
+    continue
+  fi
+  log "mirroring $src to $dst"
+  mkdir -p "$dst"
+  rsync -a --delete "${src%/}/" "${dst%/}/" || exit 4
+done
 
 # -- 6. passwords and scrub ---------------------------------------------------
 log "starting postgres and geo-db on the copy"
