@@ -2128,7 +2128,8 @@ enum TripStayPlan {
         day.window == nil && !day.blocks.contains { $0.kind == "spots" }
     }
 
-    /// "3 h 20 von 9 h", "Plan bis 19:40, Tag endet 19:00", "noch frei", "keine Zeit frei",
+    /// "3 h 20 von 9 h", "3 h 20 von 9 h, 1 h warten", "Plan bis 19:40, Tag endet 19:00",
+    /// "noch frei", "keine Zeit frei",
     /// or nil for a day without a clock.
     static func fillLine(_ day: TripDay) -> String? {
         if hasNoTime(day) { return "keine Zeit frei" }
@@ -2140,9 +2141,15 @@ enum TripStayPlan {
             // (13.11.).
             return "Plan bis \(TripClock.format(window.endMinutes + over)), Tag endet \(TripClock.format(window.endMinutes))"
         }
-        let planned = (day.plannedMinutes ?? 0) + (day.waitMinutes ?? 0)
-        if planned == 0 { return "noch frei" }
-        return "\(TripClock.duration(planned)) von \(TripClock.duration(window.minutes))"
+        // Ways and visits only: standing at a door that opens later is
+        // not planned. Counted in, a shorter visit changed nothing (the
+        // next stop waited the longer) and a longer one only the part
+        // past the wait (Anton, 14.11.); the wait stands beside it.
+        let planned = day.plannedMinutes ?? 0
+        let wait = day.waitMinutes ?? 0
+        if planned == 0 && wait == 0 { return "noch frei" }
+        let line = "\(TripClock.duration(planned)) von \(TripClock.duration(window.minutes))"
+        return wait > 0 ? line + ", \(TripClock.duration(wait)) warten" : line
     }
 
     /// Planned over available, for the fill mark; nil without a clock.

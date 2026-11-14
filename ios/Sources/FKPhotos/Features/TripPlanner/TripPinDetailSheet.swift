@@ -69,6 +69,9 @@ struct TripSpotActionSubmenu: Equatable, Sendable {
     static let priority = TripSpotActionSubmenu(title: "Priorität", systemImage: "star")
     /// The days (and excursions) a spot can go to, in the spot picker.
     static let days = TripSpotActionSubmenu(title: "Auf einen Tag", systemImage: "calendar")
+    /// How long the group stays at a spot (Anton, 14.11.: next to the
+    /// day and the fixed time, not only behind "Bearbeiten").
+    static let dwell = TripSpotActionSubmenu(title: "Aufenthaltsdauer", systemImage: "hourglass")
 }
 
 /// What an action is about, in the order a menu shows them.
@@ -168,7 +171,7 @@ struct TripSpotActionSections: View {
     var body: some View {
         if !actions.isEmpty {
             Section {
-                ForEach(ordered) { action in
+                ForEach(ordered.filter { $0.submenu == nil }) { action in
                     Button(role: action.role) {
                         running = action.id
                         Task {
@@ -191,6 +194,34 @@ struct TripSpotActionSections: View {
                         }
                     }
                     .disabled(running != nil || action.disabled)
+                }
+                // A choice between values (priority, the stay) is one
+                // row with its menu, as on a row's long press: ten
+                // durations drawn flat outgrew the sheet.
+                ForEach(TripSpotActionMenuItems.submenus(of: ordered), id: \.title) { submenu in
+                    let members = ordered.filter { $0.submenu == submenu }
+                    Menu {
+                        ForEach(members) { action in
+                            Button(role: action.role) {
+                                running = action.id
+                                Task {
+                                    await action.run()
+                                    running = nil
+                                    if action.closes { close() }
+                                }
+                            } label: {
+                                Label(action.title, systemImage: action.systemImage)
+                            }
+                            .disabled(action.disabled)
+                        }
+                    } label: {
+                        if members.contains(where: { $0.id == running }) {
+                            ProgressView()
+                        } else {
+                            Label(submenu.title, systemImage: submenu.systemImage)
+                        }
+                    }
+                    .disabled(running != nil || members.allSatisfy(\.disabled))
                 }
             }
         }
