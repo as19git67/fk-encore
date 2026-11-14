@@ -70,15 +70,32 @@ database that has history. A copy of production does.
   (CLAUDE.md, "Keine personenbezogenen Daten").
 - **Dev is defused twice: in the data and in the code.** The data step
   (scrub SQL after each refresh) removes what points outward from the
-  copy. The code step (`APP_ENVIRONMENT=dev`) makes every outbound path
-  refuse, so a job or a table added next month is covered without anyone
-  remembering the scrub. Either one alone would be enough on the day it
-  was written; only both stay enough.
-- **No separate keys.** Dev gets no SMTP, no VAPID, no APNs key, no
-  SerpApi key, no EODHD token, no CUPS server, no Anthropic key, and its
-  own `FINANCE_CREDENTIALS_KEY`, so the copied FinTS credentials cannot be
-  decrypted even if the scrub missed one. A dev that must test one of
-  these gets a key of its own for that test, not prod's.
+  copy. The code step (`APP_ENVIRONMENT=dev`) puts every outbound path
+  under a switch whose default in dev is not to reach a real person or a
+  real account, so a job or a table added next month is covered without
+  anyone remembering the scrub. Either one alone would be enough on the
+  day it was written; only both stay enough.
+- **Defused does not mean dead.** The point of dev is to try a change on
+  real data, and most of the app never leaves the host: photos, documents
+  and their classification, finance views and reports, the assistant, trip
+  planning, collections and exports as files all work as in prod. Each
+  outbound path has its own mode `off | redirect | on`, set per kind in
+  `.env.dev`, so one path can be tested without opening the others (see the
+  table below). Mail is redirected by default, so every mail dev would
+  send can be read without reaching anyone.
+- **FinTS stays off for now.** With a copy that is at most a week old, the
+  bookings in dev are recent enough to test everything that reads them.
+  A bank sync from dev can be switched on later (`on`): it then needs the
+  login entered again in dev, because the scrub removes the copied ones.
+  That works — the old test stack has run with the same logins for a few
+  banks without trouble — but every booking it fetches lands only in the
+  copy and is gone at the next refresh.
+- **No keys of prod.** Dev gets none of prod's SMTP login, VAPID or APNs
+  key, SerpApi key, EODHD token, CUPS server or Anthropic key, and its own
+  `FINANCE_CREDENTIALS_KEY`, so the copied FinTS credentials cannot be
+  decrypted even if the scrub missed one. A path switched to `on` gets a
+  key of its own (its own VAPID pair, the APNs sandbox, a SerpApi key with
+  a small quota), never prod's.
 - **Dev shares prod's llm-service**, like the demo: a second Gemma 4 does
   not fit on the 16 GB card. Interactive calls are fine; the background
   `llm` queue and the nightly aesthetic run (which lends prod's GPU) stay
@@ -114,6 +131,9 @@ What the overlay changes:
   its own llm-service, and no `documents_inbox` from prod (the clone's
   inbox is its own).
 - `llm_service` and `aesthetic_service` under a profile nobody activates.
+- `mail_catcher`: a local SMTP catcher with a web page (Mailpit), the
+  target of `mail` in `redirect` mode, reachable like the app only on the
+  LAN or VPN.
 - `upgrade_check`: the check container (see below), `restart: "no"`.
 - `watchtower`: `WATCHTOWER_INCLUDE_STOPPED` and `WATCHTOWER_REVIVE_STOPPED`
   so it also replaces and starts the stopped check container, which is
@@ -176,24 +196,28 @@ missing column fails loudly so the file is fixed rather than half applied.
 ### What the app does with `APP_ENVIRONMENT=dev`
 
 One module `lib/environment.ts` with `isDev()` and
-`assertOutbound(kind)`, called at the lowest layer of each path, where it
-throws a clear error instead of sending:
+`outbound(kind)`, called at the lowest layer of each path. It returns the
+mode of that kind: `off` throws a clear error instead of sending,
+`redirect` sends to the dev target named in the table, `on` sends as in
+prod (with dev's own key). In prod every kind is `on` and the module does
+nothing. The mode is read from `DEV_OUTBOUND_<KIND>` in `.env.dev`; the
+defaults:
 
-| Path | Where |
-|---|---|
-| Mail | `user/mail.ts` (password reset, exports, price alerts, guest digest) |
-| Web push and APNs | `push/push.ts`, `push/apns-client.ts` |
-| FinTS | the FinTS client in `finance/` (sync, TAN probe) |
-| SerpApi | the hotel and flight clients in `travel/` |
-| News and quotes with a token | EODHD client in `finance/` |
-| Printing | the CUPS client |
+| Kind | Where | Default in dev | `redirect` means |
+|---|---|---|---|
+| `mail` | `user/mail.ts` (password reset, exports, price alerts, guest digest) | `redirect` | every mail goes to a local mail catcher (e.g. Mailpit in the dev stack), whatever the recipient |
+| `push` | `push/push.ts`, `push/apns-client.ts` | `off` | — (`on` with dev's own VAPID pair and the APNs sandbox reaches only devices that signed in to dev; the copied tokens are deleted) |
+| `fints` | the FinTS client in `finance/` (sync, TAN probe) | `off` | — (`on` after entering a login in dev) |
+| `serpapi` | the hotel and flight clients in `travel/` | `off` | — (`on` with dev's own key; the daily jobs stay off, a check runs by hand) |
+| `eodhd` | EODHD client in `finance/` | `off` | — (quotes from Onvista and news from Yahoo need no token and stay on) |
+| `print` | the CUPS client | `off` | a PDF written into the dev data directory instead of paper |
 
 Jobs: `schedule()` in `lib/local-cron.ts` takes `outbound: true`. In dev
-such a job is registered disabled; the admin page shows it as
-"aus (Dev)" and it can be switched on by hand for a test. The list is the
+such a job is registered disabled when its kind is `off`; the admin page
+shows it as "aus (Dev)" and it can be switched on by hand for a test. The list is the
 exported `OUTBOUND_JOBS` that the scrub reads too; a test fails when a job
 whose module calls one of the guarded paths is not marked. Today that is
-`finance-sync-statements`, `finance-news-refresh`, `finance-quotes-refresh`,
+`finance-sync-statements`, `finance-news-refresh`,
 `travel-hotel-watches`, `travel-flight-watches`, `collections-schedules`,
 `documents-follow-ups-process-due`, `guest-digest`,
 `trip-planner-live-activities`, `photo-aesthetic-nightly` and
@@ -272,8 +296,10 @@ up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
    the dev env file, run the refresh once, set up the weekly cron job.
    Until stage 2 is deployed, dev starts with no outbound keys and the
    scrub — enough for a first look, which is why stage 2 follows directly.
-2. **`APP_ENVIRONMENT=dev` in the app.** Guards, `outbound` jobs with the
-   test, the `llm` background workers, banner and title, `dev_copy`.
+2. **`APP_ENVIRONMENT=dev` in the app.** `outbound(kind)` with the three
+   modes and the `DEV_OUTBOUND_*` variables, the mail catcher in the
+   overlay, `outbound` jobs with the test, the `llm` background workers,
+   banner and title, `dev_copy`.
 3. **Upgrade check.** Entry point, schema comparison, GitHub status,
    container in the overlay. Run by hand first (`docker compose run
    upgrade_check`) against today's `latest` and against the commit before
