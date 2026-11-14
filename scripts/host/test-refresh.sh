@@ -94,9 +94,9 @@ PG_PASSWORD="${PG_PASSWORD:-postgres}"
 GEO_PASSWORD="$(env_value GEO_DB_PASSWORD)"
 GEO_PASSWORD="${GEO_PASSWORD:-postgres}"
 # Which tier of the backup's snapshots to copy (daily-, weekly- or monthly-).
-# A clone pins its snapshot; with a short daily retention, cloning the newest
-# weekly-* (taken on the backup's WEEKLY_SNAPSHOT_DOW) keeps the backup's
-# prune from having to step around it.
+# The newest daily-* is the default even with a short daily retention: the
+# clone pins its snapshot, and the backup's prune keeps a snapshot that a
+# clone stands on until the next refresh replaces the clone.
 SNAPSHOT_PREFIX="$(env_value TEST_SNAPSHOT_PREFIX)"
 SNAPSHOT_PREFIX="${SNAPSHOT_PREFIX:-daily-}"
 # Directories prod keeps outside PROD_DATASET (thumbnails or OSM data on a
@@ -284,7 +284,9 @@ if [[ "$(echo "$has_db" | tr -d '[:space:]')" != "1" ]]; then
 fi
 
 log "scrubbing $PG_DATABASE"
-compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -U postgres -d "$PG_DATABASE" \
+# -o /dev/null drops the result table of every SELECT; notices and errors
+# go to stderr and stay in the log.
+compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -o /dev/null -U postgres -d "$PG_DATABASE" \
   < "$SCRIPT_DIR/test-scrub.sql" || exit 4
 
 printf '%s\t%s\n' "$PROD_DATASET@$SNAPSHOT" "$(date -u +%FT%TZ)" > "$DATA_ROOT/.test-copy"
