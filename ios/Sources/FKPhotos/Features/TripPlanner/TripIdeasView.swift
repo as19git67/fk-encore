@@ -31,6 +31,7 @@ struct TripIdeasView: View {
     @State private var query = ""
     /// The collection written out as a file, waiting for "Sichern unter".
     @State private var exportFile: TripExchangeDocument?
+    @State private var exportName = "Ideen.zip"
     @State private var isImporting = false
     /// What an export or import did, or why it did not.
     @State private var exchangeMessage: String?
@@ -57,12 +58,12 @@ struct TripIdeasView: View {
         view
         .fileExporter(isPresented: Binding(
             get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
-                      document: exportFile, contentType: .json,
-                      defaultFilename: "Ideen.ideen.json") { result in
+                      document: exportFile, contentType: .zip,
+                      defaultFilename: exportName) { result in
             if case .failure(let error) = result { exchangeMessage = error.localizedDescription }
             exportFile = nil
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json], onCompletion: picked)
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: TripExchange.importTypes, onCompletion: picked)
         .alert("Ideen", isPresented: Binding(
             get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
             Button("OK", role: .cancel) { exchangeMessage = nil }
@@ -423,11 +424,13 @@ struct TripIdeasView: View {
             && model.errorMessage == nil
     }
 
-    /// Your own collection as JSON, then the system's "Sichern unter".
+    /// Your own collection as a ZIP named with date and time, then the
+    /// system's "Sichern unter".
     private func exportIdeas() async {
         do {
-            let data = try await TripExchange.exportIdeas()
-            exportFile = TripExchangeDocument(data: data)
+            let file = try await TripExchange.exportIdeas()
+            exportName = file.fileName
+            exportFile = TripExchangeDocument(data: file.data)
         } catch {
             exchangeMessage = TripErrorText.describe(error)
         }

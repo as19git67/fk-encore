@@ -27,6 +27,15 @@ import {
   importTripPlanner,
 } from "./exchange";
 import { readPlannerFile, readTripFile, type TripFile } from "./exchange-format";
+import JSZip from "jszip";
+import {
+  exportTripFile,
+  fileStamp,
+  importTripFile,
+  packFile,
+  safeBaseName,
+  unpackFile,
+} from "./exchange-file";
 
 let ownerId = 0;
 let otherId = 0;
@@ -406,5 +415,103 @@ describe("everything of the planner as one file", () => {
       .rejects.toThrow("enthält eine Reise");
     expect(() => readTripFile({ format: "f4mil.tripplanner", version: 1, trips: [] }))
       .toThrow("alle Reisen und Ideen");
+  });
+});
+
+describe("the file on disk", () => {
+  it("names the time in the person's own zone, without colons", () => {
+    const now = new Date("2026-11-14T22:40:00Z");
+    expect(fileStamp(now)).toBe("2026-11-14 23-40");
+    expect(fileStamp(now, "America/Los_Angeles")).toBe("2026-11-14 14-40");
+    expect(fileStamp(now, "Mond/Basis")).toBe("2026-11-14 23-40");
+  });
+
+  it("keeps a trip title that every disk accepts", () => {
+    expect(safeBaseName("Beispiel/Reise: Teil 2", "Reise")).toBe("Beispiel-Reise- Teil 2");
+    expect(safeBaseName("   ", "Reise")).toBe("Reise");
+    expect(safeBaseName(null, "Reise")).toBe("Reise");
+  });
+
+  it("reads back what it packed, and a bare JSON file too", async () => {
+    const zip = await packFile({ format: "f4mil.ideas", version: 1, ideas: [] }, "Ideen");
+    expect(zip[0]).toBe(0x50);
+    expect(await unpackFile(zip)).toEqual({ format: "f4mil.ideas", version: 1, ideas: [] });
+    expect(await unpackFile(Buffer.from('\uFEFF{"a":1}', "utf8"))).toEqual({ a: 1 });
+  });
+
+  it("says what is wrong with a file that is no export", async () => {
+    await expect(unpackFile(Buffer.alloc(0))).rejects.toThrow();
+    await expect(unpackFile(Buffer.from("kein json"))).rejects.toMatchObject({
+      problems: ["Die Datei ist weder eine ZIP-Datei noch gültiges JSON."],
+    });
+    const empty = new JSZip();
+    empty.file("liesmich.txt", "nichts");
+    await expect(unpackFile(await empty.generateAsync({ type: "nodebuffer" }))).rejects.toMatchObject({
+      problems: ["In der ZIP-Datei ist keine JSON-Datei."],
+    });
+    const two = new JSZip();
+    two.file("a.json", "{}");
+    two.file("b.json", "{}");
+    two.file("__MACOSX/._a.json", "x");
+    await expect(unpackFile(await two.generateAsync({ type: "nodebuffer" }))).rejects.toMatchObject({
+      problems: ["In der ZIP-Datei sind 2 JSON-Dateien, erwartet wird eine."],
+    });
+  });
+});
+
+describe("export and import as a ZIP", () => {
+  async function inside(base64: string): Promise<{ name: string; text: string }> {
+    const zip = await JSZip.loadAsync(Buffer.from(base64, "base64"));
+    const [entry] = Object.values(zip.files);
+    return { name: entry.name, text: await entry.async("string") };
+  }
+
+  it("puts a trip in a ZIP named after it and the time, and reads it back", async () => {
+    const { planId } = await importTripPlan({ data: sampleFile() as unknown as Record<string, unknown> });
+    const out = await exportTripFile({ what: "trip", planId, timeZone: "Europe/Berlin" });
+    expect(out.fileName).toMatch(/^Beispielreise \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.zip$/);
+    const { name, text } = await inside(out.zip);
+    expect(name).toBe(out.fileName.replace(/\.zip$/, ".json"));
+    expect(text).toContain('\n  "format": "f4mil.trip"');
+
+    actAs(otherId);
+    const result = await importTripFile({ file: out.zip });
+    expect(result.kind).toBe("trip");
+    expect(result.trips).toEqual([{ planId: expect.any(Number), title: "Beispielreise" }]);
+    expect(result.ideas).toBeNull();
+  });
+
+  it("does the same for the ideas and for everything", async () => {
+    await importTripPlan({ data: sampleFile() as unknown as Record<string, unknown> });
+    await db.insert(ideaPool).values({
+      owner_id: ownerId, created_by: ownerId, osm_ref: "node:10", name: "Biergarten am Beispielweg",
+      lat: 50.5, lon: 8.5, category: "food", dwell_minutes: 90,
+    });
+    const ideas = await exportTripFile({ what: "ideas" });
+    expect(ideas.fileName).toMatch(/^Ideen \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.zip$/);
+    const all = await exportTripFile({ what: "all" });
+    expect(all.fileName).toMatch(/^Reiseplaner \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.zip$/);
+
+    actAs(otherId);
+    expect(await importTripFile({ file: ideas.zip, expect: "ideas" }))
+      .toEqual({ kind: "ideas", trips: [], ideas: { added: 1, skipped: 0 } });
+    const back = await importTripFile({ file: all.zip });
+    expect(back.kind).toBe("all");
+    expect(back.trips.map((t) => t.title)).toEqual(["Beispielreise"]);
+    expect(back.ideas).toEqual({ added: 0, skipped: 1 });
+  });
+
+  it("takes the bare JSON as well and refuses a file of the wrong kind", async () => {
+    const json = Buffer.from(JSON.stringify(sampleFile())).toString("base64");
+    expect((await importTripFile({ file: json })).kind).toBe("trip");
+    await expect(importTripFile({ file: json, expect: "ideas" })).rejects.toThrow("enthält eine Reise");
+    await expect(importTripFile({ file: Buffer.from("Unsinn").toString("base64") }))
+      .rejects.toThrow("weder eine ZIP-Datei");
+  });
+
+  it("does not hand a stranger's trip out", async () => {
+    const { planId } = await importTripPlan({ data: sampleFile() as unknown as Record<string, unknown> });
+    actAs(otherId);
+    await expect(exportTripFile({ what: "trip", planId })).rejects.toThrow("plan not found");
   });
 });
