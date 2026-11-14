@@ -44,7 +44,7 @@
     "chokidar": "^6.0.0",
     "dockerode": "^5.0.1",
     "dotenv": "^18.0.6",
-    "drizzle-orm": "^0.45.3",
+    "drizzle-orm": "^0.45.4",
     "encore.dev": "^1.58.7",
     "exceljs": "^4.4.0",
     "exifr": "^7.1.3",
