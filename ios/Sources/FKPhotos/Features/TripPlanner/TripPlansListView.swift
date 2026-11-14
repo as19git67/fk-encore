@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The user's plans — the "Planen" half of the Trip tab (§8.1).
 ///
@@ -52,33 +53,105 @@ struct TripPlansListView: View {
     /// shared from Apple Maps was announced as "gemerkt" and then
     /// nowhere to be seen.
     @Environment(\.scenePhase) private var scenePhase
+    /// A trip written out as a file, waiting for "Sichern unter".
+    @State private var exportFile: TripExchangeDocument?
+    @State private var exportName = "Reise.reise.json"
+    @State private var isImporting = false
+    /// What the one file picker reads: a single trip, or everything.
+    /// One picker for both, because two `.fileImporter`s on one view
+    /// leave all but the last one dead.
+    @State private var importsEverything = false
+    /// What an import of everything did.
+    @State private var exchangeMessage: String?
 
     var body: some View {
+        exchangeFlow(listBody.toolbar { toolbarItems })
+    }
+
+    @ToolbarContentBuilder private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                isCreating = true
+            } label: {
+                Label("Neue Reise", systemImage: "plus")
+            }
+        }
+        // A trip from a file: a backup, or a plan somebody sent.
+        ToolbarItem(placement: .secondaryAction) {
+            Button {
+                importsEverything = false
+                isImporting = true
+            } label: {
+                Label("Reise aus Datei importieren …", systemImage: "square.and.arrow.down")
+            }
+        }
+        // Every trip and the ideas in one file — the backup.
+        ToolbarItem(placement: .secondaryAction) {
+            Button {
+                Task { await exportEverything() }
+            } label: {
+                Label("Alle Reisen und Ideen exportieren …", systemImage: "archivebox")
+            }
+        }
+        ToolbarItem(placement: .secondaryAction) {
+            Button {
+                importsEverything = true
+                isImporting = true
+            } label: {
+                Label("Alle Reisen und Ideen importieren …", systemImage: "tray.and.arrow.down")
+            }
+        }
+        // Next to the trips rather than inside one: the collection
+        // is the half that exists *without* a trip (§20), and
+        // hiding it inside a plan would make it the trip's list.
+        ToolbarItem(placement: .topBarLeading) {
+            NavigationLink {
+                TripIdeasView()
+            } label: {
+                Label("Ideen", systemImage: "lightbulb")
+            }
+        }
+    }
+
+    /// Files out and in: kept apart from the rest of the chain, which
+    /// is already as long as the type checker will follow.
+    private func exchangeFlow(_ view: some View) -> some View {
+        view
+        .fileExporter(isPresented: Binding(
+            get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
+                      document: exportFile, contentType: .json,
+                      defaultFilename: exportName) { result in
+            if case .failure(let error) = result { actionError = error.localizedDescription }
+            exportFile = nil
+        }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json], onCompletion: picked)
+        .alert("Import", isPresented: Binding(
+            get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
+            Button("OK", role: .cancel) { exchangeMessage = nil }
+        } message: {
+            Text(exchangeMessage ?? "")
+        }
+    }
+
+    private func picked(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            let everything = importsEverything
+            Task {
+                if everything { await importEverything(from: url) } else { await importTrip(from: url) }
+            }
+        case .failure(let error):
+            actionError = error.localizedDescription
+        }
+    }
+
+    private var listBody: some View {
         VStack(spacing: 0) {
             if let pendingShare {
                 shareBanner(pendingShare)
                 Divider()
             }
             content
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    isCreating = true
-                } label: {
-                    Label("Neue Reise", systemImage: "plus")
-                }
-            }
-            // Next to the trips rather than inside one: the collection
-            // is the half that exists *without* a trip (§20), and
-            // hiding it inside a plan would make it the trip's list.
-            ToolbarItem(placement: .topBarLeading) {
-                NavigationLink {
-                    TripIdeasView()
-                } label: {
-                    Label("Ideen", systemImage: "lightbulb")
-                }
-            }
         }
         .sheet(isPresented: $isCreating) {
             NavigationStack {
@@ -217,6 +290,9 @@ struct TripPlansListView: View {
                     }
                     Button { aux = TripPlanAux(planId: plan.id, kind: .offline) } label: {
                         Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
+                    }
+                    Button { Task { await exportTrip(plan) } } label: {
+                        Label("Als Datei exportieren …", systemImage: "square.and.arrow.up")
                     }
                 }
                 .swipeActions(edge: .trailing) {
@@ -371,6 +447,52 @@ struct TripPlansListView: View {
                 "/trip-planner/plans/\(plan.id)/participants/remove", body: Body(userId: me))
             plans.removeAll { $0.id == plan.id }
             await TripPlanGone.forget(planId: plan.id)
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// The whole trip as JSON, then the system's "Sichern unter".
+    private func exportTrip(_ plan: TripPlanSummary) async {
+        do {
+            let data = try await TripExchange.exportTrip(planId: plan.id)
+            exportName = TripExchange.fileName(plan.displayTitle, suffix: "reise.json")
+            exportFile = TripExchangeDocument(data: data)
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// A new trip from the file, opened straight away. Never merged into
+    /// an existing one: the import is a copy, and the original stays.
+    private func importTrip(from url: URL) async {
+        do {
+            let imported = try await TripExchange.importTrip(TripExchange.read(url))
+            await load()
+            openPlanId = imported.planId
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// Every trip and your own ideas as one JSON file.
+    private func exportEverything() async {
+        do {
+            let data = try await TripExchange.exportPlanner()
+            exportName = "Reiseplaner.reiseplaner.json"
+            exportFile = TripExchangeDocument(data: data)
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// Each trip in the file becomes a new trip; ideas already collected
+    /// stay as they are. All or nothing: a broken file adds nothing.
+    private func importEverything(from url: URL) async {
+        do {
+            let result = try await TripExchange.importPlanner(TripExchange.read(url))
+            await load()
+            exchangeMessage = TripExchange.plannerOutcome(result)
         } catch {
             actionError = TripErrorText.describe(error)
         }
