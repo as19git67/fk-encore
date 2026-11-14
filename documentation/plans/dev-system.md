@@ -44,7 +44,17 @@ database that has history. A copy of production does.
   `-test`, ports, watchtower scope `fktest`), PR images `:test` keep
   landing there after every push — so a PR is tried on real data. Only its
   data changes: instead of whatever it holds today, it gets the copy of
-  production. A fifth stack would cost CPU and RAM for embedding and face
+  production.
+- **The technical names stay "test".** Suffix `-test`, project
+  `fk-encore-test`, scope `fktest`, image tag `:test`, secret
+  `WATCHTOWER_URL_TEST`, env file `.env.test`, overlay
+  `docker-compose.test.yml`, host scripts `test-refresh.sh` and
+  `test-scrub.sql`: the host, the workflows and the secrets stay as they
+  are, and only the data and the overlay are new. "Dev system" in this plan
+  means this stack. Only the app's own mode is called `APP_ENVIRONMENT=dev`
+  (with `DEV_OUTBOUND_<KIND>`), because `NODE_ENV=test` already means the
+  test runner and the app checks for it.
+  A fifth stack would cost CPU and RAM for embedding and face
   detection again, and there is nothing a separate empty test stack shows
   that the dev stack does not. The demo stays as it is.
   `docker-compose-dev.yml` is removed (with its two validation jobs in
@@ -70,15 +80,32 @@ database that has history. A copy of production does.
   (CLAUDE.md, "Keine personenbezogenen Daten").
 - **Dev is defused twice: in the data and in the code.** The data step
   (scrub SQL after each refresh) removes what points outward from the
-  copy. The code step (`APP_ENVIRONMENT=dev`) makes every outbound path
-  refuse, so a job or a table added next month is covered without anyone
-  remembering the scrub. Either one alone would be enough on the day it
-  was written; only both stay enough.
-- **No separate keys.** Dev gets no SMTP, no VAPID, no APNs key, no
-  SerpApi key, no EODHD token, no CUPS server, no Anthropic key, and its
-  own `FINANCE_CREDENTIALS_KEY`, so the copied FinTS credentials cannot be
-  decrypted even if the scrub missed one. A dev that must test one of
-  these gets a key of its own for that test, not prod's.
+  copy. The code step (`APP_ENVIRONMENT=dev`) puts every outbound path
+  under a switch whose default in dev is not to reach a real person or a
+  real account, so a job or a table added next month is covered without
+  anyone remembering the scrub. Either one alone would be enough on the
+  day it was written; only both stay enough.
+- **Defused does not mean dead.** The point of dev is to try a change on
+  real data, and most of the app never leaves the host: photos, documents
+  and their classification, finance views and reports, the assistant, trip
+  planning, collections and exports as files all work as in prod. Each
+  outbound path has its own mode `off | redirect | on`, set per kind in
+  `.env.test`, so one path can be tested without opening the others (see the
+  table below). Mail is redirected by default, so every mail dev would
+  send can be read without reaching anyone.
+- **FinTS stays off for now.** With a copy that is at most a week old, the
+  bookings in dev are recent enough to test everything that reads them.
+  A bank sync from dev can be switched on later (`on`): it then needs the
+  login entered again in dev, because the scrub removes the copied ones.
+  That works — the old test stack has run with the same logins for a few
+  banks without trouble — but every booking it fetches lands only in the
+  copy and is gone at the next refresh.
+- **No keys of prod.** Dev gets none of prod's SMTP login, VAPID or APNs
+  key, SerpApi key, EODHD token, CUPS server or Anthropic key, and its own
+  `FINANCE_CREDENTIALS_KEY`, so the copied FinTS credentials cannot be
+  decrypted even if the scrub missed one. A path switched to `on` gets a
+  key of its own (its own VAPID pair, the APNs sandbox, a SerpApi key with
+  a small quota), never prod's.
 - **Dev shares prod's llm-service**, like the demo: a second Gemma 4 does
   not fit on the 16 GB card. Interactive calls are fine; the background
   `llm` queue and the nightly aesthetic run (which lends prod's GPU) stay
@@ -100,11 +127,11 @@ database that has history. A copy of production does.
 
 ### Compose
 
-`docker-compose.dev.yml`, layered by `COMPOSE_FILE` in `.env.dev`
-(template `docker-compose.env.dev.example`, next to the demo's):
+`docker-compose.test.yml`, layered by `COMPOSE_FILE` in `.env.test`
+(template: the existing `docker-compose.env.test.example`, extended):
 
 ```
-COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml:docker-compose.dev.yml
+COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml:docker-compose.test.yml
 ```
 
 What the overlay changes:
@@ -114,45 +141,63 @@ What the overlay changes:
   its own llm-service, and no `documents_inbox` from prod (the clone's
   inbox is its own).
 - `llm_service` and `aesthetic_service` under a profile nobody activates.
+- `mail_catcher`: a local SMTP catcher with a web page (Mailpit), the
+  target of `mail` in `redirect` mode, reachable like the app only on the
+  LAN or VPN.
 - `upgrade_check`: the check container (see below), `restart: "no"`.
 - `watchtower`: `WATCHTOWER_INCLUDE_STOPPED` and `WATCHTOWER_REVIVE_STOPPED`
   so it also replaces and starts the stopped check container, which is
   added to its container list.
 
-`.env.dev` sets the identity of the old test stack (suffix `-test`, ports,
-scope), `DEPLOY_DATA_ROOT` to the mount point of the dev dataset, and the
+`.env.test` sets the identity of the old test stack (suffix `-test`, ports,
+scope), `DEPLOY_DATA_ROOT` to the data directory inside the clone, and the
 database names of prod (`encore`, `embeddings`), because the cloned
-cluster carries prod's names. Its own `RP_ID`/`RP_ORIGIN`: passkeys from
+cluster carries prod's names. `INTERNAL_SERVICE_SECRET` is prod's, since
+the app calls prod's llm-service; it is the one value test shares with
+prod. Its own `RP_ID`/`RP_ORIGIN`: passkeys from
 prod do not work in dev, login is by password. Extra photo libraries
 outside the prod dataset are mounted read-only in dev's
 `docker-compose.volumes.yml`.
 
-### Refresh: `scripts/host/dev-refresh.sh`
+### Refresh: `scripts/host/test-refresh.sh`
 
 Shipped in the image and copied to `backup/host-scripts/` like the backup
-hook, so the host needs no checkout. Called with the path to `.env.dev`
-from a weekly TrueNAS cron job (Sunday night, after the backup) or by
-hand. It reads `PROD_DATASET` and `DEV_DATASET` from the env file and
-refuses to run when `DEV_DATASET` equals `PROD_DATASET`, is not a sibling
-of it, does not contain "dev", or when the env file lacks
-`APP_ENVIRONMENT=dev`. `--dry-run` prints every step.
+hook, so the host needs no checkout. Called from prod's copy of that
+folder (the refresh destroys test's own) with the path to the test env
+file, from a weekly TrueNAS cron job (Sunday night, after the backup) or by
+hand. It reads `PROD_DATASET` and `TEST_DATASET` from the env file and
+refuses to run when `TEST_DATASET` equals `PROD_DATASET`, lies inside it,
+does not contain "test", when `DEPLOY_DATA_ROOT` is not inside the clone,
+or when the env file lacks `APP_ENVIRONMENT=dev`. `--dry-run` prints every
+step, `--snapshot <label>` picks another snapshot.
 
-1. `docker compose --env-file .env.dev down`.
+`TEST_DATASET` is a child dataset of its own under the test stack's
+directory (e.g. `…/f4mil_test/prod-copy`). Prod keeps its compose files
+and `.env` at the top of its dataset, so a clone in place of the test
+stack's directory would replace test's env file with prod's; one level
+down, the clone holds only data and test's compose files stay where they
+are.
+
+1. `docker compose --env-file .env.test down`.
 2. Find the newest `daily-*` snapshot of `PROD_DATASET`.
-3. `zfs destroy -r DEV_DATASET` (only if its `origin` is a snapshot of
-   `PROD_DATASET` — a dataset that is not a clone is never destroyed).
-4. `zfs clone` the snapshot to `DEV_DATASET`, and each child dataset to
+3. `zfs destroy -r TEST_DATASET` (only if every dataset in it has a
+   snapshot of `PROD_DATASET` as `origin` — a dataset that is not a clone
+   is never destroyed).
+4. `zfs clone` the snapshot to `TEST_DATASET`, and each child dataset to
    the matching child (a clone is not recursive).
-5. In the clone's backup directory: remove `restore-*.dump`, the prod
-   dumps and `host-scripts/backup-token`.
-6. Start only `postgres`, set its password to the one in `.env.dev`
-   (`ALTER USER` over the local socket, which needs none), and run the
-   scrub (`scripts/host/dev-scrub.sql`).
-7. Write the snapshot label into a `dev_copy` row, which the banner shows.
-8. `docker compose --env-file .env.dev up -d`. The app migrates the copy
+5. Remove prod's `.env*` files at the top of the clone, and in the
+   clone's backup directory every `*.dump` (including a `restore-*.dump`)
+   and `host-scripts/backup-token`.
+6. Start only `postgres` and `geo-db`, set their passwords to the ones in
+   the test env file (`ALTER USER` over the local socket, which needs
+   none), check that the database `DEPLOY_PG_DATABASE` exists, and run the
+   scrub (`scripts/host/test-scrub.sql`).
+7. Write the snapshot label into `$DEPLOY_DATA_ROOT/.test-copy` (stage 2
+   moves it into a `dev_copy` row, which the banner shows).
+8. `docker compose --env-file .env.test up -d`. The app migrates the copy
    to its own image on boot.
 
-### Scrub: `scripts/host/dev-scrub.sql`
+### Scrub: `scripts/host/test-scrub.sql`
 
 Runs in one transaction; a table that does not exist yet is skipped, a
 missing column fails loudly so the file is fixed rather than half applied.
@@ -176,24 +221,28 @@ missing column fails loudly so the file is fixed rather than half applied.
 ### What the app does with `APP_ENVIRONMENT=dev`
 
 One module `lib/environment.ts` with `isDev()` and
-`assertOutbound(kind)`, called at the lowest layer of each path, where it
-throws a clear error instead of sending:
+`outbound(kind)`, called at the lowest layer of each path. It returns the
+mode of that kind: `off` throws a clear error instead of sending,
+`redirect` sends to the dev target named in the table, `on` sends as in
+prod (with dev's own key). In prod every kind is `on` and the module does
+nothing. The mode is read from `DEV_OUTBOUND_<KIND>` in `.env.test`; the
+defaults:
 
-| Path | Where |
-|---|---|
-| Mail | `user/mail.ts` (password reset, exports, price alerts, guest digest) |
-| Web push and APNs | `push/push.ts`, `push/apns-client.ts` |
-| FinTS | the FinTS client in `finance/` (sync, TAN probe) |
-| SerpApi | the hotel and flight clients in `travel/` |
-| News and quotes with a token | EODHD client in `finance/` |
-| Printing | the CUPS client |
+| Kind | Where | Default in dev | `redirect` means |
+|---|---|---|---|
+| `mail` | `user/mail.ts` (password reset, exports, price alerts, guest digest) | `redirect` | every mail goes to a local mail catcher (e.g. Mailpit in the dev stack), whatever the recipient |
+| `push` | `push/push.ts`, `push/apns-client.ts` | `off` | — (`on` with dev's own VAPID pair and the APNs sandbox reaches only devices that signed in to dev; the copied tokens are deleted) |
+| `fints` | the FinTS client in `finance/` (sync, TAN probe) | `off` | — (`on` after entering a login in dev) |
+| `serpapi` | the hotel and flight clients in `travel/` | `off` | — (`on` with dev's own key; the daily jobs stay off, a check runs by hand) |
+| `eodhd` | EODHD client in `finance/` | `off` | — (quotes from Onvista and news from Yahoo need no token and stay on) |
+| `print` | the CUPS client | `off` | a PDF written into the dev data directory instead of paper |
 
 Jobs: `schedule()` in `lib/local-cron.ts` takes `outbound: true`. In dev
-such a job is registered disabled; the admin page shows it as
-"aus (Dev)" and it can be switched on by hand for a test. The list is the
+such a job is registered disabled when its kind is `off`; the admin page
+shows it as "aus (Dev)" and it can be switched on by hand for a test. The list is the
 exported `OUTBOUND_JOBS` that the scrub reads too; a test fails when a job
 whose module calls one of the guarded paths is not marked. Today that is
-`finance-sync-statements`, `finance-news-refresh`, `finance-quotes-refresh`,
+`finance-sync-statements`, `finance-news-refresh`,
 `travel-hotel-watches`, `travel-flight-watches`, `collections-schedules`,
 `documents-follow-ups-process-due`, `guest-digest`,
 `trip-planner-live-activities`, `photo-aesthetic-nightly` and
@@ -236,9 +285,9 @@ show the migration's file name and the Postgres error code.
 
 ### Container and trigger
 
-`upgrade_check` in `docker-compose.dev.yml`: the app image tagged
+`upgrade_check` in `docker-compose.test.yml`: the app image tagged
 `candidate`, command `upgrade-check`, the backup directory of prod
-read-only, the dev postgres, and a GitHub token in `.env.dev` (fine-grained,
+read-only, the dev postgres, and a GitHub token in `.env.test` (fine-grained,
 this repository only, permission "Commit statuses: read and write",
 nothing else). The image knows its commit from `BUILD_NUMBER`. Watchtower
 of the dev stack replaces and starts it when a new `candidate` appears;
@@ -259,21 +308,27 @@ it runs once and stops.
 5. On `failure` or timeout: the run is red, prod keeps its image. Fixing
    forward is a new merge; nothing has to be rolled back.
 
-Without the secret `WATCHTOWER_URL_DEV` the gate is skipped with a warning
+Without the secret `WATCHTOWER_URL_TEST` the gate is skipped with a warning
 and the old path runs, so the change can be merged before the host is set
 up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
 
 ## Stages
 
-1. **Dev stack and refresh.** `docker-compose.dev.yml`,
-   `docker-compose.env.dev.example`, `scripts/host/dev-refresh.sh`,
-   `scripts/host/dev-scrub.sql`, prune skips cloned snapshots, remove
-   `docker-compose-dev.yml`, DEPLOYMENT.md section "Dev stack". Host: create
+1. **Dev stack and refresh.** `docker-compose.test.yml`,
+   `docker-compose.env.test.example`, `scripts/host/test-refresh.sh`,
+   `scripts/host/test-scrub.sql`, prune skips cloned snapshots, remove
+   `docker-compose-dev.yml`, DEPLOYMENT.md section on the test stack rewritten. Host: create
    the dev env file, run the refresh once, set up the weekly cron job.
    Until stage 2 is deployed, dev starts with no outbound keys and the
    scrub — enough for a first look, which is why stage 2 follows directly.
-2. **`APP_ENVIRONMENT=dev` in the app.** Guards, `outbound` jobs with the
-   test, the `llm` background workers, banner and title, `dev_copy`.
+   Built: until stage 2 the overlay fixes mail to the catcher (Mailpit is
+   in the overlay already) and empty keys for push, APNs, printing,
+   SerpApi and EODHD, so an env file copied from prod cannot open them;
+   the copy's snapshot label is in `$DEPLOY_DATA_ROOT/.test-copy`.
+2. **`APP_ENVIRONMENT=dev` in the app.** `outbound(kind)` with the three
+   modes and the `DEV_OUTBOUND_*` variables, the mail catcher in the
+   overlay, `outbound` jobs with the test, the `llm` background workers,
+   banner and title, `dev_copy`.
 3. **Upgrade check.** Entry point, schema comparison, GitHub status,
    container in the overlay. Run by hand first (`docker compose run
    upgrade_check`) against today's `latest` and against the commit before

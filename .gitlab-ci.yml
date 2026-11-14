@@ -178,7 +178,7 @@ compose:validate:
   rules:
     - changes:
         - docker-compose.yml
-        - docker-compose-dev.yml
+        - docker-compose.test.yml
         - docker-compose.env.example
         - docker-compose.env.test.example
         - .gitlab-ci.yml
@@ -188,8 +188,7 @@ compose:validate:
     # references unset env vars (WATCHTOWER_TOKEN etc.) which compose treats
     # as empty strings — that is fine for a config check.
     - docker compose -f docker-compose.yml config --quiet
-    - docker compose --env-file docker-compose.env.test.example -f docker-compose.yml config --quiet
-    - docker compose -f docker-compose-dev.yml config --quiet
+    - docker compose --env-file docker-compose.env.test.example -f docker-compose.yml -f docker-compose.volumes.yml -f docker-compose.test.yml config --quiet
 
 compose:chown-init-smoke:
   stage: test
@@ -203,7 +202,7 @@ compose:chown-init-smoke:
   rules:
     - changes:
         - docker-compose.yml
-        - docker-compose-dev.yml
+        - docker-compose.test.yml
         - docker-compose.env.example
         - docker-compose.env.test.example
         - .gitlab-ci.yml

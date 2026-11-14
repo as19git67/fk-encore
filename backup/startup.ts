@@ -64,6 +64,11 @@ const MANAGED_HOST_SCRIPTS = [
   // The demo stack's nightly reset (DEPLOYMENT.md, "Demo stack"). Shipped to
   // every stack; it refuses any env file that is not a demo's.
   "demo-reset.sh",
+  // The test stack's weekly copy of prod (DEPLOYMENT.md, "Test stack").
+  // Called from prod's backup volume, so it is shipped to every stack; it
+  // refuses any env file that is not the test stack's.
+  "test-refresh.sh",
+  "test-scrub.sql",
   "README.md",
 ] as const;
 

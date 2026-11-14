@@ -102,8 +102,8 @@ RUN set -eux; \
 COPY --chown=568:568 frontend/dist/ /srv/frontend/dist/
 
 # Host-side backup hook: the files the TrueNAS host needs (installer,
-# daily driver script, log formatter, README, and the demo stack's nightly
-# reset) are shipped inside the image and copied onto
+# daily driver script, log formatter, README, the demo stack's nightly
+# reset and the test stack's refresh from prod) are shipped inside the image and copied onto
 # the backup volume on every container start by backup/startup.ts. That way
 # the host always has the version that matches the running image, without
 # the admin having to clone the fk-encore repo on the host.
@@ -111,6 +111,8 @@ COPY --chown=568:568 scripts/host/install-backup-hook.sh \
                      scripts/host/fk-encore-backup.sh \
                      scripts/host/format-backup-log.sh \
                      scripts/host/demo-reset.sh \
+                     scripts/host/test-refresh.sh \
+                     scripts/host/test-scrub.sql \
                      scripts/host/README.md \
                      /opt/fk-encore/host-scripts/
 RUN chmod 0755 /opt/fk-encore/host-scripts/*.sh
