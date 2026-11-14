@@ -30,10 +30,12 @@ directory onto the backup volume at:
     ├── fk-encore-backup.sh
     ├── format-backup-log.sh
     ├── demo-reset.sh
+    ├── test-refresh.sh
+    ├── test-scrub.sql
     └── README.md
 ```
 
-(The container only ever overwrites those five files. Anything else in
+(The container only ever overwrites those seven files. Anything else in
 that directory — most importantly the `backup-token` written by the
 installer — is preserved across image upgrades.)
 
@@ -52,6 +54,8 @@ upgrade-safe too.
 | `install-backup-hook.sh` | One-time setup helper. Generates the token file (if absent) and prints the cron-job fields to fill in the TrueNAS UI. |
 | `format-backup-log.sh`   | Optional log formatter. Reads `fk-encore-backup.sh` output (stdin or file) and emits a human-readable protocol followed by the raw log. Intended for cron mail. |
 | `demo-reset.sh`          | Nightly reset of the demo stack only (DEPLOYMENT.md, "Demo stack"). Refuses any env file that is not a demo's, so it is harmless on prod and test. |
+| `test-refresh.sh`        | Weekly copy of prod for the test stack (DEPLOYMENT.md, "Test stack"): replaces the test stack's ZFS clone with the newest nightly snapshot and scrubs it. Call prod's copy; refuses any env file that is not the test stack's. |
+| `test-scrub.sql`         | Run by `test-refresh.sh` on the copy: removes push and device tokens, sessions, bank logins and public links, switches off the outbound jobs. |
 
 ## Install
 

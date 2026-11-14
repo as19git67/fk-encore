@@ -296,7 +296,15 @@ prune_old_snapshots() {
     return 1
   fi
 
-  local name creation label pruned=0 failed=0
+  # Snapshots that a clone still stands on (the test stack's copy of prod,
+  # scripts/host/test-refresh.sh): `zfs destroy -r` would fail on them, so
+  # they are left alone and named. The weekly refresh moves the clone to a
+  # newer snapshot long before retention runs out.
+  local pinned
+  pinned="$(zfs list -H -r -t snapshot -o name,clones "$ZFS_DATASET" 2>/dev/null \
+    | awk -F'\t' '$2 != "-" && $2 != "" { split($1, a, "@"); print a[2] }' | sort -u || true)"
+
+  local name creation label pruned=0 failed=0 kept=0
   while IFS=$'\t' read -r name creation; do
     [[ -z "$name" ]] && continue
     label="${name#*@}"
@@ -309,6 +317,11 @@ prune_old_snapshots() {
       [[ "$label" == "$taken" ]] && { is_own=1; break; }
     done
     (( is_own == 1 )) && continue
+    if (( creation < cutoff_epoch )) && grep -qxF -- "$label" <<< "$pinned"; then
+      log "keeping $name: a clone stands on it (the test stack's copy?) — run test-refresh.sh to move it to a newer snapshot"
+      kept=$(( kept + 1 ))
+      continue
+    fi
     if (( creation < cutoff_epoch )); then
       log "destroying $name (created $(date -u -d "@$creation" +%FT%TZ))"
       if zfs destroy -r "$name"; then
@@ -320,7 +333,7 @@ prune_old_snapshots() {
     fi
   done <<< "$listing"
 
-  log "$tier prune summary: destroyed=$pruned failed=$failed"
+  log "$tier prune summary: destroyed=$pruned failed=$failed kept_for_clones=$kept"
   (( failed == 0 ))
 }
 

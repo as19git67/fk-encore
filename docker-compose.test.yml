@@ -1,0 +1,79 @@
+# fk-encore — the test stack on a copy of production
+# (documentation/plans/dev-system.md, "The dev stack").
+#
+# Layered on top of docker-compose.yml and docker-compose.volumes.yml by
+# COMPOSE_FILE in the test stack's env file (template:
+# docker-compose.env.test.example):
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml:docker-compose.test.yml
+#
+# The data under DEPLOY_DATA_ROOT is a ZFS clone of prod's newest nightly
+# snapshot, replaced weekly by scripts/host/test-refresh.sh. What differs
+# from prod:
+#
+#   1. No llm-service of its own. A second Gemma 4 does not fit next to the
+#      first on a 16 GB card, so the app joins prod's network and talks to
+#      prod's llm-service, like the demo. The aesthetic service (which lends
+#      prod's GPU at night) does not start either.
+#   2. Nothing leaves the host with prod's keys. Every mail goes to the mail
+#      catcher below (web page on DEPLOY_HOST_PORT_MAIL), whatever the
+#      recipient; push, APNs, printing, SerpApi and EODHD get no key. These
+#      are fixed here rather than in the env file, so an env file copied
+#      from prod cannot switch them back on. Stage 2 of the plan replaces
+#      this with a mode per path (DEV_OUTBOUND_<KIND>).
+#
+# `!override` needs Docker Compose 2.24 or later.
+
+services:
+  app:
+    depends_on: !override
+      chown-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      insightface:
+        condition: service_healthy
+      embedding_service:
+        condition: service_healthy
+    environment:
+      APP_ENVIRONMENT: dev
+      LLM_SERVICE_URL: ${DEPLOY_LLM_SERVICE_URL:-http://fk-encore-llm:8000}
+      SMTP_HOST: mail_catcher
+      SMTP_PORT: "1025"
+      SMTP_USER: test
+      SMTP_PASS: test
+      VAPID_PUBLIC_KEY: ""
+      VAPID_PRIVATE_KEY: ""
+      APNS_KEY_ID: ""
+      APNS_PRIVATE_KEY: ""
+      CUPS_SERVER_URL: ""
+      SERPAPI_API_KEY: ""
+      EODHD_API_TOKEN: ""
+    networks:
+      - default
+      - prod
+
+  llm_service:
+    profiles: ["own-llm"]
+
+  aesthetic_service:
+    profiles: ["own-llm"]
+
+  # Catches every mail the test app sends; read them on
+  # http://<host>:${DEPLOY_HOST_PORT_MAIL}. Kept in memory, gone on restart.
+  mail_catcher:
+    image: axllent/mailpit:v1.21.8
+    container_name: fk-encore-mail-test
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      MP_MAX_MESSAGES: "2000"
+    ports:
+      - "${DEPLOY_BIND_MAIL:-0.0.0.0}:${DEPLOY_HOST_PORT_MAIL:-18025}:8025"
+
+networks:
+  prod:
+    external: true
+    # The default network of the prod stack: <COMPOSE_PROJECT_NAME>_default.
+    name: ${TEST_PROD_NETWORK:-fk-encore_default}

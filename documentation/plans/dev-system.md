@@ -150,9 +150,11 @@ What the overlay changes:
   added to its container list.
 
 `.env.test` sets the identity of the old test stack (suffix `-test`, ports,
-scope), `DEPLOY_DATA_ROOT` to the mount point of the dev dataset, and the
+scope), `DEPLOY_DATA_ROOT` to the data directory inside the clone, and the
 database names of prod (`encore`, `embeddings`), because the cloned
-cluster carries prod's names. Its own `RP_ID`/`RP_ORIGIN`: passkeys from
+cluster carries prod's names. `INTERNAL_SERVICE_SECRET` is prod's, since
+the app calls prod's llm-service; it is the one value test shares with
+prod. Its own `RP_ID`/`RP_ORIGIN`: passkeys from
 prod do not work in dev, login is by password. Extra photo libraries
 outside the prod dataset are mounted read-only in dev's
 `docker-compose.volumes.yml`.
@@ -160,25 +162,38 @@ outside the prod dataset are mounted read-only in dev's
 ### Refresh: `scripts/host/test-refresh.sh`
 
 Shipped in the image and copied to `backup/host-scripts/` like the backup
-hook, so the host needs no checkout. Called with the path to `.env.test`
-from a weekly TrueNAS cron job (Sunday night, after the backup) or by
+hook, so the host needs no checkout. Called from prod's copy of that
+folder (the refresh destroys test's own) with the path to the test env
+file, from a weekly TrueNAS cron job (Sunday night, after the backup) or by
 hand. It reads `PROD_DATASET` and `TEST_DATASET` from the env file and
-refuses to run when `TEST_DATASET` equals `PROD_DATASET`, is not a sibling
-of it, does not contain "test", or when the env file lacks
-`APP_ENVIRONMENT=dev`. `--dry-run` prints every step.
+refuses to run when `TEST_DATASET` equals `PROD_DATASET`, lies inside it,
+does not contain "test", when `DEPLOY_DATA_ROOT` is not inside the clone,
+or when the env file lacks `APP_ENVIRONMENT=dev`. `--dry-run` prints every
+step, `--snapshot <label>` picks another snapshot.
+
+`TEST_DATASET` is a child dataset of its own under the test stack's
+directory (e.g. `…/f4mil_test/prod-copy`). Prod keeps its compose files
+and `.env` at the top of its dataset, so a clone in place of the test
+stack's directory would replace test's env file with prod's; one level
+down, the clone holds only data and test's compose files stay where they
+are.
 
 1. `docker compose --env-file .env.test down`.
 2. Find the newest `daily-*` snapshot of `PROD_DATASET`.
-3. `zfs destroy -r TEST_DATASET` (only if its `origin` is a snapshot of
-   `PROD_DATASET` — a dataset that is not a clone is never destroyed).
+3. `zfs destroy -r TEST_DATASET` (only if every dataset in it has a
+   snapshot of `PROD_DATASET` as `origin` — a dataset that is not a clone
+   is never destroyed).
 4. `zfs clone` the snapshot to `TEST_DATASET`, and each child dataset to
    the matching child (a clone is not recursive).
-5. In the clone's backup directory: remove `restore-*.dump`, the prod
-   dumps and `host-scripts/backup-token`.
-6. Start only `postgres`, set its password to the one in `.env.test`
-   (`ALTER USER` over the local socket, which needs none), and run the
+5. Remove prod's `.env*` files at the top of the clone, and in the
+   clone's backup directory every `*.dump` (including a `restore-*.dump`)
+   and `host-scripts/backup-token`.
+6. Start only `postgres` and `geo-db`, set their passwords to the ones in
+   the test env file (`ALTER USER` over the local socket, which needs
+   none), check that the database `DEPLOY_PG_DATABASE` exists, and run the
    scrub (`scripts/host/test-scrub.sql`).
-7. Write the snapshot label into a `dev_copy` row, which the banner shows.
+7. Write the snapshot label into `$DEPLOY_DATA_ROOT/.test-copy` (stage 2
+   moves it into a `dev_copy` row, which the banner shows).
 8. `docker compose --env-file .env.test up -d`. The app migrates the copy
    to its own image on boot.
 
@@ -306,6 +321,10 @@ up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
    the dev env file, run the refresh once, set up the weekly cron job.
    Until stage 2 is deployed, dev starts with no outbound keys and the
    scrub — enough for a first look, which is why stage 2 follows directly.
+   Built: until stage 2 the overlay fixes mail to the catcher (Mailpit is
+   in the overlay already) and empty keys for push, APNs, printing,
+   SerpApi and EODHD, so an env file copied from prod cannot open them;
+   the copy's snapshot label is in `$DEPLOY_DATA_ROOT/.test-copy`.
 2. **`APP_ENVIRONMENT=dev` in the app.** `outbound(kind)` with the three
    modes and the `DEV_OUTBOUND_*` variables, the mail catcher in the
    overlay, `outbound` jobs with the test, the `llm` background workers,

@@ -73,21 +73,12 @@ side-by-side. The wiring that differs per deployment — container
 name suffix, image tag, host ports, postgres database name, volume
 bind paths, OSM scope, watchtower scope — all flows from `DEPLOY_*`
 env variables with sensible production defaults baked into the
-compose file. To run a `:test`-tagged stack alongside production
-on the same host:
+compose file. The second stack on the host is the test stack, which runs
+the `:test` image of every PR push on a copy of production — see
+[Test stack](#test-stack) below.
 
-```bash
-cp docker-compose.env.test.example .env.test
-# tweak DEPLOY_DATA_ROOT and any other paths/ports if you need to
-docker compose --env-file .env.test up -d
-```
-
-The test stack listens on port 18080, image tag `:test`, container
-names with a `-test` suffix, and separate Postgres databases
-(`encore_test` / `embeddings_test`). The `geo` + `geo-db` containers
-are scoped via `DEPLOY_NAME_SUFFIX`, so a `:test` stack on the same
-host gets its own PostGIS volume and never sees the production
-regions.
+The `geo` + `geo-db` containers are scoped via `DEPLOY_NAME_SUFFIX`, so
+every stack has its own PostGIS volume.
 
 The full list of `DEPLOY_*` overrides:
 
@@ -111,6 +102,65 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_INSIGHTFACE_START_PERIOD` | `180s` | Healthcheck grace for insightface — covers cold buffalo_l load. |
 | `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
 | `DEPLOY_LLM_START_PERIOD` | `600s` | Healthcheck grace for llm_service — covers Llama GGUF + embedder load (and download on a cold volume). |
+
+### Test stack
+
+The test stack runs the `:test` image that every PR push builds, on a copy
+of production (`documentation/plans/dev-system.md`): its data directory is
+a ZFS clone of prod's newest nightly snapshot, so a PR meets real data and
+real history before it is merged. The clone costs no space until either
+side changes, and nothing test does reaches prod.
+
+```bash
+cp docker-compose.env.test.example .env
+# set PROD_DATASET, TEST_DATASET, DEPLOY_DATA_ROOT, the database names,
+# own POSTGRES_PASSWORD / GEO_DB_PASSWORD / FINANCE_CREDENTIALS_KEY;
+# INTERNAL_SERVICE_SECRET must be prod's (it talks to prod's llm-service)
+bash /path/to/prod/data/backup/host-scripts/test-refresh.sh --dry-run "$PWD/.env"
+bash /path/to/prod/data/backup/host-scripts/test-refresh.sh "$PWD/.env"
+```
+
+- **Layout.** `TEST_DATASET` is a child dataset of its own (e.g.
+  `<pool>/…/f4mil_test/prod-copy`) that holds only the clone; the compose
+  files and the env file sit one level up and survive every refresh.
+  `DEPLOY_DATA_ROOT` is the mountpoint of `TEST_DATASET` plus the sub-path
+  prod's data root has inside `PROD_DATASET`. The database names are
+  prod's (`encore`, `embeddings`), because the clone carries prod's cluster.
+  Extra photo libraries outside the prod dataset are mounted read-only in
+  test's `docker-compose.volumes.yml`.
+- **Refresh.** `scripts/host/test-refresh.sh` stops the stack, destroys the
+  previous clone (only when everything in `TEST_DATASET` is a clone of
+  `PROD_DATASET`), clones the newest `daily-*` snapshot (each child dataset
+  too), removes prod's env files, dumps and backup token from the copy,
+  sets the passwords of both Postgres clusters to the test env file's,
+  runs `test-scrub.sql` and starts the stack. The app migrates the copy to
+  its image at boot. Run it weekly from a TrueNAS cron job (Sunday, after
+  the nightly backup) and by hand for a newer copy; `--snapshot <label>`
+  picks another snapshot, `--dry-run` shows the steps. It refuses an env
+  file without `APP_ENVIRONMENT=dev`, a suffix without "test", a
+  `TEST_DATASET` without "test" or inside `PROD_DATASET`, or a data root
+  outside the clone. The image ships it (with `test-scrub.sql`) into
+  `$DEPLOY_DATA_ROOT/backup/host-scripts/` of every stack; call prod's
+  copy, since the refresh destroys test's own.
+- **Scrub.** `test-scrub.sql` deletes push subscriptions, device tokens,
+  sessions and public links, clears the bank logins, pauses the hotel and
+  flight watches and the scheduled exports, and switches off the jobs that
+  act outward on their own (Admin › Jobs shows them, one can be switched on
+  by hand for a test).
+- **Nothing goes out with prod's keys.** `docker-compose.test.yml` sends
+  every mail to a mail catcher (`DEPLOY_HOST_PORT_MAIL`, default 18025),
+  gives push, APNs, printing, SerpApi and EODHD no key, and points the app
+  at prod's llm-service (`TEST_PROD_NETWORK`, `DEPLOY_LLM_SERVICE_URL`, as
+  for the demo; prod has to be up first). Its own aesthetic service does
+  not start. `FINANCE_CREDENTIALS_KEY` is test's own, so copied bank logins
+  could not be decrypted even if the scrub missed one.
+- **Reachable only on the LAN or VPN**, never through the public reverse
+  proxy: the copy holds everyone's data. Passkeys of prod do not work on
+  test (other `RP_ID`); sign in with the password.
+- **Snapshots.** The clone pins its snapshot. The weekly refresh keeps it
+  younger than the 14 days the backup keeps a daily snapshot; should it
+  not run, the backup's prune keeps the pinned snapshot and says so in the
+  log instead of failing on it.
 
 ### Demo stack
 
