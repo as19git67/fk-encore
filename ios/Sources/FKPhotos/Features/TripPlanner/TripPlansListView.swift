@@ -65,65 +65,58 @@ struct TripPlansListView: View {
     @State private var exchangeMessage: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let pendingShare {
-                shareBanner(pendingShare)
-                Divider()
-            }
-            content
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    isCreating = true
-                } label: {
-                    Label("Neue Reise", systemImage: "plus")
-                }
-            }
-            // A trip from a file: a backup, or a plan somebody sent.
-            ToolbarItem(placement: .secondaryAction) {
-                Button {
-                    importsEverything = false
-                    isImporting = true
-                } label: {
-                    Label("Reise aus Datei importieren …", systemImage: "square.and.arrow.down")
-                }
-            }
-            // Every trip and the ideas in one file — the backup.
-            ToolbarItem(placement: .secondaryAction) {
-                Button {
-                    Task { await exportEverything() }
-                } label: {
-                    Label("Alle Reisen und Ideen exportieren …", systemImage: "archivebox")
-                }
-            }
-            ToolbarItem(placement: .secondaryAction) {
-                Button {
-                    importsEverything = true
-                    isImporting = true
-                } label: {
-                    Label("Alle Reisen und Ideen importieren …", systemImage: "tray.and.arrow.down")
-                }
-            }
-            // Next to the trips rather than inside one: the collection
-            // is the half that exists *without* a trip (§20), and
-            // hiding it inside a plan would make it the trip's list.
-            ToolbarItem(placement: .topBarLeading) {
-                NavigationLink {
-                    TripIdeasView()
-                } label: {
-                    Label("Ideen", systemImage: "lightbulb")
-                }
+        exchangeFlow(listBody.toolbar { toolbarItems })
+    }
+
+    @ToolbarContentBuilder private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                isCreating = true
+            } label: {
+                Label("Neue Reise", systemImage: "plus")
             }
         }
-        .sheet(isPresented: $isCreating) {
-            NavigationStack {
-                TripNewPlanView { planId in
-                    TripPlannerViewModel.shared(for: planId).wantsItinerary = true
-                    openPlanId = planId
-                }
+        // A trip from a file: a backup, or a plan somebody sent.
+        ToolbarItem(placement: .secondaryAction) {
+            Button {
+                importsEverything = false
+                isImporting = true
+            } label: {
+                Label("Reise aus Datei importieren …", systemImage: "square.and.arrow.down")
             }
         }
+        // Every trip and the ideas in one file — the backup.
+        ToolbarItem(placement: .secondaryAction) {
+            Button {
+                Task { await exportEverything() }
+            } label: {
+                Label("Alle Reisen und Ideen exportieren …", systemImage: "archivebox")
+            }
+        }
+        ToolbarItem(placement: .secondaryAction) {
+            Button {
+                importsEverything = true
+                isImporting = true
+            } label: {
+                Label("Alle Reisen und Ideen importieren …", systemImage: "tray.and.arrow.down")
+            }
+        }
+        // Next to the trips rather than inside one: the collection
+        // is the half that exists *without* a trip (§20), and
+        // hiding it inside a plan would make it the trip's list.
+        ToolbarItem(placement: .topBarLeading) {
+            NavigationLink {
+                TripIdeasView()
+            } label: {
+                Label("Ideen", systemImage: "lightbulb")
+            }
+        }
+    }
+
+    /// Files out and in: kept apart from the rest of the chain, which
+    /// is already as long as the type checker will follow.
+    private func exchangeFlow(_ view: some View) -> some View {
+        view
         .fileExporter(isPresented: Binding(
             get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
                       document: exportFile, contentType: .json,
@@ -131,13 +124,41 @@ struct TripPlansListView: View {
             if case .failure(let error) = result { actionError = error.localizedDescription }
             exportFile = nil
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
-            switch result {
-            case .success(let url):
-                Task {
-                    if importsEverything { await importEverything(from: url) } else { await importTrip(from: url) }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json], onCompletion: picked)
+        .alert("Import", isPresented: Binding(
+            get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
+            Button("OK", role: .cancel) { exchangeMessage = nil }
+        } message: {
+            Text(exchangeMessage ?? "")
+        }
+    }
+
+    private func picked(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            let everything = importsEverything
+            Task {
+                if everything { await importEverything(from: url) } else { await importTrip(from: url) }
+            }
+        case .failure(let error):
+            actionError = error.localizedDescription
+        }
+    }
+
+    private var listBody: some View {
+        VStack(spacing: 0) {
+            if let pendingShare {
+                shareBanner(pendingShare)
+                Divider()
+            }
+            content
+        }
+        .sheet(isPresented: $isCreating) {
+            NavigationStack {
+                TripNewPlanView { planId in
+                    TripPlannerViewModel.shared(for: planId).wantsItinerary = true
+                    openPlanId = planId
                 }
-            case .failure(let error): actionError = error.localizedDescription
             }
         }
         .sheet(isPresented: $showingPicker) {
@@ -175,12 +196,6 @@ struct TripPlansListView: View {
             Button("OK", role: .cancel) { actionError = nil }
         } message: {
             Text(actionError ?? "")
-        }
-        .alert("Import", isPresented: Binding(
-            get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
-            Button("OK", role: .cancel) { exchangeMessage = nil }
-        } message: {
-            Text(exchangeMessage ?? "")
         }
         .alert("Reise verlassen?", isPresented: Binding(
             get: { leaving != nil }, set: { if !$0 { leaving = nil } }),

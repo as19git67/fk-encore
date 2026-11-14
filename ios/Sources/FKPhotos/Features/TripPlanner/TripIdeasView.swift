@@ -49,6 +49,36 @@ struct TripIdeasView: View {
     }
 
     var body: some View {
+        exchangeFlow(ideasBody)
+    }
+
+    /// Files out and in, apart from the long chain below.
+    private func exchangeFlow(_ view: some View) -> some View {
+        view
+        .fileExporter(isPresented: Binding(
+            get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
+                      document: exportFile, contentType: .json,
+                      defaultFilename: "Ideen.ideen.json") { result in
+            if case .failure(let error) = result { exchangeMessage = error.localizedDescription }
+            exportFile = nil
+        }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json], onCompletion: picked)
+        .alert("Ideen", isPresented: Binding(
+            get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
+            Button("OK", role: .cancel) { exchangeMessage = nil }
+        } message: {
+            Text(exchangeMessage ?? "")
+        }
+    }
+
+    private func picked(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url): Task { await importIdeas(from: url) }
+        case .failure(let error): exchangeMessage = error.localizedDescription
+        }
+    }
+
+    private var ideasBody: some View {
         List {
             if let place = model.sharedPlace {
                 sharedRow(place)
@@ -266,25 +296,6 @@ struct TripIdeasView: View {
                 }
                 .disabled(model.isAdding)
             }
-        }
-        .fileExporter(isPresented: Binding(
-            get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
-                      document: exportFile, contentType: .json,
-                      defaultFilename: "Ideen.ideen.json") { result in
-            if case .failure(let error) = result { exchangeMessage = error.localizedDescription }
-            exportFile = nil
-        }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
-            switch result {
-            case .success(let url): Task { await importIdeas(from: url) }
-            case .failure(let error): exchangeMessage = error.localizedDescription
-            }
-        }
-        .alert("Ideen", isPresented: Binding(
-            get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
-            Button("OK", role: .cancel) { exchangeMessage = nil }
-        } message: {
-            Text(exchangeMessage ?? "")
         }
         .task {
             await model.load()
