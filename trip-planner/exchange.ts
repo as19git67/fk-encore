@@ -14,6 +14,10 @@
  *     the collection already has (same OSM reference) is left as it
  *     is and counted as skipped, so importing the same file twice adds
  *     nothing the second time.
+ *   - `GET  /trip-planner/export` / `POST /trip-planner/import` — all of
+ *     it at once: every trip the caller is on and their own idea
+ *     collection, in one file and one transaction. Each trip comes back
+ *     as a new trip, the ideas as above.
  *
  * Anyone on a trip may export it; it is theirs to take along. The file
  * holds no row ids and no account ids, so an import cannot point at
@@ -41,7 +45,7 @@ import {
   type SpotExtentColumn,
 } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
-import { isOnTrip } from "./plan-access";
+import { isOnTrip, visibleToUser } from "./plan-access";
 import { requireAccess } from "./ideas";
 import { priorityOf } from "./priority";
 import { placedByOf } from "./placed-by";
@@ -51,7 +55,9 @@ import {
   EXCHANGE_VERSION,
   ExchangeFileError,
   IDEAS_FORMAT,
+  PLANNER_FORMAT,
   readIdeasFile,
+  readPlannerFile,
   readTripFile,
   TRIP_FORMAT,
   type ExchangeBlock,
@@ -61,6 +67,7 @@ import {
   type ExchangeLeg,
   type ExchangeTrip,
   type IdeasFile,
+  type PlannerFile,
   type TripFile,
 } from "./exchange-format";
 
@@ -292,8 +299,11 @@ export async function exportTrip(planId: number, now: Date = new Date()): Promis
 
 /** Write a checked trip file as a new plan owned by `ownerId`. */
 export async function importTrip(file: TripFile, ownerId: number, title?: string): Promise<number> {
-  const trip = file.trip;
-  return await db.transaction(async (tx) => {
+  return await db.transaction((tx) => writeTrip(tx, file.trip, ownerId, title));
+}
+
+async function writeTrip(tx: Tx, trip: ExchangeTrip, ownerId: number, title?: string): Promise<number> {
+  {
     const [plan] = await tx.insert(tripPlans).values({
       owner_id: ownerId,
       title: title?.trim() || trip.title,
@@ -338,7 +348,7 @@ export async function importTrip(file: TripFile, ownerId: number, title?: string
       })));
     }
     return plan.id;
-  });
+  }
 }
 
 /** The first of each key; a unique index would refuse the rest. */
@@ -545,9 +555,18 @@ export interface IdeasImportResult {
 }
 
 export async function importIdeas(file: IdeasFile, ownerId: number, userId: number): Promise<IdeasImportResult> {
-  const fresh = uniqueBy(file.ideas, (i) => i.osmRef);
-  if (fresh.length === 0) return { added: 0, skipped: file.ideas.length };
-  const existing = new Set((await db.select({ ref: ideaPool.osm_ref }).from(ideaPool)
+  return await writeIdeas(db, file.ideas, ownerId, userId);
+}
+
+async function writeIdeas(
+  tx: Db | Tx,
+  ideas: readonly ExchangeIdea[],
+  ownerId: number,
+  userId: number,
+): Promise<IdeasImportResult> {
+  const fresh = uniqueBy(ideas, (i) => i.osmRef);
+  if (fresh.length === 0) return { added: 0, skipped: ideas.length };
+  const existing = new Set((await tx.select({ ref: ideaPool.osm_ref }).from(ideaPool)
     .where(and(eq(ideaPool.owner_id, ownerId), inArray(ideaPool.osm_ref, fresh.map((i) => i.osmRef)))))
     .map((r) => r.ref));
   const toAdd = fresh.filter((i) => !existing.has(i.osmRef));
@@ -555,7 +574,7 @@ export async function importIdeas(file: IdeasFile, ownerId: number, userId: numb
     // In chunks: ten thousand rows of eighteen columns is past what one
     // statement may bind.
     for (let i = 0; i < toAdd.length; i += 500) {
-      await db.insert(ideaPool).values(toAdd.slice(i, i + 500).map((idea) => ({
+      await tx.insert(ideaPool).values(toAdd.slice(i, i + 500).map((idea) => ({
         owner_id: ownerId,
         created_by: userId,
         osm_ref: idea.osmRef,
@@ -578,7 +597,46 @@ export async function importIdeas(file: IdeasFile, ownerId: number, userId: numb
       }))).onConflictDoNothing();
     }
   }
-  return { added: toAdd.length, skipped: file.ideas.length - toAdd.length };
+  return { added: toAdd.length, skipped: ideas.length - toAdd.length };
+}
+
+// ---------------------------------------------------------------------------
+// Everything at once
+// ---------------------------------------------------------------------------
+
+/** Every trip the person is on, oldest first, and their own idea collection. */
+export async function exportPlanner(userId: number, now: Date = new Date()): Promise<PlannerFile> {
+  const plans = await db.select({ id: tripPlans.id }).from(tripPlans)
+    .where(visibleToUser(userId)).orderBy(asc(tripPlans.created_at), asc(tripPlans.id));
+  const trips: ExchangeTrip[] = [];
+  for (const { id } of plans) {
+    const file = await exportTrip(id, now);
+    if (file) trips.push(file.trip);
+  }
+  const { ideas } = await exportIdeas(userId, now);
+  return { format: PLANNER_FORMAT, version: EXCHANGE_VERSION, exportedAt: now.toISOString(), trips, ideas };
+}
+
+export interface PlannerImportResult {
+  /** The new trips, in the order of the file. */
+  trips: { planId: number; title: string | null }[];
+  ideas: IdeasImportResult;
+}
+
+/**
+ * All of it in one transaction: a file that fails halfway leaves
+ * nothing behind. Every trip becomes a new one; ideas the collection
+ * already has are skipped.
+ */
+export async function importPlanner(file: PlannerFile, userId: number): Promise<PlannerImportResult> {
+  return await db.transaction(async (tx) => {
+    const trips: PlannerImportResult["trips"] = [];
+    for (const trip of file.trips) {
+      trips.push({ planId: await writeTrip(tx, trip, userId), title: trip.title });
+    }
+    const ideas = await writeIdeas(tx, file.ideas, userId, userId);
+    return { trips, ideas };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -666,5 +724,32 @@ export const importIdeaCollection = api(
       refuse(error);
     }
     return await importIdeas(file, ownerId, userId);
+  },
+);
+
+export const exportTripPlanner = api(
+  { expose: true, method: "GET", path: "/trip-planner/export", auth: true },
+  async (): Promise<PlannerFile> => {
+    const userId = requireUser();
+    return await exportPlanner(userId);
+  },
+);
+
+export interface ImportPlannerRequest {
+  /** The exported file, exactly as written by `GET /trip-planner/export`. */
+  data: Record<string, unknown>;
+}
+
+export const importTripPlanner = api(
+  { expose: true, method: "POST", path: "/trip-planner/import", auth: true },
+  async (req: ImportPlannerRequest): Promise<PlannerImportResult> => {
+    const userId = requireUser();
+    let file: PlannerFile;
+    try {
+      file = readPlannerFile(req.data);
+    } catch (error) {
+      refuse(error);
+    }
+    return await importPlanner(file, userId);
   },
 );

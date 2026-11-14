@@ -27,11 +27,14 @@ import type { TransportMode } from "./travel";
 
 export const TRIP_FORMAT = "f4mil.trip";
 export const IDEAS_FORMAT = "f4mil.ideas";
+/** Everything of the trip planner in one file: every trip and the ideas. */
+export const PLANNER_FORMAT = "f4mil.tripplanner";
 /** The newest version this server writes and the newest it reads. */
 export const EXCHANGE_VERSION = 1;
 
 /** Generous bounds: a file past them is not a trip, it is a mistake. */
 export const EXCHANGE_LIMITS = {
+  trips: 500,
   legs: 100,
   daysPerLeg: 200,
   blocksPerDay: 30,
@@ -254,6 +257,15 @@ export interface IdeasFile {
   ideas: ExchangeIdea[];
 }
 
+/** Every trip the person is on and their own idea collection. */
+export interface PlannerFile {
+  format: "f4mil.tripplanner";
+  version: number;
+  exportedAt: string;
+  trips: ExchangeTrip[];
+  ideas: ExchangeIdea[];
+}
+
 // ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------
@@ -401,10 +413,16 @@ const GETS_ABOUT = ["foot", "wheelchair", "pram"] as const;
 /** Format and version, before anything else is looked at. */
 function header(r: Reader, raw: Record<string, unknown>, format: string, what: string): void {
   if (raw.format !== format) {
-    const other = raw.format === TRIP_FORMAT ? "eine Reise" : raw.format === IDEAS_FORMAT ? "Ideen" : null;
+    const other = raw.format === TRIP_FORMAT
+      ? "eine Reise"
+      : raw.format === IDEAS_FORMAT
+        ? "Ideen"
+        : raw.format === PLANNER_FORMAT
+          ? "alle Reisen und Ideen"
+          : null;
     throw new ExchangeFileError([
       other
-        ? `Die Datei enthält ${other}, hier werden ${what} eingelesen.`
+        ? `Die Datei enthält ${other}, hier wird eine ${what}-Datei erwartet.`
         : `Keine ${what}-Datei: „format“ muss „${format}“ sein.`,
     ]);
   }
@@ -721,15 +739,10 @@ export function readTripFile(input: unknown): TripFile {
   };
 }
 
-/** Check an unknown JSON value against the ideas file; throws `ExchangeFileError`. */
-export function readIdeasFile(input: unknown): IdeasFile {
-  const r = new Reader();
-  const raw = r.object(input, "Datei");
-  if (r.problems.length > 0) throw new ExchangeFileError(r.problems);
-  header(r, raw, IDEAS_FORMAT, "Ideen");
-  const ideas = r.array(raw.ideas, "ideen", EXCHANGE_LIMITS.ideas).map((v, i) => {
-    const path = `ideen[${i}]`;
-    const o = r.object(v, path);
+function readIdeas(r: Reader, v: unknown, base: string): ExchangeIdea[] {
+  return r.array(v, base, EXCHANGE_LIMITS.ideas).map((item, i) => {
+    const path = `${base}[${i}]`;
+    const o = r.object(item, path);
     const idea: ExchangeIdea = {
       ...readSpot(r, o, path),
       title: r.optString(o.title, `${path}.title`),
@@ -743,11 +756,39 @@ export function readIdeasFile(input: unknown): IdeasFile {
     }
     return idea;
   });
+}
+
+/** Check an unknown JSON value against the ideas file; throws `ExchangeFileError`. */
+export function readIdeasFile(input: unknown): IdeasFile {
+  const r = new Reader();
+  const raw = r.object(input, "Datei");
+  if (r.problems.length > 0) throw new ExchangeFileError(r.problems);
+  header(r, raw, IDEAS_FORMAT, "Ideen");
+  const ideas = readIdeas(r, raw.ideas, "ideen");
   if (r.problems.length > 0) throw new ExchangeFileError(r.problems);
   return {
     format: IDEAS_FORMAT,
     version: raw.version as number,
     exportedAt: typeof raw.exportedAt === "string" ? raw.exportedAt : new Date().toISOString(),
+    ideas,
+  };
+}
+
+/** Check an unknown JSON value against the whole-planner file; throws `ExchangeFileError`. */
+export function readPlannerFile(input: unknown): PlannerFile {
+  const r = new Reader();
+  const raw = r.object(input, "Datei");
+  if (r.problems.length > 0) throw new ExchangeFileError(r.problems);
+  header(r, raw, PLANNER_FORMAT, "Reiseplaner");
+  const trips = r.array(raw.trips, "reisen", EXCHANGE_LIMITS.trips)
+    .map((t, i) => readTrip(r, t, `reisen[${i}]`));
+  const ideas = readIdeas(r, raw.ideas, "ideen");
+  if (r.problems.length > 0) throw new ExchangeFileError(r.problems);
+  return {
+    format: PLANNER_FORMAT,
+    version: raw.version as number,
+    exportedAt: typeof raw.exportedAt === "string" ? raw.exportedAt : new Date().toISOString(),
+    trips,
     ideas,
   };
 }

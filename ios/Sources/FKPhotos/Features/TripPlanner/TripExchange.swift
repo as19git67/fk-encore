@@ -18,6 +18,26 @@ enum TripExchange {
         let skipped: Int
     }
 
+    struct ImportedPlanner: Decodable, Sendable {
+        let trips: [ImportedTrip]
+        let ideas: ImportedIdeas
+    }
+
+    /// Every trip you are on and your own ideas, in one file.
+    static func exportPlanner() async throws -> Data {
+        try await APIClient.shared.downloadData("/trip-planner/export")
+    }
+
+    static func importPlanner(_ file: Data) async throws -> ImportedPlanner {
+        try await APIClient.shared.postJSONData("/trip-planner/import", json: wrapped(file))
+    }
+
+    /// "2 Reisen angelegt. 3 Ideen übernommen, 1 war schon vorhanden."
+    static func plannerOutcome(_ result: ImportedPlanner) -> String {
+        let trips = result.trips.count == 1 ? "1 Reise angelegt." : "\(result.trips.count) Reisen angelegt."
+        return "\(trips) \(ideasOutcome(result.ideas))"
+    }
+
     static func exportTrip(planId: Int) async throws -> Data {
         try await APIClient.shared.downloadData("/trip-planner/plans/\(planId)/export")
     }

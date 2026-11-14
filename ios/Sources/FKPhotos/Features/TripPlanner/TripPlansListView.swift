@@ -57,6 +57,12 @@ struct TripPlansListView: View {
     @State private var exportFile: TripExchangeDocument?
     @State private var exportName = "Reise.reise.json"
     @State private var isImporting = false
+    /// What the one file picker reads: a single trip, or everything.
+    /// One picker for both, because two `.fileImporter`s on one view
+    /// leave all but the last one dead.
+    @State private var importsEverything = false
+    /// What an import of everything did.
+    @State private var exchangeMessage: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,9 +83,26 @@ struct TripPlansListView: View {
             // A trip from a file: a backup, or a plan somebody sent.
             ToolbarItem(placement: .secondaryAction) {
                 Button {
+                    importsEverything = false
                     isImporting = true
                 } label: {
                     Label("Reise aus Datei importieren …", systemImage: "square.and.arrow.down")
+                }
+            }
+            // Every trip and the ideas in one file — the backup.
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    Task { await exportEverything() }
+                } label: {
+                    Label("Alle Reisen und Ideen exportieren …", systemImage: "archivebox")
+                }
+            }
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    importsEverything = true
+                    isImporting = true
+                } label: {
+                    Label("Alle Reisen und Ideen importieren …", systemImage: "tray.and.arrow.down")
                 }
             }
             // Next to the trips rather than inside one: the collection
@@ -110,7 +133,10 @@ struct TripPlansListView: View {
         }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
             switch result {
-            case .success(let url): Task { await importTrip(from: url) }
+            case .success(let url):
+                Task {
+                    if importsEverything { await importEverything(from: url) } else { await importTrip(from: url) }
+                }
             case .failure(let error): actionError = error.localizedDescription
             }
         }
@@ -149,6 +175,12 @@ struct TripPlansListView: View {
             Button("OK", role: .cancel) { actionError = nil }
         } message: {
             Text(actionError ?? "")
+        }
+        .alert("Import", isPresented: Binding(
+            get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
+            Button("OK", role: .cancel) { exchangeMessage = nil }
+        } message: {
+            Text(exchangeMessage ?? "")
         }
         .alert("Reise verlassen?", isPresented: Binding(
             get: { leaving != nil }, set: { if !$0 { leaving = nil } }),
@@ -423,6 +455,29 @@ struct TripPlansListView: View {
             let imported = try await TripExchange.importTrip(TripExchange.read(url))
             await load()
             openPlanId = imported.planId
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// Every trip and your own ideas as one JSON file.
+    private func exportEverything() async {
+        do {
+            let data = try await TripExchange.exportPlanner()
+            exportName = "Reiseplaner.reiseplaner.json"
+            exportFile = TripExchangeDocument(data: data)
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// Each trip in the file becomes a new trip; ideas already collected
+    /// stay as they are. All or nothing: a broken file adds nothing.
+    private func importEverything(from url: URL) async {
+        do {
+            let result = try await TripExchange.importPlanner(TripExchange.read(url))
+            await load()
+            exchangeMessage = TripExchange.plannerOutcome(result)
         } catch {
             actionError = TripErrorText.describe(error)
         }

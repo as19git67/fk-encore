@@ -21,10 +21,12 @@ import {
   exportIdeaCollection,
   exportTrip,
   exportTripPlan,
+  exportTripPlanner,
   importIdeaCollection,
   importTripPlan,
+  importTripPlanner,
 } from "./exchange";
-import { readTripFile, type TripFile } from "./exchange-format";
+import { readPlannerFile, readTripFile, type TripFile } from "./exchange-format";
 
 let ownerId = 0;
 let otherId = 0;
@@ -347,5 +349,62 @@ describe("ideas as a file", () => {
   it("refuses a trip file", async () => {
     await expect(importIdeaCollection({ data: sampleFile() as unknown as Record<string, unknown> }))
       .rejects.toThrow("enthält eine Reise");
+  });
+});
+
+describe("everything of the planner as one file", () => {
+  async function seed() {
+    const first = await importTripPlan({ data: sampleFile() as unknown as Record<string, unknown> });
+    const second = await importTripPlan({
+      data: sampleFile() as unknown as Record<string, unknown>,
+      title: "Zweite Reise",
+    });
+    await db.insert(ideaPool).values({
+      owner_id: ownerId, created_by: ownerId, osm_ref: "node:10", name: "Biergarten am Beispielweg",
+      lat: 50.5, lon: 8.5, category: "food", dwell_minutes: 90,
+    });
+    return [first.planId, second.planId];
+  }
+
+  it("holds every trip and the ideas, and comes back as it went", async () => {
+    await seed();
+    const file = await exportTripPlanner();
+    expect(file.format).toBe("f4mil.tripplanner");
+    expect(file.trips.map((t) => t.title)).toEqual(["Beispielreise", "Zweite Reise"]);
+    expect(file.ideas.map((i) => i.osmRef)).toEqual(["node:10"]);
+
+    actAs(otherId);
+    const result = await importTripPlanner({ data: file as unknown as Record<string, unknown> });
+    expect(result.trips.map((t) => t.title)).toEqual(["Beispielreise", "Zweite Reise"]);
+    expect(result.ideas).toEqual({ added: 1, skipped: 0 });
+
+    const back = await exportTripPlanner();
+    expect(back.trips).toEqual(readPlannerFile(file).trips);
+    expect(back.ideas).toEqual(file.ideas);
+  });
+
+  it("takes the trips shared with the caller along, not strangers' trips", async () => {
+    const [shared] = await seed();
+    actAs(otherId);
+    expect((await exportTripPlanner()).trips).toHaveLength(0);
+    await db.insert(tripPlanShares).values({ plan_id: shared, user_id: otherId });
+    expect((await exportTripPlanner()).trips).toHaveLength(1);
+  });
+
+  it("writes nothing when one trip in the file is broken", async () => {
+    await seed();
+    const file = await exportTripPlanner() as unknown as { trips: Array<{ legs: Array<{ mode: string }> }> };
+    file.trips[1].legs[0].mode = "rocket";
+    await db.delete(tripPlans);
+    await expect(importTripPlanner({ data: file as unknown as Record<string, unknown> }))
+      .rejects.toThrow("reisen[1].legs[0].mode");
+    expect(await db.select().from(tripPlans)).toHaveLength(0);
+  });
+
+  it("is not a single trip file", async () => {
+    await expect(importTripPlanner({ data: sampleFile() as unknown as Record<string, unknown> }))
+      .rejects.toThrow("enthält eine Reise");
+    expect(() => readTripFile({ format: "f4mil.tripplanner", version: 1, trips: [] }))
+      .toThrow("alle Reisen und Ideen");
   });
 });

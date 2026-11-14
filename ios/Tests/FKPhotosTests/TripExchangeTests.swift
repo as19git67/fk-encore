@@ -25,4 +25,12 @@ final class TripExchangeTests: XCTestCase {
         XCTAssertEqual(TripExchange.ideasOutcome(.init(added: 0, skipped: 1)),
                        "0 Ideen übernommen, 1 war schon vorhanden.")
     }
+
+    func testTheWholeImportSaysTripsAndIdeas() {
+        let result = TripExchange.ImportedPlanner(
+            trips: [.init(planId: 1, title: "Beispielreise"), .init(planId: 2, title: nil)],
+            ideas: .init(added: 1, skipped: 1))
+        XCTAssertEqual(TripExchange.plannerOutcome(result),
+                       "2 Reisen angelegt. 1 Idee übernommen, 1 war schon vorhanden.")
+    }
 }

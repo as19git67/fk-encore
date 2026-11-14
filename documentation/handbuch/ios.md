@@ -475,10 +475,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Sammlung als JSON (`*.ideen.json`), „Ideen aus Datei importieren …“
   fügt sie der eigenen Sammlung hinzu. Was die Sammlung schon hat (gleiche
   OSM-Referenz), bleibt unverändert und wird als „schon vorhanden“ gezählt.
+- Im Mehr-Menü der Reiseliste schreibt „Alle Reisen und Ideen
+  exportieren …“ jede Reise, auf der man ist, und die eigene
+  Ideensammlung in eine Datei (`*.reiseplaner.json`). „Alle Reisen und
+  Ideen importieren …“ legt jede Reise daraus neu an und ergänzt die
+  Ideen wie oben, alles oder nichts.
 - Eine Datei, die nicht passt, wird ganz abgelehnt; die Meldung nennt die
   Stelle („reise.legs[0].days[1].blocks[0].stops[2].lat: Zahl erwartet“).
-  Format: `trip-planner/exchange-format.ts` (`format` „f4mil.trip“ bzw.
-  „f4mil.ideas“, `version` 1).
+  Format: `trip-planner/exchange-format.ts` (`format` „f4mil.trip“,
+  „f4mil.ideas“ bzw. „f4mil.tripplanner“, `version` 1).
 - **Test:** `trip-planner/exchange.test.ts`, `ios/Tests/FKPhotosTests/TripExchangeTests.swift`
 
 ---
