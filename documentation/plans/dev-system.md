@@ -40,11 +40,19 @@ database that has history. A copy of production does.
 
 ## Decisions
 
-- **The dev system replaces the test stack.** Same slot (name suffix
-  `-test`, ports, watchtower scope `fktest`), PR images `:test` keep
-  landing there after every push — so a PR is tried on real data. Only its
-  data changes: instead of whatever it holds today, it gets the copy of
-  production. A fifth stack would cost CPU and RAM for embedding and face
+- **The dev system replaces the test stack.** It takes the test stack's
+  ports (18080/15432/9001), and PR images keep landing there after every
+  push — so a PR is tried on real data. Instead of whatever the test stack
+  holds today, it gets the copy of production.
+- **It is called dev everywhere.** Name suffix `-dev`, compose project
+  `fk-encore-dev`, watchtower scope `fkdev`, image tag `:dev` for PR builds
+  (instead of `:test`), repository secret `WATCHTOWER_URL_DEV` (instead of
+  `WATCHTOWER_URL_TEST`), env file `.env.dev`, a data root containing
+  "dev". Keeping "test" would leave two names for one system, in the
+  workflow, on the host and in every conversation about it. The rename
+  costs nothing extra: the stack gets new data at its first refresh
+  anyway, so the old test containers are simply stopped and removed once
+  dev is up. `docker-compose.env.test.example` goes with them. A fifth stack would cost CPU and RAM for embedding and face
   detection again, and there is nothing a separate empty test stack shows
   that the dev stack does not. The demo stays as it is.
   `docker-compose-dev.yml` is removed (with its two validation jobs in
@@ -139,8 +147,8 @@ What the overlay changes:
   so it also replaces and starts the stopped check container, which is
   added to its container list.
 
-`.env.dev` sets the identity of the old test stack (suffix `-test`, ports,
-scope), `DEPLOY_DATA_ROOT` to the mount point of the dev dataset, and the
+`.env.dev` sets the dev identity (suffix `-dev`, project `fk-encore-dev`,
+scope `fkdev`, tag `dev`, the old test ports), `DEPLOY_DATA_ROOT` to the mount point of the dev dataset, and the
 database names of prod (`encore`, `embeddings`), because the cloned
 cluster carries prod's names. Its own `RP_ID`/`RP_ORIGIN`: passkeys from
 prod do not work in dev, login is by password. Extra photo libraries
@@ -292,8 +300,12 @@ up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
 1. **Dev stack and refresh.** `docker-compose.dev.yml`,
    `docker-compose.env.dev.example`, `scripts/host/dev-refresh.sh`,
    `scripts/host/dev-scrub.sql`, prune skips cloned snapshots, remove
-   `docker-compose-dev.yml`, DEPLOYMENT.md section "Dev stack". Host: create
-   the dev env file, run the refresh once, set up the weekly cron job.
+   `docker-compose-dev.yml` and `docker-compose.env.test.example`, PR builds
+   tagged `:dev` and deployed through `WATCHTOWER_URL_DEV`, DEPLOYMENT.md
+   section "Dev stack" in place of the test stack. Host: create the dev env
+   file, run the refresh once, set up the weekly cron job, stop and remove
+   the old test containers, set the secret `WATCHTOWER_URL_DEV` and drop
+   `WATCHTOWER_URL_TEST`.
    Until stage 2 is deployed, dev starts with no outbound keys and the
    scrub — enough for a first look, which is why stage 2 follows directly.
 2. **`APP_ENVIRONMENT=dev` in the app.** `outbound(kind)` with the three
