@@ -137,6 +137,13 @@ esac
     expect(r.stdout).not.toContain("weekly");
   });
 
+  it("copies the newest weekly snapshot when the env file asks for that tier", () => {
+    const r = run(withLine("TEST_SNAPSHOT_PREFIX", "weekly-"), { FZ_EXISTS: `${fake.FZ_EXISTS} ${prod}@weekly-2026-11-13_01-30 ${prod}/pgdata@weekly-2026-11-13_01-30` }, "--dry-run");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`would clone ${prod}@weekly-2026-11-13_01-30 to tank/f4mil_test/prod-copy\n`);
+    expect(run(withLine("TEST_SNAPSHOT_PREFIX", "hourly-"), {}, "--dry-run").status).toBe(1);
+  });
+
   it("refuses an env file that is not the test stack's", () => {
     expect(run(withLine("APP_ENVIRONMENT", ""), {}, "--dry-run").status).toBe(1);
     expect(run(withLine("DEPLOY_NAME_SUFFIX", ""), {}, "--dry-run").status).toBe(1);

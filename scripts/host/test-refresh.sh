@@ -10,7 +10,8 @@
 #
 # Steps:
 #   1. stop the test stack
-#   2. find the newest daily-* snapshot of PROD_DATASET (or --snapshot)
+#   2. find the newest daily-* snapshot of PROD_DATASET (TEST_SNAPSHOT_PREFIX
+#      picks weekly-* or monthly-* instead; --snapshot names one)
 #   3. destroy TEST_DATASET — only if every dataset in it is a clone of a
 #      snapshot of PROD_DATASET; anything else is never destroyed
 #   4. clone the snapshot to TEST_DATASET, and each child dataset to the
@@ -90,6 +91,12 @@ PG_PASSWORD="$(env_value POSTGRES_PASSWORD)"
 PG_PASSWORD="${PG_PASSWORD:-postgres}"
 GEO_PASSWORD="$(env_value GEO_DB_PASSWORD)"
 GEO_PASSWORD="${GEO_PASSWORD:-postgres}"
+# Which tier of the backup's snapshots to copy (daily-, weekly- or monthly-).
+# A clone pins its snapshot; with a short daily retention, cloning the newest
+# weekly-* (taken on the backup's WEEKLY_SNAPSHOT_DOW) keeps the backup's
+# prune from having to step around it.
+SNAPSHOT_PREFIX="$(env_value TEST_SNAPSHOT_PREFIX)"
+SNAPSHOT_PREFIX="${SNAPSHOT_PREFIX:-daily-}"
 
 # -- the env file must be the test stack's ---------------------------------
 [[ "$APP_ENVIRONMENT" == "dev" ]] || refuse "$ENV_FILE does not set APP_ENVIRONMENT=dev, so it is not the test stack on a copy of prod"
@@ -107,6 +114,7 @@ done
 [[ "$TEST_DATASET" == */* ]] || refuse "TEST_DATASET must not be a pool's root dataset"
 [[ "$DATA_ROOT" == /* && "$DATA_ROOT" != *..* ]] || refuse "DEPLOY_DATA_ROOT must be an absolute path (is \"$DATA_ROOT\")"
 [[ "$PG_DATABASE" =~ ^[A-Za-z0-9_]+$ ]] || refuse "DEPLOY_PG_DATABASE \"$PG_DATABASE\" is not a plain database name"
+[[ "$SNAPSHOT_PREFIX" =~ ^(daily|weekly|monthly)-$ ]] || refuse "TEST_SNAPSHOT_PREFIX must be daily-, weekly- or monthly- (is \"$SNAPSHOT_PREFIX\")"
 [[ -z "$SNAPSHOT" || "$SNAPSHOT" =~ ^[A-Za-z0-9_.:-]+$ ]] || refuse "--snapshot takes a label like daily-2026-11-14_01-30"
 [[ -r "$SCRIPT_DIR/test-scrub.sql" ]] || refuse "test-scrub.sql is missing next to this script ($SCRIPT_DIR)"
 
@@ -150,8 +158,8 @@ fi
 # -- which snapshot ---------------------------------------------------------
 if [[ -z "$SNAPSHOT" ]]; then
   SNAPSHOT="$(zfs list -H -p -d 1 -t snapshot -o name,creation -s creation "$PROD_DATASET" \
-    | awk -F'\t' '{ split($1, a, "@"); if (a[2] ~ /^daily-/) last = a[2] } END { print last }')"
-  [[ -n "$SNAPSHOT" ]] || { echo "FATAL: $PROD_DATASET has no daily-* snapshot — has the nightly backup run?" >&2; exit 3; }
+    | awk -F'\t' -v p="$SNAPSHOT_PREFIX" '{ split($1, a, "@"); if (index(a[2], p) == 1) last = a[2] } END { print last }')"
+  [[ -n "$SNAPSHOT" ]] || { echo "FATAL: $PROD_DATASET has no ${SNAPSHOT_PREFIX}* snapshot — has the nightly backup run?" >&2; exit 3; }
 fi
 zfs list -H -o name "$PROD_DATASET@$SNAPSHOT" >/dev/null 2>&1 \
   || { echo "FATAL: snapshot $PROD_DATASET@$SNAPSHOT does not exist" >&2; exit 3; }
