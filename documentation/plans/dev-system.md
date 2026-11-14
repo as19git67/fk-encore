@@ -40,19 +40,21 @@ database that has history. A copy of production does.
 
 ## Decisions
 
-- **The dev system replaces the test stack.** It takes the test stack's
-  ports (18080/15432/9001), and PR images keep landing there after every
-  push — so a PR is tried on real data. Instead of whatever the test stack
-  holds today, it gets the copy of production.
-- **It is called dev everywhere.** Name suffix `-dev`, compose project
-  `fk-encore-dev`, watchtower scope `fkdev`, image tag `:dev` for PR builds
-  (instead of `:test`), repository secret `WATCHTOWER_URL_DEV` (instead of
-  `WATCHTOWER_URL_TEST`), env file `.env.dev`, a data root containing
-  "dev". Keeping "test" would leave two names for one system, in the
-  workflow, on the host and in every conversation about it. The rename
-  costs nothing extra: the stack gets new data at its first refresh
-  anyway, so the old test containers are simply stopped and removed once
-  dev is up. `docker-compose.env.test.example` goes with them. A fifth stack would cost CPU and RAM for embedding and face
+- **The dev system replaces the test stack.** Same slot (name suffix
+  `-test`, ports, watchtower scope `fktest`), PR images `:test` keep
+  landing there after every push — so a PR is tried on real data. Only its
+  data changes: instead of whatever it holds today, it gets the copy of
+  production.
+- **The technical names stay "test".** Suffix `-test`, project
+  `fk-encore-test`, scope `fktest`, image tag `:test`, secret
+  `WATCHTOWER_URL_TEST`, env file `.env.test`, overlay
+  `docker-compose.test.yml`, host scripts `test-refresh.sh` and
+  `test-scrub.sql`: the host, the workflows and the secrets stay as they
+  are, and only the data and the overlay are new. "Dev system" in this plan
+  means this stack. Only the app's own mode is called `APP_ENVIRONMENT=dev`
+  (with `DEV_OUTBOUND_<KIND>`), because `NODE_ENV=test` already means the
+  test runner and the app checks for it.
+  A fifth stack would cost CPU and RAM for embedding and face
   detection again, and there is nothing a separate empty test stack shows
   that the dev stack does not. The demo stays as it is.
   `docker-compose-dev.yml` is removed (with its two validation jobs in
@@ -88,7 +90,7 @@ database that has history. A copy of production does.
   and their classification, finance views and reports, the assistant, trip
   planning, collections and exports as files all work as in prod. Each
   outbound path has its own mode `off | redirect | on`, set per kind in
-  `.env.dev`, so one path can be tested without opening the others (see the
+  `.env.test`, so one path can be tested without opening the others (see the
   table below). Mail is redirected by default, so every mail dev would
   send can be read without reaching anyone.
 - **FinTS stays off for now.** With a copy that is at most a week old, the
@@ -125,11 +127,11 @@ database that has history. A copy of production does.
 
 ### Compose
 
-`docker-compose.dev.yml`, layered by `COMPOSE_FILE` in `.env.dev`
-(template `docker-compose.env.dev.example`, next to the demo's):
+`docker-compose.test.yml`, layered by `COMPOSE_FILE` in `.env.test`
+(template: the existing `docker-compose.env.test.example`, extended):
 
 ```
-COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml:docker-compose.dev.yml
+COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml:docker-compose.test.yml
 ```
 
 What the overlay changes:
@@ -147,40 +149,40 @@ What the overlay changes:
   so it also replaces and starts the stopped check container, which is
   added to its container list.
 
-`.env.dev` sets the dev identity (suffix `-dev`, project `fk-encore-dev`,
-scope `fkdev`, tag `dev`, the old test ports), `DEPLOY_DATA_ROOT` to the mount point of the dev dataset, and the
+`.env.test` sets the identity of the old test stack (suffix `-test`, ports,
+scope), `DEPLOY_DATA_ROOT` to the mount point of the dev dataset, and the
 database names of prod (`encore`, `embeddings`), because the cloned
 cluster carries prod's names. Its own `RP_ID`/`RP_ORIGIN`: passkeys from
 prod do not work in dev, login is by password. Extra photo libraries
 outside the prod dataset are mounted read-only in dev's
 `docker-compose.volumes.yml`.
 
-### Refresh: `scripts/host/dev-refresh.sh`
+### Refresh: `scripts/host/test-refresh.sh`
 
 Shipped in the image and copied to `backup/host-scripts/` like the backup
-hook, so the host needs no checkout. Called with the path to `.env.dev`
+hook, so the host needs no checkout. Called with the path to `.env.test`
 from a weekly TrueNAS cron job (Sunday night, after the backup) or by
-hand. It reads `PROD_DATASET` and `DEV_DATASET` from the env file and
-refuses to run when `DEV_DATASET` equals `PROD_DATASET`, is not a sibling
-of it, does not contain "dev", or when the env file lacks
+hand. It reads `PROD_DATASET` and `TEST_DATASET` from the env file and
+refuses to run when `TEST_DATASET` equals `PROD_DATASET`, is not a sibling
+of it, does not contain "test", or when the env file lacks
 `APP_ENVIRONMENT=dev`. `--dry-run` prints every step.
 
-1. `docker compose --env-file .env.dev down`.
+1. `docker compose --env-file .env.test down`.
 2. Find the newest `daily-*` snapshot of `PROD_DATASET`.
-3. `zfs destroy -r DEV_DATASET` (only if its `origin` is a snapshot of
+3. `zfs destroy -r TEST_DATASET` (only if its `origin` is a snapshot of
    `PROD_DATASET` — a dataset that is not a clone is never destroyed).
-4. `zfs clone` the snapshot to `DEV_DATASET`, and each child dataset to
+4. `zfs clone` the snapshot to `TEST_DATASET`, and each child dataset to
    the matching child (a clone is not recursive).
 5. In the clone's backup directory: remove `restore-*.dump`, the prod
    dumps and `host-scripts/backup-token`.
-6. Start only `postgres`, set its password to the one in `.env.dev`
+6. Start only `postgres`, set its password to the one in `.env.test`
    (`ALTER USER` over the local socket, which needs none), and run the
-   scrub (`scripts/host/dev-scrub.sql`).
+   scrub (`scripts/host/test-scrub.sql`).
 7. Write the snapshot label into a `dev_copy` row, which the banner shows.
-8. `docker compose --env-file .env.dev up -d`. The app migrates the copy
+8. `docker compose --env-file .env.test up -d`. The app migrates the copy
    to its own image on boot.
 
-### Scrub: `scripts/host/dev-scrub.sql`
+### Scrub: `scripts/host/test-scrub.sql`
 
 Runs in one transaction; a table that does not exist yet is skipped, a
 missing column fails loudly so the file is fixed rather than half applied.
@@ -208,7 +210,7 @@ One module `lib/environment.ts` with `isDev()` and
 mode of that kind: `off` throws a clear error instead of sending,
 `redirect` sends to the dev target named in the table, `on` sends as in
 prod (with dev's own key). In prod every kind is `on` and the module does
-nothing. The mode is read from `DEV_OUTBOUND_<KIND>` in `.env.dev`; the
+nothing. The mode is read from `DEV_OUTBOUND_<KIND>` in `.env.test`; the
 defaults:
 
 | Kind | Where | Default in dev | `redirect` means |
@@ -268,9 +270,9 @@ show the migration's file name and the Postgres error code.
 
 ### Container and trigger
 
-`upgrade_check` in `docker-compose.dev.yml`: the app image tagged
+`upgrade_check` in `docker-compose.test.yml`: the app image tagged
 `candidate`, command `upgrade-check`, the backup directory of prod
-read-only, the dev postgres, and a GitHub token in `.env.dev` (fine-grained,
+read-only, the dev postgres, and a GitHub token in `.env.test` (fine-grained,
 this repository only, permission "Commit statuses: read and write",
 nothing else). The image knows its commit from `BUILD_NUMBER`. Watchtower
 of the dev stack replaces and starts it when a new `candidate` appears;
@@ -291,21 +293,17 @@ it runs once and stops.
 5. On `failure` or timeout: the run is red, prod keeps its image. Fixing
    forward is a new merge; nothing has to be rolled back.
 
-Without the secret `WATCHTOWER_URL_DEV` the gate is skipped with a warning
+Without the secret `WATCHTOWER_URL_TEST` the gate is skipped with a warning
 and the old path runs, so the change can be merged before the host is set
 up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
 
 ## Stages
 
-1. **Dev stack and refresh.** `docker-compose.dev.yml`,
-   `docker-compose.env.dev.example`, `scripts/host/dev-refresh.sh`,
-   `scripts/host/dev-scrub.sql`, prune skips cloned snapshots, remove
-   `docker-compose-dev.yml` and `docker-compose.env.test.example`, PR builds
-   tagged `:dev` and deployed through `WATCHTOWER_URL_DEV`, DEPLOYMENT.md
-   section "Dev stack" in place of the test stack. Host: create the dev env
-   file, run the refresh once, set up the weekly cron job, stop and remove
-   the old test containers, set the secret `WATCHTOWER_URL_DEV` and drop
-   `WATCHTOWER_URL_TEST`.
+1. **Dev stack and refresh.** `docker-compose.test.yml`,
+   `docker-compose.env.test.example`, `scripts/host/test-refresh.sh`,
+   `scripts/host/test-scrub.sql`, prune skips cloned snapshots, remove
+   `docker-compose-dev.yml`, DEPLOYMENT.md section on the test stack rewritten. Host: create
+   the dev env file, run the refresh once, set up the weekly cron job.
    Until stage 2 is deployed, dev starts with no outbound keys and the
    scrub — enough for a first look, which is why stage 2 follows directly.
 2. **`APP_ENVIRONMENT=dev` in the app.** `outbound(kind)` with the three
