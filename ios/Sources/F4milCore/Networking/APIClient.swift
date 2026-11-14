@@ -88,6 +88,17 @@ public actor APIClient {
         return try await perform(request)
     }
 
+    /// POST a body that is already JSON — a file the user picked, passed
+    /// on without decoding it into a model first.
+    public func postJSONData<T: Decodable>(_ path: String, json: Data) async throws -> T {
+        var request = URLRequest(url: buildURL(path: path), timeoutInterval: 120)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = json
+        applyAuth(&request)
+        return try await performWithRefresh(request)
+    }
+
     public func put<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
         var request = URLRequest(url: buildURL(path: path), timeoutInterval: 30)
         request.httpMethod = "PUT"

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The collection, at last on a screen (§20).
 ///
@@ -28,6 +29,11 @@ struct TripIdeasView: View {
     @State private var openPlanId: Int?
     /// What somebody is looking for, across every group (§20.1).
     @State private var query = ""
+    /// The collection written out as a file, waiting for "Sichern unter".
+    @State private var exportFile: TripExchangeDocument?
+    @State private var isImporting = false
+    /// What an export or import did, or why it did not.
+    @State private var exchangeMessage: String?
     @Environment(\.scenePhase) private var scenePhase
 
     /// Whether the list is currently answering a search rather than
@@ -236,6 +242,22 @@ struct TripIdeasView: View {
             // tab view, and a bottom toolbar item loses that argument
             // with the tab bar — the button was in the code and on no
             // screen.
+            // Your own collection as a file and back — a backup, or the
+            // list for somebody without an account here.
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    Task { await exportIdeas() }
+                } label: {
+                    Label("Meine Ideen exportieren …", systemImage: "square.and.arrow.up")
+                }
+            }
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    isImporting = true
+                } label: {
+                    Label("Ideen aus Datei importieren …", systemImage: "square.and.arrow.down")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     startAdding()
@@ -244,6 +266,25 @@ struct TripIdeasView: View {
                 }
                 .disabled(model.isAdding)
             }
+        }
+        .fileExporter(isPresented: Binding(
+            get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
+                      document: exportFile, contentType: .json,
+                      defaultFilename: "Ideen.ideen.json") { result in
+            if case .failure(let error) = result { exchangeMessage = error.localizedDescription }
+            exportFile = nil
+        }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url): Task { await importIdeas(from: url) }
+            case .failure(let error): exchangeMessage = error.localizedDescription
+            }
+        }
+        .alert("Ideen", isPresented: Binding(
+            get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
+            Button("OK", role: .cancel) { exchangeMessage = nil }
+        } message: {
+            Text(exchangeMessage ?? "")
         }
         .task {
             await model.load()
@@ -369,6 +410,28 @@ struct TripIdeasView: View {
         model.entries.isEmpty && !model.isLoading && model.sharedPlace == nil
             && model.sharedArticleUrl == nil
             && model.errorMessage == nil
+    }
+
+    /// Your own collection as JSON, then the system's "Sichern unter".
+    private func exportIdeas() async {
+        do {
+            let data = try await TripExchange.exportIdeas()
+            exportFile = TripExchangeDocument(data: data)
+        } catch {
+            exchangeMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Adds what the file has and the collection does not; a place
+    /// already collected stays as it is.
+    private func importIdeas(from url: URL) async {
+        do {
+            let result = try await TripExchange.importIdeas(TripExchange.read(url))
+            await model.load()
+            exchangeMessage = TripExchange.ideasOutcome(result)
+        } catch {
+            exchangeMessage = TripErrorText.describe(error)
+        }
     }
 
     private func startAdding() {

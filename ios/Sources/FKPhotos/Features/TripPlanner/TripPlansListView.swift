@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The user's plans — the "Planen" half of the Trip tab (§8.1).
 ///
@@ -52,6 +53,10 @@ struct TripPlansListView: View {
     /// shared from Apple Maps was announced as "gemerkt" and then
     /// nowhere to be seen.
     @Environment(\.scenePhase) private var scenePhase
+    /// A trip written out as a file, waiting for "Sichern unter".
+    @State private var exportFile: TripExchangeDocument?
+    @State private var exportName = "Reise.reise.json"
+    @State private var isImporting = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,6 +72,14 @@ struct TripPlansListView: View {
                     isCreating = true
                 } label: {
                     Label("Neue Reise", systemImage: "plus")
+                }
+            }
+            // A trip from a file: a backup, or a plan somebody sent.
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    isImporting = true
+                } label: {
+                    Label("Reise aus Datei importieren …", systemImage: "square.and.arrow.down")
                 }
             }
             // Next to the trips rather than inside one: the collection
@@ -86,6 +99,19 @@ struct TripPlansListView: View {
                     TripPlannerViewModel.shared(for: planId).wantsItinerary = true
                     openPlanId = planId
                 }
+            }
+        }
+        .fileExporter(isPresented: Binding(
+            get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
+                      document: exportFile, contentType: .json,
+                      defaultFilename: exportName) { result in
+            if case .failure(let error) = result { actionError = error.localizedDescription }
+            exportFile = nil
+        }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url): Task { await importTrip(from: url) }
+            case .failure(let error): actionError = error.localizedDescription
             }
         }
         .sheet(isPresented: $showingPicker) {
@@ -217,6 +243,9 @@ struct TripPlansListView: View {
                     }
                     Button { aux = TripPlanAux(planId: plan.id, kind: .offline) } label: {
                         Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
+                    }
+                    Button { Task { await exportTrip(plan) } } label: {
+                        Label("Als Datei exportieren …", systemImage: "square.and.arrow.up")
                     }
                 }
                 .swipeActions(edge: .trailing) {
@@ -371,6 +400,29 @@ struct TripPlansListView: View {
                 "/trip-planner/plans/\(plan.id)/participants/remove", body: Body(userId: me))
             plans.removeAll { $0.id == plan.id }
             await TripPlanGone.forget(planId: plan.id)
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// The whole trip as JSON, then the system's "Sichern unter".
+    private func exportTrip(_ plan: TripPlanSummary) async {
+        do {
+            let data = try await TripExchange.exportTrip(planId: plan.id)
+            exportName = TripExchange.fileName(plan.displayTitle, suffix: "reise.json")
+            exportFile = TripExchangeDocument(data: data)
+        } catch {
+            actionError = TripErrorText.describe(error)
+        }
+    }
+
+    /// A new trip from the file, opened straight away. Never merged into
+    /// an existing one: the import is a copy, and the original stays.
+    private func importTrip(from url: URL) async {
+        do {
+            let imported = try await TripExchange.importTrip(TripExchange.read(url))
+            await load()
+            openPlanId = imported.planId
         } catch {
             actionError = TripErrorText.describe(error)
         }
