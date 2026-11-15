@@ -660,6 +660,27 @@ enum TripItineraryText {
         return rest == 0 ? "\(sign)\(hours) h" : "\(sign)\(hours) h \(rest)"
     }
 
+    /// "Uhr −1 h": the badge on a journey card. The bare "−1 h" read as
+    /// a delay or a shorter trip; naming the clock says it is the zone.
+    static func zoneShiftBadge(_ minutes: Int?) -> String? {
+        zoneShift(minutes).map { "Uhr \($0)" }
+    }
+
+    /// "Am Ziel wird die Uhr 1 h zurückgestellt.": what the jump means,
+    /// for the footer of the journey sheet and for VoiceOver.
+    static func zoneShiftSentence(_ minutes: Int?) -> String? {
+        guard let minutes, minutes != 0 else { return nil }
+        let hours = abs(minutes) / 60
+        let rest = abs(minutes) % 60
+        let amount = switch (hours, rest) {
+        case (0, _): "\(rest) min"
+        case (_, 0): "\(hours) h"
+        default: "\(hours) h \(rest) min"
+        }
+        let way = minutes > 0 ? "vorgestellt" : "zurückgestellt"
+        return "Am Ziel wird die Uhr \(amount) \(way)."
+    }
+
     /// The trip under its name: "Fr 27.11. bis Do 3.12.2026 · 7 Tage",
     /// or "Noch ohne Datum · 7 Tage".
     static func tripSpan(_ draft: TripItineraryDraft, timeZone: TimeZone = .current) -> String {
