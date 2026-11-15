@@ -49,6 +49,11 @@ struct TripSpotDetailView<Actions: View>: View {
     /// The actions as a bar under the sheet (Route · Karte · the one for
     /// the day · Mehr). Nil draws them as rows in the list instead.
     let bar: TripSpotDetailBar?
+    /// The bar is drawn by the screen around this one, not here. The
+    /// pager does that: inside its sideways-paging `TabView` the
+    /// paging scroll view took the first tap on "Mehr" for the start
+    /// of a swipe, and the menu only opened on the second (Anton, 15.11.).
+    let barOutside: Bool
     @State private var routeChoice: TripMapsChoice?
     /// The pictures of the spot `galleryRef` names: the details can
     /// page to the next spot, and its pictures are not this one's.
@@ -73,9 +78,11 @@ struct TripSpotDetailView<Actions: View>: View {
         onStayLightAccepted: @escaping () async -> Void = {},
         onRoute: (() -> Void)? = nil,
         bar: TripSpotDetailBar? = nil,
+        barOutside: Bool = false,
         @ViewBuilder actions: @escaping (@escaping () -> Void) -> Actions,
     ) {
         self.bar = bar
+        self.barOutside = barOutside
         self.spot = spot
         _draft = State(initialValue: TripSpotEdit(spot))
         self.mode = mode
@@ -184,7 +191,7 @@ struct TripSpotDetailView<Actions: View>: View {
         // the mock: Route, Karte, the one for the day, and the rest
         // under "Mehr".
         .safeAreaInset(edge: .bottom) {
-            if let bar {
+            if let bar, !barOutside {
                 TripSpotDetailBarView(bar: bar, close: { dismiss() }, route: { offerRoute() }, map: {
                     TripMapsOpen.pin(spot.coordinate, name: spot.name, using: preference)
                 }, google: {

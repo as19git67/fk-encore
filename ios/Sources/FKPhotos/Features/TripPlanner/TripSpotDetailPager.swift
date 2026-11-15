@@ -28,6 +28,7 @@ struct TripSpotDetailPager: View {
     @State private var selection: Int
     @State private var wayStop: TripStop?
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
 
     init(stops: [TripStop], selected: TripStop, mode: TripTransportMode,
          onSave: @escaping (TripSpotEdit) async -> Void,
@@ -58,11 +59,21 @@ struct TripSpotDetailPager: View {
                                        stayLight: stayLight?(stop),
                                        onStayLightAccepted: onStayLightAccepted,
                                        onRoute: way == nil ? nil : { wayStop = stop },
-                                       bar: .planned(actions(stop))) { _ in EmptyView() }
+                                       bar: .planned(actions(stop)), barOutside: true) { _ in EmptyView() }
                     .tag(stop.rowId)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            // The bar under the pages, not on each page: a menu inside
+            // the paging scroll view needed two taps, the first one
+            // only lit the button up (Anton, 15.11.). One bar for the
+            // spot on screen; `id` gives it fresh state per spot.
+            .safeAreaInset(edge: .bottom) {
+                if let stop = current {
+                    bar(for: stop)
+                        .id(stop.rowId)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen", systemImage: "xmark") { dismiss() }
@@ -85,6 +96,33 @@ struct TripSpotDetailPager: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .opaqueSheetBackground()
+    }
+
+    /// The spot the pager shows right now.
+    private var current: TripStop? {
+        stops.first { $0.rowId == selection } ?? stops.first
+    }
+
+    private var preference: TripMapsApp {
+        TripMapsApp(rawValue: mapsPreference) ?? .apple
+    }
+
+    private func bar(for stop: TripStop) -> some View {
+        let detail = detailOf(stop)
+        return TripSpotDetailBarView(bar: .planned(actions(stop)), close: { dismiss() }, route: {
+            if way != nil {
+                wayStop = stop
+                return
+            }
+            let availability = TripMapsAvailability(
+                preference: preference, googleAppInstalled: TripMapsOpen.googleInstalled)
+            TripMapsOpen.route(TripMapsChoice.single(detail.coordinate, mode: mode),
+                               using: availability.resolved ?? .apple)
+        }, map: {
+            TripMapsOpen.pin(detail.coordinate, name: detail.name, using: preference)
+        }, google: {
+            TripMapsOpen.pin(detail.coordinate, name: detail.name, using: .google)
+        })
     }
 }
 
