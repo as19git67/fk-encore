@@ -69,6 +69,7 @@ import { tickHighlights } from "./highlights-job";
 import { describeSpots } from "./spot-description";
 import { summariseSpots } from "./spot-summary";
 import { tickReturnOpen } from "./open-return";
+import { tickFindRepair } from "./find-repair";
 
 // A trip planned for a place with no imported region is saved framed
 // and empty, and the import that follows takes hours (§4.3). This is
@@ -166,6 +167,19 @@ schedule({
   nextFire: everyMs(30 * 60_000),
   run: async () => {
     await tickReturnOpen();
+  },
+});
+
+// Finds that took a neighbour's OSM entry before add-find kept the one a
+// list showed (find-repair.ts): each plan is looked at once.
+schedule({
+  name: "trip-planner-find-repair",
+  description: "Give finds that took a neighbour's OpenStreetMap entry their own back.",
+  service: "trip-planner",
+  scheduleLabel: "every 10m",
+  nextFire: everyMs(10 * 60_000),
+  run: async () => {
+    await tickFindRepair();
   },
 });
 

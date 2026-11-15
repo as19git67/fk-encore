@@ -30,6 +30,7 @@ import { addPoolEntry, mergeIntoPoolEntry, type StoredPoolEntry } from "./find-s
 import { DEFAULT_DWELL_MINUTES, FALLBACK_DWELL_MINUTES, MANUAL_REASON, MANUAL_SCORE } from "./candidates";
 import { chooseLeg, findDuplicate, isManualRef, manualRef } from "./finds";
 import { extentOf, type SpotExtent } from "./extent";
+import { carriesName } from "./find-repair";
 import { fameFor } from "./spot-fame";
 
 /** How far around a find to look for the OSM entry it might be. */
@@ -304,14 +305,9 @@ export function pickMatch<T extends Pick<GeoPoiSearchSpot, "osmRef" | "name" | "
   if (spots.length === 0) return null;
   const seen = seenOsmRef ? spots.find((s) => s.osmRef === seenOsmRef) : undefined;
   if (seen) return seen;
-  const wanted = name?.trim().toLocaleLowerCase("de");
-  if (wanted) {
-    const names = (s: T) => [s.name, s.nameDe, s.nameEn]
-      .filter((n): n is string => Boolean(n))
-      .map((n) => n.trim().toLocaleLowerCase("de"));
-    const named = spots.find((s) => names(s).includes(wanted));
-    if (named) return named;
-  }
+  // Accents and case aside: "Beispielkirche" is "Beispielkírche".
+  const named = spots.find((s) => carriesName(s, name));
+  if (named) return named;
   return seenOsmRef ? null : spots[0];
 }
 
