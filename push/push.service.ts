@@ -11,7 +11,7 @@
  * no-op and subscribe endpoints reject with FailedPrecondition.
  */
 
-import webPush from "web-push";
+import * as webPush from "web-push";
 import { outbound } from "../lib/environment";
 import { and, eq } from "drizzle-orm";
 import { secret } from "encore.dev/config";

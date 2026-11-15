@@ -9,7 +9,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { and, eq } from "drizzle-orm";
-import webPush from "web-push";
+import * as webPush from "web-push";
 import db from "../db/database";
 import { dbAll, dbExec } from "../db/adapter";
 import { guestPushSubscriptions } from "../db/schema";
