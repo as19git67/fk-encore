@@ -39,6 +39,7 @@ import {
   removeLeg,
   replanPlan,
   setJourneyNotes,
+  type JourneyNotes,
   setLegPositions,
   setLegsAwaitingRegion,
   updateLegFrames,
@@ -464,17 +465,16 @@ export function itineraryOf(plan: Pick<StoredPlan, "legs" | "home">): {
     if (pendingJourney) {
       items.push(withNote(journeyFromTransit(pendingJourney), previousStay?.departureNote ?? leg.arrivalNote));
     } else if (previousStay) {
-      items.push(withNote(implicitJourney(previousStay, leg), previousStay.departureNote));
-    } else if (plan.home && leg.arrivalNote) {
+      items.push(withMode(withNote(implicitJourney(previousStay, leg), previousStay.departureNote), previousStay.departureMode));
+    } else if (plan.home && (leg.arrivalNote || leg.arrivalMode)) {
       // The way there from home with its times open has no row; with a
-      // note it is still a journey somebody wrote something on.
-      items.push({
+      // note or a mode it is still a journey somebody said something on.
+      items.push(withMode(withNote({
         kind: "journey",
         departAt: null,
         arriveAt: leg.arriveMinutes === null ? null : formatMinutes(leg.arriveMinutes),
         nights: 0,
-        note: leg.arrivalNote,
-      });
+      }, leg.arrivalNote), leg.arrivalMode));
     }
     items.push({
       kind: "stay",
@@ -497,15 +497,14 @@ export function itineraryOf(plan: Pick<StoredPlan, "legs" | "home">): {
   }
   if (pendingJourney) {
     items.push(withNote(journeyFromTransit(pendingJourney), previousStay?.departureNote));
-  } else if (plan.home && previousStay?.departureNote) {
+  } else if (plan.home && previousStay && (previousStay.departureNote || previousStay.departureMode)) {
     const departure = journeyDepartureOf(previousStay);
-    items.push({
+    items.push(withMode(withNote({
       kind: "journey",
       departAt: departure === null ? null : formatMinutes(departure.startMinutes),
       arriveAt: null,
       nights: 0,
-      note: previousStay.departureNote,
-    });
+    }, previousStay.departureNote), previousStay.departureMode));
   }
 
   return { startDate: legs[0]?.startDate ?? null, items };
@@ -515,20 +514,28 @@ function withNote(item: ItineraryItem, note: string | null | undefined): Itinera
   return note ? { ...item, note } : item;
 }
 
+function withMode(item: ItineraryItem, mode: TransportMode | null | undefined): ItineraryItem {
+  return mode ? { ...item, mode } : item;
+}
+
 /**
- * The notes of the chain's journeys, one entry per stay in order: the
- * journey that leaves the stay, and on the first stay the way there
- * from home (`setJourneyNotes`).
+ * The notes and modes of the chain's journeys, one entry per stay in
+ * order: the journey that leaves the stay, and on the first stay the
+ * way there from home (`setJourneyNotes`). The mode is kept here as
+ * well because a journey with its times open has no row of its own.
  */
-export function journeyNotes(items: readonly ItineraryItem[]): Array<{ departure: string | null; arrival: string | null }> {
-  const notes: Array<{ departure: string | null; arrival: string | null }> = [];
+export function journeyNotes(items: readonly ItineraryItem[]): JourneyNotes[] {
+  const notes: JourneyNotes[] = [];
   for (const [index, item] of items.entries()) {
     if (item.kind !== "stay") continue;
     const before = items[index - 1];
     const after = items[index + 1];
+    const first = notes.length === 0;
     notes.push({
       departure: after ? noteOf(after.note, index + 1) : null,
-      arrival: notes.length === 0 && before ? noteOf(before.note, index - 1) : null,
+      arrival: first && before ? noteOf(before.note, index - 1) : null,
+      departureMode: after?.mode == null ? null : validateMode(after.mode),
+      arrivalMode: first && before?.mode != null ? validateMode(before.mode) : null,
     });
   }
   return notes;

@@ -459,6 +459,28 @@ describe("a note on a journey", () => {
     expect(stored.legs.every((l) => l.kind === "stay")).toBe(true);
   });
 
+  it("keeps the mode of a journey whose times are open or half known", async () => {
+    const plan = await threeStays();
+    await setTripHome({ planId: plan.id, ...HOME, label: "Zuhause" });
+    const chain = await chainOf(plan.id);
+    chain.items.unshift({ kind: "journey", departAt: null, arriveAt: "14:00", mode: "transit" });
+    chain.items.push({ kind: "journey", departAt: null, arriveAt: null, mode: "plane" });
+    chain.items[stayAt(chain.items, 0) + 1].mode = "bike";
+    await write(plan.id, chain);
+
+    const modesOf = async () =>
+      (await chainOf(plan.id)).items.map((i) => (i.kind === "journey" ? i.mode ?? null : "stay"));
+    expect(await modesOf()).toEqual(["transit", "stay", "bike", "stay", null, "stay", "plane"]);
+    const { plan: stored } = await getTripPlan({ planId: plan.id });
+    expect(stored.legs.every((l) => l.kind === "stay")).toBe(true);
+
+    // Writing the chain back as read keeps them; another pick replaces one.
+    const again = await chainOf(plan.id);
+    again.items[0].mode = "car";
+    await write(plan.id, again);
+    expect(await modesOf()).toEqual(["car", "stay", "bike", "stay", null, "stay", "plane"]);
+  });
+
   it("refuses a note longer than a booking", async () => {
     const plan = await threeStays();
     const chain = await chainOf(plan.id);

@@ -3694,6 +3694,10 @@ export const tripPlanLegs = pgTable(
     // `arrival_note` the way there from home, read on the first stay.
     departure_note: text("departure_note"),
     arrival_note: text("arrival_note"),
+    // Its mode while its times are open (migration 0318), on the same
+    // stays as the notes; a journey with both times has its own row.
+    departure_mode: text("departure_mode"),
+    arrival_mode: text("arrival_mode"),
     // Optional real dates; absent means "day 1, day 2, …".
     start_date: date("start_date"),
     // What this leg was searched with, so it can be searched again when
