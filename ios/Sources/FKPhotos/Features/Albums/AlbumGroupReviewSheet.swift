@@ -41,10 +41,10 @@ struct AlbumGroupReviewSheet: View {
                     )
                 } else if groups.isEmpty {
                     ContentUnavailableView(
-                        "Keine Serien",
+                        "Keine offenen Serien",
                         systemImage: "square.stack.3d.up.slash",
                         description: Text(
-                            "In diesem Album sind keine zwei Fotos ähnlich genug, um verglichen zu werden."
+                            "In diesem Album wartet keine Serie ähnlicher Fotos auf eine Entscheidung."
                         )
                     )
                 } else {
@@ -108,11 +108,6 @@ struct AlbumGroupReviewSheet: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(group.member_count) ähnliche Fotos")
-                if group.reviewed_at != nil {
-                    Text("Schon einmal entschieden")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
             Spacer()
             Image(systemName: "chevron.right")

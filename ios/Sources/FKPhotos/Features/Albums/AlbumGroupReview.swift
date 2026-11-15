@@ -34,9 +34,12 @@ enum AlbumGroupReview {
 
     /// The groups worth offering inside an album.
     ///
-    /// A group is trimmed to the album's own **visible** members: a photo
-    /// already hidden is settled, and a group with one member left has nothing
-    /// left to compare. Both rules are the web's.
+    /// A group already decided (`reviewed_at` set) is settled and not offered
+    /// again — the web's album review walks only undecided groups
+    /// (`orderedUnreviewedGroupIds` in `utils/reviewOrder.ts`). What is left is
+    /// trimmed to the album's own **visible** members: a photo already hidden
+    /// is settled, and a group with one member left has nothing left to
+    /// compare. All three rules are the web's.
     ///
     /// Order is by size, largest first — the group where a decision saves the
     /// most is the one to offer first — with the group id breaking ties so the
@@ -47,6 +50,7 @@ enum AlbumGroupReview {
     ) -> [Group] {
         groups
             .compactMap { group -> Group? in
+                guard group.reviewed_at == nil else { return nil }
                 let members = group.photo_ids.filter { visible.contains($0) }
                 guard members.count >= 2 else { return nil }
                 let cover = group.cover_photo_id.flatMap {
