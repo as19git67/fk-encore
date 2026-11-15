@@ -14,7 +14,7 @@
  */
 
 import { isVisit } from "./frame-spots";
-import { blockStart, excursionPlaces } from "./excursions";
+import { awaySpan, blockStart, excursionIdOf, excursionPlaces, excursionWays } from "./excursions";
 import { addDays } from "./leg-dates";
 import { lineOf, type OrderBreak, type OrderInput, type OrderStop } from "./day-order";
 import { resolveFixpoints, type Fixpoint } from "./fixpoints";
@@ -126,6 +126,8 @@ export function withDayTimes(
     const breakEtas = new Map<string, number>();
     const home = position;
     const places = excursionPlaces(day.excursions);
+    const excursions = new Map((day.excursions ?? []).map((e) => [e.id, e]));
+    const ways = excursionWays(day.excursions ?? [], opts.anchor, opts.mode);
     const blocks = day.blocks.map((block, index) => {
       const frame = block.kind === "spots" ? frameOf(block, day.fixpoints) : null;
       position = blockStart(block.id, index > 0 ? day.blocks[index - 1].id : null, position, home, places);
@@ -147,8 +149,25 @@ export function withDayTimes(
       windowStart = windowStart === null ? frame.window.startMinutes : Math.min(windowStart, frame.window.startMinutes);
       windowEnd = windowEnd === null ? frame.window.endMinutes : Math.max(windowEnd, frame.window.endMinutes);
       windowMinutes += frame.window.endMinutes - frame.window.startMinutes;
-      planned += line.plannedMinutes;
-      waited += line.waitMinutes;
+      const excursion = excursions.get(excursionIdOf(block.id) ?? "");
+      if (excursion) {
+        // The hours away are spent, spots or none: the group is in
+        // Seestadt from 10:15 to 14:30 whatever it does there, and the
+        // drive there and back is part of it. Counted as the stops in
+        // its block alone, a day trip from 9:30 to 14:30 read as
+        // "21 min von 10 h" (Anton, 15.11.). A wait at a door there is
+        // inside the same hours, so it is not counted twice.
+        const there = ways.there(excursion);
+        const back = ways.back(excursion);
+        const away = awaySpan(excursion, there, back);
+        windowStart = Math.min(windowStart ?? away.from, away.from);
+        windowEnd = Math.max(windowEnd ?? away.to, away.to);
+        windowMinutes += there + back;
+        planned += there + back + Math.max(frame.window.endMinutes - frame.window.startMinutes, line.plannedMinutes + line.waitMinutes);
+      } else {
+        planned += line.plannedMinutes;
+        waited += line.waitMinutes;
+      }
       overrun += Math.max(0, line.endMinutes - frame.window.endMinutes);
       const byRef = new Map(line.entries.map((e) => [e.ref, e]));
       for (const brk of day.breaks ?? []) {
