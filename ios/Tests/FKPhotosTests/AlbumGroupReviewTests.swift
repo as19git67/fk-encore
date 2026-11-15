@@ -9,14 +9,15 @@ final class AlbumGroupReviewTests: XCTestCase {
         id: Int,
         photoIds: [Int],
         cover: Int? = nil,
-        picked: [Int]? = nil
+        picked: [Int]? = nil,
+        reviewedAt: String? = nil
     ) -> AlbumGroupReview.Group {
         AlbumGroupReview.Group(
             id: id,
             cover_photo_id: cover,
             member_count: photoIds.count,
             photo_ids: photoIds,
-            reviewed_at: nil,
+            reviewed_at: reviewedAt,
             ai_picked_photo_ids: picked,
             ai_picked_confidence: nil
         )
@@ -67,6 +68,18 @@ final class AlbumGroupReviewTests: XCTestCase {
             toVisiblePhotoIds: [1]
         )
         XCTAssertTrue(scoped.isEmpty)
+    }
+
+    /// A group decided before is settled — the web offers only undecided ones.
+    func testAnAlreadyDecidedGroupIsNotOfferedAgain() {
+        let scoped = AlbumGroupReview.scoped(
+            groups: [
+                group(id: 1, photoIds: [1, 2], reviewedAt: "2026-01-01T00:00:00.000Z"),
+                group(id: 2, photoIds: [3, 4])
+            ],
+            toVisiblePhotoIds: [1, 2, 3, 4]
+        )
+        XCTAssertEqual(scoped.map(\.id), [2])
     }
 
     func testACoverOutsideTheAlbumIsReplacedByOneInside() {
