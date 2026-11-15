@@ -332,10 +332,8 @@ struct PhotoRecipeEditorView: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .discardGuard(hasChanges: viewModel.isDirty, busy: viewModel.isSaving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     if viewModel.isSaving {
                         ProgressView()

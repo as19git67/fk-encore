@@ -71,10 +71,8 @@ struct TripIdeaCaptureSheet: View {
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: [note, dwellMinutes] as [AnyHashable], busy: saving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         saving = true

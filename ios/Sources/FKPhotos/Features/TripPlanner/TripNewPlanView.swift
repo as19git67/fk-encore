@@ -11,7 +11,6 @@ import SwiftUI
 struct TripNewPlanView: View {
     @State private var model = TripNewPlanViewModel()
     @Environment(\.dismiss) private var dismiss
-    @State private var confirmCancel = false
     /// "Neuer Aufenthalt", opened by the plus (mock "Ablauf 1").
     @State private var addingStay = false
 
@@ -99,18 +98,9 @@ struct TripNewPlanView: View {
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         // A filled form is not thrown away by a swipe or a mis-tap.
-        .interactiveDismissDisabled(model.isDirty)
-        .confirmationDialog("Eingaben verwerfen?", isPresented: $confirmCancel,
-                            titleVisibility: .visible) {
-            Button("Verwerfen", role: .destructive) { addingStay = false }
-            Button("Weiter bearbeiten", role: .cancel) {}
-        }
+        .discardGuard(hasChanges: model.isDirty, busy: model.isCreating,
+                      onCancel: { addingStay = false })
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") {
-                    if model.isDirty { confirmCancel = true } else { addingStay = false }
-                }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     Task {

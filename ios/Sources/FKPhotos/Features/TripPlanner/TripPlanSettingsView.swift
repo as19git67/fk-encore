@@ -155,10 +155,11 @@ struct TripPlanSettingsView: View {
         .sheet(isPresented: $editingDayShape) {
             TripDayShapeView(planId: planId, onSaved: onSaved)
         }
+        .discardGuard(tracking: [model.title, model.pace, model.withChildren, model.limitedMobility,
+                                 model.isDated, model.startDate, model.voting,
+                                 model.interests] as [AnyHashable],
+                      ready: model.interestsLoaded, busy: model.isSaving)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     Task { await save(replan: true) }
@@ -211,6 +212,9 @@ final class TripPlanSettingsViewModel {
     /// than copied: two lists would drift the first time a tag is added
     /// to one of them, and the failure would be silent.
     private(set) var options: [TripInterestOption] = []
+    /// The interest list has been asked for and the ticks set from it;
+    /// from here on a difference in the form is an edit.
+    private(set) var interestsLoaded = false
 
     private let maxWalkMinutes: Int?
 
@@ -263,6 +267,7 @@ final class TripPlanSettingsViewModel {
     /// banner over the settings because a side list could not be
     /// fetched helps nobody.
     func loadInterests() async {
+        defer { interestsLoaded = true }
         struct Response: Decodable { let interests: [TripInterestOption] }
         do {
             let response: Response = try await APIClient.shared.get("/trip-planner/interests")

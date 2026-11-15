@@ -20,6 +20,8 @@ struct TripDayShapeView: View {
 
     @State private var blocks: [Block] = []
     @State private var loaded = false
+    /// The blocks from the server are in; edits count from here.
+    @State private var fetched = false
     @State private var saving = false
     @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
@@ -103,10 +105,8 @@ struct TripDayShapeView: View {
             .navigationTitle("Tagesablauf")
             .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: blocks, ready: fetched, busy: saving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .topBarTrailing) { EditButton() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -121,6 +121,7 @@ struct TripDayShapeView: View {
                 guard !loaded else { return }
                 loaded = true
                 await load()
+                fetched = true
             }
         }
     }

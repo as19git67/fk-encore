@@ -211,10 +211,9 @@ struct TripDayFillSheet: View {
             content
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
+                // Struck spots are the sheet's one edit.
+                .discardGuard(hasChanges: !dropped.isEmpty, busy: saving)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Abbrechen") { dismiss() }
-                    }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Übernehmen") {
                             Task { await accept() }

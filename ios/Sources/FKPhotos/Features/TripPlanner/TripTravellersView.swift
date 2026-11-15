@@ -359,10 +359,8 @@ struct TripManualTravellerSheet: View {
         }
         .navigationTitle("Jemanden eintragen")
         .navigationBarTitleDisplayMode(.inline)
+        .discardGuard(tracking: entry, busy: isSaving)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Sichern") {
                     guard let trimmedName = entry.trimmedName else { return }
