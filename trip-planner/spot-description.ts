@@ -28,7 +28,7 @@ import { tripPlanPool, tripPlanStops, tripSpotFame } from "../db/schema";
 import { articleTextFromHtml, prepareArticleText, quoteAppearsIn } from "./article";
 import { namesUnknownFact } from "./curation";
 import { getFameClient } from "./fame-client";
-import { askForJson, LlmServiceUnavailableError } from "./llm-client";
+import { askForJson, isLlmOutage } from "./llm-client";
 import { fetchSharedPage } from "./page-fetch";
 import { articleOf } from "./spot-fame";
 import { RECENT_DAYS } from "./spot-summary";
@@ -209,7 +209,7 @@ export async function describeSpots(
       try {
         found = await fromWebsite(row.name, row.website, deps);
       } catch (err) {
-        if (err instanceof LlmServiceUnavailableError) break; // tried again next tick
+        if (isLlmOutage(err)) break; // nothing was computed: tried again next tick
         log.info("trip spot description: website not usable", {
           osmRef: row.osm_ref, error: err instanceof Error ? err.message : String(err),
         });

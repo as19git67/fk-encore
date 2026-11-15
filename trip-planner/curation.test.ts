@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { CURATED_FLOOR, CURATED_TOP, MANUAL_SCORE, curatedScore, toCandidates } from "./candidates";
 import {
   buildCurationPrompt,
+  MAX_CURATION_PICKS,
   curationDue,
   gateCuration,
   groupLine,
@@ -38,6 +39,18 @@ describe("the prompt", () => {
     expect(prompt).toContain("Reisegruppe: 2 Erwachsene, 1 Kind (7).");
     expect(prompt).toContain("von den Reisenden selbst hinzugefügt");
     expect(prompt).toContain("keine Öffnungszeiten, keine Preise");
+  });
+});
+
+describe("a long list", () => {
+  it("asks for the best twenty only, so the answer fits", () => {
+    const many: CurationEntry[] = Array.from({ length: 45 }, (_, i) => ({
+      osmRef: `node:${i + 1}`, name: `Beispielort ${i + 1}`, category: "museum", reasons: [], text: null,
+    }));
+    const prompt = buildCurationPrompt(many, context);
+    expect(prompt).toContain(`aus 45 Orten die ${MAX_CURATION_PICKS} lohnendsten`);
+    expect(prompt).toContain(`Genau ${MAX_CURATION_PICKS} Orte`);
+    expect(prompt).toContain("node:45 | Beispielort 45");
   });
 });
 

@@ -63,6 +63,14 @@ export interface GateResult {
 
 /** More than this many entries are cut, best open-data score first. */
 export const MAX_CURATION_ENTRIES = 60;
+/**
+ * How many of them the model names, best first. The rest of the list
+ * follows by fame anyway (`orderBy` in `highlights.ts`), and a sentence
+ * for each of sixty places did not fit `max_tokens`: the answer was
+ * cut off, and the job asked again every five minutes. Twenty fill the
+ * first page and take a third of the time.
+ */
+export const MAX_CURATION_PICKS = 20;
 /** Fewer than this and there is nothing to order. */
 export const MIN_CURATION_ENTRIES = 3;
 /**
@@ -98,8 +106,12 @@ export function buildCurationPrompt(
       : "Interessen: alles.",
   ].filter((line): line is string => line !== null);
 
+  const picks = Math.min(entries.length, MAX_CURATION_PICKS);
+  const all = picks === entries.length;
   return [
-    `Du ordnest ${entries.length} Orte für eine Reise, den besten zuerst.`,
+    all
+      ? `Du ordnest ${entries.length} Orte für eine Reise, den besten zuerst.`
+      : `Du wählst aus ${entries.length} Orten die ${picks} lohnendsten für eine Reise, den besten zuerst.`,
     "",
     ...trip,
     "",
@@ -110,7 +122,9 @@ export function buildCurationPrompt(
     '  { "order": [ { "ref": "way:12", "why": "ein Satz" }, … ] }',
     "",
     "Regeln:",
-    "- Jeder Ort aus der Liste genau einmal, der lohnendste für diese Gruppe zuerst.",
+    all
+      ? "- Jeder Ort aus der Liste genau einmal, der lohnendste für diese Gruppe zuerst."
+      : `- Genau ${picks} Orte, jeder höchstens einmal, der lohnendste für diese Gruppe zuerst. Die übrigen lässt du weg.`,
     "- Nur Referenzen aus der Liste oben. Erfinde keine.",
     '- "why" ist ein kurzer Satz, warum dieser Ort auf diese Reise gehört.',
     '- In "why" nur, was oben steht: keine Öffnungszeiten, keine Preise, keine Zahlen, die oben fehlen.',

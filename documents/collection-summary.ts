@@ -35,6 +35,22 @@ export class LlmServiceUnavailableError extends Error {
   }
 }
 
+/**
+ * The service answered, but with nothing to use, or ran out of time: the
+ * model computed for nothing, and the same prompt does the same again.
+ */
+export class LlmAnswerUnusableError extends LlmServiceUnavailableError {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "LlmAnswerUnusableError";
+  }
+}
+
+/** Nobody computed anything (down, 503, no slot): worth the next tick. */
+export function isLlmOutage(err: unknown): boolean {
+  return err instanceof LlmServiceUnavailableError && !(err instanceof LlmAnswerUnusableError);
+}
+
 /** One member document, reduced to what the prompt needs. */
 export interface CollectionSummaryMember {
   title: string | null;
@@ -147,22 +163,22 @@ async function askForSummary(input: CollectionSummaryInput, timeoutMs: number): 
       signal: controller.signal,
     });
   } catch (err) {
-    throw new LlmServiceUnavailableError(
-      `llm-service /json-prompt failed: ${(err as Error)?.message ?? err}`,
-    );
+    const message = `llm-service /json-prompt failed: ${(err as Error)?.message ?? err}`;
+    if (controller.signal.aborted) throw new LlmAnswerUnusableError(message);
+    throw new LlmServiceUnavailableError(message);
   } finally {
     clearTimeout(timer);
   }
   if (!resp.ok) {
-    throw new LlmServiceUnavailableError(
-      `llm-service /json-prompt returned HTTP ${resp.status}`,
-    );
+    const message = `llm-service /json-prompt returned HTTP ${resp.status}`;
+    if (resp.status === 503 || resp.status === 429) throw new LlmServiceUnavailableError(message);
+    throw new LlmAnswerUnusableError(message);
   }
   let payload: unknown;
   try {
     payload = await resp.json();
   } catch (err) {
-    throw new LlmServiceUnavailableError(
+    throw new LlmAnswerUnusableError(
       `llm-service /json-prompt produced invalid JSON: ${(err as Error)?.message ?? err}`,
     );
   }

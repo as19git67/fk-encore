@@ -15,10 +15,10 @@
  * at all, so an electricity bill never costs an LLM call.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeDocumentSettlementLlm } from "../db/schema";
+import { financeDocumentSettlementLlm, financeDocumentSettlementLlmFailure } from "../db/schema";
 import { extractIsin, extractWkn } from "./depot-derivation";
 import {
   inspectSettlement,
@@ -37,7 +37,7 @@ import {
   type MergeResult,
   type SettlementValues,
 } from "./depot-settlement-merge";
-import { extractSettlementValues, LlmServiceUnavailableError } from "./llm-client";
+import { extractSettlementValues, isLlmOutage, LlmServiceUnavailableError } from "./llm-client";
 import { knownSecurities, snapToKnown, type KnownSecurities } from "./known-securities";
 
 export type LlmMode = "allow" | "cache-only" | "off";
@@ -60,6 +60,11 @@ export interface SettlementReading {
   llmSaysSettlement: boolean | null;
   merge: MergeResult;
   llmStatus: LlmStatus;
+  /**
+   * With `unavailable`: the model did answer, but with nothing to use.
+   * Recorded, so the hourly retry does not ask it every hour.
+   */
+  llmRefused?: boolean;
   /** Which source's name the text puts nearer the identifier, when they differ. */
   nameFrom: "rules" | "llm" | null;
   /** Where the text shows the model's values (see groundingOf). */
@@ -318,6 +323,21 @@ async function storedAnswer(documentId: number): Promise<Record<string, unknown>
   return row?.values ?? null;
 }
 
+/** One more failed try for this paper; the hourly retry counts them. */
+async function noteRefusal(documentId: number, error: string): Promise<void> {
+  await db
+    .insert(financeDocumentSettlementLlmFailure)
+    .values({ document_id: documentId, failures: 1, error: error.slice(0, 500) })
+    .onConflictDoUpdate({
+      target: financeDocumentSettlementLlmFailure.document_id,
+      set: {
+        failures: sql`${financeDocumentSettlementLlmFailure.failures} + 1`,
+        error: error.slice(0, 500),
+        failed_at: sql`now()`,
+      },
+    });
+}
+
 export async function readSettlement(
   documentId: number,
   text: string | null,
@@ -328,6 +348,7 @@ export async function readSettlement(
   let llm: SettlementValues | null = null;
   let llmSaysSettlement: boolean | null = null;
   let llmStatus: LlmStatus = mode === "off" ? "off" : "skipped";
+  let llmRefused = false;
 
   // Insurance paperwork and cost disclosures are settled by the rules alone: no LLM call for them.
   if (mode !== "off" && text && text.trim().length > 0 && !rulesAlone(rules)) {
@@ -357,6 +378,10 @@ export async function readSettlement(
           console.warn(`[finance] settlement LLM read failed for document=${documentId}:`, (err as Error).message);
         }
         llmStatus = "unavailable";
+        if (!isLlmOutage(err)) {
+          llmRefused = true;
+          await noteRefusal(documentId, (err as Error)?.message ?? String(err));
+        }
       }
     }
   }
@@ -381,6 +406,7 @@ export async function readSettlement(
     llmSaysSettlement,
     merge: snapToKnown(withNameFrom(mergeSettlement(fromRules, llm, new Date(), null, grounding), nameFrom), known),
     llmStatus,
+    ...(llmRefused ? { llmRefused } : {}),
     nameFrom,
     grounding,
     known,

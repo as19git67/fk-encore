@@ -13,6 +13,13 @@
  * asks one stay at a time through the same prompt and gate as the
  * candidate order (`curation.ts`). Until it has answered, the list is
  * ordered by fame alone and says "wird noch sortiert".
+ *
+ * The timer runs every five minutes, so whatever it retries it retries
+ * twelve times an hour. Only an outage (nobody computed anything) goes
+ * back to the queue, and not before `OUTAGE_PAUSE_MINUTES`; an answer
+ * cut off at `max_tokens` is final until the places change, and any
+ * other failure is tried `MAX_ATTEMPTS` times an hour apart. A tick
+ * with nothing due is one query.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -30,7 +37,7 @@ import {
   type CurationSignature,
 } from "./curation";
 import { askCurationModel, leadsFor } from "./highlights-model";
-import { LlmServiceUnavailableError } from "./llm-client";
+import { isLlmOutage, LlmAnswerUnusableError } from "./llm-client";
 import { parseArticleUrl } from "./wikipedia-client";
 
 type Db = typeof dbDefault;
@@ -45,6 +52,8 @@ export interface HighlightEntry extends CurationEntry {
 const STALE_RUN_MINUTES = 30;
 const MAX_ATTEMPTS = 3;
 const STAYS_PER_TICK = 3;
+/** After an outage the stay waits this long, rather than one tick. */
+const OUTAGE_PAUSE_MINUTES = 15;
 
 export interface StoredHighlights {
   status: HighlightsStatus;
@@ -98,6 +107,7 @@ export async function requestHighlightsOrder(
         requested_at: sql`now()`,
         attempts: 0,
         error: null,
+        finished_at: null,
       },
     });
   return "pending";
@@ -122,7 +132,9 @@ async function claimNext(db: Db): Promise<number | null> {
        SET status = 'running', started_at = now(), attempts = attempts + 1
      WHERE leg_id = (
        SELECT leg_id FROM trip_leg_highlights
-        WHERE status = 'pending'
+        WHERE (status = 'pending'
+               AND (finished_at IS NULL
+                    OR finished_at < now() - make_interval(mins => ${OUTAGE_PAUSE_MINUTES})))
            OR (status = 'running' AND started_at < now() - make_interval(mins => ${STALE_RUN_MINUTES}))
            OR (status = 'failed' AND attempts < ${MAX_ATTEMPTS}
                AND finished_at < now() - interval '1 hour')
@@ -166,14 +178,22 @@ export async function runHighlights(
     return "done";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (err instanceof LlmServiceUnavailableError) {
+    if (isLlmOutage(err)) {
+      // Not counted as an attempt; `finished_at` holds it back a while.
       await db.update(tripLegHighlights)
-        .set({ status: "pending", attempts: sql`greatest(${tripLegHighlights.attempts} - 1, 0)`, error: message })
+        .set({
+          status: "pending",
+          attempts: sql`greatest(${tripLegHighlights.attempts} - 1, 0)`,
+          error: message,
+          finished_at: sql`now()`,
+        })
         .where(and(eq(tripLegHighlights.leg_id, legId), eq(tripLegHighlights.status, "running")));
       return "unavailable";
     }
     log.warn("trip highlights order failed", { legId, error: message });
-    await finish(legId, { status: "failed", error: message }, db);
+    // The same prompt runs into the same cap: no retry until the places change.
+    const final = err instanceof LlmAnswerUnusableError && err.cutOff;
+    await finish(legId, { status: "failed", error: message, final }, db);
     return "failed";
   }
 }
@@ -190,12 +210,13 @@ async function withLeads(entries: readonly HighlightEntry[]): Promise<CurationEn
 
 async function finish(
   legId: number,
-  outcome: { status: "done" | "failed"; picks?: CuratedPick[] | null; error?: string },
+  outcome: { status: "done" | "failed"; picks?: CuratedPick[] | null; error?: string; final?: boolean },
   db: Db,
 ): Promise<void> {
   await db.update(tripLegHighlights)
     .set({
       status: outcome.status,
+      ...(outcome.final ? { attempts: MAX_ATTEMPTS } : {}),
       finished_at: sql`now()`,
       error: outcome.error ?? null,
       ...(outcome.picks !== undefined ? { picks: outcome.picks } : {}),
