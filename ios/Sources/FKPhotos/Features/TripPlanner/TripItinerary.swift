@@ -490,8 +490,8 @@ struct TripItineraryDraft: Equatable {
     }
 
     /// Whether anything about this journey is kept: a time, nights on
-    /// the way or a note. Its mode alone is not; without times the
-    /// server keeps no row for it.
+    /// the way or a note. Its mode alone is not "something to remove":
+    /// the server keeps it, but clearing only puts the guess back.
     func hasDetails(_ id: TripItineraryItem.ID) -> Bool {
         guard let journey = self[id] else { return false }
         return journey.departAt != nil || journey.arriveAt != nil || (journey.nights ?? 0) != 0
@@ -606,6 +606,14 @@ struct TripItineraryDraft: Equatable {
         }
         if hasHome, let last = fixed.last, last.isStay {
             fixed.append(TripItineraryItem.newJourney(from: last, to: nil))
+        }
+        // A journey read back without a mode (saved before the server
+        // kept the mode of open times) gets the guess a new one gets,
+        // not the "zu Fuß" an absent mode reads as.
+        for i in fixed.indices where fixed[i].isJourney && fixed[i].mode == nil {
+            let from: TripItineraryItem? = i > 0 ? fixed[i - 1] : nil
+            let to: TripItineraryItem? = i + 1 < fixed.count ? fixed[i + 1] : nil
+            fixed[i].mode = TripItineraryItem.newJourney(from: from, to: to).mode
         }
         items = fixed
     }

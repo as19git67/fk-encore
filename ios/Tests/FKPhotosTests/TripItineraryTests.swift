@@ -65,6 +65,17 @@ final class TripItineraryTests: XCTestCase {
         XCTAssertEqual(draft.item(focused: .journeyAfter(legId: 3))?.legId, 3)
     }
 
+    func testAJourneyReadWithoutAModeGetsTheGuessNotFoot() {
+        var open = TripItineraryItem(kind: .journey)
+        open.nights = 0
+        let draft = TripItineraryDraft(startDate: nil, hasHome: false, items: [
+            stay("Ort A", days: 2, mode: .car),
+            open,
+            stay("Ort B", days: 2, mode: .foot),
+        ])
+        XCTAssertEqual(draft.items[1].transportMode, .car)
+    }
+
     func testWithHomeTheWayThereAndBackAreJourneys() {
         let draft = TripItineraryDraft(startDate: nil, hasHome: true, items: [
             stay("Ort A", days: 3, legId: 1),

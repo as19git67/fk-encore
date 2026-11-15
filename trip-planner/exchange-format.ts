@@ -197,6 +197,9 @@ export interface ExchangeLeg {
   tenderPort: boolean;
   departureNote: string | null;
   arrivalNote: string | null;
+  /** Modes of those journeys while their times are open; absent in older files. */
+  departureMode?: TransportMode | null;
+  arrivalMode?: TransportMode | null;
   /** YYYY-MM-DD, or null for "Tag 1, Tag 2, …". */
   startDate: string | null;
   radiusM: number | null;
@@ -663,6 +666,8 @@ function readLeg(r: Reader, v: unknown, path: string): ExchangeLeg {
     tenderPort: r.bool(o.tenderPort, `${path}.tenderPort`),
     departureNote: r.optString(o.departureNote, `${path}.departureNote`),
     arrivalNote: r.optString(o.arrivalNote, `${path}.arrivalNote`),
+    departureMode: o.departureMode == null ? null : r.oneOf(o.departureMode, `${path}.departureMode`, MODES),
+    arrivalMode: o.arrivalMode == null ? null : r.oneOf(o.arrivalMode, `${path}.arrivalMode`, MODES),
     startDate: r.date(o.startDate, `${path}.startDate`),
     radiusM: r.optInt(o.radiusM, `${path}.radiusM`, { min: 0 }),
     dayStartsAt: r.optMinutes(o.dayStartsAt, `${path}.dayStartsAt`),
