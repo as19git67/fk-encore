@@ -467,7 +467,9 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 ### IOS-PLN-05 Reise und Ideen als Datei
 
 - Langes Drücken auf eine Reise in der Liste › „Als Datei exportieren …“
-  schreibt die ganze Reise als JSON (`*.reise.json`): Aufenthalte und
+  schreibt die ganze Reise als ZIP-Datei mit Titel, Datum und Uhrzeit im
+  Namen („Beispielreise 2026-11-14 23-40.zip“, Ortszeit des Telefons);
+  darin liegt eine gleichnamige, eingerückte JSON-Datei: Aufenthalte und
   Weiterreisen, Tage, Ausflüge, Pausen, feste Zeiten, Spots mit Status,
   Ideen, Notizen, ausgeblendete Spots, gewählte Wege und die von Hand
   eingetragenen Mitreisenden. Nicht dabei: mit wem die Reise geteilt ist,
@@ -477,17 +479,18 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   gehört; sie öffnet sich gleich. Eine bestehende Reise wird nie
   überschrieben oder zusammengeführt.
 - In „Ideen“ › Mehr-Menü: „Meine Ideen exportieren …“ schreibt die eigene
-  Sammlung als JSON (`*.ideen.json`), „Ideen aus Datei importieren …“
+  Sammlung als ZIP („Ideen 2026-11-14 23-40.zip“), „Ideen aus Datei importieren …“
   fügt sie der eigenen Sammlung hinzu. Was die Sammlung schon hat (gleiche
   OSM-Referenz), bleibt unverändert und wird als „schon vorhanden“ gezählt.
 - Im Mehr-Menü der Reiseliste schreibt „Alle Reisen und Ideen
   exportieren …“ jede Reise, auf der man ist, und die eigene
-  Ideensammlung in eine Datei (`*.reiseplaner.json`). „Alle Reisen und
+  Ideensammlung in eine Datei („Reiseplaner 2026-11-14 23-40.zip“). „Alle Reisen und
   Ideen importieren …“ legt jede Reise daraus neu an und ergänzt die
   Ideen wie oben, alles oder nichts.
-- Eine Datei, die nicht passt, wird ganz abgelehnt; die Meldung nennt die
+- Jeder Import nimmt die ZIP-Datei oder die nackte JSON-Datei (auch eine
+  aus einem älteren Export). Eine Datei, die nicht passt, wird ganz abgelehnt; die Meldung nennt die
   Stelle („reise.legs[0].days[1].blocks[0].stops[2].lat: Zahl erwartet“).
-  Format: `trip-planner/exchange-format.ts` (`format` „f4mil.trip“,
+  Datei: `trip-planner/exchange-file.ts`, Format: `trip-planner/exchange-format.ts` (`format` „f4mil.trip“,
   „f4mil.ideas“ bzw. „f4mil.tripplanner“, `version` 1).
 - **Test:** `trip-planner/exchange.test.ts`, `ios/Tests/FKPhotosTests/TripExchangeTests.swift`
 

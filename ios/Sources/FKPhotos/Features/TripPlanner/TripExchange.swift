@@ -1,13 +1,18 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// A trip or the idea collection as a JSON file, and back
-/// (`trip-planner/exchange.ts` on the server).
+/// A trip, the idea collection or everything as a ZIP file, and back
+/// (`trip-planner/exchange-file.ts` on the server).
 ///
-/// The app never decodes the file: the server writes it, the server
-/// reads it back and checks it field by field, so the format has one
-/// owner and an older app can still pass on a newer file.
+/// The app never opens the file: the server packs it, names it with
+/// date and time, unpacks it again and checks it field by field, so the
+/// format has one owner and an older app can still pass on a newer file.
 enum TripExchange {
+    /// What a file holds, as the server names it.
+    enum Kind: String, Codable, Sendable {
+        case trip, ideas, all
+    }
+
     struct ImportedTrip: Decodable, Sendable {
         let planId: Int
         let title: String?
@@ -23,13 +28,63 @@ enum TripExchange {
         let ideas: ImportedIdeas
     }
 
+    /// "Beispielreise 2026-11-14 23-40.zip" and its bytes.
+    struct ExportedFile: Sendable {
+        let fileName: String
+        let data: Data
+    }
+
+    struct ExportRequest: Encodable {
+        let what: Kind
+        let planId: Int?
+        let timeZone: String
+    }
+
+    struct ExportResponse: Decodable {
+        let fileName: String
+        let zip: String
+    }
+
+    struct ImportRequest: Encodable {
+        let file: String
+        let expect: Kind
+    }
+
+    struct ImportResponse: Decodable, Sendable {
+        let kind: Kind
+        let trips: [ImportedTrip]
+        let ideas: ImportedIdeas?
+    }
+
+    /// The server names the file in the phone's own time.
+    static func exportRequest(_ what: Kind, planId: Int? = nil,
+                              timeZone: TimeZone = .current) -> ExportRequest {
+        ExportRequest(what: what, planId: planId, timeZone: timeZone.identifier)
+    }
+
+    static func export(_ what: Kind, planId: Int? = nil) async throws -> ExportedFile {
+        let response: ExportResponse = try await APIClient.shared.post(
+            "/trip-planner/export-file", body: exportRequest(what, planId: planId), timeout: 120)
+        guard let data = Data(base64Encoded: response.zip) else { throw URLError(.cannotDecodeContentData) }
+        return ExportedFile(fileName: response.fileName, data: data)
+    }
+
+    /// The ZIP (or a bare JSON file from an older export) as it is.
+    /// A file of another kind than `expect` is refused by the server.
+    static func importFile(_ file: Data, expect: Kind) async throws -> ImportResponse {
+        try await APIClient.shared.post(
+            "/trip-planner/import-file",
+            body: ImportRequest(file: file.base64EncodedString(), expect: expect), timeout: 120)
+    }
+
     /// Every trip you are on and your own ideas, in one file.
-    static func exportPlanner() async throws -> Data {
-        try await APIClient.shared.downloadData("/trip-planner/export")
+    static func exportPlanner() async throws -> ExportedFile {
+        try await export(.all)
     }
 
     static func importPlanner(_ file: Data) async throws -> ImportedPlanner {
-        try await APIClient.shared.postJSONData("/trip-planner/import", json: wrapped(file))
+        let result = try await importFile(file, expect: .all)
+        return ImportedPlanner(trips: result.trips, ideas: result.ideas ?? ImportedIdeas(added: 0, skipped: 0))
     }
 
     /// "2 Reisen angelegt. 3 Ideen übernommen, 1 war schon vorhanden."
@@ -38,30 +93,27 @@ enum TripExchange {
         return "\(trips) \(ideasOutcome(result.ideas))"
     }
 
-    static func exportTrip(planId: Int) async throws -> Data {
-        try await APIClient.shared.downloadData("/trip-planner/plans/\(planId)/export")
+    static func exportTrip(planId: Int) async throws -> ExportedFile {
+        try await export(.trip, planId: planId)
     }
 
     static func importTrip(_ file: Data) async throws -> ImportedTrip {
-        try await APIClient.shared.postJSONData("/trip-planner/plans/import", json: wrapped(file))
+        let result = try await importFile(file, expect: .trip)
+        guard let trip = result.trips.first else { throw URLError(.cannotParseResponse) }
+        return trip
     }
 
-    static func exportIdeas() async throws -> Data {
-        try await APIClient.shared.downloadData("/trip-planner/ideas/export")
+    static func exportIdeas() async throws -> ExportedFile {
+        try await export(.ideas)
     }
 
     static func importIdeas(_ file: Data) async throws -> ImportedIdeas {
-        try await APIClient.shared.postJSONData("/trip-planner/ideas/import", json: wrapped(file))
+        try await importFile(file, expect: .ideas).ideas ?? ImportedIdeas(added: 0, skipped: 0)
     }
 
-    /// The endpoints take `{ "data": <file> }`. The file goes in as it
-    /// is, byte for byte; if it is no JSON at all the server says so.
-    static func wrapped(_ file: Data) -> Data {
-        var body = Data(#"{"data":"#.utf8)
-        body.append(file)
-        body.append(Data("}".utf8))
-        return body
-    }
+    /// What the file picker offers: the ZIP, and the bare JSON of an
+    /// export made before the ZIP.
+    static let importTypes: [UTType] = [.zip, .json]
 
     /// Reads a file the document picker handed over. Files from iCloud
     /// or another app are security-scoped and must be opened as such.
@@ -69,14 +121,6 @@ enum TripExchange {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         return try Data(contentsOf: url)
-    }
-
-    /// "Beispielreise.reise.json" — readable in Files, safe on every disk.
-    static func fileName(_ title: String, suffix: String) -> String {
-        let banned = CharacterSet(charactersIn: "/\\:?%*|\"<>")
-        let cleaned = title.components(separatedBy: banned).joined(separator: "-")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(cleaned.isEmpty ? "Reise" : cleaned).\(suffix)"
     }
 
     /// "3 Ideen übernommen, 2 schon vorhanden."
@@ -90,7 +134,7 @@ enum TripExchange {
 
 /// The bytes of an exported file, for `.fileExporter`.
 struct TripExchangeDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
+    static var readableContentTypes: [UTType] { [.zip] }
     var data: Data
 
     init(data: Data) { self.data = data }

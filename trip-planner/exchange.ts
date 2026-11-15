@@ -74,7 +74,7 @@ import {
 type Db = typeof db;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
-function requireUser(): number {
+export function requireUser(): number {
   const auth = getAuthData();
   if (!auth) throw APIError.unauthenticated("Unauthorized");
   requirePermission(auth, "photos.view");
@@ -644,7 +644,7 @@ export async function importPlanner(file: PlannerFile, userId: number): Promise<
 // ---------------------------------------------------------------------------
 
 /** A file that does not fit, as one sentence naming where. */
-function refuse(error: unknown): never {
+export function refuse(error: unknown): never {
   if (error instanceof ExchangeFileError) {
     throw APIError.invalidArgument(`Die Datei passt nicht: ${error.message}`)
       .withDetails({ problems: error.problems });

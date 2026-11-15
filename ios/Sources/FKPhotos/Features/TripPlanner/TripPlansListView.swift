@@ -55,7 +55,7 @@ struct TripPlansListView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// A trip written out as a file, waiting for "Sichern unter".
     @State private var exportFile: TripExchangeDocument?
-    @State private var exportName = "Reise.reise.json"
+    @State private var exportName = "Reise.zip"
     @State private var isImporting = false
     /// What the one file picker reads: a single trip, or everything.
     /// One picker for both, because two `.fileImporter`s on one view
@@ -119,12 +119,12 @@ struct TripPlansListView: View {
         view
         .fileExporter(isPresented: Binding(
             get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
-                      document: exportFile, contentType: .json,
+                      document: exportFile, contentType: .zip,
                       defaultFilename: exportName) { result in
             if case .failure(let error) = result { actionError = error.localizedDescription }
             exportFile = nil
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json], onCompletion: picked)
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: TripExchange.importTypes, onCompletion: picked)
         .alert("Import", isPresented: Binding(
             get: { exchangeMessage != nil }, set: { if !$0 { exchangeMessage = nil } })) {
             Button("OK", role: .cancel) { exchangeMessage = nil }
@@ -452,12 +452,13 @@ struct TripPlansListView: View {
         }
     }
 
-    /// The whole trip as JSON, then the system's "Sichern unter".
+    /// The whole trip as a ZIP named with date and time, then the
+    /// system's "Sichern unter".
     private func exportTrip(_ plan: TripPlanSummary) async {
         do {
-            let data = try await TripExchange.exportTrip(planId: plan.id)
-            exportName = TripExchange.fileName(plan.displayTitle, suffix: "reise.json")
-            exportFile = TripExchangeDocument(data: data)
+            let file = try await TripExchange.exportTrip(planId: plan.id)
+            exportName = file.fileName
+            exportFile = TripExchangeDocument(data: file.data)
         } catch {
             actionError = TripErrorText.describe(error)
         }
@@ -475,12 +476,12 @@ struct TripPlansListView: View {
         }
     }
 
-    /// Every trip and your own ideas as one JSON file.
+    /// Every trip and your own ideas as one ZIP file.
     private func exportEverything() async {
         do {
-            let data = try await TripExchange.exportPlanner()
-            exportName = "Reiseplaner.reiseplaner.json"
-            exportFile = TripExchangeDocument(data: data)
+            let file = try await TripExchange.exportPlanner()
+            exportName = file.fileName
+            exportFile = TripExchangeDocument(data: file.data)
         } catch {
             actionError = TripErrorText.describe(error)
         }

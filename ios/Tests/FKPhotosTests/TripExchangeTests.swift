@@ -1,21 +1,36 @@
 import XCTest
+import UniformTypeIdentifiers
 @testable import FKPhotosLib
 
-/// A trip or the idea collection as a file (`TripExchange`).
+/// A trip or the idea collection as a ZIP file (`TripExchange`).
 final class TripExchangeTests: XCTestCase {
-    func testTheFileGoesInByteForByte() throws {
-        let file = Data(#"{"format":"f4mil.ideas","version":1,"ideas":[]}"#.utf8)
-        let body = TripExchange.wrapped(file)
+    func testTheExportAsksForTheNameInThePhonesOwnTime() throws {
+        let zone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let body = try JSONEncoder().encode(TripExchange.exportRequest(.trip, planId: 7, timeZone: zone))
         let decoded = try JSONSerialization.jsonObject(with: body) as? [String: Any]
-        let inner = decoded?["data"] as? [String: Any]
-        XCTAssertEqual(inner?["format"] as? String, "f4mil.ideas")
-        XCTAssertEqual(inner?["version"] as? Int, 1)
+        XCTAssertEqual(decoded?["what"] as? String, "trip")
+        XCTAssertEqual(decoded?["planId"] as? Int, 7)
+        XCTAssertEqual(decoded?["timeZone"] as? String, "America/Los_Angeles")
     }
 
-    func testAFileNameSurvivesEveryDisk() {
-        XCTAssertEqual(TripExchange.fileName("Beispiel/Reise: Teil 2", suffix: "reise.json"),
-                       "Beispiel-Reise- Teil 2.reise.json")
-        XCTAssertEqual(TripExchange.fileName("  ", suffix: "reise.json"), "Reise.reise.json")
+    func testTheFileGoesInByteForByte() throws {
+        let file = Data([0x50, 0x4b, 0x03, 0x04, 0xff])
+        let body = try JSONEncoder().encode(TripExchange.ImportRequest(file: file.base64EncodedString(), expect: .ideas))
+        let decoded = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        XCTAssertEqual((decoded?["file"] as? String).flatMap { Data(base64Encoded: $0) }, file)
+        XCTAssertEqual(decoded?["expect"] as? String, "ideas")
+    }
+
+    func testTheImportAnswerOfOneTripHasNoIdeas() throws {
+        let json = Data(#"{"kind":"trip","trips":[{"planId":3,"title":"Beispielreise"}],"ideas":null}"#.utf8)
+        let answer = try JSONDecoder().decode(TripExchange.ImportResponse.self, from: json)
+        XCTAssertEqual(answer.kind, .trip)
+        XCTAssertEqual(answer.trips.first?.planId, 3)
+        XCTAssertNil(answer.ideas)
+    }
+
+    func testThePickerTakesTheZipAndAnOlderJsonFile() {
+        XCTAssertEqual(TripExchange.importTypes, [.zip, .json])
     }
 
     func testTheOutcomeSaysWhatWasLeftAlone() {
