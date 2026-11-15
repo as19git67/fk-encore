@@ -62,6 +62,9 @@ struct TripSpotDetailView<Actions: View>: View {
     /// What the fields hold while somebody types. Saved when a field
     /// is left, a switch or menu changes, or the screen goes away.
     @State private var draft: TripSpotEdit
+    /// Finished saves, so the evening light asks again once a switched
+    /// "Fotostopp" is on the server.
+    @State private var saves = 0
     @FocusState private var focus: TripSpotEditField?
     /// The kind just picked, shown until the caller hands a new spot.
     @State private var shownCategory: String?
@@ -164,7 +167,7 @@ struct TripSpotDetailView<Actions: View>: View {
             }
 
             if let stayLight {
-                TripStaySpotLightSection(ref: stayLight, onAccepted: onStayLightAccepted)
+                TripStaySpotLightSection(ref: stayLight, revision: saves, onAccepted: onStayLightAccepted)
             }
 
             if bar == nil {
@@ -533,7 +536,10 @@ struct TripSpotDetailView<Actions: View>: View {
         let base = TripSpotEdit(spot)
         guard draft.osmRef == base.osmRef, draft.needsSaving(against: base) else { return }
         let edit = draft.trimmed
-        Task { await onSave(edit) }
+        Task {
+            await onSave(edit)
+            saves += 1
+        }
     }
 
     /// "Art", which the people planning can change where the caller

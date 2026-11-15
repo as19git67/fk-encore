@@ -61,6 +61,11 @@ enum TripStaySpotLightText {
 /// view, without a date, or that is not part of the stay.
 struct TripStaySpotLightSection: View {
     let ref: TripStayLightRef
+    /// Counts the saves of the spot in the details around it. Switching
+    /// "Fotostopp" on is what makes the server answer with a light, and
+    /// the details may hold a copy of the spot that never reloads (the
+    /// spot picker), so the section asks again after every save.
+    var revision: Int = 0
     /// After "+ Tag n am Abend": the trip changed, the caller reloads.
     let onAccepted: () async -> Void
 
@@ -70,7 +75,19 @@ struct TripStaySpotLightSection: View {
 
     var body: some View {
         Group {
-            if let light, light.applies, !light.days.isEmpty {
+            if let light, light.applies, light.days.isEmpty {
+                // Marked, and still nothing to offer: said, rather than
+                // a switch that seems to do nothing.
+                Section {
+                    Text(ref.startDate == nil
+                         ? "Sobald die Reise ein Datum hat, steht hier das beste Abendlicht."
+                         : "An euren Tagen gibt es hier kein brauchbares Abendlicht.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Label("Abendlicht", systemImage: "sun.horizon")
+                }
+            } else if let light, light.applies {
                 Section {
                     if let range = TripStaySpotLightText.range(light.days) {
                         LabeledContent("Bestes Licht an euren Tagen", value: range)
@@ -114,7 +131,12 @@ struct TripStaySpotLightSection: View {
                 }
             }
         }
-        .task(id: ref) { await load() }
+        .task(id: LoadKey(ref: ref, revision: revision)) { await load() }
+    }
+
+    private struct LoadKey: Hashable {
+        let ref: TripStayLightRef
+        let revision: Int
     }
 
     private func load() async {
