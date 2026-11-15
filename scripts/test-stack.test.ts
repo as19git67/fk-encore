@@ -72,6 +72,11 @@ describe("the upgrade check (stage 3) and the gate in CI (stage 4)", () => {
     expect(service).toMatch(/target: \/mnt\/prod-backup\n {8}read_only: true\n {8}bind:\n {10}create_host_path: false/);
     const docker = read("docker/Dockerfile.runtime");
     expect(docker).toMatch(/scripts\/upgrade-check\/schema\.mjs[\s\S]*scripts\/upgrade-check\/upgrade-check\.mjs[\s\S]*\/opt\/fk-encore\/upgrade-check\//);
+    // `scripts` is excluded from the build context; the COPY needs exceptions.
+    const ignore = read(".dockerignore").split("\n");
+    for (const file of ["scripts/upgrade-check/schema.mjs", "scripts/upgrade-check/upgrade-check.mjs"]) {
+      expect(ignore).toContain(`!${file}`);
+    }
   });
 
   it("lets the test stack's Watchtower replace the check container, next to everything prod's names", () => {

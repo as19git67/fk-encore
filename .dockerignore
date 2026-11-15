@@ -34,6 +34,10 @@ scripts
 !scripts/host/install-backup-hook.sh
 !scripts/host/fk-encore-backup.sh
 !scripts/host/README.md
+# The upgrade check runs with the image's own node (docker-compose.test.yml).
+!scripts/upgrade-check
+!scripts/upgrade-check/schema.mjs
+!scripts/upgrade-check/upgrade-check.mjs
 test_output.txt
 tsconfig.tsbuildinfo
 data
