@@ -298,7 +298,10 @@ directory, the ones the boot uses:
    functions and triggers, read from the catalog rather than from a text
    dump, so column order and dump formatting cannot raise a false alarm. A
    skipped migration, as in #1919, shows twice: as an unapplied entry and
-   as a missing column. `UPGRADE_CHECK_IGNORE` leaves out key prefixes,
+   as a missing column. Only entries after the last one the copy had
+   recorded count as unapplied: an older entry prod never recorded is
+   history (0314, skipped and then repaired by 0316, stays unrecorded for
+   good), and only its effect on the schema is checked. `UPGRADE_CHECK_IGNORE` leaves out key prefixes,
    for a difference prod carried from before the check.
 5. Drop both databases.
 6. Report the result for the image's commit to GitHub as the commit status
