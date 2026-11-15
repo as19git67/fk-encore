@@ -106,10 +106,9 @@ struct AlbumSettingsView: View {
             }
             .navigationTitle("Album-Einstellungen")
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: [name, albumDescription, mapEnabled] as [AnyHashable],
+                          busy: isSaving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     if isSaving {
                         ProgressView()

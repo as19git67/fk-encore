@@ -338,10 +338,10 @@ struct TripFixpointSheet: View {
             }
             .navigationTitle("Feste Zeit")
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: [place, label, kind, time, travelMinutes, durationMinutes,
+                                     spot, pinReason, dayIndex] as [AnyHashable],
+                          ready: seeded, busy: saving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         saving = true

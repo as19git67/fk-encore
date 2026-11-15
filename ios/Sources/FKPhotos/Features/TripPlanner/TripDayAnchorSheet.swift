@@ -85,6 +85,9 @@ struct TripDayAnchorSheet: View {
     @State private var span = Span.window
     /// What the server said when saving failed.
     @State private var failure: String?
+    /// The form holds what the sheet was opened with; from here on a
+    /// difference is an edit.
+    @State private var adopted = false
     @Environment(\.dismiss) private var dismiss
 
     private var windowed: Bool { onSaveWindow != nil && span == .window }
@@ -240,10 +243,10 @@ struct TripDayAnchorSheet: View {
             }
             .navigationTitle(after != nil && excursion == nil ? "Weiteres Ziel" : "Ausflug")
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: [place, reach, saysDeparture, saysReturn, departure, back,
+                                     span] as [AnyHashable],
+                          ready: adopted, busy: saving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         guard let place else { return }
@@ -271,7 +274,10 @@ struct TripDayAnchorSheet: View {
                     .disabled(saving || place == nil || !hoursAddUp)
                 }
             }
-            .onAppear(perform: adoptCurrent)
+            .onAppear {
+                adoptCurrent()
+                adopted = true
+            }
         }
     }
 

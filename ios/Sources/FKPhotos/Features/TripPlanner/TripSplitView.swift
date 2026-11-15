@@ -106,10 +106,10 @@ struct TripSplitView: View {
             .navigationTitle("\(blockLabel): Gruppe trennen")
             .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: [meetAt, meetingLabel, branches.map(\.label),
+                                     branches.map(\.osmRef)] as [AnyHashable],
+                          ready: !isLoading, busy: isSaving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task { await save() }

@@ -154,10 +154,8 @@ struct AlbumViewConfigSheet: View {
             }
             .navigationTitle("Eigene Ansicht")
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: config)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Anwenden") {
                         config = config.clamped(memberCount: memberCount)

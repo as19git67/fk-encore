@@ -79,10 +79,8 @@ struct TripSharePickerView: View {
             }
             .navigationTitle("Fund übernehmen")
             .navigationBarTitleDisplayMode(.inline)
+            .discardGuard(tracking: [title, note] as [AnyHashable])
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Weiter") { navigateToReview = true }
                         .disabled(selectedPlanId == nil)

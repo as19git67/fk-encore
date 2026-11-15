@@ -159,11 +159,8 @@ struct TripStaySheet: View {
         }
         .navigationTitle(purpose == .new ? "Neuer Aufenthalt" : "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
-        .interactiveDismissDisabled(saving)
+        .discardGuard(tracking: draft, busy: saving)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     Task { await save() }
@@ -462,11 +459,8 @@ struct TripJourneySheet: View {
         }
         .navigationTitle(draft.name(of: journey))
         .navigationBarTitleDisplayMode(.inline)
-        .interactiveDismissDisabled(saving)
+        .discardGuard(tracking: draft, busy: saving)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     Task { await save() }
@@ -661,7 +655,7 @@ struct TripPortSheet: View {
         }
         .navigationTitle("Neuer Hafen")
         .navigationBarTitleDisplayMode(.inline)
-        .interactiveDismissDisabled(saving)
+        .discardGuard(hasChanges: place != nil, busy: saving)
         .onChange(of: ashoreAfter) { _, value in
             if aboardAfter < value { aboardAfter = value }
         }
@@ -670,9 +664,6 @@ struct TripPortSheet: View {
             aboardAfter = ashoreAfter
         }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     Task { await save() }

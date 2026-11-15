@@ -140,10 +140,8 @@ struct PhotoMetadataView: View {
                     .padding()
                     .navigationTitle("Datum ändern")
                     .navigationBarTitleDisplayMode(.inline)
+                    .discardGuard(tracking: editedDate, onCancel: { showDatePicker = false })
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Abbrechen") { showDatePicker = false }
-                        }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("Speichern") {
                                 showDatePicker = false

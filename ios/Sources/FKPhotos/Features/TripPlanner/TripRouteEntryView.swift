@@ -169,6 +169,9 @@ struct TripRouteEntryView: View {
         .navigationTitle("Strecke anlegen")
         .navigationBarTitleDisplayMode(.inline)
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
+        .discardGuard(tracking: [model.name, model.note, model.durationMinutes, model.lengthText,
+                                 model.ascentText, model.start, model.end] as [AnyHashable],
+                      busy: model.isSaving)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Sichern") {
