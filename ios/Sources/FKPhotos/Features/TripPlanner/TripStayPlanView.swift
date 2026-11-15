@@ -124,9 +124,14 @@ struct TripStayPlanView: View {
                 await acceptFill(days, fromMinutes: request.fromMinutes)
             }
         }
+        // The sheet's "Abbrechen" and "Fertig" sit in its toolbar, which
+        // only shows inside a navigation stack. Without it the sheet had
+        // no way to save: a swipe down closed it and dropped the edits.
         .sheet(item: $editingStay) { editing in
-            TripStaySheet(draft: editing.draft, stayId: editing.id, purpose: .edit,
-                          onCommit: { next in await commitStay(next) })
+            NavigationStack {
+                TripStaySheet(draft: editing.draft, stayId: editing.id, purpose: .edit,
+                              onCommit: { next in await commitStay(next) })
+            }
         }
         .toolbar {
             // A sign that the server is working, so a change that takes a
