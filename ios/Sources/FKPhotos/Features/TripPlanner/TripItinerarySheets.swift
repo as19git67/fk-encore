@@ -382,8 +382,8 @@ struct TripJourneySheet: View {
                 if timesOpen {
                     Text("Solange die Zeiten offen sind, rechnet der Tag mit Vorgaben: Abfahrt 10:00, "
                          + "Ankunft 15:00, Anreise von Zuhause ab 08:00.")
-                } else if let shift = TripItineraryText.zoneShift(journey.zoneShiftMinutes) {
-                    Text("Ortszeit. Die Uhr springt auf dieser Fahrt um \(shift).")
+                } else if let shift = TripItineraryText.zoneShiftSentence(journey.zoneShiftMinutes) {
+                    Text("Ortszeit, am Ort der Abfahrt und am Ort der Ankunft. \(shift)")
                 } else {
                     Text("Ortszeit, am Ort der Abfahrt und am Ort der Ankunft.")
                 }

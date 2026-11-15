@@ -481,13 +481,13 @@ struct TripItineraryView: View {
                         }
                     }
                     Spacer(minLength: 6)
-                    if let shift = TripItineraryText.zoneShift(journey.zoneShiftMinutes) {
+                    if let shift = TripItineraryText.zoneShiftBadge(journey.zoneShiftMinutes) {
                         Text(shift)
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(.quaternary, in: .capsule)
-                            .accessibilityLabel("Zeitverschiebung \(shift)")
+                            .accessibilityLabel(TripItineraryText.zoneShiftSentence(journey.zoneShiftMinutes) ?? shift)
                     }
                     if let start = dated.startDate {
                         Text(TripItineraryText.shortDate(start))

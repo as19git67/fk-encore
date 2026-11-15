@@ -81,6 +81,12 @@ final class TripItineraryStayDaysTests: XCTestCase {
         XCTAssertEqual(TripItineraryText.zoneShift(330), "+5 h 30")
         XCTAssertNil(TripItineraryText.zoneShift(0))
         XCTAssertNil(TripItineraryText.zoneShift(nil))
+        XCTAssertEqual(TripItineraryText.zoneShiftBadge(-60), "Uhr −1 h")
+        XCTAssertNil(TripItineraryText.zoneShiftBadge(0))
+        XCTAssertEqual(TripItineraryText.zoneShiftSentence(-60), "Am Ziel wird die Uhr 1 h zurückgestellt.")
+        XCTAssertEqual(TripItineraryText.zoneShiftSentence(330), "Am Ziel wird die Uhr 5 h 30 min vorgestellt.")
+        XCTAssertEqual(TripItineraryText.zoneShiftSentence(30), "Am Ziel wird die Uhr 30 min vorgestellt.")
+        XCTAssertNil(TripItineraryText.zoneShiftSentence(nil))
     }
 
     func testATripWithoutADateCountsItsDays() {
