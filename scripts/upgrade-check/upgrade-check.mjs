@@ -49,6 +49,7 @@ import {
   describeResult,
   describeSchema,
   diffSchemas,
+  newEntries,
   pendingEntries,
   safeError,
   unappliedEntries,
@@ -214,7 +215,12 @@ export async function runCheck({
     }
 
     const after = await withClient(deps, copyUrl, migrationRows);
-    const unapplied = unappliedEntries(journal, after, hashes).map((e) => e.tag);
+    const fresh = new Set(newEntries(journal, before, hashes).map((e) => e.tag));
+    const unrecorded = unappliedEntries(journal, after, hashes).map((e) => e.tag);
+    const unapplied = unrecorded.filter((tag) => fresh.has(tag));
+    for (const tag of unrecorded.filter((tag) => !fresh.has(tag))) {
+      log(`never recorded on prod, older than its newest migration (ignored, the schema decides): ${tag}`);
+    }
     const copySchema = await withClient(deps, copyUrl, describeSchema);
     const freshSchema = await withClient(deps, freshUrl, describeSchema);
     const differences = diffSchemas(copySchema, freshSchema, ignore);

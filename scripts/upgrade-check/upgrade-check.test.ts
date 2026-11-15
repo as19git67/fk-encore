@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 // Plain JavaScript that runs in the image without a build step; loaded at
 // run time so the TypeScript tooling never has to resolve it.
-const { commitOf, describeResult, diffSchemas, pendingEntries, safeError, unappliedEntries } = await import(
+const { commitOf, describeResult, diffSchemas, newEntries, pendingEntries, safeError, unappliedEntries } = await import(
   "./schema.mjs" as string
 );
 const { loadDeps, newestDump, runCheck } = await import("./upgrade-check.mjs" as string);
@@ -51,6 +51,14 @@ describe("schema comparison", () => {
     // Drizzle's rule: only entries younger than the newest row are applied.
     expect(pendingEntries(journal, 3000)).toEqual([]);
     expect(pendingEntries(journal, null)).toHaveLength(3);
+  });
+
+  it("counts as new only the entries after the last one the database recorded", () => {
+    const journal = { entries: [{ tag: "0001_a", when: 1000 }, { tag: "0002_b", when: 500 }, { tag: "0003_c", when: 3000 }, { tag: "0004_d", when: 2000 }] };
+    // 0002_b was skipped long ago and repaired by 0003_c: history, not new.
+    const before = [{ created_at: "1000", hash: "h1" }, { created_at: "3000", hash: "h3" }];
+    expect(newEntries(journal, before).map((e: { tag: string }) => e.tag)).toEqual(["0004_d"]);
+    expect(newEntries(journal, [])).toHaveLength(4);
   });
 
   it("reads the commit from APP_BUILD_NUMBER", () => {
@@ -172,6 +180,19 @@ describe("runCheck", () => {
     expect(result.unapplied).toEqual(["0002_watch_from"]);
     expect(result.differences).toEqual([{ kind: "missing", key: "column:public.items.watch_from" }]);
     expect(describeResult(result)).toBe("skipped on the copy of prod: 0002_watch_from");
+  });
+
+  it("passes when prod never recorded an old skipped migration that a later one repaired (0314 and 0316)", async () => {
+    const repair = { tag: "0003_repair", when: 5_000, sql: "-- repeats 0002\nALTER TABLE items ADD COLUMN IF NOT EXISTS watch_from date;" };
+    // Prod's history: 0002 never ran (skipped), 0003 repaired it.
+    const prod = folder([...base, repair]);
+    const candidate = folder([
+      ...base,
+      { tag: "0002_watch_from", when: 2_000, sql: "ALTER TABLE items ADD COLUMN watch_from date;" },
+      repair,
+    ]);
+    const result = await check(prod, candidate);
+    expect(result).toMatchObject({ state: "success", applied: 0, unapplied: [], differences: [] });
   });
 
   it("fails on a migration that prod's rows break, naming it and the error code only", async () => {

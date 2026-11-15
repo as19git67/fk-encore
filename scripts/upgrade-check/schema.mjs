@@ -163,6 +163,26 @@ export function unappliedEntries(journal, rows, hashes = new Map()) {
 }
 
 /**
+ * Journal entries that came after everything the database had recorded
+ * before the candidate's migrations ran: the candidate's own new
+ * migrations. An older entry the database never recorded is history — a
+ * migration skipped long ago and repaired by a later one (0314 by 0316,
+ * #1919) stays unrecorded for good — and only its effect on the schema
+ * counts, which the comparison checks.
+ */
+export function newEntries(journal, rowsBefore, hashes = new Map()) {
+  const recorded = new Set(appliedPositions(journal, rowsBefore, hashes));
+  const last = recorded.size ? Math.max(...recorded) : -1;
+  return journal.entries.filter((_, i) => i > last);
+}
+
+function appliedPositions(journal, rows, hashes) {
+  const when = new Set(rows.map((r) => Number(r.created_at)));
+  const hash = new Set(rows.map((r) => r.hash));
+  return journal.entries.flatMap((e, i) => (when.has(Number(e.when)) || hash.has(hashes.get(e.tag)) ? [i] : []));
+}
+
+/**
  * Journal entries that the migrator would apply to a database whose newest
  * recorded migration is `lastCreatedAt` — the same rule as Drizzle's
  * `migrate()`: only entries younger than the newest row.

@@ -208,8 +208,9 @@ gate on, CI then calls the test stack's Watchtower, which replaces the `upgrade_
    `encore_upgrade_check` on the test stack's postgres,
 2. runs the image's migrations on it with the same migrator as the boot,
    and on an empty `encore_upgrade_fresh`,
-3. fails when a journal entry was not applied on the copy (the skip of
-   #1919), when a migration fails on prod's rows, or when the two schemas
+3. fails when one of the image's new journal entries was not applied on
+   the copy (the skip of #1919; an old entry prod never recorded, such as
+   0314 repaired by 0316, only counts through the schema), when a migration fails on prod's rows, or when the two schemas
    differ in a table, column, constraint, index, enum, view, function or
    trigger,
 4. drops both databases and writes the commit status
