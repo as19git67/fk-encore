@@ -1,5 +1,7 @@
 # Home systems: maintenance handbook and optional readings (Haus › Anlagen)
 
+Issue #1926.
+
 A household keeps a lot of knowledge about its house that lives nowhere
 else: how the filters of the ventilation unit are changed and which ones
 fit, which wrench opens which tap aerator, what has to happen to the
