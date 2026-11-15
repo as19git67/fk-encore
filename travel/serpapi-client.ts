@@ -9,6 +9,7 @@
  * The client is a seam: the tests set a fake with `setHotelSearchClient`.
  */
 
+import { assertOutbound, outbound } from "../lib/environment";
 import { secret } from "encore.dev/config";
 
 export interface HotelSearchParams {
@@ -68,6 +69,7 @@ export function createSerpApiClient(key: string, fetchImpl: typeof fetch = fetch
 
     let res: Response;
     try {
+      assertOutbound("serpapi");
       res = await fetchImpl(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
     } catch (err) {
       throw new HotelSearchError(`SerpApi nicht erreichbar: ${err instanceof Error ? err.message : err}`);
@@ -135,6 +137,8 @@ export function setHotelSearchClient(client: HotelSearchClient | null | undefine
 
 export function hotelSearchClient(): HotelSearchClient | null {
   if (override !== undefined) return override;
+  // Off in the dev stack unless DEV_OUTBOUND_SERPAPI=on: "no key configured".
+  if (outbound("serpapi") === "off") return null;
   let key = "";
   try {
     key = serpApiKey().trim();

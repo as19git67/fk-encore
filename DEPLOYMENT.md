@@ -161,13 +161,34 @@ bash /path/to/prod/data/backup/host-scripts/test-refresh.sh "$PWD/.env"
   flight watches and the scheduled exports, and switches off the jobs that
   act outward on their own (Admin › Jobs shows them, one can be switched on
   by hand for a test).
-- **Nothing goes out with prod's keys.** `docker-compose.test.yml` sends
-  every mail to a mail catcher (`DEPLOY_HOST_PORT_MAIL`, default 18025),
-  gives push, APNs, printing, SerpApi and EODHD no key, and points the app
-  at prod's llm-service (`TEST_PROD_NETWORK`, `DEPLOY_LLM_SERVICE_URL`, as
-  for the demo; prod has to be up first). Its own aesthetic service does
+- **Nothing goes out on its own.** `APP_ENVIRONMENT=dev` gives every
+  outbound path a mode `off | redirect | on` (`lib/environment.ts`), set
+  with `DEV_OUTBOUND_<KIND>` in the env file:
+
+  | Kind | Default | `redirect` |
+  |---|---|---|
+  | `MAIL` | `redirect` | every mail to the mail catcher (`DEPLOY_HOST_PORT_MAIL`, default 18025), whatever the recipient |
+  | `PUSH` (Web Push, APNs, Live Activities) | `off` | — |
+  | `FINTS` | `off` | — |
+  | `SERPAPI` (hotel and flight watches) | `off` | — |
+  | `EODHD` | `off` | — (Onvista quotes and Yahoo news need no key and stay on) |
+  | `PRINT` | `off` | a PNG per label in `<data root>/backup/dev-print` |
+  | `LLM` (background work on prod's llm-service) | `off` | — |
+
+  `off` sends nothing: the path reports itself unconfigured, and its
+  lowest layer refuses. `on` sends for real with the key the env file
+  gives — test's own, never prod's. Jobs that use an off path start
+  paused on every boot (Admin › Jobs: "aus (Dev)", can be switched on by
+  hand until the next restart); with `LLM` off, classification, tag
+  suggestions and the nightly aesthetic run wait in their queues while a
+  user's own request (the assistant, a critique) still runs. The app talks
+  to prod's llm-service (`TEST_PROD_NETWORK`, `DEPLOY_LLM_SERVICE_URL`, as
+  for the demo; prod has to be up first); its own aesthetic service does
   not start. `FINANCE_CREDENTIALS_KEY` is test's own, so copied bank logins
-  could not be decrypted even if the scrub missed one.
+  could not be decrypted even if the scrub missed one. Every page shows a
+  thin "Dev · Kopie vom …" bar and every title starts with "Dev ·"; the
+  date comes from the `.test-copy` the refresh writes into the backup
+  volume.
 - **Reachable only on the LAN or VPN**, never through the public reverse
   proxy: the copy holds everyone's data. Passkeys of prod do not work on
   test (other `RP_ID`); sign in with the password.

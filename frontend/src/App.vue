@@ -20,6 +20,7 @@ import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig, ModuleMenuItem } from './config/modules'
 import { useReferenceData } from './composables/useReferenceData'
 import { useAtLeast } from './composables/useBreakpoint'
+import { devBarText, devEnvironment, loadDevEnvironment } from './utils/devEnvironment'
 import { submenuFitsNavbar } from './utils/navbarLayout'
 import { usePhotoNavStore } from './stores/photoNav'
 import { albumMenuTarget, albumsViewQueryFromStorage, readRememberedAlbumId } from './utils/albumsViewState'
@@ -403,10 +404,18 @@ watch(
   { deep: true },
 )
 onBeforeUnmount(() => navbarObserver?.disconnect())
+
+// The dev stack on a copy of prod marks itself (utils/devEnvironment.ts).
+onMounted(() => {
+  void loadDevEnvironment()
+})
 </script>
 
 <template>
   <div ref="appContainerRef" class="app-container">
+    <div v-if="devEnvironment?.dev" class="dev-bar" role="status" data-testid="dev-bar">
+      {{ devBarText(devEnvironment) }}
+    </div>
     <div v-if="auth.isAuthenticated" ref="toolbarStackRef" class="app-toolbar-stack">
       <!-- Row 1: main menu. Left: module switcher + active module; right: meta icons. -->
       <nav ref="navbarRef" class="sticky-navbar app-navbar" aria-label="Hauptmenü">
@@ -788,5 +797,15 @@ body {
   .submenu-strip .p-button {
     padding: 0.4rem 0.75rem;
   }
+}
+
+/* The dev stack on a copy of prod: one thin line above the navigation. */
+.dev-bar {
+  padding: 2px var(--page-gutter);
+  background: var(--p-tag-warn-background);
+  color: var(--p-tag-warn-color);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-align: center;
 }
 </style>

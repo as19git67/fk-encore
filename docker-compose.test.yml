@@ -15,12 +15,15 @@
 #      first on a 16 GB card, so the app joins prod's network and talks to
 #      prod's llm-service, like the demo. The aesthetic service (which lends
 #      prod's GPU at night) does not start either.
-#   2. Nothing leaves the host with prod's keys. Every mail goes to the mail
-#      catcher below (web page on DEPLOY_HOST_PORT_MAIL), whatever the
-#      recipient; push, APNs, printing, SerpApi and EODHD get no key. These
-#      are fixed here rather than in the env file, so an env file copied
-#      from prod cannot switch them back on. Stage 2 of the plan replaces
-#      this with a mode per path (DEV_OUTBOUND_<KIND>).
+#   2. Nothing leaves the host on its own. APP_ENVIRONMENT=dev puts every
+#      outbound path under a mode `off | redirect | on` (lib/environment.ts),
+#      set per path with DEV_OUTBOUND_<KIND> in the env file. Without a line
+#      there, mail goes to the mail catcher below (web page on
+#      DEPLOY_HOST_PORT_MAIL), whatever the recipient, and push, FinTS,
+#      SerpApi, EODHD, printing and background work on prod's llm-service
+#      are off — so an env file copied from prod opens nothing. A path set
+#      to `on` uses the key the env file gives it: give it one of test's
+#      own, never prod's.
 #
 # `!override` needs Docker Compose 2.24 or later.
 
@@ -38,17 +41,17 @@ services:
     environment:
       APP_ENVIRONMENT: dev
       LLM_SERVICE_URL: ${DEPLOY_LLM_SERVICE_URL:-http://fk-encore-llm:8000}
-      SMTP_HOST: mail_catcher
-      SMTP_PORT: "1025"
-      SMTP_USER: test
-      SMTP_PASS: test
-      VAPID_PUBLIC_KEY: ""
-      VAPID_PRIVATE_KEY: ""
-      APNS_KEY_ID: ""
-      APNS_PRIVATE_KEY: ""
-      CUPS_SERVER_URL: ""
-      SERPAPI_API_KEY: ""
-      EODHD_API_TOKEN: ""
+      # Mode per outbound path; empty means the default of lib/environment.ts.
+      DEV_OUTBOUND_MAIL: ${DEV_OUTBOUND_MAIL:-}
+      DEV_OUTBOUND_PUSH: ${DEV_OUTBOUND_PUSH:-}
+      DEV_OUTBOUND_FINTS: ${DEV_OUTBOUND_FINTS:-}
+      DEV_OUTBOUND_SERPAPI: ${DEV_OUTBOUND_SERPAPI:-}
+      DEV_OUTBOUND_EODHD: ${DEV_OUTBOUND_EODHD:-}
+      DEV_OUTBOUND_PRINT: ${DEV_OUTBOUND_PRINT:-}
+      DEV_OUTBOUND_LLM: ${DEV_OUTBOUND_LLM:-}
+      # Where `redirect` sends mail: the catcher below.
+      DEV_MAIL_HOST: mail_catcher
+      DEV_MAIL_PORT: "1025"
     networks:
       - default
       - prod
@@ -59,7 +62,7 @@ services:
   aesthetic_service:
     profiles: ["own-llm"]
 
-  # Catches every mail the test app sends; read them on
+  # Catches every mail the test app sends in `redirect` mode; read them on
   # http://<host>:${DEPLOY_HOST_PORT_MAIL}. Kept in memory, gone on restart.
   mail_catcher:
     image: axllent/mailpit:v1.21.8

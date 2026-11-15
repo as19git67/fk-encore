@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { assertOutbound, outbound } from "../lib/environment";
 
 console.log("[boot] user/mail.ts: all imports resolved");
 
@@ -10,13 +11,33 @@ const SMTP_FROM = process.env.SMTP_FROM || "noreply@example.com";
 const APP_URL = process.env.APP_URL || process.env.RP_ORIGIN || "http://localhost:5173";
 const APP_NAME = process.env.RP_NAME || "App";
 
+// In the dev stack (lib/environment.ts) mail is redirected by default: every
+// mail goes to the stack's mail catcher, whatever the recipient, without a
+// login. `DEV_OUTBOUND_MAIL=off` sends nothing, `on` uses the SMTP account of
+// the dev env file.
+const DEV_MAIL_HOST = process.env.DEV_MAIL_HOST || "mail_catcher";
+const DEV_MAIL_PORT = Number(process.env.DEV_MAIL_PORT || "1025");
+
 function isSmtpConfigured(): boolean {
+  const mode = outbound("mail");
+  if (mode === "off") return false;
+  if (mode === "redirect") return true;
   return !!(SMTP_HOST && SMTP_USER && SMTP_PASS);
 }
 
 let transporter: nodemailer.Transporter | null = null;
+let redirectTransporter: nodemailer.Transporter | null = null;
 
 function getTransporter(): nodemailer.Transporter {
+  if (assertOutbound("mail") === "redirect") {
+    redirectTransporter ??= nodemailer.createTransport({
+      host: DEV_MAIL_HOST,
+      port: DEV_MAIL_PORT,
+      secure: false,
+      ignoreTLS: true,
+    });
+    return redirectTransporter;
+  }
   if (!transporter) {
     transporter = nodemailer.createTransport({
       host: SMTP_HOST,

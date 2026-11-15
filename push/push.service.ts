@@ -12,6 +12,7 @@
  */
 
 import webPush from "web-push";
+import { outbound } from "../lib/environment";
 import { and, eq } from "drizzle-orm";
 import { secret } from "encore.dev/config";
 import db from "../db/database";
@@ -29,6 +30,9 @@ const vapidSubject = secret("VapidSubject");
 
 let vapidConfigured = false;
 function configureVapid(): boolean {
+  // Off in the dev stack unless DEV_OUTBOUND_PUSH=on (lib/environment.ts):
+  // every caller skips push then, as it does without keys.
+  if (outbound("push") === "off") return false;
   if (vapidConfigured) return true;
   let pub = "";
   let priv = "";

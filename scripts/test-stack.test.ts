@@ -7,6 +7,7 @@ import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import db from "../db/database";
+import { OUTBOUND_JOBS, OUTBOUND_KINDS } from "../lib/environment";
 
 /**
  * The test stack on a copy of production (documentation/plans/dev-system.md,
@@ -37,13 +38,14 @@ describe("docker-compose.test.yml", () => {
     expect(testDeps.sort()).toEqual(deps.filter((d) => d !== "llm_service").sort());
   });
 
-  it("sends every mail to the catcher and gives the outward paths no key, whatever the env file says", () => {
-    expect(overlay).toContain("SMTP_HOST: mail_catcher");
-    expect(overlay).toMatch(/^ {2}mail_catcher:$/m);
-    for (const key of ["VAPID_PRIVATE_KEY", "APNS_PRIVATE_KEY", "CUPS_SERVER_URL", "SERPAPI_API_KEY", "EODHD_API_TOKEN"]) {
-      expect(overlay).toContain(`${key}: ""`);
-    }
+  it("puts the app in dev mode, hands it every outbound mode and points mail redirects at the catcher", () => {
     expect(overlay).toContain("APP_ENVIRONMENT: dev");
+    expect(overlay).toMatch(/^ {2}mail_catcher:$/m);
+    expect(overlay).toContain("DEV_MAIL_HOST: mail_catcher");
+    for (const kind of OUTBOUND_KINDS) {
+      const name = `DEV_OUTBOUND_${kind.toUpperCase()}`;
+      expect(overlay).toContain(`${name}: \${${name}:-}`);
+    }
   });
 
   it("is combined by the template's COMPOSE_FILE, with prod's database names", () => {
@@ -180,6 +182,13 @@ esac
 });
 
 describe("scripts/host/test-scrub.sql", () => {
+  it("switches off exactly the jobs the app knows as outbound", () => {
+    const sqlText = read("scripts/host/test-scrub.sql");
+    const list = /unnest\(ARRAY\[([\s\S]*?)\]\)/.exec(sqlText)![1]!;
+    const names = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]);
+    expect(names.sort()).toEqual(Object.keys(OUTBOUND_JOBS).sort());
+  });
+
   it("runs on the schema the migrations build and switches off the outbound jobs", async () => {
     const body = read("scripts/host/test-scrub.sql").replace(/^BEGIN;$/m, "").replace(/^COMMIT;$/m, "");
     const rollback = new Error("rollback");

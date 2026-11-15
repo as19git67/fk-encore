@@ -8,6 +8,7 @@
  * FINANCE_TAG_WORKER_CONCURRENCY env var.
  */
 
+import { outbound } from "../lib/environment";
 import {
   DeferTagJobError,
   dequeueNextTagJob,
@@ -37,6 +38,9 @@ class FinanceTagWorker {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   tick(): void {
+    // The dev stack shares prod's llm-service: tag suggestions wait in the
+    // queue unless DEV_OUTBOUND_LLM=on (lib/environment.ts).
+    if (outbound("llm") === "off") return;
     while (this.running < CONCURRENCY) {
       this.running++;
       this.processNext()

@@ -21,6 +21,7 @@
  * Architecture: documentation/finance-fints-integration.md §2.
  */
 
+import { assertOutbound } from "../lib/environment";
 import { eq } from "drizzle-orm";
 import {
   FinTSClient,
@@ -146,8 +147,12 @@ export interface FintsClientSurface {
 /** Constructor shape the wrapper needs; the default uses `lib-fints`. */
 export type FintsClientFactory = (config: FinTSConfig) => FintsClientSurface;
 
-const defaultFactory: FintsClientFactory = (config) =>
-  new FinTSClient(config) as unknown as FintsClientSurface;
+// The one place a real FinTS client is made: off in the dev stack unless
+// DEV_OUTBOUND_FINTS=on (lib/environment.ts).
+const defaultFactory: FintsClientFactory = (config) => {
+  assertOutbound("fints");
+  return new FinTSClient(config) as unknown as FintsClientSurface;
+};
 
 interface RunOptions extends SyncOptions {
   /** Test seam: override the FinTSClient constructor. */

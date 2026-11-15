@@ -41,6 +41,7 @@ import {
 import { ReceiptOcrUnavailableError } from "./receipt-ocr-client";
 import { AI_PRIORITY, withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
 import { notifyDocScanQueueChanged } from "./scan-queue-events";
+import { outbound } from "../lib/environment";
 import { runTaxValues } from "./tax-values";
 import { topUpPageWordsBackfill } from "./page-words-backfill";
 
@@ -86,6 +87,9 @@ class DocumentScanWorker {
   ) {}
 
   tick(): void {
+    // The dev stack shares prod's llm-service: its jobs that need the model
+    // wait in the queue unless DEV_OUTBOUND_LLM=on (lib/environment.ts).
+    if (AI_MODEL_MAP[this.service] === "llm" && outbound("llm") === "off") return;
     while (this.running < this.concurrency) {
       this.running++;
       this.processNext()

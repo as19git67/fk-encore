@@ -12,6 +12,7 @@
  */
 
 import http2, { type ClientHttp2Session } from "node:http2";
+import { assertOutbound, outbound } from "../lib/environment";
 import { secret } from "encore.dev/config";
 import { ProviderTokenCache, type ApnsCredentials } from "./apns-jwt";
 import {
@@ -48,6 +49,8 @@ function loadCredentials(): ApnsCredentials | null {
 }
 
 export function apnsEnabled(): boolean {
+  // Off in the dev stack unless DEV_OUTBOUND_PUSH=on (lib/environment.ts).
+  if (outbound("push") === "off") return false;
   return loadCredentials() !== null;
 }
 
@@ -140,6 +143,7 @@ let gateway: ApnsGateway | null = null;
 /** Send one notification to one device. Throws on transport failure;
  * Apple's own refusals come back as a result. */
 export async function sendApns(deviceToken: string, env: ApnsEnvironment, payload: PushPayload): Promise<ApnsSendResult> {
+  assertOutbound("push");
   if (!gateway) gateway = new ApnsGateway();
   return gateway.send(deviceToken, env, buildApnsMessage(payload, apnsTopic()));
 }
@@ -155,6 +159,7 @@ export async function sendLiveActivity(
   env: ApnsEnvironment,
   push: LiveActivityPush,
 ): Promise<ApnsSendResult> {
+  assertOutbound("push");
   if (!gateway) gateway = new ApnsGateway();
   return gateway.send(activityToken, env, buildLiveActivityMessage(push, apnsTopic()));
 }
