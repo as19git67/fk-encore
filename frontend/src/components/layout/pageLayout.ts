@@ -17,10 +17,23 @@ export type AnchorResolution = HTMLElement | boolean | null | void
 
 export const APP_NAME = 'F4mil'
 
-/** "<Page> · <Module> · F4mil" — the module is derived from the route path. */
+/** In the dev stack every title starts with this (see utils/devEnvironment.ts). */
+export const DEV_TITLE_PREFIX = 'Dev'
+let devTitle = false
+
+/** Called once the app knows it runs in the dev stack. */
+export function markDevTitle(on: boolean): void {
+  devTitle = on
+}
+
+/**
+ * "<Page> · <Module> · F4mil" — the module is derived from the route path.
+ * In the dev stack "Dev · " goes in front, so a dev tab is never mistaken
+ * for prod.
+ */
 export function formatDocumentTitle(page: string, modulePath: string | undefined): string {
   const mod = modulePath ? detectModule(modulePath) : null
-  return [page.trim(), mod?.label, APP_NAME]
+  return [devTitle ? DEV_TITLE_PREFIX : null, page.trim(), mod?.label, APP_NAME]
     .filter((part): part is string => !!part)
     .join(' · ')
 }

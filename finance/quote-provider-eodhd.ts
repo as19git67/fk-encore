@@ -13,6 +13,7 @@
  * so the shapes can be tested without the network.
  */
 
+import { assertOutbound } from "../lib/environment";
 import {
   QuoteRateLimitedError,
   type HistoryRange,
@@ -158,6 +159,7 @@ export interface EodhdProvider extends QuoteProvider, NewsProvider {
 export function createEodhdProvider(token: string, dailyCalls = DEFAULT_DAILY_CALLS): EodhdProvider {
   async function get(path: string, params: Record<string, string> = {}): Promise<unknown> {
     const qs = new URLSearchParams({ ...params, api_token: token, fmt: "json" });
+    assertOutbound("eodhd");
     const res = await fetch(`${BASE_URL}${path}?${qs.toString()}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
     // 402: the plan's allowance is spent; 429: too many requests a minute.
     if (res.status === 429 || res.status === 402) throw new QuoteRateLimitedError(`eodhd ${res.status}`);

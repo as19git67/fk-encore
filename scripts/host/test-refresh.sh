@@ -289,7 +289,11 @@ log "scrubbing $PG_DATABASE"
 compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -o /dev/null -U postgres -d "$PG_DATABASE" \
   < "$SCRIPT_DIR/test-scrub.sql" || exit 4
 
+# Which snapshot the copy is, for the operator and for the app's "Dev" bar:
+# the backup volume is the one directory of the data root the app mounts.
 printf '%s\t%s\n' "$PROD_DATASET@$SNAPSHOT" "$(date -u +%FT%TZ)" > "$DATA_ROOT/.test-copy"
+mkdir -p "$DATA_ROOT/backup"
+cp "$DATA_ROOT/.test-copy" "$DATA_ROOT/backup/.test-copy"
 
 # -- 7. start ------------------------------------------------------------------
 log "starting the test stack on the copy of $SNAPSHOT"

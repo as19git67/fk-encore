@@ -192,8 +192,12 @@ are.
    the test env file (`ALTER USER` over the local socket, which needs
    none), check that the database `DEPLOY_PG_DATABASE` exists, and run the
    scrub (`scripts/host/test-scrub.sql`).
-7. Write the snapshot label into `$DEPLOY_DATA_ROOT/.test-copy` (stage 2
-   moves it into a `dev_copy` row, which the banner shows).
+7. Write the snapshot label into `$DEPLOY_DATA_ROOT/.test-copy` and a copy
+   into the backup volume (`$DEPLOY_DATA_ROOT/backup/.test-copy`), the one
+   directory of the data root the app mounts; `GET /environment` reads it
+   for the banner. A file rather than a `dev_copy` row: the scrub runs on
+   the copy's schema before the app migrates it, and a row would need a
+   table prod does not use.
 8. `docker compose --env-file .env.test up -d`. The app migrates the copy
    to its own image on boot.
 
@@ -221,7 +225,10 @@ missing column fails loudly so the file is fixed rather than half applied.
 ### What the app does with `APP_ENVIRONMENT=dev`
 
 One module `lib/environment.ts` with `isDev()` and
-`outbound(kind)`, called at the lowest layer of each path. It returns the
+`outbound(kind)` (and `assertOutbound(kind)`, which throws when the kind is
+off), called at the lowest layer of each path; the "is it configured?"
+check of each path answers false while it is off, so callers that skip an
+unconfigured path skip it too. It returns the
 mode of that kind: `off` throws a clear error instead of sending,
 `redirect` sends to the dev target named in the table, `on` sends as in
 prod (with dev's own key). In prod every kind is `on` and the module does
@@ -235,22 +242,29 @@ defaults:
 | `fints` | the FinTS client in `finance/` (sync, TAN probe) | `off` | — (`on` after entering a login in dev) |
 | `serpapi` | the hotel and flight clients in `travel/` | `off` | — (`on` with dev's own key; the daily jobs stay off, a check runs by hand) |
 | `eodhd` | EODHD client in `finance/` | `off` | — (quotes from Onvista and news from Yahoo need no token and stay on) |
-| `print` | the CUPS client | `off` | a PDF written into the dev data directory instead of paper |
+| `print` | the CUPS client | `off` | the label written as a PNG into the backup volume of the copy (`dev-print/`) instead of paper; the printer list shows one printer "dev-datei" |
+| `llm` | background work on prod's llm-service: the document workers that need the model (classify, tax values, the vision reads of text extraction), tag suggestions, and the jobs below marked `llm` | `off` | — (a user's own request, such as the assistant or a critique, always runs) |
 
-Jobs: `schedule()` in `lib/local-cron.ts` takes `outbound: true`. In dev
-such a job is registered disabled when its kind is `off`; the admin page
-shows it as "aus (Dev)" and it can be switched on by hand for a test. The list is the
-exported `OUTBOUND_JOBS` that the scrub reads too; a test fails when a job
-whose module calls one of the guarded paths is not marked. Today that is
-`finance-sync-statements`, `finance-news-refresh`,
-`travel-hotel-watches`, `travel-flight-watches`, `collections-schedules`,
-`documents-follow-ups-process-due`, `guest-digest`,
-`trip-planner-live-activities`, `photo-aesthetic-nightly` and
-`meter-petrol-prices`. The OSM jobs stay on: the geo database comes along
-in the clone, and keeping its regions current only downloads public data.
+Jobs: `OUTBOUND_JOBS` in `lib/environment.ts` names each job that acts
+outward with its kinds. In dev `lib/local-cron.ts` holds such a job paused
+on every boot while one of its kinds is `off`, whatever the copied state
+says; the admin page shows it as "aus (Dev)" and it can be switched on by
+hand until the next restart (the guard at the path still holds). The
+scrub switches off the same names, and a test keeps the two lists equal.
+Today that is `finance-sync-statements` (fints), `travel-hotel-watches`
+and `travel-flight-watches` (serpapi), `collections-schedules` and
+`guest-digest` (mail), `documents-follow-ups-process-due` and
+`trip-planner-live-activities` (push), and `photo-aesthetic-nightly`,
+`trip-planner-curation`, `trip-planner-spot-descriptions`,
+`trip-planner-spot-summaries`, `documents-collection-summaries` and
+`finance-depot-model-retry` (llm). The OSM jobs, the petrol prices (the
+EU's weekly bulletin) and the news refresh (Yahoo without a key; EODHD is
+guarded at its client) stay on: they only download public data.
 
-The `llm` queue does not start its background workers in dev; a user's
-own request still runs.
+The background workers that need the model (`classify` and `tax_values`
+of the document pipeline, the finance tag worker) leave their jobs queued
+while `llm` is off, and text extraction gets no vision read; a user's own
+request still runs.
 
 Every page shows a thin bar "Dev · Kopie vom <Datum>" above the
 navigation (from `dev_copy`), and `document.title` starts with "Dev ·",
@@ -329,6 +343,16 @@ up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
    modes and the `DEV_OUTBOUND_*` variables, the mail catcher in the
    overlay, `outbound` jobs with the test, the `llm` background workers,
    banner and title, `dev_copy`.
+   Built: `lib/environment.ts` (kinds, defaults, `OUTBOUND_JOBS`), guards in
+   `user/mail.ts`, `push/push.service.ts`, `push/apns-client.ts`,
+   `finance/fints-client.ts`, `travel/serpapi-client.ts`,
+   `travel/flight-search-client.ts`, `finance/quote-provider-eodhd*.ts`,
+   `label/label.service.ts`, the llm workers and `documents/vlm-client.ts`;
+   jobs held in `lib/local-cron.ts` (`dev_off`); `GET /environment`
+   (`user/environment.ts`) with the copy from the backup volume's
+   `.test-copy` instead of a `dev_copy` row; the bar in `App.vue` and the
+   title prefix in `pageLayout.ts`. The overlay passes the modes through
+   instead of blanking keys.
 3. **Upgrade check.** Entry point, schema comparison, GitHub status,
    container in the overlay. Run by hand first (`docker compose run
    upgrade_check`) against today's `latest` and against the commit before

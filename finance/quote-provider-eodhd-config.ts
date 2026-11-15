@@ -6,11 +6,14 @@
 
 import { secret } from "encore.dev/config";
 
+import { outbound } from "../lib/environment";
 import { createEodhdProvider, type EodhdProvider } from "./quote-provider-eodhd";
 
 const eodhdApiToken = secret("EodhdApiToken");
 
 export function eodhdFromEnvironment(): EodhdProvider | null {
+  // Off in the dev stack unless DEV_OUTBOUND_EODHD=on: "no token".
+  if (outbound("eodhd") === "off") return null;
   let token: string;
   try {
     token = eodhdApiToken().trim();

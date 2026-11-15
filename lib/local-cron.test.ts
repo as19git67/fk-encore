@@ -376,3 +376,37 @@ describe("hooks", () => {
     expect(last.run_count).toBeGreaterThan(0);
   });
 });
+
+describe("jobs that act outward, in the dev stack", () => {
+  afterEach(() => {
+    delete process.env.APP_ENVIRONMENT;
+  });
+
+  it("start paused on every boot while their path is off, whatever the copied state says", async () => {
+    process.env.APP_ENVIRONMENT = "dev";
+    const run = vi.fn(async () => {});
+    setLocalCronHooks({
+      load: async () => [
+        { name: "travel-hotel-watches", enabled: true, last_run_at: null, last_status: "ok", last_duration_ms: 1, last_error: null, run_count: 3, error_count: 0 },
+      ],
+    });
+    schedule({ name: "travel-hotel-watches", nextFire: everyMs(60_000), run });
+    schedule({ name: "osm-admin-retention", nextFire: everyMs(60_000), run });
+    await startLocalCron();
+    const byName = Object.fromEntries(inspectJobs().map((j) => [j.name, j]));
+    expect(byName["travel-hotel-watches"]).toMatchObject({ enabled: false, status: "paused", dev_off: true });
+    expect(byName["osm-admin-retention"]).toMatchObject({ enabled: true, dev_off: false });
+    await runJobNow("travel-hotel-watches");
+    expect(run).not.toHaveBeenCalled();
+    // Switched on by hand for a test, it runs.
+    await setJobEnabled("travel-hotel-watches", true);
+    await runJobNow("travel-hotel-watches");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("run as usual outside the dev stack", async () => {
+    schedule({ name: "travel-hotel-watches", nextFire: everyMs(60_000), run: async () => {} });
+    await startLocalCron();
+    expect(inspectJobs()[0]).toMatchObject({ enabled: true, dev_off: false });
+  });
+});

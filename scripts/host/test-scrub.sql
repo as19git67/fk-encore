@@ -57,12 +57,13 @@ SELECT pg_temp.scrub('photo_aesthetic_settings', 'UPDATE photo_aesthetic_setting
 -- Jobs that act outward on their own. Switched off, not deleted: the admin
 -- page (Admin › Jobs) shows them and one can be switched on by hand for a
 -- test. A row is created for a job that never ran on prod, so it starts off
--- too. Keep in step with the outbound jobs of the plan.
+-- too. The same names as OUTBOUND_JOBS in lib/environment.ts (a test keeps
+-- them in step); the app holds those whose path is off paused on every boot
+-- anyway, this also stops the ones whose path is redirected (mail).
 SELECT pg_temp.scrub('scheduled_job_state', $q$
   INSERT INTO scheduled_job_state (name, enabled)
   SELECT name, false FROM unnest(ARRAY[
     'finance-sync-statements',
-    'finance-news-refresh',
     'travel-hotel-watches',
     'travel-flight-watches',
     'collections-schedules',
@@ -70,7 +71,11 @@ SELECT pg_temp.scrub('scheduled_job_state', $q$
     'guest-digest',
     'trip-planner-live-activities',
     'photo-aesthetic-nightly',
-    'meter-petrol-prices'
+    'trip-planner-curation',
+    'trip-planner-spot-descriptions',
+    'trip-planner-spot-summaries',
+    'documents-collection-summaries',
+    'finance-depot-model-retry'
   ]) AS name
   ON CONFLICT (name) DO UPDATE SET enabled = false, updated_at = now()
 $q$);

@@ -21,6 +21,8 @@ export interface ScheduledJob {
   last_error: string | null
   run_count: number
   error_count: number
+  /** Acts outward and its path is off in the dev stack: starts paused on every boot. */
+  dev_off?: boolean
 }
 
 export async function listScheduledJobs(): Promise<{ jobs: ScheduledJob[] }> {

@@ -18,10 +18,13 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import dns from "node:dns/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { APIError } from "encore.dev/api";
 import log from "encore.dev/log";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
+import { assertOutbound } from "../lib/environment";
 import { dbExec, dbFirst } from "../db/adapter";
 import { users } from "../db/schema";
 import {
@@ -179,8 +182,20 @@ async function ippRequest(path: string, body: Buffer): Promise<Buffer> {
   });
 }
 
+// In the dev stack (lib/environment.ts) printing is off by default;
+// DEV_OUTBOUND_PRINT=redirect offers one printer that writes each label as a
+// PNG into DEV_PRINT_DIR (default: the backup volume, i.e. inside the copy)
+// instead of reaching the CUPS server.
+const DEV_PRINTER = "dev-datei";
+function devPrintDir(): string {
+  return process.env.DEV_PRINT_DIR || path.join(process.env.BACKUP_DIR ?? "/mnt/backup", "dev-print");
+}
+
 /** List the printers the configured CUPS server exposes. */
 export async function listPrinters(): Promise<CupsPrinter[]> {
+  if (assertOutbound("print") === "redirect") {
+    return [{ name: DEV_PRINTER, info: `Dev: Datei in ${devPrintDir()}`, location: null, state: 3, makeAndModel: null }];
+  }
   const respBuf = await ippRequest("/", buildGetPrintersRequest(nextRequestId()));
   const resp = parseIppResponse(respBuf);
   const printers = parsePrinters(resp);
@@ -215,6 +230,13 @@ export interface PrintLabelInput {
  * text it contains — CUPS treats every same-size image identically.
  */
 export async function printLabel(input: PrintLabelInput): Promise<void> {
+  if (assertOutbound("print") === "redirect") {
+    const dir = devPrintDir();
+    await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(path.join(dir, `label-${stamp}-x${input.copies}.png`), input.image);
+    return;
+  }
   const base = getCupsBaseUrl();
   const host = new URL(base).host;
   const printerUri = `ipp://${host}/printers/${input.printer}`;

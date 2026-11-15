@@ -8,6 +8,7 @@
  * vision timeout inheriting a classification's minutes-long budget.
  */
 
+import { outbound } from "../lib/environment";
 import { isGpuLent } from "../lib/llm-lease";
 
 console.log("[boot] documents/vlm-client.ts: all imports resolved");
@@ -63,6 +64,9 @@ export class VlmUnavailableError extends Error {
  * a projector.
  */
 async function refuseOnCpuTwin(url: string): Promise<void> {
+  // The dev stack shares prod's llm-service; text extraction there reads the
+  // copy's backlog, so it gets no second opinion unless DEV_OUTBOUND_LLM=on.
+  if (outbound("llm") === "off") throw new VlmUnavailableError(`POST ${url} skipped: llm is off in the dev stack`);
   if (await isGpuLent()) throw new VlmUnavailableError(`POST ${url} skipped: GPU lent, llm-service on its CPU twin`);
 }
 

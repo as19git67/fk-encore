@@ -221,7 +221,10 @@ function formatDuration(ms: number | null): string {
               <strong>{{ job.name }}</strong>
               <span v-if="job.description" class="hint">{{ job.description }}</span>
             </div>
-            <Tag :severity="statusSeverity[job.status]" :value="statusLabel[job.status]" />
+            <Tag
+              :severity="statusSeverity[job.status]"
+              :value="job.status === 'paused' && job.dev_off ? 'aus (Dev)' : statusLabel[job.status]"
+            />
           </header>
 
           <dl class="job-fields">

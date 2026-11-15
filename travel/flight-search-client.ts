@@ -6,6 +6,7 @@
  * `setFlightSearchClient`.
  */
 
+import { assertOutbound, outbound } from "../lib/environment";
 import { secret } from "encore.dev/config";
 import { HotelSearchError } from "./serpapi-client";
 
@@ -74,6 +75,7 @@ export function createFlightSearchClient(key: string, fetchImpl: typeof fetch = 
       url.searchParams.set("api_key", key);
       let res: Response;
       try {
+        assertOutbound("serpapi");
         res = await fetchImpl(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
       } catch (err) {
         throw new HotelSearchError(`SerpApi nicht erreichbar: ${err instanceof Error ? err.message : err}`);
@@ -95,6 +97,8 @@ export function createFlightSearchClient(key: string, fetchImpl: typeof fetch = 
 const serpApiKey = secret("SerpApiKey");
 
 function keyValue(): string | null {
+  // Off in the dev stack unless DEV_OUTBOUND_SERPAPI=on: "no key configured".
+  if (outbound("serpapi") === "off") return null;
   try {
     return serpApiKey().trim() || null;
   } catch {

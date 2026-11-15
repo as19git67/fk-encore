@@ -37,6 +37,7 @@
  */
 
 import log from "encore.dev/log";
+import { jobOffInDev } from "./environment";
 
 export interface ScheduledJob {
   name: string;
@@ -80,6 +81,11 @@ export interface JobInspectEntry {
   last_error: string | null;
   run_count: number;
   error_count: number;
+  /**
+   * The job acts outward and one of its paths is off in the dev stack
+   * (lib/environment.ts, OUTBOUND_JOBS): it starts disabled on every boot.
+   */
+  dev_off: boolean;
 }
 
 /** Snapshot used for persistence I/O — Date objects, no string conversion. */
@@ -150,6 +156,7 @@ export function schedule(job: ScheduledJob): void {
     run_count: 0,
     error_count: 0,
   };
+  holdIfOffInDev(entry);
   entries.push(entry);
   if (started) {
     // Late registration (some other service already started the
@@ -198,6 +205,7 @@ async function hydrateFromHooks(): Promise<void> {
       // Last status from a prior process is informational only; the
       // current scheduling state is "scheduled" (or "paused") since
       // we haven't fired yet in this process.
+      holdIfOffInDev(entry);
       if (!entry.enabled) {
         entry.status = "paused";
       } else if (row.last_status === "ok" || row.last_status === "error") {
@@ -210,6 +218,17 @@ async function hydrateFromHooks(): Promise<void> {
       err: (err as Error).message,
     });
   }
+}
+
+/**
+ * In the dev stack a job whose outbound path is off starts disabled on every
+ * boot, whatever the copied state says; switching it on by hand lasts until
+ * the next restart.
+ */
+function holdIfOffInDev(entry: Entry): void {
+  if (!jobOffInDev(entry.job.name)) return;
+  entry.enabled = false;
+  entry.status = "paused";
 }
 
 export function inspectJobs(): JobInspectEntry[] {
@@ -230,6 +249,7 @@ function toInspect(e: Entry): JobInspectEntry {
     last_error: e.last_error,
     run_count: e.run_count,
     error_count: e.error_count,
+    dev_off: jobOffInDev(e.job.name),
   };
 }
 
