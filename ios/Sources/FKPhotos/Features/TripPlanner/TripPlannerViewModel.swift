@@ -169,6 +169,28 @@ final class TripPlannerViewModel {
         return fresh
     }
 
+    /// Bumped when the share extension wrote to this trip while it was
+    /// open (`TripShareChangeRelay`). Screens that keep their own copy
+    /// of the trip — the itinerary — read again on a change of it.
+    private(set) var outsideChanges = 0
+
+    /// The share extension added something behind the app's back: every
+    /// open model of a trip it touched loads again, and an ideas offer
+    /// already shown is asked again, because a new idea in the
+    /// collection may lie in one of the trip's stays.
+    static func changedOutside(_ change: TripShareChange) {
+        for (planId, model) in byPlanId {
+            let touched = change.planIds.contains(planId)
+            if touched {
+                model.outsideChanges += 1
+                Task { await model.load() }
+            }
+            if (touched || change.ideas) && model.didLoadPlanIdeas {
+                Task { await model.loadIdeasOfferQuietly() }
+            }
+        }
+    }
+
     /// Drop the model — the plan was deleted or left, and a stale one
     /// must not answer for a plan that is created again under a new id
     /// (it never would; this keeps the map from growing for good).
