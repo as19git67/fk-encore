@@ -158,6 +158,11 @@ struct TripItineraryView: View {
             if draft == nil { await load() }
             if userHome == nil { userHome = await TripUserHome.load() }
         }
+        // A find added through the share sheet while this screen was
+        // open: the model reloads itself, the chain here is our own copy.
+        .onChange(of: viewModel.outsideChanges) { _, _ in
+            Task { await reload() }
+        }
     }
 
     // MARK: - The list

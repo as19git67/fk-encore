@@ -104,3 +104,63 @@ extension TripSharePayload {
     /// Shorter than this, a "selection" is a stray tap, not a choice.
     static let minimumSelectionLength = 12
 }
+
+/// "Something was added from outside" — the extension's note to the app.
+///
+/// The share sheet writes a find straight into a trip's pool, or an
+/// idea straight into the collection, without the app. The app had a
+/// trip open the whole time, loaded long before the share, and kept
+/// showing the trip as it was until somebody left it and came back.
+/// So the extension leaves this note in the App Group, next to the
+/// payload above, and the app reads it whenever it comes forward:
+/// which trips changed, and whether the collection did.
+///
+/// A note, not a queue: several shares before the app looks merge into
+/// one, and reading it clears it. When the app is already on screen
+/// beside the share sheet (iPad, Stage Manager) it never leaves
+/// `.active`, so the extension also rings a Darwin notification under
+/// `darwinName`; the app listens for it while it runs.
+struct TripShareChange: Codable, Equatable, Sendable {
+    static let defaultsKey = "shared.tripChanged"
+    static let darwinName = "de.f4mil.photos.trip-share-changed"
+
+    /// Trips whose pool the extension wrote to.
+    var planIds: [Int] = []
+    /// Whether the idea collection got something.
+    var ideas = false
+
+    var isEmpty: Bool { planIds.isEmpty && !ideas }
+
+    /// Leave the note: a trip got a find (`planId`), or the collection
+    /// an idea (`planId == nil`). Merges with a note nobody read yet.
+    static func note(planId: Int?, in store: UserDefaults?) {
+        var change = read(store) ?? TripShareChange()
+        if let planId {
+            if !change.planIds.contains(planId) { change.planIds.append(planId) }
+        } else {
+            change.ideas = true
+        }
+        guard let data = try? JSONEncoder().encode(change) else { return }
+        store?.set(data, forKey: defaultsKey)
+    }
+
+    /// Read the note and clear it. Nil when there is nothing new.
+    static func take(from store: UserDefaults?) -> TripShareChange? {
+        let change = read(store)
+        store?.removeObject(forKey: defaultsKey)
+        guard let change, !change.isEmpty else { return nil }
+        return change
+    }
+
+    private static func read(_ store: UserDefaults?) -> TripShareChange? {
+        guard let data = store?.data(forKey: defaultsKey) else { return nil }
+        return try? JSONDecoder().decode(TripShareChange.self, from: data)
+    }
+
+    /// Tell a running app to read the note now.
+    static func ring() {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(darwinName as CFString), nil, nil, true)
+    }
+}

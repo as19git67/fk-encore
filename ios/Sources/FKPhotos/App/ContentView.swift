@@ -57,6 +57,10 @@ public struct ContentView: View {
                 // Comments may have arrived while the app was away; the icon
                 // is the only place that can say so before it is opened.
                 Task { await CommentBadge.shared.refresh() }
+                // A trip or idea added through the share sheet while the
+                // app was away: whatever is open reads it again.
+                TripShareChangeRelay.shared.start()
+                TripShareChangeRelay.shared.apply()
             }
         }
         // Both the app scheme and universal links (`https://<server>/app/…`)

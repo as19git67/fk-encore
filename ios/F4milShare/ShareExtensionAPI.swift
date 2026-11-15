@@ -99,6 +99,15 @@ enum ShareExtensionAPI {
             return request
         }
         try check(http, data: data)
+        noteChange(planId: nil)
+    }
+
+    /// The app may have the trip or the collection open, loaded before
+    /// this share; the note makes it read again (`TripShareChange`).
+    private static func noteChange(planId: Int?) {
+        TripShareChange.note(planId: planId,
+                             in: UserDefaults(suiteName: TripSharePayload.appGroupID))
+        TripShareChange.ring()
     }
 
     // MARK: - Reading a map link (§9.2)
@@ -195,6 +204,7 @@ enum ShareExtensionAPI {
             return request
         }
         try check(http, data: data)
+        noteChange(planId: planId)
         return (try? JSONDecoder().decode(Response.self, from: data))?.merged ?? false
     }
 }

@@ -311,6 +311,11 @@ struct TripIdeasView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.checkShare() } }
         }
+        // An idea saved straight from the share sheet, while this list
+        // was open and loaded.
+        .onChange(of: TripShareChangeRelay.shared.ideasVersion) { _, _ in
+            Task { await model.load() }
+        }
         .onChange(of: noticesEnabled) { _, enabled in
             TripIdeaNoticePreferences.setEnabled(enabled)
             if enabled {
