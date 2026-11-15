@@ -17,7 +17,7 @@ import {
   resetStuckTagJobs,
 } from "./tag-queue";
 import { suggestTagsForTransaction } from "./tag-suggester";
-import { LlmServiceUnavailableError, isLlmServiceHealthy } from "./llm-client";
+import { isLlmOutage, isLlmServiceHealthy } from "./llm-client";
 import { withAiSlot, AiSlotTimeoutError } from "../ai-queue/slot-helper";
 import { isTransientConnectionError } from "../db/database";
 
@@ -80,7 +80,9 @@ class FinanceTagWorker {
     } catch (err: any) {
       if (
         err instanceof DeferTagJobError ||
-        err instanceof LlmServiceUnavailableError ||
+        // An outage only: an unusable answer or a timeout comes back the
+        // same, and deferring it re-ran the model on every poll.
+        isLlmOutage(err) ||
         err instanceof AiSlotTimeoutError ||
         isTransientConnectionError(err)
       ) {

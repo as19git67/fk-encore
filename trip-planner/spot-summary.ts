@@ -25,7 +25,7 @@ import log from "encore.dev/log";
 import db from "../db/database";
 import { tripPlanPool, tripPlanStops, tripSpotFame } from "../db/schema";
 import { namesUnknownFact } from "./curation";
-import { askForJson, LlmServiceUnavailableError } from "./llm-client";
+import { askForJson, isLlmOutage } from "./llm-client";
 import type { SpotDescription } from "./spot-description";
 
 /** Longest sentence that still sits under a name in two lines. */
@@ -171,11 +171,13 @@ export async function summariseSpots(
       try {
         text = checkSummary(await ask(buildSummaryPrompt(row.name, source.text)), source.text);
       } catch (err) {
-        if (err instanceof LlmServiceUnavailableError) break; // tried again next tick
+        if (isLlmOutage(err)) break; // nothing was computed: tried again next tick
+        // The same text gets the same answer: kept as "no sentence" until
+        // the text changes, instead of asking again every ten minutes.
         log.info("trip spot summary: no sentence", {
           osmRef: row.osmRef, error: err instanceof Error ? err.message : String(err),
         });
-        continue;
+        text = null;
       }
     }
     const stored: StoredSummary = { text, key };

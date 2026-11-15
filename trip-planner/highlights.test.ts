@@ -17,7 +17,7 @@ import { tickHighlights } from "./highlights-job";
 import { resetCurationAsker, setCurationAsker } from "./highlights-model";
 import { searchPlaces } from "./search";
 import { addFind } from "./add-find";
-import { LlmServiceUnavailableError } from "./llm-client";
+import { LlmAnswerUnusableError, LlmServiceUnavailableError, LlmTimeoutError, isLlmOutage } from "./llm-client";
 
 const TOWN = { lat: 48.37, lon: 10.9 };
 
@@ -121,6 +121,52 @@ describe("the highlights of a stay", () => {
     expect(res.sorting).toBe(true);
   });
 
+  it("does not ask again on the next tick after an outage", async () => {
+    const plan = await emptyTrip();
+    await tripHighlights({ planId: plan.id, legIndex: 0 });
+    let asked = 0;
+    setCurationAsker(async () => { asked += 1; throw new LlmServiceUnavailableError("inference busy"); });
+    await tickHighlights();
+    await tickHighlights();
+    expect(asked).toBe(1);
+    // A quarter of an hour later it is due again.
+    await db.update(tripLegHighlights).set({ finished_at: new Date(Date.now() - 20 * 60_000).toISOString() });
+    await tickHighlights();
+    expect(asked).toBe(2);
+  });
+
+  it("gives up on an answer cut off at max_tokens until the places change", async () => {
+    const plan = await emptyTrip();
+    await tripHighlights({ planId: plan.id, legIndex: 0 });
+    let asked = 0;
+    setCurationAsker(async () => {
+      asked += 1;
+      throw new LlmAnswerUnusableError("llm-service /json-prompt returned HTTP 422", 422);
+    });
+    expect(await tickHighlights()).toBe(1);
+    // Hours later, and the list looked at again: still not asked.
+    await db.update(tripLegHighlights).set({ finished_at: new Date(Date.now() - 5 * 3_600_000).toISOString() });
+    const res = await tripHighlights({ planId: plan.id, legIndex: 0 });
+    expect(res.sorting).toBe(false);
+    expect(await tickHighlights()).toBe(0);
+    expect(asked).toBe(1);
+    const [row] = await db.select().from(tripLegHighlights);
+    expect(row.status).toBe("failed");
+  });
+
+  it("tries another failure an hour apart, three times at most", async () => {
+    const plan = await emptyTrip();
+    await tripHighlights({ planId: plan.id, legIndex: 0 });
+    let asked = 0;
+    setCurationAsker(async () => { asked += 1; throw new LlmTimeoutError("aborted"); });
+    for (let i = 0; i < 5; i += 1) {
+      await tickHighlights();
+      await tickHighlights();
+      await db.update(tripLegHighlights).set({ finished_at: new Date(Date.now() - 2 * 3_600_000).toISOString() });
+    }
+    expect(asked).toBe(3);
+  });
+
   it("pages on and marks what is already an idea", async () => {
     const plan = await emptyTrip();
     const first = await tripHighlights({ planId: plan.id, legIndex: 0, limit: 2 });
@@ -173,5 +219,16 @@ describe("searching by category", () => {
   it("still wants two characters when no category is given", async () => {
     const plan = await emptyTrip();
     await expect(searchPlaces({ planId: plan.id, query: "" })).rejects.toThrow(/mindestens/);
+  });
+});
+
+describe("telling an outage from a bad answer", () => {
+  it("retries only what computed nothing", () => {
+    expect(isLlmOutage(new LlmServiceUnavailableError("HTTP 503"))).toBe(true);
+    expect(isLlmOutage(new LlmAnswerUnusableError("HTTP 422", 422))).toBe(false);
+    expect(isLlmOutage(new LlmTimeoutError("aborted"))).toBe(false);
+    expect(isLlmOutage(new Error("other"))).toBe(false);
+    // A request path that knows only the old type still catches both.
+    expect(new LlmAnswerUnusableError("HTTP 502", 502)).toBeInstanceOf(LlmServiceUnavailableError);
   });
 });

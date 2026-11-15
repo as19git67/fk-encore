@@ -9,6 +9,10 @@
  *
  * All failures throw LlmServiceUnavailableError — callers treat it as
  * a soft failure (log and skip) rather than propagating to the user.
+ * A background job that retries tells the subclasses apart with
+ * `isLlmOutage`: an unusable answer (`LlmAnswerUnusableError`) comes back
+ * the same on the next try, and a timeout (`LlmTimeoutError`) kept the
+ * model busy for its whole budget. Only an outage computed nothing.
  */
 
 import { AiSlotTimeoutError, withLlmSlot } from "../ai-queue/slot-helper";
@@ -29,6 +33,31 @@ export class LlmServiceUnavailableError extends Error {
     this.name = "LlmServiceUnavailableError";
   }
 }
+
+/** The service answered with nothing to use (422, 502, 400, 500, no object). */
+export class LlmAnswerUnusableError extends LlmServiceUnavailableError {
+  constructor(reason: string, readonly status: number | null) {
+    super(reason);
+    this.name = "LlmAnswerUnusableError";
+  }
+}
+
+/** The model worked for the whole budget and did not finish. */
+export class LlmTimeoutError extends LlmServiceUnavailableError {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "LlmTimeoutError";
+  }
+}
+
+/** Nobody computed anything: down, busy (503) or no slot. Only this is worth an immediate retry. */
+export function isLlmOutage(err: unknown): boolean {
+  return err instanceof LlmServiceUnavailableError
+    && !(err instanceof LlmAnswerUnusableError)
+    && !(err instanceof LlmTimeoutError);
+}
+
+const OUTAGE_STATUSES = new Set([429, 503]);
 
 // -----------------------------------------------------------------------
 // Shared HTTP helper
@@ -62,22 +91,24 @@ async function send<TBody, TResp>(path: string, body: TBody, timeoutMs: number):
       signal: controller.signal,
     });
   } catch (err: any) {
-    throw new LlmServiceUnavailableError(
-      `llm-service ${path} failed: ${err?.message ?? err}`,
-    );
+    const message = `llm-service ${path} failed: ${err?.message ?? err}`;
+    if (controller.signal.aborted) throw new LlmTimeoutError(message);
+    throw new LlmServiceUnavailableError(message);
   } finally {
     clearTimeout(timer);
   }
   if (!resp.ok) {
-    throw new LlmServiceUnavailableError(
-      `llm-service ${path} returned HTTP ${resp.status}`,
-    );
+    const message = `llm-service ${path} returned HTTP ${resp.status}`;
+    if (OUTAGE_STATUSES.has(resp.status)) throw new LlmServiceUnavailableError(message);
+    if (resp.status === 504) throw new LlmTimeoutError(message);
+    throw new LlmAnswerUnusableError(message, resp.status);
   }
   try {
     return (await resp.json()) as TResp;
   } catch (err: any) {
-    throw new LlmServiceUnavailableError(
+    throw new LlmAnswerUnusableError(
       `llm-service ${path} produced invalid JSON: ${err?.message ?? err}`,
+      null,
     );
   }
 }
@@ -360,7 +391,7 @@ export async function extractStatementValues(
     max_tokens: 600,
   });
   if (!resp || typeof resp !== "object") {
-    throw new LlmServiceUnavailableError("/json-prompt returned no object for the statement");
+    throw new LlmAnswerUnusableError("/json-prompt returned no object for the statement", null);
   }
   return resp;
 }
@@ -435,7 +466,7 @@ export async function extractSettlementValues(
     max_tokens: 500,
   });
   if (!resp || typeof resp !== "object") {
-    throw new LlmServiceUnavailableError("/json-prompt returned no object for the settlement");
+    throw new LlmAnswerUnusableError("/json-prompt returned no object for the settlement", null);
   }
   return resp;
 }
@@ -472,7 +503,7 @@ export async function classifySecuritiesPaper(text: string): Promise<Record<stri
     max_tokens: 60,
   });
   if (!resp || typeof resp !== "object") {
-    throw new LlmServiceUnavailableError("/json-prompt returned no object for the paper type");
+    throw new LlmAnswerUnusableError("/json-prompt returned no object for the paper type", null);
   }
   return resp;
 }
@@ -514,7 +545,7 @@ export async function extractStatementPositions(text: string): Promise<Record<st
     max_tokens: 1500,
   });
   if (!resp || typeof resp !== "object") {
-    throw new LlmServiceUnavailableError("/json-prompt returned no object for the depot statement");
+    throw new LlmAnswerUnusableError("/json-prompt returned no object for the depot statement", null);
   }
   return resp;
 }

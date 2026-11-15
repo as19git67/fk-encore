@@ -29,6 +29,7 @@ import {
   documents,
   financeAccount,
   financeDepotDocumentIgnore,
+  financeDocumentSettlementLlmFailure,
   financeDocumentSettlementLlm,
   financeAccountAccess,
   financeAccountHolding,
@@ -110,6 +111,8 @@ export interface EnrichResult {
   date_source: "statement" | "document_date" | null;
   /** What happened with the language model for this read. */
   llm_status: LlmStatus | null;
+  /** With `model_unavailable`: the model answered, but with nothing to use (counted for the retry). */
+  model_refused?: boolean;
   /** Rules and model disagreed and the booking's net decided between them. */
   checked_against_booking: boolean;
   /** The user marked the document "ignore for depots". */
@@ -902,6 +905,7 @@ export async function enrichDocument(
   // again. Applied by the user after looking at it, it is theirs to decide.
   if (reading.llmStatus === "unavailable" && !options.overwrite) {
     result.outcome = "model_unavailable";
+    if (reading.llmRefused) result.model_refused = true;
     return result;
   }
   const toParsed = (rd: SettlementReading): SettlementExtraction | null => {
@@ -1352,11 +1356,24 @@ export async function enrichPendingDocuments(
  * although it is asked about them. Read again, newest first, at most
  * `limit`; the first one the model still cannot read ends the run.
  */
+/** Tries before a paper the model cannot read usefully is left to the user. */
+export const MAX_SETTLEMENT_TRIES = 3;
+/** Hours between two tries of such a paper. */
+export const SETTLEMENT_RETRY_HOURS = 6;
+
 export async function retryPapersAwaitingModel(limit = 20): Promise<EnrichStats> {
   const stats = emptyStats();
   const answered = db.select({ id: financeDocumentSettlementLlm.document_id }).from(financeDocumentSettlementLlm);
   const linked = db.select({ id: financeDepotTransactionDocument.document_id }).from(financeDepotTransactionDocument);
   const ignored = db.select({ id: financeDepotDocumentIgnore.document_id }).from(financeDepotDocumentIgnore);
+  // A paper the model answered with nothing to use waits a while, and
+  // after three tries for good: the same text gets the same answer, and
+  // asked every hour it held up every paper behind it.
+  const refused = db
+    .select({ id: financeDocumentSettlementLlmFailure.document_id })
+    .from(financeDocumentSettlementLlmFailure)
+    .where(sql`${financeDocumentSettlementLlmFailure.failures} >= ${MAX_SETTLEMENT_TRIES}
+      OR ${financeDocumentSettlementLlmFailure.failed_at} > now() - make_interval(hours => ${SETTLEMENT_RETRY_HOURS})`);
   const rows = await db
     .select({ id: documents.id, text: documents.extracted_text })
     .from(documents)
@@ -1368,6 +1385,7 @@ export async function retryPapersAwaitingModel(limit = 20): Promise<EnrichStats>
         notInArray(documents.id, answered),
         notInArray(documents.id, linked),
         notInArray(documents.id, ignored),
+        notInArray(documents.id, refused),
       ),
     )
     .orderBy(desc(documents.id))
@@ -1387,7 +1405,8 @@ export async function retryPapersAwaitingModel(limit = 20): Promise<EnrichStats>
         case "unverified": stats.unverified++; break;
         case "model_unavailable": stats.waiting_for_model++; break;
       }
-      if (res.outcome === "model_unavailable") break;
+      // An outage holds for the next paper too; a refusal is this paper's own.
+      if (res.outcome === "model_unavailable" && !res.model_refused) break;
     } catch (err) {
       stats.errors.push(`document ${r.id}: ${(err as Error).message ?? String(err)}`);
     }

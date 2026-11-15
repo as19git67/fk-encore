@@ -13,6 +13,7 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
 import { checkSummary, summariseSpots, summarySource, takenAsIs } from "./spot-summary";
+import { LlmAnswerUnusableError, LlmServiceUnavailableError } from "./llm-client";
 
 const LEAD_IT = "La Torre di Esempio è una torre campanaria del 1250, alta 54 metri, nel centro di Musterstadt.";
 
@@ -129,5 +130,24 @@ describe("making the sentences in the background", () => {
     expect(await summariseSpots({ ask: async () => ({ summary: "Mittelalterlicher Glockenturm." }) })).toBe(1);
     const [row] = await db.select().from(tripSpotFame).where(eq(tripSpotFame.osm_ref, "node:1"));
     expect((row.summary as { text: string }).text).toBe("Mittelalterlicher Glockenturm.");
+  });
+  it("asks a bad answer once, but waits out an outage", async () => {
+    await createTripPlan({ legs: [{ title: "Musterstadt", anchor: CITY, days: 1 }] });
+    const at = new Date().toISOString();
+    const set = { description: { text: LEAD_IT, source: "wikipedia", url: "https://it.wikipedia.org/wiki/Torre" } };
+    await db.insert(tripSpotFame).values({ osm_ref: "node:1", name: "Torre", lat: CITY.lat, lon: CITY.lon, fetched_at: at, ...set })
+      .onConflictDoUpdate({ target: tripSpotFame.osm_ref, set });
+
+    let busy = 0;
+    const down = async () => { busy += 1; throw new LlmServiceUnavailableError("HTTP 503"); };
+    await summariseSpots({ ask: down });
+    await summariseSpots({ ask: down });
+    expect(busy).toBe(2);
+
+    let cut = 0;
+    const bad = async () => { cut += 1; throw new LlmAnswerUnusableError("HTTP 422", 422); };
+    expect(await summariseSpots({ ask: bad })).toBe(0);
+    expect(await summariseSpots({ ask: bad })).toBe(0);
+    expect(cut).toBe(1);
   });
 });

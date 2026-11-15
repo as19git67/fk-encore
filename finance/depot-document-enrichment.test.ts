@@ -15,7 +15,7 @@ vi.mock("./llm-client", async (importOriginal) => {
 });
 
 import db from "../db/database";
-import { extractSettlementValues, LlmServiceUnavailableError } from "./llm-client";
+import { extractSettlementValues, LlmAnswerUnusableError, LlmServiceUnavailableError } from "./llm-client";
 import {
   documents,
   financeAccount,
@@ -28,13 +28,14 @@ import {
   financeDepotTransaction,
   financeDepotTransactionDocument,
   financeDocumentSettlementLlm,
+  financeDocumentSettlementLlmFailure,
   financeTagTransaction,
   financeTanSession,
   financeTransaction,
   financeTransactionDocument,
   users,
 } from "../db/schema";
-import { enrichDocument, enrichPendingDocuments, retryPapersAwaitingModel } from "./depot-document-enrichment";
+import { enrichDocument, enrichPendingDocuments, MAX_SETTLEMENT_TRIES, retryPapersAwaitingModel } from "./depot-document-enrichment";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
   applySettlementDocument,
@@ -1656,6 +1657,30 @@ Zu Ihren Gunsten nach Steuern EUR 2.953,60`;
     expect(Number(row!.price)).toBe(118.4);
     // Answered now: nothing left to retry.
     expect((await retryPapersAwaitingModel()).documents_examined).toBe(0);
+  });
+
+  it("does not ask the hourly retry again for an answer the model cannot give, and reads the next paper", async () => {
+    await setup();
+    vi.mocked(extractSettlementValues).mockRejectedValue(new LlmAnswerUnusableError("HTTP 422", 422));
+    const docId = await insertDocument(SALE);
+    const first = await enrichDocument(docId);
+    expect(first.outcome).toBe("model_unavailable");
+    expect(first.model_refused).toBe(true);
+    const calls = vi.mocked(extractSettlementValues).mock.calls.length;
+
+    // Within the pause: not asked.
+    expect((await retryPapersAwaitingModel()).documents_examined).toBe(0);
+    expect(vi.mocked(extractSettlementValues).mock.calls.length).toBe(calls);
+
+    // After the pause: asked again, up to the limit, then left alone.
+    for (let i = 0; i < MAX_SETTLEMENT_TRIES + 1; i += 1) {
+      await db.update(financeDocumentSettlementLlmFailure)
+        .set({ failed_at: new Date(Date.now() - 24 * 3_600_000).toISOString() });
+      await retryPapersAwaitingModel();
+    }
+    expect(vi.mocked(extractSettlementValues).mock.calls.length).toBe(calls + MAX_SETTLEMENT_TRIES - 1);
+    const [failure] = await db.select().from(financeDocumentSettlementLlmFailure);
+    expect(failure!.failures).toBe(MAX_SETTLEMENT_TRIES);
   });
 
   it("corrects a row booked from the rules alone, and joins the booking that quotes the settlement", async () => {

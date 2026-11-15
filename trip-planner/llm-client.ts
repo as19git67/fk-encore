@@ -3,7 +3,15 @@
  *
  * Shares shape and failure handling with finance/llm-client.ts: the
  * generic `/json-prompt` endpoint, a hard timeout, and one error type
- * that callers treat as "the model is not available right now".
+ * that callers on a request path treat as "the model is not available
+ * right now".
+ *
+ * A background job must tell more apart, because "try again on the
+ * next tick" is only right for an outage: an unusable answer
+ * (`LlmAnswerUnusableError`) comes back the same at temperature 0, and
+ * a timeout (`LlmTimeoutError`) kept the GPU busy for the whole budget.
+ * Both are subclasses, so a request path sees no difference; a job asks
+ * `isLlmOutage`.
  *
  * The prompt asks for constraints, never for a plan. That boundary is
  * the concept's (§11.6): the model reads the sentence, the solver
@@ -25,6 +33,46 @@ export class LlmServiceUnavailableError extends Error {
     this.name = "LlmServiceUnavailableError";
   }
 }
+
+/**
+ * The service answered, but with nothing to use: cut off at
+ * `max_tokens` (422), not JSON (502), a prompt the model refused (400,
+ * 500). The same prompt gets the same answer again, so a job must not
+ * retry it on every tick: that was a minute of GPU every five minutes
+ * for one stay's highlights.
+ */
+export class LlmAnswerUnusableError extends LlmServiceUnavailableError {
+  constructor(reason: string, readonly status: number | null) {
+    super(reason);
+    this.name = "LlmAnswerUnusableError";
+  }
+
+  /** Cut off at `max_tokens`: nothing but a different prompt helps. */
+  get cutOff(): boolean {
+    return this.status === 422;
+  }
+}
+
+/** The model worked for the whole budget and did not finish. */
+export class LlmTimeoutError extends LlmServiceUnavailableError {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "LlmTimeoutError";
+  }
+}
+
+/**
+ * Nobody computed anything: the service is down, busy (503) or no slot
+ * came free. The only failure a background job may retry right away.
+ */
+export function isLlmOutage(err: unknown): boolean {
+  return err instanceof LlmServiceUnavailableError
+    && !(err instanceof LlmAnswerUnusableError)
+    && !(err instanceof LlmTimeoutError);
+}
+
+/** Statuses that mean "not now" rather than "not this prompt". */
+const OUTAGE_STATUSES = new Set([429, 503]);
 
 export interface CategoryVocabularyEntry {
   id: string;
@@ -89,23 +137,25 @@ async function postPrompt(
       signal: controller.signal,
     });
   } catch (err) {
-    throw new LlmServiceUnavailableError(
-      `llm-service /json-prompt failed: ${(err as Error)?.message ?? err}`,
-    );
+    const message = `llm-service /json-prompt failed: ${(err as Error)?.message ?? err}`;
+    if (controller.signal.aborted) throw new LlmTimeoutError(message);
+    throw new LlmServiceUnavailableError(message);
   } finally {
     clearTimeout(timer);
   }
 
   if (!resp.ok) {
-    throw new LlmServiceUnavailableError(
-      `llm-service /json-prompt returned HTTP ${resp.status}`,
-    );
+    const message = `llm-service /json-prompt returned HTTP ${resp.status}`;
+    if (OUTAGE_STATUSES.has(resp.status)) throw new LlmServiceUnavailableError(message);
+    if (resp.status === 504) throw new LlmTimeoutError(message);
+    throw new LlmAnswerUnusableError(message, resp.status);
   }
   try {
     return await resp.json();
   } catch (err) {
-    throw new LlmServiceUnavailableError(
+    throw new LlmAnswerUnusableError(
       `llm-service /json-prompt produced invalid JSON: ${(err as Error)?.message ?? err}`,
+      null,
     );
   }
 }

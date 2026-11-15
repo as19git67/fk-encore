@@ -1426,6 +1426,9 @@ export const documentCollections = pgTable("document_collections", {
   summary_generated_at: timestamp("summary_generated_at", { mode: "string", withTimezone: true }),
   summary_stale: boolean("summary_stale").notNull().default(true),
   summary_error: text("summary_error"),
+  /** Failed tries since the last summary; three and the job waits for the next change. */
+  summary_failures: integer("summary_failures").notNull().default(0),
+  summary_failed_at: timestamp("summary_failed_at", { mode: "string", withTimezone: true }),
   /** Which parts of the front matter the generated PDF carries. */
   include_cover: boolean("include_cover").notNull().default(true),
   include_toc: boolean("include_toc").notNull().default(true),
@@ -2778,6 +2781,19 @@ export const financeDocumentSettlementLlm = pgTable("finance_document_settlement
     .references(() => documents.id, { onDelete: "cascade" }),
   values: jsonb("values").$type<Record<string, unknown>>().notNull(),
   created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// A settlement the model answered with nothing to use (cut off, not JSON):
+// the hourly retry leaves it after three tries — see migration 0317.
+export const financeDocumentSettlementLlmFailure = pgTable("finance_document_settlement_llm_failure", {
+  document_id: integer("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  failures: integer("failures").notNull().default(0),
+  error: text("error"),
+  failed_at: timestamp("failed_at", { mode: "string", withTimezone: true })
     .notNull()
     .defaultNow(),
 });
