@@ -196,6 +196,51 @@ bash /path/to/prod/data/backup/host-scripts/test-refresh.sh "$PWD/.env"
   it past its retention (and says so in the log) until the next refresh
   replaces the clone; the next backup then prunes it.
 
+### Upgrade check
+
+Prod takes an app image only after its migrations have run on a copy of
+prod's data (documentation/plans/dev-system.md, "The upgrade check"). Every
+merge to main pushes the image as `candidate` and `sha-<commit>`; with the
+gate on, CI then calls the test stack's Watchtower, which replaces the `upgrade_check` container
+(`docker-compose.test.yml`) with it. The container:
+
+1. restores prod's newest `encore-daily-*.dump` into a scratch database
+   `encore_upgrade_check` on the test stack's postgres,
+2. runs the image's migrations on it with the same migrator as the boot,
+   and on an empty `encore_upgrade_fresh`,
+3. fails when a journal entry was not applied on the copy (the skip of
+   #1919), when a migration fails on prod's rows, or when the two schemas
+   differ in a table, column, constraint, index, enum, view, function or
+   trigger,
+4. drops both databases and writes the commit status
+   `prod-data/upgrade-check` — object names, migration tags and Postgres
+   error codes only; the full log stays in the container
+   (`docker logs fk-encore-upgrade-check-test`).
+
+CI waits for that status (at most `UPGRADE_CHECK_MINUTES`, default 45),
+then retags `sha-<commit>` as `latest` and deploys prod and the demo. On
+red, prod keeps its image; the fix is the next merge. A `v*` tag still
+builds `latest` directly, past the check.
+
+Set it up once, in this order:
+
+1. In the test stack's env file: `UPGRADE_CHECK_DUMP_DIR` (prod's backup
+   directory on the host, mounted read-only) and
+   `UPGRADE_CHECK_GITHUB_TOKEN` (fine-grained, this repository only,
+   "Commit statuses: read and write").
+2. Wait for the first merge to main after this change: every main build
+   pushes `candidate` (without the gate, main still goes straight to
+   `latest` as well).
+3. Run the check once by hand and read its log:
+   `docker compose --profile upgrade-check run --rm upgrade_check --no-report`
+   (exit code 0 = passed). A difference prod carried from before the check
+   can be left out with `UPGRADE_CHECK_IGNORE` (key prefixes from the log).
+4. Add `COMPOSE_PROFILES=upgrade-check` to the env file and
+   `docker compose up -d`.
+5. Set the repository variable `UPGRADE_CHECK=on` (Settings › Secrets and
+   variables › Actions › Variables). From the next merge on, main waits for
+   the check.
+
 ### Demo stack
 
 A third stack shows the app filled with synthetic demo data

@@ -24,6 +24,9 @@
 #      are off — so an env file copied from prod opens nothing. A path set
 #      to `on` uses the key the env file gives it: give it one of test's
 #      own, never prod's.
+#   3. The upgrade check runs here (service upgrade_check below): every
+#      image merged to main migrates a copy of prod's newest dump before
+#      prod takes it.
 #
 # `!override` needs Docker Compose 2.24 or later.
 
@@ -74,6 +77,63 @@ services:
       MP_MAX_MESSAGES: "2000"
     ports:
       - "${DEPLOY_BIND_MAIL:-0.0.0.0}:${DEPLOY_HOST_PORT_MAIL:-18025}:8025"
+
+  # The upgrade check (documentation/plans/dev-system.md, "The upgrade
+  # check"): the app image of a merge to main, tagged `candidate`, restores
+  # prod's newest nightly dump into a scratch database of this stack's
+  # postgres, runs its migrations on it and on an empty database, compares
+  # the two schemas and reports the commit status prod-data/upgrade-check.
+  # Prod only takes the image as `latest` after that status is green
+  # (.github/workflows/docker-image.yml). Watchtower of this stack replaces
+  # the container when a new candidate appears; it checks once and then
+  # waits. Only with COMPOSE_PROFILES=upgrade-check in the env file, once
+  # the first candidate exists.
+  upgrade_check:
+    image: ${DEPLOY_IMAGE_BASE:-ghcr.io/as19git67/fk-encore}:${UPGRADE_CHECK_TAG:-candidate}
+    container_name: fk-encore-upgrade-check${DEPLOY_NAME_SUFFIX:-}
+    profiles: ["upgrade-check"]
+    restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["node", "/opt/fk-encore/upgrade-check/upgrade-check.mjs"]
+    command: ["--stay"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      UPGRADE_CHECK_DUMP_DIR: /mnt/prod-backup
+      UPGRADE_CHECK_GITHUB_TOKEN: ${UPGRADE_CHECK_GITHUB_TOKEN:-}
+      UPGRADE_CHECK_IGNORE: ${UPGRADE_CHECK_IGNORE:-}
+    volumes:
+      # Prod's backup directory, read-only: the check reads the newest
+      # encore-daily-*.dump and nothing else. Never created by compose.
+      - type: bind
+        source: ${UPGRADE_CHECK_DUMP_DIR:-/upgrade-check-dump-dir-is-not-set}
+        target: /mnt/prod-backup
+        read_only: true
+        bind:
+          create_host_path: false
+
+  # The list of docker-compose.yml plus the upgrade check: Watchtower only
+  # updates the containers it names.
+  watchtower:
+    command: >
+      --http-api-periodic-polls
+      fk-encore-app${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-aesthetic${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-receipt-ocr${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-routing${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-taxonomy-tools${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-upgrade-check${DEPLOY_NAME_SUFFIX:-}
 
 networks:
   prod:
