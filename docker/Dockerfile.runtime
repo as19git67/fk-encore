@@ -117,6 +117,13 @@ COPY --chown=568:568 scripts/host/install-backup-hook.sh \
                      /opt/fk-encore/host-scripts/
 RUN chmod 0755 /opt/fk-encore/host-scripts/*.sh
 
+# The upgrade check (documentation/plans/dev-system.md, "The upgrade check"):
+# run by the test stack's `upgrade_check` service with this image's node, on
+# the migrations under the working directory — the ones this image boots with.
+COPY --chown=568:568 scripts/upgrade-check/schema.mjs \
+                     scripts/upgrade-check/upgrade-check.mjs \
+                     /opt/fk-encore/upgrade-check/
+
 ARG BUILD_NUMBER=dev
 ENV APP_BUILD_NUMBER=${BUILD_NUMBER} \
     FRONTEND_DIST_DIR=/srv/frontend/dist \

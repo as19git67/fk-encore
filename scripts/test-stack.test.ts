@@ -58,6 +58,52 @@ describe("docker-compose.test.yml", () => {
   });
 });
 
+describe("the upgrade check (stage 3) and the gate in CI (stage 4)", () => {
+  const overlay = read("docker-compose.test.yml");
+  const service = overlay.split(/^ {2}upgrade_check:$/m)[1]?.split(/^ {2}[a-z_-]+:$/m)[0] ?? "";
+  const watchedIn = (text: string) =>
+    (/^ {2}watchtower:\n[\s\S]*?command:\s*>([\s\S]*?)\n {4}\S/m.exec(text + "\n    x")?.[1] ?? "").match(/fk-encore-[a-z-]+/g) ?? [];
+
+  it("runs the candidate image's check script, only with its profile, on prod's dumps read-only", () => {
+    expect(service).toContain("${UPGRADE_CHECK_TAG:-candidate}");
+    expect(service).toContain('profiles: ["upgrade-check"]');
+    expect(service).toContain('entrypoint: ["node", "/opt/fk-encore/upgrade-check/upgrade-check.mjs"]');
+    expect(service).toContain('command: ["--stay"]');
+    expect(service).toMatch(/target: \/mnt\/prod-backup\n {8}read_only: true\n {8}bind:\n {10}create_host_path: false/);
+    const docker = read("docker/Dockerfile.runtime");
+    expect(docker).toMatch(/scripts\/upgrade-check\/schema\.mjs[\s\S]*scripts\/upgrade-check\/upgrade-check\.mjs[\s\S]*\/opt\/fk-encore\/upgrade-check\//);
+  });
+
+  it("lets the test stack's Watchtower replace the check container, next to everything prod's names", () => {
+    const base = watchedIn(read("docker-compose.yml"));
+    const test = watchedIn(overlay);
+    expect(base.length).toBeGreaterThan(5);
+    expect(test).toEqual([...base, "fk-encore-upgrade-check"]);
+    expect(service).toContain("container_name: fk-encore-upgrade-check${DEPLOY_NAME_SUFFIX:-}");
+    expect(service).toContain("com.centurylinklabs.watchtower.scope");
+  });
+
+  it("promotes to latest only the checked sha tag, after a green status, when the gate is on", () => {
+    const wf = read(".github/workflows/docker-image.yml");
+    expect(wf).toContain("GATE: ${{ github.ref == 'refs/heads/main' && vars.UPGRADE_CHECK == 'on' }}");
+    expect(wf).toContain("type=raw,value=latest,enable=${{ (github.ref == 'refs/heads/main' && env.GATE != 'true') || startsWith(github.ref, 'refs/tags/v') }}");
+    expect(wf).toContain("type=raw,value=candidate,enable=${{ github.ref == 'refs/heads/main' }}");
+    expect(wf).toContain('select(.context == "prod-data/upgrade-check")');
+    const steps = wf.split("\n      - name: ").map((s) => s.split("\n")[0]);
+    const at = (name: string) => steps.indexOf(name);
+    expect(at("Hand the candidate to the upgrade check")).toBeGreaterThan(at("Build and push runtime image (Stage B)"));
+    expect(at("Wait for the upgrade check")).toBeGreaterThan(at("Hand the candidate to the upgrade check"));
+    expect(at("Promote the candidate to latest")).toBeGreaterThan(at("Wait for the upgrade check"));
+    expect(at("Deploy to TrueNAS (latest)")).toBeGreaterThan(at("Promote the candidate to latest"));
+    expect(wf).toMatch(/imagetools create \\\n\s+-t \$\{\{ env\.REGISTRY \}\}\/\$\{\{ env\.IMAGE_NAME \}\}:latest \\\n\s+\$\{\{ env\.REGISTRY \}\}\/\$\{\{ env\.IMAGE_NAME \}\}:sha-\$\{\{ github\.sha \}\}/);
+  });
+
+  it("reports under the context the gate waits for", async () => {
+    const { STATUS_CONTEXT } = await import("./upgrade-check/upgrade-check.mjs" as string);
+    expect(STATUS_CONTEXT).toBe("prod-data/upgrade-check");
+  });
+});
+
 describe("host scripts of the test stack", () => {
   it("ship with the image and are seeded onto every backup volume", () => {
     const docker = read("docker/Dockerfile.runtime");

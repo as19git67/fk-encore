@@ -274,19 +274,32 @@ so a dev tab is never mistaken for prod.
 
 ### What it does
 
-The app image gets a second entry point, `node … upgrade-check`, which
-runs without the HTTP server:
+The app image gets a second entry point,
+`node /opt/fk-encore/upgrade-check/upgrade-check.mjs`
+(`scripts/upgrade-check/`), which runs without the HTTP server. It is plain
+JavaScript so it needs no build, and it loads the image's own `pg`,
+Drizzle migrator and `db/migrations/postgres` from the image's working
+directory, the ones the boot uses:
 
 1. Restore the newest `encore-daily-*.dump` from prod's backup directory
    (mounted read-only into the check container) into a scratch database
    `encore_upgrade_check` on the dev postgres, dropped and recreated each
    time.
-2. Run the image's migrations and seed on it, exactly as the boot does.
+2. Run the image's migrations on it with Drizzle's `migrate()`, exactly as
+   the boot does. The seed (`db/seed.ts`) is TypeScript inside the app
+   bundle and is not run: it only inserts roles and permissions with
+   `ON CONFLICT`, and a fault there shows at the dev stack's next boot.
 3. Run the same migrations on an empty database `encore_upgrade_fresh`.
-4. Compare: every journal entry applied in both, and
-   `pg_dump --schema-only` of both equal after normalising. A skipped
-   migration, as in #1919, shows here as a missing column, as does any
-   migration that only half applied.
+4. Compare: every journal entry applied on the copy (a row in
+   `drizzle.__drizzle_migrations` with its `when` or its file hash), and
+   both schemas equal object by object — schemas, extensions (by name;
+   prod keeps an old extension version until someone updates it), tables,
+   columns with type, null and default, constraints, indexes, enums, views,
+   functions and triggers, read from the catalog rather than from a text
+   dump, so column order and dump formatting cannot raise a false alarm. A
+   skipped migration, as in #1919, shows twice: as an unapplied entry and
+   as a missing column. `UPGRADE_CHECK_IGNORE` leaves out key prefixes,
+   for a difference prod carried from before the check.
 5. Drop both databases.
 6. Report the result for the image's commit to GitHub as the commit status
    `prod-data/upgrade-check`: `success`, or `failure` with the first
@@ -294,37 +307,66 @@ runs without the HTTP server:
    never a row, a value or a count of rows of a user.
 
 Data-dependent failures (a `NOT NULL` on a column with nulls, a unique
-index that real rows violate, a long-running backfill) fail in step 2 and
-show the migration's file name and the Postgres error code.
+index that real rows violate, a long-running backfill) fail in step 2.
+Drizzle runs all pending migrations in one transaction and its error does
+not say which one failed, so the check then applies them one by one on
+the scratch copy and reports the first that fails, with the Postgres error
+code and the names of table, column and constraint. Never the message or
+its detail: those can quote a value from a row. The full log stays in the
+container on the host.
 
 ### Container and trigger
 
 `upgrade_check` in `docker-compose.test.yml`: the app image tagged
-`candidate`, command `upgrade-check`, the backup directory of prod
-read-only, the dev postgres, and a GitHub token in `.env.test` (fine-grained,
-this repository only, permission "Commit statuses: read and write",
-nothing else). The image knows its commit from `BUILD_NUMBER`. Watchtower
-of the dev stack replaces and starts it when a new `candidate` appears;
-it runs once and stops.
+`candidate`, the entry point above with `--stay`, the backup directory of
+prod read-only (`UPGRADE_CHECK_DUMP_DIR`, never created by compose), the
+dev postgres, and a GitHub token in `.env.test`
+(`UPGRADE_CHECK_GITHUB_TOKEN`, fine-grained, this repository only,
+permission "Commit statuses: read and write", nothing else). The image
+knows its commit from `APP_BUILD_NUMBER`. It starts only with
+`COMPOSE_PROFILES=upgrade-check`, because compose would otherwise try to
+pull a `candidate` that does not exist before the first gated merge.
+
+Watchtower only updates running containers, so the container does not run
+once and stop: it checks, reports, and then waits. When a new `candidate`
+appears, the dev stack's Watchtower (whose list in the overlay adds
+`fk-encore-upgrade-check-test` to prod's) replaces it, and the new one
+checks its own commit. A restart of the same container does not check the
+same commit twice (a marker in its `/tmp`). By hand:
+`docker compose --profile upgrade-check run --rm upgrade_check --no-report`
+checks without writing a status and exits 0 (passed), 1 (failed) or 2
+(could not run).
 
 ### Gate in CI
 
-`docker-image.yml` on `main`:
+`docker-image.yml` on `main`, with the repository variable
+`UPGRADE_CHECK=on` (step 1 runs without it too):
 
 1. Build and push the app image as `candidate` and `sha-<commit>` (no
    longer straight to `latest`).
 2. Call the dev Watchtower.
 3. Wait for the commit status `prod-data/upgrade-check` on this commit,
-   polling every 30 s, at most 45 minutes.
+   polling every 30 s, at most 45 minutes (`UPGRADE_CHECK_MINUTES`).
 4. On `success`: tag `sha-<commit>` as `latest`
    (`docker buildx imagetools create`, no rebuild) and call the prod and
    demo Watchtower as today.
 5. On `failure` or timeout: the run is red, prod keeps its image. Fixing
    forward is a new merge; nothing has to be rolled back.
 
-Without the secret `WATCHTOWER_URL_TEST` the gate is skipped with a warning
-and the old path runs, so the change can be merged before the host is set
-up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
+The switch is the repository variable, not the secret
+`WATCHTOWER_URL_TEST`: that secret exists already for the PR deploys, so
+the gate would have waited in vain from the first merge on. Without the
+variable the old path runs, so the change can be merged before the host is
+set up. Every main build pushes `candidate` and `sha-<commit>` either way,
+so the first merge after this change gives the check an image to start
+from; only `latest`, the call to the test Watchtower and the wait depend on
+the variable. Set it up in this order: env file, first
+candidate, one check by hand, profile, variable (DEPLOYMENT.md › "Upgrade
+check"). Main builds run one at a time (`concurrency`), so a later
+candidate never overtakes an earlier one between its check and its
+promotion, and the promotion retags the `sha-<commit>` tag, never
+`candidate`. A tag push (`v*`) still builds `latest` directly and deploys
+prod as an escape hatch.
 
 ## Stages
 
@@ -357,9 +399,24 @@ up. A tag push (`v*`) still builds `latest` directly as an escape hatch.
    container in the overlay. Run by hand first (`docker compose run
    upgrade_check`) against today's `latest` and against the commit before
    #1919, which must fail on `watch_from`.
+   Built: `scripts/upgrade-check/upgrade-check.mjs` (restore, migrate,
+   find the failing migration, report) and `schema.mjs` (catalog, diff,
+   journal, status text), copied into the image under
+   `/opt/fk-encore/upgrade-check/`; service `upgrade_check` with profile
+   `upgrade-check` in the overlay. No image of the commit before #1919 is
+   kept, so the fault of #1919 is reproduced in
+   `scripts/upgrade-check/upgrade-check.test.ts` instead: a journal entry
+   older than the newest applied one is reported as skipped and its column
+   as missing, and a `NOT NULL` that prod's rows break names the migration
+   and code 23502.
 4. **Gate in CI.** `candidate` tag, wait for the status, promote to
    `latest`. The GitLab mirror (`.gitlab-ci.yml`) does not deploy and stays
    as it is.
+   Built: `GATE` in `docker-image.yml` from `vars.UPGRADE_CHECK`, the
+   tags `candidate` and `sha-<commit>` on every main build, the steps "Hand the candidate to
+   the upgrade check", "Wait for the upgrade check" and "Promote the
+   candidate to latest" before the prod and demo deploys, one main build
+   at a time. Off until the variable is set.
 
 ## Without ZFS
 

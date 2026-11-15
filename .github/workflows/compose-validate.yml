@@ -55,6 +55,10 @@ jobs:
       - name: Validate docker-compose.yml (test env-file)
         run: docker compose --env-file docker-compose.env.test.example -f docker-compose.yml -f docker-compose.volumes.yml -f docker-compose.test.yml config --quiet
 
+      # The upgrade check only starts with its profile (dev-system.md, stage 3).
+      - name: Validate docker-compose.yml (test env-file, upgrade check)
+        run: docker compose --env-file docker-compose.env.test.example -f docker-compose.yml -f docker-compose.volumes.yml -f docker-compose.test.yml --profile upgrade-check config --quiet
+
   chown-init-smoke:
     name: chown-init smoke test
     needs: validate

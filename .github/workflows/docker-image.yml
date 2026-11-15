@@ -29,6 +29,19 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # The gate of documentation/plans/dev-system.md ("Gate in CI"): every merge
+  # to main is pushed as `candidate`; with the repository variable
+  # UPGRADE_CHECK=on it is then migrated on a copy of prod by the test stack's
+  # upgrade_check container, and only promoted to `latest` (and deployed)
+  # after the commit status prod-data/upgrade-check is green. Without the
+  # variable, main goes straight to `latest` as before.
+  GATE: ${{ github.ref == 'refs/heads/main' && vars.UPGRADE_CHECK == 'on' }}
+
+# One main build at a time, so a later candidate never overtakes an earlier
+# one between its check and its promotion. PR builds run side by side.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && 'docker-image-main' || format('docker-image-{0}', github.run_id) }}
+  cancel-in-progress: false
 
 jobs:
 
@@ -39,6 +52,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Reads the commit status the upgrade check writes.
+      statuses: read
 
     services:
       postgres:
@@ -151,8 +166,16 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest: main without the gate, and any v* tag as the escape hatch
+          # past the gate. candidate + sha-<commit>: every main build, so the
+          # upgrade check has an image to start from before the gate is
+          # switched on; the sha tag is what gets promoted, so a newer
+          # candidate pushed in between can never be the one that lands on
+          # latest.
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=latest,enable=${{ (github.ref == 'refs/heads/main' && env.GATE != 'true') || startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=candidate,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=sha-${{ github.sha }},enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
 
@@ -256,8 +279,55 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
             ${{ secrets.WATCHTOWER_URL_TEST }}/v1/update
 
+      # The candidate goes to the test stack, whose Watchtower replaces the
+      # upgrade_check container with it (docker-compose.test.yml).
+      - name: Hand the candidate to the upgrade check
+        if: env.GATE == 'true'
+        run: |
+          curl -f -X POST \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            ${{ secrets.WATCHTOWER_URL_TEST }}/v1/update
+
+      # Waits for prod-data/upgrade-check on this commit. Red on failure,
+      # error or timeout: prod keeps its image, the fix is the next merge.
+      - name: Wait for the upgrade check
+        if: env.GATE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MINUTES: ${{ vars.UPGRADE_CHECK_MINUTES || '45' }}
+        run: |
+          deadline=$(( $(date +%s) + MINUTES * 60 ))
+          url="https://api.github.com/repos/${{ github.repository }}/commits/${{ github.sha }}/statuses?per_page=100"
+          while :; do
+            latest="$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$url" \
+              | jq -c '[.[] | select(.context == "prod-data/upgrade-check")] | sort_by(.updated_at) | last // {}')" || latest='{}'
+            state="$(jq -r '.state // empty' <<<"$latest")"
+            description="$(jq -r '.description // empty' <<<"$latest")"
+            case "$state" in
+              success) echo "upgrade check passed: $description"; exit 0 ;;
+              failure|error) echo "::error::upgrade check $state: $description"; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::no result of the upgrade check after $MINUTES minutes (last: ${state:-none})"
+              exit 1
+            fi
+            echo "upgrade check: ${state:-not started} ${description}"
+            sleep 30
+          done
+
+      # Promotes exactly the checked image: a registry-side retag, no rebuild.
+      - name: Promote the candidate to latest
+        if: env.GATE == 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+
       - name: Deploy to TrueNAS (latest)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         run: |
           curl -f -X POST \
             --retry 5 \
@@ -270,7 +340,7 @@ jobs:
       # "Demo deployment"). It must never turn main red: without the secret
       # the step does nothing, and a demo that is down only leaves a warning.
       - name: Deploy to TrueNAS (demo)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         continue-on-error: true
         env:
           WATCHTOWER_URL_DEMO: ${{ secrets.WATCHTOWER_URL_DEMO }}
