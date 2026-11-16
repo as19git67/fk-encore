@@ -65,16 +65,23 @@ What is still wrong is the shape of the app around it:
 
 ### Planning a stay
 
-- Tapping a stay in the itinerary opens its planning view: **all days on one
-  screen**, each with "planned of available" (the same figure as the fill
-  bar under the stay in the itinerary). Tapping a day row opens it scrolled
-  to that day.
+- "Planen" on a stay's card in the itinerary opens its planning view:
+  **all days on one screen**, each with "planned of available" (the same
+  figure as the fill bar under the stay in the itinerary). Tapping a day
+  row opens it scrolled to that day. A tap on the card itself opens the
+  stay's sheet, "⋯" (or a long press) its actions (review of the sheets,
+  16.11.).
 - The header (name and "4 Tage · Fr 27.11. bis Mo 30.11. · Hotel Beispiel",
   on the road "Tag 2 von 4 · heute") is one tappable row with a "›" and
-  opens the stay's details; the navigation title's menu offers the same as
-  "Ort, Tage und Unterkunft …". No "Bearbeiten" button: it would not say
-  that only the stay's basics are meant, not its spots or day trips
-  (Anton, 11.11.). "Aufenthalt planen" in the details leads back.
+  opens the stay's details. No "Bearbeiten" button and no title menu: the
+  header says what is edited (Anton, 11.11.; title menu dropped 16.11.).
+  "Aufenthalt planen" in the details leads back.
+- Start and end of the stays frame the trip; the journeys fill in. A stay
+  with "Beginn steht fest" (`start_pinned`) keeps its first day whatever
+  changes before it, and the journey before takes the nights in between;
+  an unpinned stay moves with the chain (Anton, 15.11.). The stay sheet
+  carries "Wann?" (Von, Bis, the pin) and the neighbouring journeys' times;
+  the journey sheet has no "Zeiten noch offen" switch and no "Von".
 - Spot cards show picture, duration, priority and estimated time. Drag
   reorders, also into another day. `⋯` opens the actions, a tap the details.
 - **Pinned** is a spot with a fixed time the ordering must not move: ticket

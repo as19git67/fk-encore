@@ -42,23 +42,23 @@ Alle drei lassen sich mit den Bildschirmen unten vollständig anlegen; die Ablä
 
 Der Reiseverlauf ist eine senkrechte Linie, an der sich Aufenthalte und Weiterreisen abwechseln. Unter jedem Aufenthalt stehen seine Tage, jeder mit einer Füllmarke (frei, halb, voll, zu viel). So sieht man auf einen Blick, wie groß ein Aufenthalt ist und wo noch Platz ist.
 
-- **Tippen auf einen Aufenthalt** öffnet ihn zum Planen, Tippen auf eine Tageszeile öffnet ihn gleich bei diesem Tag.
+- **Tippen auf einen Aufenthalt** öffnet sein Blatt (Ort, Tage, Unterkunft); „Planen“ an der Karte öffnet die Tage, Tippen auf eine Tageszeile gleich bei diesem Tag. „⋯“ an der Karte (oder langes Drücken) trägt die übrigen Aktionen. Ein angepinnter Aufenthalt zeigt eine Nadel.
 - **Tippen auf eine Weiterreise** öffnet ihr Blatt.
 - **Das Plus an der Linie** fügt einen Aufenthalt ein, oben auch die Anreise. Die Weiterreise dorthin entsteht im selben Schritt mit „Zeiten offen“; niemand legt eine Fahrt eigens an. Ein Plus auf einer Schiffsfahrt fügt einen Hafen ein und teilt die Fahrt, das Ende der Reise bleibt stehen.
 - **Umsortieren** per Ziehen geht nur, solange die Reise kein Datum hat; mit Datum ergibt die Reihenfolge die Daten.
 - **Löschen** durch Schieben nach links, mit Rückgängig. Die beiden angrenzenden Weiterreisen werden zu einer.
 
-Jede Änderung wirkt sofort auf die gerechneten Daten: Wer aus drei Nächten vier macht, sieht alle folgenden Karten um einen Tag wandern. Kürzt eine Änderung bereits geplante Tage, steht sie unter „Änderungen“ und lässt sich zurücknehmen.
+Start und Ende der Aufenthalte sind das Gerüst, die Weiterreisen füllen auf. Jede Änderung wirkt sofort auf die gerechneten Daten: Wer aus drei Nächten vier macht, sieht alle folgenden Karten um einen Tag wandern, bis zum nächsten angepinnten Aufenthalt. Ein Aufenthalt mit „Beginn steht fest“ (Hotel gebucht, Hafen im Fahrplan) bleibt an seinem Tag; die Weiterreise davor nimmt die Nächte dazwischen. Passt etwas nicht mehr davor, sagt das Blatt „… Tage zu viel“ und bietet an, davor zu kürzen oder den Pin zu lösen. Kürzt eine Änderung bereits geplante Tage, steht sie unter „Änderungen“ und lässt sich zurücknehmen.
 
-**Neuer Aufenthalt** ist ein kleines Blatt: Wo (Ort oder Unterkunft), Von (nur am Anfang der Reise, sonst gerechnet), Wie lange (Stepper), Bis (gerechnet, nur zum Lesen), Vor Ort und Übernachtung.
+**Neuer Aufenthalt** ist dasselbe Blatt wie die Details eines Aufenthalts: Wo (Ort oder Unterkunft), „Wann?“ mit Von und Bis (Von am ersten Aufenthalt setzt den Reisebeginn, sonst gerechnet oder mit „Beginn steht fest“ fest; Bis setzt die Länge, ohne Datum ein Stepper), Ankunft und Abfahrt, Vor Ort und Übernachtung als Wahl aus drei (Unterkunft steht fest, noch nichts gebucht, an Bord). „Neue Reise“ öffnet gleich dieses Blatt für den ersten Aufenthalt.
 
 ## Aufenthalt und Weiterreise bearbeiten
 
 ![Details eines Aufenthalts (ein Hafen, Übernachtung an Bord) und das Blatt einer Weiterreise](reise-planen-und-unterwegs/02-aufenthalt-weiterreise.svg)
 
-**Die Details eines Aufenthalts** öffnet ein Tipp auf den Kopf der Planungsansicht: Name und „4 Tage · Fr 27.11. bis Mo 30.11. · Hotel Beispiel“ tragen rechts ein „›“, unterwegs ebenso. Bearbeitet wird also genau das, was dort steht, nicht die Spots oder Ausflüge; ein Knopf „Bearbeiten“ ließe das offen. Dasselbe bietet das Menü am Titel in der Navigationsleiste als „Ort, Tage und Unterkunft …“ (wie „Umbenennen“ in Dateien oder Notizen); „Aufenthalt planen“ in den Details führt zurück. Sie tragen dieselben Felder wie „Neuer Aufenthalt“, dazu Ankunft und Abfahrt zum Lesen: Diese Zeiten gehören den Weiterreisen, „›“ öffnet sie.
+**Die Details eines Aufenthalts** öffnet ein Tipp auf seine Karte im Reiseverlauf oder auf den Kopf der Planungsansicht (Name und „4 Tage · Fr 27.11. bis Mo 30.11. · Hotel Beispiel“ tragen rechts ein „›“). Ein Titelmenü gibt es nicht. „Aufenthalt planen“ in den Details führt zur Planung; aus der Planung geöffnet fehlen „planen“ und „entfernen“. Sie tragen dieselben Felder wie „Neuer Aufenthalt“, dazu den Namen. Ankunft und Abfahrt sind dieselben Zeiten wie an den Weiterreisen daneben und lassen sich hier direkt ändern; an einem Hafen heißen sie „An Land ab“ und „An Bord bis“. Eine leere Zeit zeigt „offen · festlegen“ und, womit der Tag rechnet.
 
-**Das Blatt einer Weiterreise** hat Verkehrsmittel, Abfahrt und Ankunft (Ortszeit), Nächte unterwegs, den Schalter „Zeiten noch offen“ und eine Notiz für Flugnummer oder Sitzplatz. Bei der Anreise kommt „Ab“ (Zuhause) und „Von“ dazu, das den Beginn der Reise setzt. Solange die Zeiten offen sind, rechnet der Tag mit Vorgaben: Abfahrt 10:00, Ankunft 15:00, Anreise von Zuhause ab 08:00.
+**Das Blatt einer Weiterreise** hat Verkehrsmittel, Abfahrt und Ankunft (Ortszeit), Nächte unterwegs und eine Notiz für Flugnummer oder Sitzplatz. Einen Schalter „Zeiten noch offen“ gibt es nicht: eine leere Zeit ist offen, und der Tag rechnet mit Vorgaben (Abfahrt 10:00, Ankunft 15:00, Anreise von Zuhause ab 08:00). Die Anreise hat kein eigenes „Von“; ihr Tag folgt aus dem „Von“ des ersten Aufenthalts. Ist der Aufenthalt danach angepinnt, stehen die Nächte nur zum Lesen da, sie ergeben sich aus dem Pin.
 
 ## Einen Aufenthalt planen
 
