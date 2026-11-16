@@ -554,6 +554,12 @@ struct TripPlansListView: View {
             errorMessage = nil
             offlineSince = nil
             store.saveList(response.plans)
+            // Trips starting within a week come along by themselves
+            // (Anton, 16.11.); the row's icon follows once they are in.
+            Task {
+                await TripOfflineAutoLoad.run(response.plans)
+                stored = TripOfflineStore.shared.storedPlanIds()
+            }
         } catch {
             // Without a network, the list from the last time — or, if
             // there is none yet, the trips whose bundle is on the phone

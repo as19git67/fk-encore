@@ -215,6 +215,98 @@ final class TripOfflineBundleTests: XCTestCase {
         XCTAssertNil(try store().keptList())
     }
 
+    // MARK: - Pictures
+
+    func testAPictureIsKeptAndComesBack() throws {
+        let store = try store()
+        let url = "https://bilder.beispiel.test/spot-1.jpg"
+
+        store.saveThumb(Data([1, 2, 3]), for: url)
+
+        XCTAssertTrue(store.hasThumb(for: url))
+        XCTAssertEqual(store.thumbData(for: url), Data([1, 2, 3]))
+    }
+
+    func testAPictureNoStoredTripShowsIsDropped() throws {
+        let store = try store()
+        let url = "https://bilder.beispiel.test/spot-2.jpg"
+        store.saveThumb(Data([4]), for: url)
+        try store.save(try bundle(), planId: 7)
+
+        // The example trip has no pictures, so nothing holds this one.
+        store.remove(planId: 7)
+
+        XCTAssertFalse(store.hasThumb(for: url))
+    }
+
+    // MARK: - Loading by itself
+
+    private func summary(startDate: String?, days: Int = 3) -> TripPlanSummary {
+        TripPlanSummary(id: 5, title: "Beispielreise", legTitles: [], dayCount: days,
+                        startDate: startDate, updatedAt: "2026-06-01T08:00:00.000Z",
+                        youOrganise: true)
+    }
+
+    private var utc: TimeZone { TimeZone(secondsFromGMT: 0)! }
+
+    private func day(_ iso: String, hour: Int = 10) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        let parts = iso.split(separator: "-").compactMap { Int($0) }
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: hour))!
+    }
+
+    func testATripWithinAWeekComesAlong() {
+        XCTAssertTrue(TripOfflineAutoLoad.wants(
+            summary(startDate: "2026-06-18"), today: day("2026-06-12"),
+            storedAt: nil, declined: false, timeZone: utc))
+    }
+
+    func testATripFurtherAwayWaits() {
+        XCTAssertFalse(TripOfflineAutoLoad.wants(
+            summary(startDate: "2026-06-30"), today: day("2026-06-12"),
+            storedAt: nil, declined: false, timeZone: utc))
+    }
+
+    func testARunningTripComesAlong() {
+        XCTAssertTrue(TripOfflineAutoLoad.wants(
+            summary(startDate: "2026-06-11"), today: day("2026-06-12"),
+            storedAt: nil, declined: false, timeZone: utc))
+    }
+
+    func testAPastOrUndatedTripDoesNot() {
+        XCTAssertFalse(TripOfflineAutoLoad.wants(
+            summary(startDate: "2026-06-01"), today: day("2026-06-12"),
+            storedAt: nil, declined: false, timeZone: utc))
+        XCTAssertFalse(TripOfflineAutoLoad.wants(
+            summary(startDate: nil), today: day("2026-06-12"),
+            storedAt: nil, declined: false, timeZone: utc))
+    }
+
+    func testATripDeletedByHandStaysDeleted() {
+        XCTAssertFalse(TripOfflineAutoLoad.wants(
+            summary(startDate: "2026-06-14"), today: day("2026-06-12"),
+            storedAt: nil, declined: true, timeZone: utc))
+    }
+
+    func testAFreshCopyIsNotFetchedAgainButAnOldOneIs() {
+        let today = day("2026-06-12")
+        XCTAssertFalse(TripOfflineAutoLoad.wants(
+            summary(startDate: "2026-06-14"), today: today,
+            storedAt: today.addingTimeInterval(-3_600), declined: false, timeZone: utc))
+        XCTAssertTrue(TripOfflineAutoLoad.wants(
+            summary(startDate: "2026-06-14"), today: today,
+            storedAt: today.addingTimeInterval(-24 * 3_600), declined: false, timeZone: utc))
+    }
+
+    @MainActor
+    func testTheRunningTripIsFoundInAKeptList() {
+        let plans = [summary(startDate: "2026-06-30"), summary(startDate: "2026-06-11")]
+
+        XCTAssertEqual(TripRunningPlan.running(in: plans, on: day("2026-06-12"))?.startDate, "2026-06-11")
+        XCTAssertNil(TripRunningPlan.running(in: plans, on: day("2026-05-01")))
+    }
+
     // MARK: - When it may be used
 
     func testNoNetworkIsTheCaseItWasWrittenFor() {

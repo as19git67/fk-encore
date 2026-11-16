@@ -14,6 +14,7 @@ import SwiftUI
 struct TripOfflineView: View {
     @State var viewModel: TripPlannerViewModel
     @State private var justSaved = false
+    @AppStorage(TripOfflineAutoLoad.settingKey) private var autoLoad = true
 
     var body: some View {
         List {
@@ -58,12 +59,22 @@ struct TripOfflineView: View {
                 Text("Ohne Netz")
             } footer: {
                 Text("Auf dem iPhone liegt danach die ganze Reise: Reiseverlauf, Aufenthalte, "
-                     + "Tage, Spots, Ideen und das Licht der ausgeplanten Tage. Ohne Netz steht "
-                     + "sie in der Liste, und die App zeigt diesen Stand und sagt, von wann er ist. "
+                     + "Tage, Spots, Ideen, die Bilder der Spots und das Licht der ausgeplanten "
+                     + "Tage. Jede Änderung kommt von selbst nach. Ohne Netz steht die Reise in "
+                     + "der Liste, und die App zeigt diesen Stand und sagt, von wann er ist. "
                      + "Erkannte Besuche schickt sie nach, sobald wieder Netz da ist.\n\nNicht "
                      + "dabei sind die Karte in der App und die Wettervorhersage. Die Route öffnet "
                      + "Apple Karten, das mit seinen eigenen Offline-Karten weiter funktioniert. "
                      + "Planen und ändern geht nur mit Verbindung.")
+            }
+
+            Section {
+                Toggle("Anstehende Reisen von selbst laden", isOn: $autoLoad)
+            } footer: {
+                Text("Eine Reise, die in den nächsten \(TripOfflineAutoLoad.daysAhead) Tagen beginnt "
+                     + "oder gerade läuft, lädt die App im WLAN von selbst für unterwegs, wenn "
+                     + "genug Platz ist. Löschst du sie hier vom Gerät, bleibt sie gelöscht, "
+                     + "bis du sie wieder lädst.")
             }
 
             if justSaved {

@@ -63,6 +63,7 @@ struct TripPlanDayView: View {
     /// The day's offers: behind on a block, arrived late (§7.1).
     @State private var notices = TripDayNotices.shared
     @State var viewModel: TripPlannerViewModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -89,6 +90,12 @@ struct TripPlanDayView: View {
             TripSpotPickerView(viewModel: viewModel)
         }
         .navigationDestination(isPresented: $showingStay) { stayRoot }
+        // A change made just before the phone goes into the pocket
+        // reaches the copy for the road now, not in thirty seconds the
+        // app may not get (§3.9).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { viewModel.flushBundleRefresh() }
+        }
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() }, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

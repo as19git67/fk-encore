@@ -1,5 +1,6 @@
 import CoreLocation
 import SwiftUI
+import UIKit
 
 /// Loads one plan and holds what the day screen needs.
 ///
@@ -15,7 +16,11 @@ import SwiftUI
 /// stay reproducible if the app never accumulates its own version of it.
 @Observable @MainActor
 final class TripPlannerViewModel {
-    private(set) var plan: TripPlan?
+    /// Every change to a trip arrives here, so this is where the copy
+    /// kept for the road learns about it (§3.9).
+    private(set) var plan: TripPlan? {
+        didSet { scheduleBundleRefresh() }
+    }
     private(set) var isLoading = false
     /// Set while a day is being detailed, so the button can say so.
     private(set) var isDetailing = false
@@ -299,9 +304,7 @@ final class TripPlannerViewModel {
             // offline meant "keep it", not "keep that one afternoon".
             // A plan changed at breakfast has to be the plan in the
             // pocket by the time the wifi is gone.
-            if bundleStoredAt != nil {
-                Task { await refreshBundleQuietly() }
-            }
+            if bundleStoredAt != nil { scheduleBundleRefresh(after: 0) }
         } catch {
             // The plan from disk, but only when the server could not be
             // asked (§3.9). A "not found" is an answer and has to reach
@@ -348,7 +351,8 @@ final class TripPlannerViewModel {
             let bundle = try await fetchBundle()
             bundleStoredAt = try offlineStore.save(bundle, planId: planId)
             offlineBundle = bundle
-            await TripOfflineThumbnails.prefetch(bundle.thumbnailURLs)
+            TripOfflineAutoLoad.accept(planId)
+            await TripOfflineThumbnails.prefetch(bundle, into: offlineStore)
             return true
         } catch {
             errorMessage = TripErrorText.describe(error)
@@ -362,14 +366,53 @@ final class TripPlannerViewModel {
     /// stored plan, and an error over the day screen because a refresh
     /// did not go through would train people to ignore errors.
     private func refreshBundleQuietly() async {
-        guard offlineStore.has(planId: planId) else { return }
+        guard offlineStore.has(planId: planId), !isOffline else { return }
         guard let bundle = try? await fetchBundle() else { return }
         bundleStoredAt = try? offlineStore.save(bundle, planId: planId)
         offlineBundle = bundle
-        await TripOfflineThumbnails.prefetch(bundle.thumbnailURLs)
+        await TripOfflineThumbnails.prefetch(bundle, into: offlineStore)
+    }
+
+    /// The pending quiet refresh, if a change is waiting to reach the
+    /// stored copy.
+    @ObservationIgnored private var bundleRefresh: Task<Void, Never>?
+
+    /// Keep the stored copy in step with the plan (§3.9): after a
+    /// change, once the changes have stopped for a while, so ten taps
+    /// in a row cost one download. A later change moves the moment.
+    private func scheduleBundleRefresh(after seconds: Double = 30) {
+        guard offlineStore.has(planId: planId) else { return }
+        bundleRefresh?.cancel()
+        bundleRefresh = Task { [weak self] in
+            if seconds > 0 {
+                try? await Task.sleep(for: .seconds(seconds))
+            }
+            guard !Task.isCancelled, let self else { return }
+            await self.refreshBundleQuietly()
+            self.bundleRefresh = nil
+        }
+    }
+
+    /// The app is going away: a change still waiting for its quiet
+    /// moment is stored now, while there may still be a network.
+    func flushBundleRefresh() {
+        guard bundleRefresh != nil else { return }
+        bundleRefresh?.cancel()
+        // Asked for a little time in the background, or the system may
+        // freeze the app halfway through the download.
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "trip-offline-bundle")
+        bundleRefresh = Task { [weak self] in
+            await self?.refreshBundleQuietly()
+            self?.bundleRefresh = nil
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+        }
     }
 
     private func fetchBundle() async throws -> TripOfflineBundle {
+        try await Self.fetchBundle(planId: planId)
+    }
+
+    static func fetchBundle(planId: Int) async throws -> TripOfflineBundle {
         try await APIClient.shared.get(
             "/trip-planner/plans/\(planId)/bundle",
             query: ["utcOffsetMinutes": String(TimeZone.current.secondsFromGMT() / 60)],
@@ -380,6 +423,9 @@ final class TripPlannerViewModel {
     /// it, and a bundle nobody deletes is a plan that outlives the
     /// holiday on a full phone.
     func removeBundle() {
+        bundleRefresh?.cancel()
+        bundleRefresh = nil
+        TripOfflineAutoLoad.decline(planId)
         offlineStore.remove(planId: planId)
         bundleStoredAt = nil
         offlineBundle = nil
