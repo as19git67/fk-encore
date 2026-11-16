@@ -94,22 +94,6 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
         return presets.contains(current) ? presets : (presets + [current]).sorted()
     }
 
-    /// "Aufenthaltsdauer" as a submenu of a spot's actions, the current
-    /// one ticked — one list for a stop on a day and for an idea.
-    static func dwellActions(
-        current: Int,
-        set: @escaping @MainActor (Int) async -> Void,
-    ) -> [TripPinSheetAction] {
-        dwellChoices(current: current).map { minutes in
-            TripPinSheetAction(id: "dwell-\(minutes)", title: TripClock.duration(minutes),
-                               systemImage: minutes == current ? "checkmark" : "clock",
-                               closes: false, group: .plan, submenu: .dwell,
-                               disabled: minutes == current) {
-                await set(minutes)
-            }
-        }
-    }
-
     /// This edit with another stay, everything else as it was.
     func with(dwellMinutes minutes: Int) -> TripSpotEdit {
         var edit = self

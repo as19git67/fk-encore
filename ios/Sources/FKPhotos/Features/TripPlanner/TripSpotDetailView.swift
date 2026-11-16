@@ -54,6 +54,12 @@ struct TripSpotDetailView<Actions: View>: View {
     /// paging scroll view took the first tap on "Mehr" for the start
     /// of a swipe, and the menu only opened on the second (Anton, 15.11.).
     let barOutside: Bool
+    /// Priority and fixed time, as actions of the group `.details`
+    /// (review F): drawn here as values in "Planung", never in a menu.
+    let details: [TripPinSheetAction]
+    /// Closes the screen around the details when a detail opens a sheet
+    /// of its own (the fixed time): the pager, not this page.
+    let closeAll: (() -> Void)?
     @State private var routeChoice: TripMapsChoice?
     /// The pictures of the spot `galleryRef` names: the details can
     /// page to the next spot, and its pictures are not this one's.
@@ -65,6 +71,9 @@ struct TripSpotDetailView<Actions: View>: View {
     /// Finished saves, so the evening light asks again once a switched
     /// "Fotostopp" is on the server.
     @State private var saves = 0
+    /// A save just went through: said as "Gesichert" under the fields
+    /// for a moment (review F), since there is no "Sichern" to press.
+    @State private var justSaved = false
     @FocusState private var focus: TripSpotEditField?
     /// The kind just picked, shown until the caller hands a new spot.
     @State private var shownCategory: String?
@@ -82,8 +91,12 @@ struct TripSpotDetailView<Actions: View>: View {
         onRoute: (() -> Void)? = nil,
         bar: TripSpotDetailBar? = nil,
         barOutside: Bool = false,
+        details: [TripPinSheetAction] = [],
+        closeAll: (() -> Void)? = nil,
         @ViewBuilder actions: @escaping (@escaping () -> Void) -> Actions,
     ) {
+        self.details = bar?.details ?? details
+        self.closeAll = closeAll
         self.bar = bar
         self.barOutside = barOutside
         self.spot = spot
@@ -112,6 +125,11 @@ struct TripSpotDetailView<Actions: View>: View {
             // mock "Spot-Details"): the ticket, whether it is open, when it
             // is planned, and why somebody saved it.
             planFacts
+
+            // What is said about the spot for the plan, changed where it
+            // is read (review F): priority, how long, the fixed time,
+            // "Fotostopp".
+            planningSection
 
             // Your own words about the place, right where you read
             // them: written in place, saved when you leave the field.
@@ -442,14 +460,8 @@ struct TripSpotDetailView<Actions: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            dwellRow
-            if onSave != nil, spot.supportsPhotoStop {
-                Toggle(isOn: Binding(get: { draft.photoStop }, set: { on in
-                    draft.photoStop = on
-                    save()
-                })) {
-                    Label("Fotostopp", systemImage: "camera")
-                }
+            if onSave == nil {
+                dwellRow
             }
             if let extent = spot.extent {
                 // The way is the point: the day goes on from its end,
@@ -475,6 +487,71 @@ struct TripSpotDetailView<Actions: View>: View {
             }
         }
 
+    }
+
+    /// "Planung" (review F): priority, how long, the fixed time and
+    /// "Fotostopp", each changed in its row. Priority and fixed time come
+    /// as actions of the group `.details` from the same list the menu is
+    /// built from, so the details can do what the menu used to.
+    @ViewBuilder
+    private var planningSection: some View {
+        let priorities = details.filter { $0.submenu == .priority }
+        let fixedTime = details.first { $0.id == "appointment" }
+        if onSave != nil || !details.isEmpty {
+            Section {
+                if !priorities.isEmpty {
+                    Picker(selection: Binding(
+                        get: { priorities.first(where: \.disabled)?.id ?? "" },
+                        set: { id in
+                            guard let action = priorities.first(where: { $0.id == id }), !action.disabled else { return }
+                            Task { await action.run() }
+                        },
+                    )) {
+                        ForEach(priorities) { action in
+                            Text(action.title.replacingOccurrences(of: "Priorität: ", with: "")).tag(action.id)
+                        }
+                    } label: {
+                        Label("Priorität", systemImage: "flag")
+                    }
+                    .pickerStyle(.menu)
+                }
+                if onSave != nil {
+                    dwellRow
+                }
+                if let fixedTime {
+                    Button {
+                        Task {
+                            await fixedTime.run()
+                            if fixedTime.closes { (closeAll ?? { dismiss() })() }
+                        }
+                    } label: {
+                        HStack {
+                            Label("Feste Zeit", systemImage: "clock")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(spot.pin.map { TripClock.format($0.startMinutes) } ?? "keine")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(fixedTime.disabled)
+                }
+                if onSave != nil, spot.supportsPhotoStop {
+                    Toggle(isOn: Binding(get: { draft.photoStop }, set: { on in
+                        draft.photoStop = on
+                        save()
+                    })) {
+                        Label("Fotostopp", systemImage: "camera")
+                    }
+                }
+            } header: {
+                Text("Planung")
+            }
+        }
     }
 
     /// Title, note and link, as fields. The map's name stays the
@@ -505,8 +582,11 @@ struct TripSpotDetailView<Actions: View>: View {
         } header: {
             Text("Titel, Notiz und Link")
         } footer: {
-            Text("Leerer Titel heißt: Name aus OpenStreetMap. Gespeichert wird, "
-                 + "sobald ihr das Feld verlasst.")
+            if justSaved {
+                Label("Gesichert", systemImage: "checkmark")
+            } else {
+                Text("Leerer Titel heißt: Name aus OpenStreetMap.")
+            }
         }
     }
 
@@ -539,6 +619,9 @@ struct TripSpotDetailView<Actions: View>: View {
         Task {
             await onSave(edit)
             saves += 1
+            justSaved = true
+            try? await Task.sleep(for: .seconds(2))
+            justSaved = false
         }
     }
 
@@ -630,14 +713,18 @@ struct TripSpotDetailBar {
     /// Its symbol in the bar, where it differs from the menu's.
     var primaryImage: String? = nil
     var more: [TripPinSheetAction]
+    /// What is said about the spot (priority, fixed time): not in the
+    /// bar, in the details' section "Planung".
+    var details: [TripPinSheetAction] = []
 
     /// A planned stop: "Auf einen anderen Tag" goes in the bar. The
     /// navigate group is the bar's own Route and Karte.
     static func planned(_ actions: [TripPinSheetAction]) -> TripSpotDetailBar {
-        let shown = actions.filter { $0.group != .navigate }
+        let shown = actions.filter { $0.group != .navigate && $0.group != .details }
         let primary = shown.first { $0.id == "move" }
         return TripSpotDetailBar(primary: primary, primaryTitle: primary == nil ? nil : "Anderer Tag",
-                                 more: shown.filter { $0.id != primary?.id })
+                                 more: shown.filter { $0.id != primary?.id },
+                                 details: actions.filter { $0.group == .details })
     }
 }
 

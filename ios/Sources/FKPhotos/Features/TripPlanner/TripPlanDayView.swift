@@ -558,8 +558,11 @@ struct TripPlanDayView: View {
         // hour, and on no other day. One entry, "Feste Zeit …" (Anton,
         // 10.11.): its sheet enters a time with its reason, or changes
         // the one there is, or takes it off.
+        // Said about the spot, so it stands in the details' "Planung",
+        // not in the menu (review F).
         actions.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit …",
                                           systemImage: fixed == nil ? "calendar.badge.clock" : "calendar.badge.checkmark",
+                                          group: .details,
                                           disabled: status != .planned && fixed == nil) {
             later {
                 if let day { viewModel.select(dayIndex: day.dayIndex) }
@@ -568,15 +571,7 @@ struct TripPlanDayView: View {
                 addingFixpoint = true
             }
         })
-        // How long the visit takes, next to its day and its fixed time
-        // (Anton, 14.11.); the times of the day follow from the server.
-        actions.append(contentsOf: TripSpotEdit.dwellActions(current: stop.dwellMinutes) { minutes in
-            await viewModel.saveNote(TripSpotEdit(TripSpotDetail(stop)).with(dwellMinutes: minutes))
-        }.map { action in
-            var action = action
-            action.disabled = action.disabled || status != .planned
-            return action
-        })
+        // How long the visit takes is in the details' "Planung" (review F).
         // Holding a stop in its slot when the planner plans again: a
         // trip of ideas never plans again, and there "gepinnt" is a
         // fixed time.

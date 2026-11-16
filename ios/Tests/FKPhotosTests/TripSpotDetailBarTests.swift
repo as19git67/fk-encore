@@ -30,4 +30,20 @@ final class TripSpotDetailBarTests: XCTestCase {
         XCTAssertNil(bar.primaryTitle)
         XCTAssertEqual(bar.more.map(\.id), ["done", "toPool"])
     }
+
+    func testWhatIsSaidAboutASpotGoesToTheDetailsNotTheBar() {
+        let bar = TripSpotDetailBar.planned([
+            action("move"),
+            action("appointment", group: .details),
+            action("priority-must", group: .details),
+            action("delete", group: .remove),
+        ])
+        XCTAssertEqual(bar.more.map(\.id), ["delete"])
+        XCTAssertEqual(bar.details.map(\.id), ["appointment", "priority-must"])
+    }
+
+    func testThePriorityIsSaidInTheDetails() {
+        let actions = TripIdeaPriority.actions(current: .want) { _ in }
+        XCTAssertTrue(actions.allSatisfy { $0.group == .details && $0.submenu == .priority })
+    }
 }

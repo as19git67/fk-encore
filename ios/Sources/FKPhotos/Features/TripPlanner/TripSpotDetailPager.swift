@@ -59,7 +59,8 @@ struct TripSpotDetailPager: View {
                                        stayLight: stayLight?(stop),
                                        onStayLightAccepted: onStayLightAccepted,
                                        onRoute: way == nil ? nil : { wayStop = stop },
-                                       bar: .planned(actions(stop)), barOutside: true) { _ in EmptyView() }
+                                       bar: .planned(actions(stop)), barOutside: true,
+                                       closeAll: { dismiss() }) { _ in EmptyView() }
                     .tag(stop.rowId)
                 }
             }

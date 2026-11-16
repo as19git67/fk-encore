@@ -44,6 +44,13 @@ struct TripStayPlanView: View {
     @State private var dropSlot: TripDropSlot?
     /// The card whose details are open, as a sheet over the days (stage 4).
     @State private var detailPick: TripStayDetailPick?
+    /// An open spot whose details are open (review F: a tap on any card
+    /// opens its details, "Noch offen" too).
+    @State private var openDetail: TripCandidate?
+    /// An open spot getting a fixed time, from its details.
+    @State private var appointmentFor: TripCandidate?
+    /// What a button in the open spot's details opens once they are gone.
+    @State private var afterOpenDetail: (() -> Void)?
     /// When a card was last swiped sideways: the lift of that finger
     /// also ends the card's tap, which must not open its details.
     @State private var swipedAt: Date?
@@ -171,6 +178,16 @@ struct TripStayPlanView: View {
             }
         } message: {
             Text("Seine Spots gehen zurück zu den Ideen.")
+        }
+        .sheet(item: $openDetail, onDismiss: {
+            let work = afterOpenDetail
+            afterOpenDetail = nil
+            work?()
+        }) { candidate in
+            openDetailSheet(candidate)
+        }
+        .sheet(item: $appointmentFor) { candidate in
+            openAppointmentSheet(candidate)
         }
         .sheet(item: $detailPick) { pick in
             TripSpotDetailPager(
@@ -627,33 +644,36 @@ struct TripStayPlanView: View {
     }
 
     /// One open spot: what it is, how long, its priority and hints.
-    /// Dragged onto a day, or put there from its menu, it stands there by hand.
+    /// Dragged onto a day, or put there from its menu, it stands there by
+    /// hand. A tap opens its details, and "⋯" carries what one does with
+    /// an idea, as in the spot picker (review F).
     private func openCard(_ candidate: TripCandidate, days: [TripDay], leg: TripLeg) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(TripSpotName.line(candidate.displayName, local: candidate.localName))
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                Text(TripOpenSpots.cardLine(candidate))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
-                              closedOn: candidate.closedOn ?? [],
-                              openingHours: candidate.openingHours)
-            }
-            Spacer(minLength: 0)
-            if let image = candidate.image {
-                TripSpotThumbnail(image: image, height: 48, width: 48, placeholder: false)
-            }
-            Menu {
-                ForEach(days) { day in
-                    Button("Auf \(TripStayPlan.dayTitle(day, leg: leg))") {
-                        guard let block = TripSpotPicker.spotsBlock(of: day) else { return }
-                        Task { _ = await viewModel.place(candidate, inBlock: block.id, onDay: day.dayIndex) }
+            Button {
+                openDetail = candidate
+            } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(TripSpotName.line(candidate.displayName, local: candidate.localName))
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                        Text(TripOpenSpots.cardLine(candidate))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TripIdeaChips(priority: candidate.ideaPriority, ticket: candidate.ticket,
+                                      closedOn: candidate.closedOn ?? [],
+                                      openingHours: candidate.openingHours)
+                    }
+                    Spacer(minLength: 0)
+                    if let image = candidate.image {
+                        TripSpotThumbnail(image: image, height: 48, width: 48, placeholder: false)
                     }
                 }
-                Divider()
-                Button("Ideen und Suche", systemImage: "magnifyingglass") { picking = TripPickerRequest() }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            Menu {
+                TripSpotActionMenuItems(actions: ideaActions(candidate, days: days, leg: leg))
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: 32, height: 32)
@@ -663,6 +683,9 @@ struct TripStayPlanView: View {
         }
         .padding(12)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .contextMenu {
+            TripSpotActionMenuItems(actions: ideaActions(candidate, days: days, leg: leg))
+        }
         .onDrag {
             NSItemProvider(object: TripOpenSpots.dragId(candidate.osmRef) as NSString)
         } preview: {
@@ -670,6 +693,98 @@ struct TripStayPlanView: View {
                 .font(.subheadline.weight(.semibold))
                 .padding(8)
                 .background(.regularMaterial, in: .rect(cornerRadius: 8))
+        }
+    }
+
+    /// What one does with an open spot: put it on a day, keep it for
+    /// another trip, take it out of the ideas; its priority and a fixed
+    /// time are said in its details (group `.details`). The same entries
+    /// as the spot picker's for an idea (CLAUDE.md, "Aktionen an Spots").
+    private func ideaActions(
+        _ candidate: TripCandidate, days: [TripDay], leg: TripLeg,
+        later: @escaping @MainActor (@escaping @MainActor () -> Void) -> Void = { $0() },
+    ) -> [TripPinSheetAction] {
+        var out: [TripPinSheetAction] = days.map { day in
+            TripPinSheetAction(id: "day-\(day.dayIndex)", title: TripStayPlan.dayTitle(day, leg: leg),
+                               systemImage: "calendar", submenu: .days) {
+                guard let block = TripSpotPicker.spotsBlock(of: day) else { return }
+                _ = await viewModel.place(candidate, inBlock: block.id, onDay: day.dayIndex)
+            }
+        }
+        out.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit …",
+                                      systemImage: "calendar.badge.clock", group: .details) {
+            later { appointmentFor = candidate }
+        })
+        out.append(contentsOf: TripIdeaPriority.actions(current: candidate.ideaPriority) { priority in
+            await viewModel.setPriority(osmRef: candidate.osmRef, priority)
+        })
+        out.append(TripPinSheetAction(id: "keep", title: "Für andere Reisen merken", systemImage: "lightbulb",
+                                      footer: "Eine Kopie in den Ideenvorrat für eine andere Reise.",
+                                      closes: false) {
+            await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
+        })
+        out.append(TripPinSheetAction(id: "drop", title: "Aus den Ideen entfernen", systemImage: "trash",
+                                      role: .destructive, group: .remove) {
+            await viewModel.drop(candidate)
+        })
+        return out
+    }
+
+    /// The details of an open spot, as the picker shows an idea's.
+    @ViewBuilder
+    private func openDetailSheet(_ candidate: TripCandidate) -> some View {
+        if let leg = viewModel.leg {
+            let all = ideaActions(candidate, days: days(of: leg).filter { $0.anchor == nil }, leg: leg,
+                                  later: { afterOpenDetail = $0 })
+            NavigationStack {
+                TripSpotDetailView(
+                    spot: {
+                        var detail = TripSpotDetail(candidate)
+                        detail.distance = TripSpotDetailContext.distance(to: detail.coordinate, in: leg)
+                        return detail
+                    }(),
+                    mode: leg.transportMode,
+                    onSave: { await viewModel.saveNote($0) },
+                    onCategory: { await viewModel.setCategory(osmRef: candidate.osmRef, $0) },
+                    stayLight: TripStayLightRef(planId: viewModel.planId, legIndex: viewModel.legIndex,
+                                                osmRef: candidate.osmRef, startDate: leg.startDate),
+                    onStayLightAccepted: { await viewModel.load() },
+                    bar: TripSpotDetailBar(primary: nil, more: all.filter { $0.group != .details },
+                                           details: all.filter { $0.group == .details }),
+                    closeAll: { openDetail = nil },
+                ) { _ in EmptyView() }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Schließen", systemImage: "xmark") { openDetail = nil }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .opaqueSheetBackground()
+        }
+    }
+
+    /// A fixed time for an open spot: on its day first, then the time,
+    /// as in the spot picker.
+    @ViewBuilder
+    private func openAppointmentSheet(_ candidate: TripCandidate) -> some View {
+        if let leg = viewModel.leg {
+            TripFixpointSheet(
+                dayLabel: "Termin",
+                spots: leg.spotChoices,
+                presetSpot: TripSpotChoice(osmRef: candidate.osmRef, name: candidate.displayName, plannedOn: nil),
+                days: days(of: leg).map { day in
+                    TripDayChoice(dayIndex: day.dayIndex, label: TripStayPlan.dayTitle(day, leg: leg))
+                },
+            ) { draft in
+                if let day = draft.dayIndex,
+                   let target = leg.days.first(where: { $0.dayIndex == day }),
+                   let block = TripSpotPicker.spotsBlock(of: target) {
+                    guard await viewModel.place(osmRef: candidate.osmRef, inBlock: block.id, onDay: day) else { return }
+                }
+                await viewModel.addFixpoint(draft, legIndex: viewModel.legIndex)
+            }
         }
     }
 

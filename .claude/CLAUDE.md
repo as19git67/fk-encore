@@ -1413,27 +1413,36 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
 
 ## Aktionen an Spots in der iOS-App
 
-Was man mit einem Spot tun kann, ist überall dasselbe, wo der Spot in
-vergleichbarer Weise gezeigt wird: Zeile in der Liste (Menü, langes
-Drücken, Wischgesten), Detailansicht, Pin-Sheet auf der Karte und die
-Detailansicht hinter „Alle Details“. Niemand soll sich wundern, dass eine
-Aktion nur über einen bestimmten Weg erreichbar ist. Was die Karte kann,
-kann die Liste auch, und umgekehrt.
+Eine Regel für jeden Spot, gleich wo er steht: **Tipp öffnet, „⋯“ handelt,
+Angaben stehen im Blatt.** Ein Tipp auf eine Karte öffnet die Details (Zeile
+in der Liste, „Noch offen“, Spot-Auswahl, Pin-Sheet über „Alle Details“).
+Jede Karte und Zeile hat ein sichtbares „⋯“; langes Drücken zeigt dasselbe
+Menü, ist aber nie der einzige Weg. Was die Karte kann, kann die Liste auch,
+und umgekehrt. Dasselbe gilt eine Ebene höher: ein Tipp auf einen Aufenthalt
+im Reiseverlauf öffnet sein Blatt, „Planen“ und „⋯“ stehen daneben.
 
 - Die Aktionen entstehen an **einer** Stelle je Art von Spot:
   `stopActions(_:later:)` in `TripPlanDayView` für eingeplante Stopps,
-  `candidateActions(_:later:)` in `TripPoolView` für Kandidaten. Beide
-  liefern `[TripPinSheetAction]`; gezeichnet wird mit
-  `TripSpotActionMenuItems` (Menü) oder `TripSpotActionSections`
-  (Pin-Sheet, Detailansicht). Keine Oberfläche baut eigene Knöpfe daneben.
+  `actions(_:later:)` in `TripSpotPickerView` für Ideen und Funde,
+  `ideaActions` in `TripStayPlanView` für die Karte „Noch offen“ (dieselben
+  Einträge wie für eine Idee in der Spot-Auswahl). Alle liefern
+  `[TripPinSheetAction]`; gezeichnet wird mit `TripSpotActionMenuItems`
+  (Menü) oder `TripSpotActionSections` (Pin-Sheet). Keine Oberfläche baut
+  eigene Knöpfe daneben.
+- Im „⋯“ stehen nur **Handlungen**: auf einen Tag, Erledigt/Übersprungen,
+  Route, für andere Reisen merken, Löschen bzw. aus den Ideen entfernen.
+  **Angaben** (Priorität, feste Zeit) tragen die Gruppe `.details`; Menüs
+  und Aktionslisten zeichnen sie nie, die Details zeigen sie im Abschnitt
+  „Planung“ als Wert, dort änderbar, zusammen mit Dauer und Fotostopp.
+  Titel, Notiz, Link und Art stehen als Felder darunter. Kein Stift, kein
+  Bearbeiten-Modus.
 - Unterschiede kommen nur aus dem **Zustand** des Spots, nie aus dem Weg
   dorthin, und sie lassen das Menü gleich: was der Zustand nicht erlaubt,
   steht ausgegraut da (`disabled` an `TripPinSheetAction`), statt zu
   fehlen — „Erledigt“ erst ab dem Tag selbst, „Auf einen anderen Tag“ nicht
-  für Erledigtes oder fest Terminiertes, im Untermenü Priorität trägt die
-  aktuelle Wahl den Haken. Was zu einer Sache gehört, ist ein Eintrag mit
-  einem Blatt: „Feste Zeit …“ öffnet das Blatt der festen Zeit, das sie
-  mit Grund einträgt, ändert oder entfernt. „Einplanen“ nur für Kandidaten.
+  für Erledigtes oder fest Terminiertes. Was zu einer Sache gehört, ist ein
+  Eintrag mit einem Blatt: „Feste Zeit“ in den Details öffnet das Blatt der
+  festen Zeit, das sie mit Grund einträgt, ändert oder entfernt.
 - Ein eingeplanter Stopp verlässt den Tag über „Löschen“ (ganz unten im
   Menü, und Wischen nach links auf der Karte); er landet wieder bei den
   Ideen, eine feste Zeit nimmt er mit weg.
@@ -1442,7 +1451,7 @@ kann die Liste auch, und umgekehrt.
   `.navigate` aus; nur die Liste klappt „Warum hier?“ an Ort und Stelle auf, weil
   Detailansicht und Pin-Sheet die Gründe ohnehin zeigen.
 - Beim Code-Review wird das geprüft: Eine neue Aktion an einer Stelle ist
-  eine neue Aktion an allen.
+  eine neue Aktion an allen, eine neue Angabe gehört in „Planung“.
 
 ## Date-only values in the frontend
 
