@@ -26,6 +26,7 @@ import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import {
+  linkedDocumentFile,
   linkPlanDocument,
   planDocuments,
   suggestPlanDocuments,
@@ -292,5 +293,42 @@ describe("the trip is shared, the paperwork is not", () => {
     actAs(papaId);
 
     await expect(planDocuments({ planId: plan.id })).rejects.toThrow(/plan not found/);
+  });
+});
+
+describe("the file for the road", () => {
+  it("is there for a linked document the caller may read", async () => {
+    const id = await paper({ title: "Hotelbuchung", disk_path: `/tmp/${stamp}-hotel.pdf` });
+    const plan = await trip();
+    await linkPlanDocument({ planId: plan.id, documentId: id });
+
+    const file = await linkedDocumentFile(plan.id, id, annaId);
+
+    expect(file).toEqual({ diskPath: `/tmp/${stamp}-hotel.pdf`, mimeType: "application/pdf" });
+  });
+
+  it("is not there for a document the trip does not hold", async () => {
+    const id = await paper();
+    const plan = await trip();
+
+    expect(await linkedDocumentFile(plan.id, id, annaId)).toBeNull();
+  });
+
+  it("is not there for a fellow traveller who may not read the document", async () => {
+    const id = await paper();
+    const plan = await trip();
+    await linkPlanDocument({ planId: plan.id, documentId: id });
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: papaId });
+
+    expect(await linkedDocumentFile(plan.id, id, papaId)).toBeNull();
+  });
+
+  it("is not there for somebody who is not on the trip", async () => {
+    const id = await paper({ user_id: papaId });
+    const plan = await trip();
+    actAs(annaId);
+    await db.insert(tripPlanDocuments).values({ plan_id: plan.id, document_id: id });
+
+    expect(await linkedDocumentFile(plan.id, id, papaId)).toBeNull();
   });
 });

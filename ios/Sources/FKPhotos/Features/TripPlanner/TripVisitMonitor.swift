@@ -314,6 +314,9 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             guard await Self.send(report) else { return }
             TripVisitReportQueue.remove(report)
         }
+        // The network is back: the ticks made without it go too, after
+        // the visits they may answer (offline review, F2).
+        await TripTickQueue.flush()
     }
 
     /// One report, one call. True when the server took it.

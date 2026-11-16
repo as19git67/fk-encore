@@ -307,6 +307,81 @@ final class TripOfflineBundleTests: XCTestCase {
         XCTAssertNil(TripRunningPlan.running(in: plans, on: day("2026-05-01")))
     }
 
+    // MARK: - Ticks without a network
+
+    private func defaults() -> UserDefaults {
+        let name = "offline-ticks-\(UUID().uuidString)"
+        let store = UserDefaults(suiteName: name)!
+        addTeardownBlock { store.removePersistentDomain(forName: name) }
+        return store
+    }
+
+    func testATickWaitsAndShowsAtOnce() throws {
+        let store = defaults()
+        let plan = try bundle().plan
+
+        TripTickQueue.append(.status(planId: 7, stopId: 51, status: .done), to: store)
+        let shown = TripTickQueue.applied(to: plan, in: store)
+
+        XCTAssertEqual(shown.legs[0].days[0].blocks[0].stops[0].status, "done")
+        XCTAssertEqual(TripTickQueue.queuedStopIds(planId: 7, in: store), [51])
+    }
+
+    func testTheLastTickOnAStopIsTheOneThatGoes() {
+        let store = defaults()
+
+        TripTickQueue.append(.status(planId: 7, stopId: 51, status: .done), to: store)
+        TripTickQueue.append(.status(planId: 7, stopId: 51, status: .planned), to: store)
+
+        let ticks = TripTickQueue.load(from: store)
+        XCTAssertEqual(ticks.count, 1)
+        XCTAssertEqual(ticks.first?.status, "planned")
+    }
+
+    func testTicksKeepTheOrderTheyWereTapped() {
+        let store = defaults()
+
+        TripTickQueue.append(.status(planId: 7, stopId: 51, status: .done), to: store)
+        TripTickQueue.append(.visitAnswer(planId: 7, visitId: 9, confirmed: true, utcOffsetMinutes: 120), to: store)
+        TripTickQueue.append(.status(planId: 7, stopId: 52, status: .skipped), to: store)
+
+        XCTAssertEqual(TripTickQueue.load(from: store).map(\.kind), [.status, .visitAnswer, .status])
+    }
+
+    func testAnotherTripsTickLeavesThisPlanAlone() throws {
+        let store = defaults()
+        let plan = try bundle().plan
+
+        TripTickQueue.append(.status(planId: 8, stopId: 51, status: .done), to: store)
+
+        XCTAssertEqual(TripTickQueue.applied(to: plan, in: store).legs[0].days[0].blocks[0].stops[0].status,
+                       "planned")
+    }
+
+    // MARK: - Documents
+
+    func testADocumentFileIsKeptAndDroppedWithItsTrip() throws {
+        let store = try store()
+        let withDocument = bundleJSON.replacingOccurrences(
+            of: "\"omits\": [\"weather\", \"map\"],",
+            with: """
+            "omits": ["weather", "map"],
+            "documents": [ { "id": 1, "documentId": 33, "role": "ticket", "note": null,
+              "linkedBy": "Anna", "readable": true, "title": "Fahrkarte", "sender": null,
+              "docDate": null, "hints": [] } ],
+            """)
+        let decoded = try JSONDecoder().decode(TripOfflineBundle.self, from: Data(withDocument.utf8))
+        try store.save(decoded, planId: 7)
+        store.saveDocument(Data("%PDF-1.4".utf8), documentId: 33)
+
+        XCTAssertNotNil(store.storedDocument(33))
+        XCTAssertEqual(store.load(planId: 7)?.bundle.documents?.first?.title, "Fahrkarte")
+
+        store.remove(planId: 7)
+
+        XCTAssertNil(store.storedDocument(33))
+    }
+
     // MARK: - When it may be used
 
     func testNoNetworkIsTheCaseItWasWrittenFor() {

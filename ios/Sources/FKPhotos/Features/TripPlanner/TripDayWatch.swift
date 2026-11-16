@@ -550,10 +550,17 @@ public final class TripDayNotices {
             let utcOffsetMinutes: Int
         }
         struct Ignored: Decodable {}
-        _ = try? await APIClient.shared.post(
-            "/trip-planner/plans/\(planId)/visits/answer",
-            body: Body(visitId: visit.id, confirmed: yes,
-                       utcOffsetMinutes: TripInstant.utcOffsetMinutes())) as Ignored
+        do {
+            let _: Ignored = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/visits/answer",
+                body: Body(visitId: visit.id, confirmed: yes,
+                           utcOffsetMinutes: TripInstant.utcOffsetMinutes()))
+        } catch let error where TripOfflineReach.meansUnreachable(error) {
+            // Answered in a tunnel: the answer waits on the phone
+            // (offline review, F2) instead of being lost.
+            TripTickQueue.append(.visitAnswer(planId: planId, visitId: visit.id, confirmed: yes,
+                                              utcOffsetMinutes: TripInstant.utcOffsetMinutes()))
+        } catch {}
         pendingVisits.removeAll { $0.id == visit.id }
     }
 
@@ -685,10 +692,15 @@ public final class TripDayNotices {
             let utcOffsetMinutes: Int
         }
         struct Ignored: Decodable {}
-        _ = try? await APIClient.shared.post(
-            "/trip-planner/plans/\(planId)/visits/answer",
-            body: Body(visitId: visitId, confirmed: yes,
-                       utcOffsetMinutes: TripInstant.utcOffsetMinutes())) as Ignored
+        do {
+            let _: Ignored = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/visits/answer",
+                body: Body(visitId: visitId, confirmed: yes,
+                           utcOffsetMinutes: TripInstant.utcOffsetMinutes()))
+        } catch let error where TripOfflineReach.meansUnreachable(error) {
+            TripTickQueue.append(.visitAnswer(planId: planId, visitId: visitId, confirmed: yes,
+                                              utcOffsetMinutes: TripInstant.utcOffsetMinutes()))
+        } catch {}
         pendingVisits.removeAll { $0.id == visitId }
         // A yes ticked a stop: the day and the Lock Screen changed.
         if yes { await TripDayPulse.tick(.foreground) }
