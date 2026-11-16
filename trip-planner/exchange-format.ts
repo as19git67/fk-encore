@@ -202,6 +202,8 @@ export interface ExchangeLeg {
   arrivalMode?: TransportMode | null;
   /** YYYY-MM-DD, or null for "Tag 1, Tag 2, …". */
   startDate: string | null;
+  /** A stay that keeps its first day; absent in older files. */
+  startPinned?: boolean;
   radiusM: number | null;
   dayStartsAt: number | null;
   days: ExchangeDay[];
@@ -669,6 +671,7 @@ function readLeg(r: Reader, v: unknown, path: string): ExchangeLeg {
     departureMode: o.departureMode == null ? null : r.oneOf(o.departureMode, `${path}.departureMode`, MODES),
     arrivalMode: o.arrivalMode == null ? null : r.oneOf(o.arrivalMode, `${path}.arrivalMode`, MODES),
     startDate: r.date(o.startDate, `${path}.startDate`),
+    startPinned: o.startPinned == null ? false : r.bool(o.startPinned, `${path}.startPinned`),
     radiusM: r.optInt(o.radiusM, `${path}.radiusM`, { min: 0 }),
     dayStartsAt: r.optMinutes(o.dayStartsAt, `${path}.dayStartsAt`),
     days: r.array(o.days, `${path}.days`, EXCHANGE_LIMITS.daysPerLeg).map((d, i) => readDay(r, d, `${path}.days[${i}]`)),

@@ -95,6 +95,7 @@ function sampleFile(): TripFile {
           awaitingRegion: false,
           quartersAboard: false,
           tenderPort: false,
+          startPinned: true,
           departureNote: "Zug 123",
           arrivalNote: null,
           startDate: "2026-06-01",
@@ -309,8 +310,10 @@ describe("reading a trip file", () => {
     delete file.trip.legs[1].pool;
     delete file.trip.legs[1].spotNotes;
     delete file.trip.legs[1].dismissedDayTrips;
+    delete file.trip.legs[0].startPinned;
     const read = readTripFile(file);
     expect(read.trip.legs[1].pool).toEqual([]);
+    expect(read.trip.legs[0].startPinned).toBe(false);
   });
 });
 
