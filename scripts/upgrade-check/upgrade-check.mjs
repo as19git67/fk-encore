@@ -244,16 +244,29 @@ export function newestDump(dir) {
   return dumps[0]?.file ?? null;
 }
 
-function pgRestore(file, url) {
+// Index builds during the restore run without parallel workers: a parallel
+// HNSW build (document_embeddings) needs dynamic shared memory in /dev/shm,
+// and Docker gives a container 64 MB of it, so the restore died with "could
+// not resize shared memory segment ... No space left on device". Serial is
+// slower but needs only maintenance_work_mem of the backend itself.
+export const RESTORE_PGOPTIONS = "-c max_parallel_maintenance_workers=0";
+
+export function restoreEnv(url, base = process.env) {
   const u = new URL(url);
-  const env = {
-    ...process.env,
+  const pgOptions = [base.PGOPTIONS, RESTORE_PGOPTIONS].filter(Boolean).join(" ");
+  return {
+    ...base,
     PGHOST: u.hostname,
     PGPORT: u.port || "5432",
     PGUSER: decodeURIComponent(u.username),
     PGPASSWORD: decodeURIComponent(u.password),
     PGDATABASE: u.pathname.slice(1),
+    PGOPTIONS: pgOptions,
   };
+}
+
+function pgRestore(file, url) {
+  const env = restoreEnv(url);
   return new Promise((resolve, reject) => {
     const child = spawn(
       "pg_restore",

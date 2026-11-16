@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 const { commitOf, describeResult, diffSchemas, newEntries, pendingEntries, safeError, unappliedEntries } = await import(
   "./schema.mjs" as string
 );
-const { loadDeps, newestDump, runCheck } = await import("./upgrade-check.mjs" as string);
+const { loadDeps, newestDump, restoreEnv, runCheck } = await import("./upgrade-check.mjs" as string);
 
 /**
  * The upgrade check (documentation/plans/dev-system.md, stage 3). The pure
@@ -218,5 +218,14 @@ describe("runCheck", () => {
     await expect(
       runCheck({ deps, adminUrl, migrationsFolder: folder(base), restore: async () => {}, copyDb: "encore", freshDb: "encore_upgrade_fresh_t" }),
     ).rejects.toThrow(/refusing to touch database encore/);
+  });
+});
+
+describe("restoreEnv", () => {
+  it("restores without parallel index builds, keeping other options", () => {
+    const env = restoreEnv("postgres://pg:se%40cret@db:5433/encore_upgrade_check", { PGOPTIONS: "-c work_mem=64MB" });
+    expect(env.PGOPTIONS).toBe("-c work_mem=64MB -c max_parallel_maintenance_workers=0");
+    expect(env).toMatchObject({ PGHOST: "db", PGPORT: "5433", PGUSER: "pg", PGPASSWORD: "se@cret", PGDATABASE: "encore_upgrade_check" });
+    expect(restoreEnv("postgres://pg:x@db/c", {}).PGOPTIONS).toBe("-c max_parallel_maintenance_workers=0");
   });
 });
