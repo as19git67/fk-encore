@@ -128,7 +128,11 @@ export interface ItineraryItem {
   pinnedStart?: string | null;
 
   // Journey
-  /** When it sets off, as "HH:MM"; null or absent while nobody knows. */
+  /**
+   * When it sets off, as "HH:MM"; null or absent while nobody knows.
+   * On the last stay this is read too, when no journey leaves it: the
+   * day ends with the departure, wherever the group goes from there.
+   */
   departAt?: string | null;
   /**
    * When it arrives, as "HH:MM". On the first stay this is read too,
@@ -517,6 +521,11 @@ export function itineraryOf(plan: Pick<StoredPlan, "legs" | "home">): {
       arriveAt: null,
       nights: 0,
     }, previousStay.departureNote), previousStay.departureMode));
+  } else if (!plan.home && previousStay) {
+    // Without home the last stay owns its departure: the day ends there.
+    const departure = journeyDepartureOf(previousStay);
+    const last = items[items.length - 1];
+    if (departure !== null && last?.kind === "stay") last.departAt = formatMinutes(departure.startMinutes);
   }
 
   return { startDate: legs[0]?.startDate ?? null, items };
@@ -634,8 +643,11 @@ export interface StayFrame {
   days: number;
   /** When the group gets there: the journey before, or the stay's own. */
   arriveMinutes: number | null;
-  /** The departure on its last day, when the journey after knows it. */
-  departure: { at: string; nextTitle: string } | null;
+  /**
+   * The departure on its last day, when the journey after knows it, or
+   * the last stay's own; `nextTitle` is null when no journey follows.
+   */
+  departure: { at: string; nextTitle: string | null } | null;
   /** Its first day is pinned (`pinnedStart`) and was kept. */
   pinned: boolean;
 }
@@ -712,7 +724,11 @@ export function deriveFrames(
       const arriveMinutes = before
         ? timeOf(before.arriveAt, `items[${index - 1}].arriveAt`)
         : timeOf(item.arriveAt, `items[${index}].arriveAt`);
-      const departAt = after ? timeOf(after.departAt, `items[${index + 1}].departAt`) : null;
+      // The last stay keeps its own departure only while no journey
+      // leaves it; with home the way home owns that time.
+      const departAt = after
+        ? timeOf(after.departAt, `items[${index + 1}].departAt`)
+        : timeOf(item.departAt, `items[${index}].departAt`);
       const endDate = cursor ? addDays(cursor, days - 1) : null;
       frames.push({
         kind: "stay",
@@ -729,7 +745,9 @@ export function deriveFrames(
         arriveMinutes,
         departure: departAt === null
           ? null
-          : { at: formatMinutes(departAt), nextTitle: stayTitle(items[index + 2], index + 2, options.homeLabel) },
+          : after
+            ? { at: formatMinutes(departAt), nextTitle: stayTitle(items[index + 2], index + 2, options.homeLabel) }
+            : { at: formatMinutes(departAt), nextTitle: null },
         pinned,
       });
       cursor = endDate;

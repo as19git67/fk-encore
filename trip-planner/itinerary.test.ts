@@ -502,6 +502,27 @@ describe("PUT /trip-planner/plans/:planId/itinerary", () => {
     expect(loosened.legs.map((l) => l.startDate)).toEqual(["2026-09-05", "2026-09-08", "2026-09-10"]);
   });
 
+  it("ends the last stay with its own departure when no journey leaves it, and reads it back", async () => {
+    const plan = await threeStays();
+    const chain = await getTripItinerary({ planId: plan.id });
+    const items = chain.items.map((i) => ({ ...i }));
+    items[items.length - 1].departAt = "11:30";
+
+    const { plan: after } = await putTripItinerary({ planId: plan.id, startDate: chain.startDate, items });
+    const last = after.legs[after.legs.length - 1];
+    expect(last.days[last.days.length - 1].fixpoints.find((f) => f.kind === "departure"))
+      .toMatchObject({ startMinutes: 690, label: "Abreise" });
+    const read = await getTripItinerary({ planId: plan.id });
+    expect(read.items[read.items.length - 1]).toMatchObject({ kind: "stay", departAt: "11:30" });
+
+    // Taken off again, the day ends open.
+    const open = read.items.map((i) => ({ ...i }));
+    open[open.length - 1].departAt = null;
+    const { plan: cleared } = await putTripItinerary({ planId: plan.id, startDate: read.startDate, items: open });
+    const lastAgain = cleared.legs[cleared.legs.length - 1];
+    expect(lastAgain.days[lastAgain.days.length - 1].fixpoints.some((f) => f.kind === "departure")).toBe(false);
+  });
+
   it("refuses a leg id that is not this trip's", async () => {
     const plan = await threeStays();
     const chain = await getTripItinerary({ planId: plan.id });
