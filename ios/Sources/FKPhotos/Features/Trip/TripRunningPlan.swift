@@ -47,7 +47,9 @@ final class TripRunningPlan {
             let response: ListTripPlansResponse =
                 try await APIClient.shared.get("/trip-planner/plans")
             let today = now()
-            plan = response.plans.first { $0.schedule(on: today).isRunning }
+            plan = Self.running(in: response.plans, on: today)
+            TripOfflineStore.shared.saveList(response.plans)
+            Task { await TripOfflineAutoLoad.run(response.plans) }
         } catch {
             // Silent: this is an offer, not a feature. A planner that
             // cannot be reached must not put an error on the tab bar.
@@ -60,9 +62,19 @@ final class TripRunningPlan {
             // it, because that is an answer.
             if !TripOfflineReach.meansUnreachable(error) {
                 plan = nil
+            } else if plan == nil {
+                // Started in the tunnel, with no answer from breakfast
+                // to stand on: the list kept on the phone knows the
+                // dates just as well.
+                plan = Self.running(in: TripOfflineStore.shared.keptList()?.plans ?? [], on: now())
             }
         }
         didLoad = true
+    }
+
+    /// The trip of a list that is running on a given day.
+    static func running(in plans: [TripPlanSummary], on today: Date) -> TripPlanSummary? {
+        plans.first { $0.schedule(on: today).isRunning }
     }
 }
 

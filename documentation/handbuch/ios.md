@@ -485,6 +485,14 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 
 - Plan offline laden, Dokumente der Reise, Reisebereit?-Checkliste,
   Strecken als GPX, nach der Reise „Danach“.
+- Ohne Netz: geladene Reisen stehen in der Liste (Symbol ⬇︎), die anderen
+  ausgegraut mit „Nicht für unterwegs geladen“. Die Reise öffnet sich auf
+  dem gespeicherten Reiseverlauf mit der Leiste „Offline · Stand vom …“;
+  ein Tipp darauf lädt neu. Ändern geht erst wieder mit Verbindung. Der
+  gespeicherte Stand samt Bildern der Spots kommt nach jeder Änderung von
+  selbst nach. „Anstehende Reisen von selbst laden“ (ab Werk an) lädt im
+  WLAN jede Reise, die in den nächsten 7 Tagen beginnt oder läuft; eine
+  von Hand gelöschte bleibt gelöscht.
 - Am laufenden Tag zeigt die Aufenthaltsplanung oben das Besuchte, dann
   eine „jetzt“-Linie und was noch kommt; ein Kreis hakt ab, „Doch nicht“
   nimmt es zurück, „Neu ordnen“ plant den Rest ab jetzt.

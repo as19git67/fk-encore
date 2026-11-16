@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 /// The plan, kept on the phone (§3.9).
 ///
@@ -138,6 +139,7 @@ struct TripOfflineStore: Sendable {
     /// a day running that the server no longer has.
     func forget(planId: Int) {
         try? FileManager.default.removeItem(at: file(planId))
+        pruneThumbs()
     }
 
     func has(planId: Int) -> Bool {
@@ -149,14 +151,63 @@ struct TripOfflineStore: Sendable {
         return attributes?[.modificationDate] as? Date
     }
 
-    /// Roughly how much room it takes, for the screen to say.
+    /// Roughly how much room it takes, for the screen to say: the plan
+    /// and the pictures it brings along.
     func sizeBytes(planId: Int) -> Int? {
         let attributes = try? FileManager.default.attributesOfItem(atPath: file(planId).path)
-        return (attributes?[.size] as? NSNumber)?.intValue
+        guard let plan = (attributes?[.size] as? NSNumber)?.intValue else { return nil }
+        let pictures = load(planId: planId)?.bundle.thumbnailURLs.reduce(0) { sum, url in
+            let found = try? FileManager.default.attributesOfItem(atPath: thumbFile(url.absoluteString).path)
+            return sum + ((found?[.size] as? NSNumber)?.intValue ?? 0)
+        } ?? 0
+        return plan + pictures
     }
 
+    /// The plan and the pictures only it needed. A picture another
+    /// stored trip shows as well stays.
     func remove(planId: Int) {
         try? FileManager.default.removeItem(at: file(planId))
+        pruneThumbs()
+    }
+
+    // MARK: - Pictures
+
+    /// The spot pictures, kept as files beside the plans (§3.9). The
+    /// shared URL cache they used to go into is the system's to empty,
+    /// and the cards read the app's image cache, not that one — offline
+    /// the cards stayed grey.
+    private var thumbsDirectory: URL { directory.appendingPathComponent("thumbs", isDirectory: true) }
+
+    private func thumbFile(_ url: String) -> URL {
+        thumbsDirectory.appendingPathComponent(TripThumbnailCache.key(url))
+    }
+
+    func hasThumb(for url: String) -> Bool {
+        FileManager.default.fileExists(atPath: thumbFile(url).path)
+    }
+
+    func thumbData(for url: String) -> Data? {
+        try? Data(contentsOf: thumbFile(url))
+    }
+
+    func saveThumb(_ data: Data, for url: String) {
+        try? FileManager.default.createDirectory(at: thumbsDirectory, withIntermediateDirectories: true)
+        var target = thumbFile(url)
+        try? data.write(to: target, options: .atomic)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? target.setResourceValues(values)
+    }
+
+    /// Drops every picture no stored trip shows any more.
+    func pruneThumbs() {
+        let wanted = Set(storedPlanIds().flatMap { planId in
+            (load(planId: planId)?.bundle.thumbnailURLs ?? []).map { TripThumbnailCache.key($0.absoluteString) }
+        })
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: thumbsDirectory.path)) ?? []
+        for name in names where !wanted.contains(name) {
+            try? FileManager.default.removeItem(at: thumbsDirectory.appendingPathComponent(name))
+        }
     }
 
     /// The trips that have a bundle here.
@@ -253,21 +304,135 @@ enum TripOfflineWording {
     }
 }
 
-/// Loads the bundle's thumbnails into the shared URL cache, which is
-/// where `AsyncImage` looks first — so the pictures are there without
-/// a network (candidate ranking, stage 2). Quietly: a picture that does
-/// not come is a card with its symbol, not an error over a plan that
-/// is otherwise stored.
+/// Loads the bundle's pictures onto the phone, next to the plan
+/// (candidate ranking, stage 2). Quietly: a picture that does not come
+/// is a card with its symbol, not an error over a plan that is
+/// otherwise stored. A picture already there is not fetched again.
 enum TripOfflineThumbnails {
-    static func prefetch(_ urls: [URL]) async {
+    static func prefetch(_ bundle: TripOfflineBundle, into store: TripOfflineStore = .shared) async {
+        let missing = bundle.thumbnailURLs.filter { !store.hasThumb(for: $0.absoluteString) }
         await withTaskGroup(of: Void.self) { group in
-            for url in urls.prefix(400) {
+            for url in missing.prefix(400) {
                 group.addTask {
-                    var request = URLRequest(url: url)
-                    request.cachePolicy = .returnCacheDataElseLoad
-                    _ = try? await URLSession.shared.data(for: request)
+                    guard let fetched = try? await URLSession.shared.data(from: url) else { return }
+                    let status = (fetched.1 as? HTTPURLResponse)?.statusCode ?? 200
+                    guard status < 300, !fetched.0.isEmpty else { return }
+                    store.saveThumb(fetched.0, for: url.absoluteString)
                 }
             }
         }
     }
+}
+
+/// Trips that load themselves for the road (§3.9, Anton 16.11.): one
+/// that starts within a week or is running now, on Wi-Fi and with room
+/// on the phone. A trip whose bundle somebody deleted by hand stays
+/// deleted; the switch in "Unterwegs ohne Netz" turns it all off.
+enum TripOfflineAutoLoad {
+    static let settingKey = "tripPlanner.offline.autoLoad"
+    private static let declinedKey = "tripPlanner.offline.declined"
+    /// How far ahead a trip comes along by itself.
+    static let daysAhead = 7
+    /// A stored bundle older than this is fetched again.
+    static let staleAfter: TimeInterval = 6 * 3_600
+    /// Room the phone keeps for photos before a plan takes any.
+    static let minimumFreeBytes: Int64 = 500_000_000
+
+    static var isOn: Bool {
+        UserDefaults.standard.object(forKey: settingKey) as? Bool ?? true
+    }
+
+    /// Whether this trip should be (re)loaded now. Pure, for the tests.
+    static func wants(_ plan: TripPlanSummary, today: Date, storedAt: Date?,
+                      declined: Bool, timeZone: TimeZone = .current) -> Bool {
+        guard !declined else { return false }
+        switch plan.schedule(on: today, timeZone: timeZone) {
+        case .running:
+            break
+        case .upcoming(let days) where days <= daysAhead:
+            break
+        default:
+            return false
+        }
+        guard let storedAt else { return true }
+        return today.timeIntervalSince(storedAt) > staleAfter
+    }
+
+    static func isDeclined(_ planId: Int) -> Bool {
+        declined().contains(planId)
+    }
+
+    /// Deleted by hand: not loaded again by itself.
+    static func decline(_ planId: Int) {
+        var ids = declined()
+        ids.insert(planId)
+        UserDefaults.standard.set(Array(ids), forKey: declinedKey)
+    }
+
+    /// Loaded by hand: from now on kept current again.
+    static func accept(_ planId: Int) {
+        var ids = declined()
+        guard ids.remove(planId) != nil else { return }
+        UserDefaults.standard.set(Array(ids), forKey: declinedKey)
+    }
+
+    private static func declined() -> Set<Int> {
+        Set(UserDefaults.standard.array(forKey: declinedKey) as? [Int] ?? [])
+    }
+
+    /// Load what the list says should come along. Called with every
+    /// list the server gives; does nothing off Wi-Fi or when the switch
+    /// is off.
+    @MainActor private static var isRunning = false
+
+    @MainActor
+    static func run(_ plans: [TripPlanSummary], store: TripOfflineStore = .shared) async {
+        // The list and the running-trip check both ask at launch; one
+        // download of each trip is enough.
+        guard isOn, !isRunning else { return }
+        isRunning = true
+        defer { isRunning = false }
+        let today = Date()
+        let due = plans.filter {
+            wants($0, today: today, storedAt: store.storedAt(planId: $0.id), declined: isDeclined($0.id))
+        }
+        guard !due.isEmpty, await onUnmeteredNetwork(), hasRoom() else { return }
+        for plan in due {
+            guard let bundle = try? await TripPlannerViewModel.fetchBundle(planId: plan.id),
+                  (try? store.save(bundle, planId: plan.id)) != nil
+            else { continue }
+            await TripOfflineThumbnails.prefetch(bundle, into: store)
+        }
+    }
+
+    private static func hasRoom() -> Bool {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        let values = try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        guard let free = values?.volumeAvailableCapacityForImportantUsage else { return true }
+        return free > minimumFreeBytes
+    }
+
+    /// Wi-Fi or another network that is neither metered nor in Low
+    /// Data Mode — a whole trip with its pictures is not something to
+    /// pull over roaming.
+    private static func onUnmeteredNetwork() async -> Bool {
+        await withCheckedContinuation { continuation in
+            let monitor = NWPathMonitor()
+            // The handler may be called again before the cancel lands;
+            // a continuation resumes once. Both run on the one queue.
+            let answered = AnsweredOnce()
+            monitor.pathUpdateHandler = { path in
+                guard !answered.done else { return }
+                answered.done = true
+                monitor.cancel()
+                continuation.resume(returning: path.status == .satisfied
+                                    && !path.isExpensive && !path.isConstrained)
+            }
+            monitor.start(queue: DispatchQueue(label: "trip-offline-autoload"))
+        }
+    }
+}
+
+private final class AnsweredOnce: @unchecked Sendable {
+    var done = false
 }

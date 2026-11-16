@@ -57,6 +57,16 @@ struct TripSpotThumbnail: View {
             loaded = hit
             return
         }
+        // A trip stored for the road keeps its pictures on the phone
+        // (§3.9): there first, so they are there in a tunnel too.
+        if let kept = TripOfflineStore.shared.thumbData(for: image.thumbUrl),
+           let raw = UIImage(data: kept) {
+            let prepared = await raw.byPreparingForDisplay() ?? raw
+            await ImageCache.shared.store(prepared, forKey: key)
+            guard !Task.isCancelled else { return }
+            loaded = prepared
+            return
+        }
         guard let url = URL(string: image.thumbUrl) else {
             failed = true
             return
