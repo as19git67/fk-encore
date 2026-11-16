@@ -13,12 +13,8 @@ import SwiftUI
 /// everything anybody put in the pool by hand (§9.2).
 struct TripPlanSettingsView: View {
     @State private var model: TripPlanSettingsViewModel
-    @State private var editingDayShape = false
     @Environment(\.dismiss) private var dismiss
 
-    /// Kept beside the model because the day-shape editor is its own
-    /// screen with its own request — it does not go through the
-    /// settings save.
     private let planId: Int
     /// A trip of ideas: its day is one window, and nothing is searched
     /// but the highlights (ideen-statt-pool.md).
@@ -93,24 +89,6 @@ struct TripPlanSettingsView: View {
                      + "über die Priorität jeder Idee.")
             }
 
-            // A trip of ideas has no Vormittag or Nachmittag to change:
-            // its day is one window (ideen-statt-pool.md, stage 4).
-            if !ideas {
-                Section {
-                    Button {
-                        editingDayShape = true
-                    } label: {
-                        Label("Tagesablauf ändern", systemImage: "list.bullet.indent")
-                    }
-                } footer: {
-                    // §4.1: the four-part day is a default, not a fixed
-                    // set — this is where it stops being fixed.
-                    Text("Vormittag, Mittagspause, Nachmittag, Abend sind ein Vorschlag. "
-                         + "Blöcke lassen sich umbenennen, verlängern, verschieben und "
-                         + "streichen — die Mittagspause zum Beispiel.")
-                }
-            }
-
             if !model.options.isEmpty {
                 Section {
                     ForEach(model.options) { option in
@@ -151,9 +129,6 @@ struct TripPlanSettingsView: View {
             Text(reason)
         }
         .task { await model.loadInterests() }
-        .sheet(isPresented: $editingDayShape) {
-            TripDayShapeView(planId: planId, onSaved: onSaved)
-        }
         .discardGuard(tracking: [model.title, model.pace, model.withChildren, model.limitedMobility,
                                  model.voting,
                                  model.interests] as [AnyHashable],

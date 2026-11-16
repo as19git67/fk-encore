@@ -48,7 +48,6 @@ struct TripPlanDayView: View {
     /// The destination a new excursion goes on from (Mock 18).
     @State private var appendingAfter: TripExcursion?
     /// The block being split (§6.5), while its sheet is open.
-    @State private var splitting: TripSplitTarget?
     /// A stay's planning view, pushed from the itinerary, which is where
     /// a trip opens (reise-planen-und-unterwegs-design.md, "Der
     /// Reiseverlauf"). A running trip pushes it at once, on today.
@@ -183,15 +182,6 @@ struct TripPlanDayView: View {
                 }
                 Button("Abbrechen", role: .cancel) {}
             }
-        }
-        .sheet(item: $splitting) { target in
-            TripSplitView(
-                planId: viewModel.planId,
-                dayIndex: viewModel.dayIndex,
-                blockIndex: target.blockIndex,
-                blockLabel: target.blockLabel,
-                candidates: viewModel.leg?.pool ?? [],
-            ) { Task { await viewModel.load() } }
         }
         .sheet(isPresented: $settingDayAnchor, onDismiss: {
             editingExcursion = nil
