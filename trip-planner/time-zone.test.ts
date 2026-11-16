@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { offsetMinutes, zoneAt, zoneShiftMinutes } from "./time-zone";
+import { offsetMinutes, stayOffsetMinutes, zoneAt, zoneShiftMinutes } from "./time-zone";
 
 describe("zoneAt", () => {
   it("finds the zone of a point offline", () => {
@@ -38,5 +38,16 @@ describe("zoneShiftMinutes", () => {
   it("asks about today without a date and gives null without a zone", () => {
     expect(zoneShiftMinutes("Europe/Berlin", "Asia/Tokyo", null, () => "2027-02-20")).toBe(480);
     expect(zoneShiftMinutes(null, "Asia/Tokyo", "2027-02-20")).toBeNull();
+  });
+});
+
+describe("stayOffsetMinutes", () => {
+  it("is the clock of the stay, not of the phone", () => {
+    expect(stayOffsetMinutes({ lat: 35.68, lon: 139.69 }, "2027-07-20", 120)).toBe(540);
+    expect(stayOffsetMinutes({ lat: 52.52, lon: 13.4 }, "2027-01-15", 0)).toBe(60);
+  });
+
+  it("falls back to the caller's offset without a zone", () => {
+    expect(stayOffsetMinutes(null, "2027-01-15", 90)).toBe(90);
   });
 });

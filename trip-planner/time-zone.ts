@@ -76,3 +76,20 @@ export function localDateIn(zone: string | null, now: Date): string {
     return now.toISOString().slice(0, 10);
   }
 }
+
+/**
+ * The offset of the clock at a stay on a day: what light and weather
+ * are read in (offline review O7). The phone's own offset is only the
+ * fallback, for a place the lookup has no zone for — before, a phone
+ * still on home time put the golden hour of a stay eight zones away
+ * eight hours off.
+ */
+export function stayOffsetMinutes(
+  point: { lat: number; lon: number } | null | undefined,
+  day: string,
+  fallback: number,
+): number {
+  const zone = zoneAt(point);
+  if (!zone) return fallback;
+  return offsetMinutes(zone, day) ?? fallback;
+}

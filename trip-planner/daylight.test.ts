@@ -117,6 +117,17 @@ describe("the light on a day of a trip", () => {
     expect(golden[1].toMinutes).toBeLessThan(22 * 60);
   });
 
+  it("reads the stay's clock whatever time the phone is on", async () => {
+    // A phone still on home time far away asks with its own offset;
+    // the golden hour of the stay must not move with it (offline review O7).
+    const plan = await datedTrip();
+
+    const local = await dayLight({ planId: plan.id, dayIndex: 0, utcOffsetMinutes: 120 });
+    const elsewhere = await dayLight({ planId: plan.id, dayIndex: 0, utcOffsetMinutes: -420 });
+
+    expect(elsewhere.windows).toEqual(local.windows);
+  });
+
   it("says nothing at all for a trip that has no dates yet", async () => {
     // A trip planned "sometime" has no day to compute for. Answering
     // with today's sun would be a fact about the wrong date (§4.3).

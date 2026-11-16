@@ -23,6 +23,7 @@ import { spotLight, type FacadeLight } from "./light";
 import { loadPlan, type StoredLeg } from "./plan-store";
 import { horizonFor } from "./horizon-store";
 import { lightWindows, type HorizonProfile, type LightWindow } from "./sun";
+import { stayOffsetMinutes } from "./time-zone";
 
 export interface DayLightRequest {
   planId: number;
@@ -31,10 +32,10 @@ export interface DayLightRequest {
   /** Which day of that leg, counted from zero within the leg. */
   dayIndex: number;
   /**
-   * The offset of the *destination's* clock from UTC, in minutes —
-   * what a clock at the spot would read. It has to be passed in: a
-   * coordinate does not carry its time zone, and deriving one from the
-   * longitude would be wrong across most of Europe and all of China.
+   * The caller's offset from UTC, in minutes. Only a fallback: the
+   * light is read on the clock of the stay, whose zone follows from its
+   * coordinates (`time-zone.ts`); this counts only for a place the
+   * lookup has no zone for.
    */
   utcOffsetMinutes?: number;
   /** Optional precomputed terrain profile, sampled clockwise from north. */
@@ -99,11 +100,14 @@ export const dayLight = api(
 export function lightOfDay(
   leg: StoredLeg,
   day: StoredLeg["days"][number],
-  offsetMinutes: number,
+  fallbackOffset: number,
   horizon: HorizonProfile = [],
 ): DayLightResponse {
   const date = leg.startDate === null ? null : addDays(leg.startDate, day.dayIndex);
   if (date === null) return { day: null, windows: [], spots: [] };
+  // The clock of the place, not of the phone that asks: the caller's
+  // offset is only the fallback for a place without a known zone.
+  const offsetMinutes = stayOffsetMinutes(day.anchor ?? leg.anchor, date, fallbackOffset);
 
   // The day's own sun: a day trip happens where it happens (§4.5), and
   // sixty kilometres west is a different sunset.
