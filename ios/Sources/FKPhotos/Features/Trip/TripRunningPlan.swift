@@ -49,6 +49,7 @@ final class TripRunningPlan {
             let today = now()
             plan = Self.running(in: response.plans, on: today)
             TripOfflineStore.shared.saveList(response.plans)
+            Task { await TripTickQueue.flush() }
             Task { await TripOfflineAutoLoad.run(response.plans) }
         } catch {
             // Silent: this is an offer, not a feature. A planner that

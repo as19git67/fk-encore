@@ -1404,6 +1404,11 @@ struct TripStayPlanView: View {
                     .controlSize(.small)
                 }
             }
+            if viewModel.queuedStopIds.contains(stop.rowId) {
+                Label("Wird gesendet, sobald wieder Netz da ist", systemImage: "clock.arrow.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if isNext {
                 Button {
                     if let leg = viewModel.leg { wayRequest = makeWayRequest(to: stop, on: day, leg: leg, fromHere: true) }

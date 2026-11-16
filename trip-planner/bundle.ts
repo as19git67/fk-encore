@@ -36,6 +36,7 @@ import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { lightOfDay, validateOffset, type DayLightResponse } from "./daylight";
+import { linkedDocuments, type LinkedDocument } from "./documents";
 import { itineraryResponse, type ItineraryResponse } from "./itinerary";
 import { loadPlan, type StoredPlan } from "./plan-store";
 
@@ -71,6 +72,13 @@ export interface OfflineBundleResponse {
    * whole plan on disk and nothing to show it on.
    */
   itinerary: ItineraryResponse;
+  /**
+   * The trip's paperwork, as its list shows it to the caller. The app
+   * fetches the file of each readable one through
+   * `…/documents/:documentId/file` and keeps it with the bundle
+   * (offline review, F3).
+   */
+  documents: LinkedDocument[];
   /** The light of every dated day that has stops, best window first. */
   light: BundledDayLight[];
   /**
@@ -111,6 +119,7 @@ export const offlineBundle = api(
       generatedAt: new Date().toISOString(),
       plan,
       itinerary: itineraryResponse(plan),
+      documents: await linkedDocuments(plan.id, userId),
       light,
       omits: ["weather", "map"],
     };
