@@ -36,6 +36,7 @@ import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { lightOfDay, validateOffset, type DayLightResponse } from "./daylight";
+import { itineraryResponse, type ItineraryResponse } from "./itinerary";
 import { loadPlan, type StoredPlan } from "./plan-store";
 
 export interface OfflineBundleRequest {
@@ -64,6 +65,12 @@ export interface OfflineBundleResponse {
    */
   generatedAt: string;
   plan: StoredPlan;
+  /**
+   * The trip as the itinerary reads it — what `GET …/itinerary` answers.
+   * A trip opens on its itinerary, so without it the phone had the
+   * whole plan on disk and nothing to show it on.
+   */
+  itinerary: ItineraryResponse;
   /** The light of every dated day that has stops, best window first. */
   light: BundledDayLight[];
   /**
@@ -103,6 +110,7 @@ export const offlineBundle = api(
     return {
       generatedAt: new Date().toISOString(),
       plan,
+      itinerary: itineraryResponse(plan),
       light,
       omits: ["weather", "map"],
     };

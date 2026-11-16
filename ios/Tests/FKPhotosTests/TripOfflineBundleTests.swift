@@ -138,6 +138,83 @@ final class TripOfflineBundleTests: XCTestCase {
         XCTAssertFalse(store.has(planId: 8))
     }
 
+    // MARK: - The itinerary and the list
+
+    func testABundleFromAnOlderBuildHasNoItineraryAndStillReads() throws {
+        XCTAssertNil(try bundle().itinerary)
+    }
+
+    func testTheItineraryTravelsAlong() throws {
+        let withItinerary = bundleJSON.replacingOccurrences(
+            of: "\"omits\": [\"weather\", \"map\"],",
+            with: """
+            "omits": ["weather", "map"],
+            "itinerary": { "planId": 7, "startDate": "2026-06-18", "home": null,
+              "items": [ { "kind": "stay", "legId": 11, "title": "Beispielstadt", "days": 1,
+                           "startDate": "2026-06-18", "endDate": "2026-06-18" } ] },
+            """)
+        let store = try store()
+        let decoded = try JSONDecoder().decode(TripOfflineBundle.self, from: Data(withItinerary.utf8))
+
+        try store.save(decoded, planId: 7)
+        let read = store.load(planId: 7)?.bundle.itinerary
+
+        XCTAssertEqual(read?.planId, 7)
+        XCTAssertEqual(read?.items.first?.kind, .stay)
+        XCTAssertEqual(read?.items.first?.legId, 11)
+    }
+
+    func testStoredIdsAreTheBundlesOnThePhone() throws {
+        let store = try store()
+        try store.save(try bundle(), planId: 7)
+        try store.save(try bundle(), planId: 12)
+        store.saveList([])
+
+        XCTAssertEqual(store.storedPlanIds(), [7, 12])
+    }
+
+    func testTheListComesBackWithoutANetwork() throws {
+        let store = try store()
+        let summary = TripPlanSummary(id: 3, title: "Beispielreise", legTitles: ["Beispielstadt"],
+                                      dayCount: 4, startDate: "2026-06-18",
+                                      updatedAt: "2026-06-01T08:00:00.000Z", youOrganise: true)
+
+        store.saveList([summary])
+        let kept = store.keptList()
+
+        XCTAssertEqual(kept?.plans.map(\.id), [3])
+        XCTAssertEqual(kept?.plans.first?.youOrganise, true)
+        XCTAssertNotNil(kept?.storedAt)
+    }
+
+    func testATripStoredWithoutAListStillShows() throws {
+        // The first flight after the update: bundles, but no list yet.
+        let store = try store()
+        try store.save(try bundle(), planId: 7)
+
+        let kept = store.keptList()
+
+        XCTAssertEqual(kept?.plans.map(\.id), [7])
+        XCTAssertEqual(kept?.plans.first?.displayTitle, "Beispielreise")
+        XCTAssertEqual(kept?.plans.first?.dayCount, 1)
+        XCTAssertEqual(kept?.plans.first?.startDate, "2026-06-18")
+    }
+
+    func testAStoredTripMissingFromTheListIsAdded() throws {
+        let store = try store()
+        let other = TripPlanSummary(id: 3, title: "Andere Reise", legTitles: [], dayCount: 2,
+                                    startDate: nil, updatedAt: "2026-06-01T08:00:00.000Z",
+                                    youOrganise: true)
+        store.saveList([other])
+        try store.save(try bundle(), planId: 7)
+
+        XCTAssertEqual(store.keptList()?.plans.map(\.id), [3, 7])
+    }
+
+    func testNothingKeptIsNothingToShow() throws {
+        XCTAssertNil(try store().keptList())
+    }
+
     // MARK: - When it may be used
 
     func testNoNetworkIsTheCaseItWasWrittenFor() {

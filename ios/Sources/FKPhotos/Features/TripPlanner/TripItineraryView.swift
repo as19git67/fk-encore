@@ -163,6 +163,11 @@ struct TripItineraryView: View {
         .onChange(of: viewModel.outsideChanges) { _, _ in
             Task { await reload() }
         }
+        // Back online (the bar's "Neu laden"): the stored chain gives
+        // way to the server's.
+        .onChange(of: viewModel.offlineSince) { before, now in
+            if before != nil, now == nil { Task { await reload() } }
+        }
     }
 
     // MARK: - The list
@@ -794,18 +799,32 @@ struct TripItineraryView: View {
         do {
             let response: TripItineraryResponse = try await APIClient.shared.get(
                 "/trip-planner/plans/\(viewModel.planId)/itinerary")
-            let loaded = TripItineraryDraft(response: response)
-            draft = loaded
-            if viewModel.plan == nil { await viewModel.load() }
-            if let focus, sheet == nil, let item = loaded.item(focused: focus) {
-                sheet = item.isStay ? .stay(item.id) : .journey(item.id)
-            }
-            if selectedStay == nil { selectedStay = loaded.stays.first?.id }
+            show(response)
+            if viewModel.plan == nil || viewModel.isOffline { await viewModel.load() }
             await loadSuggestion()
             await suggestNameIfNeeded()
+        } catch let error where TripOfflineReach.meansUnreachable(error) {
+            // No network: the trip opens on the chain it had when it was
+            // stored for the road (§3.9). Without a stored copy there is
+            // nothing to show, and the sentence says why.
+            await viewModel.load()
+            if let kept = viewModel.offlineItinerary {
+                show(kept)
+            } else {
+                loadError = TripErrorText.describe(error)
+            }
         } catch {
             loadError = TripErrorText.describe(error)
         }
+    }
+
+    private func show(_ response: TripItineraryResponse) {
+        let loaded = TripItineraryDraft(response: response)
+        draft = loaded
+        if let focus, sheet == nil, let item = loaded.item(focused: focus) {
+            sheet = item.isStay ? .stay(item.id) : .journey(item.id)
+        }
+        if selectedStay == nil { selectedStay = loaded.stays.first?.id }
     }
 
     /// Save the whole chain at once and read it back. Answers nil when
@@ -814,6 +833,7 @@ struct TripItineraryView: View {
     /// planned, can be taken back.
     private func commit(_ next: TripItineraryDraft, shortened before: TripItineraryItem? = nil) async -> String? {
         if let problem = next.problems().first { return problem }
+        if viewModel.isOffline { return TripPlannerViewModel.offlineText }
         saving = true
         defer { saving = false }
         do {

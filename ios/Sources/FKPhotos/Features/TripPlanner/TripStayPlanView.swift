@@ -410,8 +410,15 @@ struct TripStayPlanView: View {
     private func openStay() async {
         guard let legId = viewModel.leg?.id else { return }
         do {
-            let response: TripItineraryResponse = try await APIClient.shared.get(
-                "/trip-planner/plans/\(viewModel.planId)/itinerary")
+            let response: TripItineraryResponse
+            if let kept = viewModel.offlineItinerary {
+                // Offline the sheet shows the stored chain; saving it
+                // waits for a connection (commitStay).
+                response = kept
+            } else {
+                response = try await APIClient.shared.get(
+                    "/trip-planner/plans/\(viewModel.planId)/itinerary")
+            }
             let draft = TripItineraryDraft(response: response)
             guard let stay = draft.items.first(where: { $0.isStay && $0.legId == legId }) else { return }
             editingStay = TripStayEditing(id: stay.id, draft: draft)
@@ -423,6 +430,7 @@ struct TripStayPlanView: View {
     /// Saved like from the itinerary: the whole chain, read back.
     private func commitStay(_ next: TripItineraryDraft) async -> String? {
         if let problem = next.problems().first { return problem }
+        if viewModel.isOffline { return TripPlannerViewModel.offlineText }
         do {
             let response: TripPlanResponse = try await APIClient.shared.put(
                 "/trip-planner/plans/\(viewModel.planId)/itinerary", body: next.request)

@@ -19,6 +19,10 @@ struct TripOfflineBundle: Codable, Sendable {
     /// When the server assembled it, ISO-8601.
     let generatedAt: String
     let plan: TripPlan
+    /// The trip as its itinerary reads it, which is where a trip opens.
+    /// Optional: a bundle stored by an older build has none, and is
+    /// still a plan.
+    var itinerary: TripItineraryResponse? = nil
     let light: [TripBundledDayLight]
     /// What the server knowingly left out — "weather", "map" (§14).
     let omits: [String]
@@ -153,6 +157,71 @@ struct TripOfflineStore: Sendable {
 
     func remove(planId: Int) {
         try? FileManager.default.removeItem(at: file(planId))
+    }
+
+    /// The trips that have a bundle here.
+    func storedPlanIds() -> Set<Int> {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        return Set(names.compactMap { name -> Int? in
+            guard name.hasPrefix("plan-"), name.hasSuffix(".json") else { return nil }
+            return Int(name.dropFirst("plan-".count).dropLast(".json".count))
+        })
+    }
+
+    // MARK: - The list of trips
+
+    private var listFile: URL { directory.appendingPathComponent("plans.json") }
+
+    /// The list as the server last gave it — what the planner shows
+    /// when it cannot ask (§3.9). Small, so it is simply kept every time.
+    func saveList(_ plans: [TripPlanSummary]) {
+        guard let data = try? JSONEncoder().encode(plans) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? data.write(to: listFile, options: .atomic)
+        var url = listFile
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
+    }
+
+    /// The list to show offline, and from when it is. The kept list
+    /// when there is one, with any trip stored since added; otherwise
+    /// the trips whose bundle is here, so the first flight after an
+    /// update is not the one with an empty planner. Nil when there is
+    /// neither.
+    func keptList() -> (plans: [TripPlanSummary], storedAt: Date)? {
+        var plans: [TripPlanSummary] = []
+        var storedAt: Date?
+        if let data = try? Data(contentsOf: listFile),
+           let kept = try? JSONDecoder().decode([TripPlanSummary].self, from: data) {
+            plans = kept
+            let attributes = try? FileManager.default.attributesOfItem(atPath: listFile.path)
+            storedAt = attributes?[.modificationDate] as? Date
+        }
+        let listed = Set(plans.map(\.id))
+        for planId in storedPlanIds().sorted() where !listed.contains(planId) {
+            guard let snapshot = load(planId: planId) else { continue }
+            plans.append(TripPlanSummary(bundle: snapshot.bundle))
+            storedAt = min(storedAt ?? snapshot.storedAt, snapshot.storedAt)
+        }
+        guard let storedAt, !plans.isEmpty else { return nil }
+        return (plans, storedAt)
+    }
+}
+
+extension TripPlanSummary {
+    /// A row for the list from a stored bundle — enough to find the trip
+    /// and open it; who organises it is not in the plan, so it is left
+    /// open and the row treats it as before.
+    init(bundle: TripOfflineBundle) {
+        let plan = bundle.plan
+        self.init(id: plan.id,
+                  title: plan.title,
+                  legTitles: plan.legs.map(\.title),
+                  dayCount: plan.legs.reduce(0) { $0 + $1.days.count },
+                  startDate: plan.legs.first?.startDate,
+                  updatedAt: bundle.generatedAt,
+                  youOrganise: nil)
     }
 }
 

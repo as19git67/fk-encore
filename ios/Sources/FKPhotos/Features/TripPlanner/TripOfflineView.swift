@@ -57,16 +57,18 @@ struct TripOfflineView: View {
             } header: {
                 Text("Ohne Netz")
             } footer: {
-                Text("Geladen werden alle Aufenthalte, Tage, Spots, Ideen und die "
-                     + "Lichtfenster der ausgeplanten Tage. Nicht dabei: die Karte und die "
-                     + "Wettervorhersage — eine drei Tage alte Vorhersage wäre schlechter als "
-                     + "gar keine.\n\nÄndern lässt sich ein Plan nur mit Verbindung. Ohne Netz "
-                     + "zeigt der Tagesplan, was gespeichert ist, und sagt, von wann es ist.")
+                Text("Auf dem iPhone liegt danach die ganze Reise: Reiseverlauf, Aufenthalte, "
+                     + "Tage, Spots, Ideen und das Licht der ausgeplanten Tage. Ohne Netz steht "
+                     + "sie in der Liste, und die App zeigt diesen Stand und sagt, von wann er ist. "
+                     + "Erkannte Besuche schickt sie nach, sobald wieder Netz da ist.\n\nNicht "
+                     + "dabei sind die Karte in der App und die Wettervorhersage. Die Route öffnet "
+                     + "Apple Karten, das mit seinen eigenen Offline-Karten weiter funktioniert. "
+                     + "Planen und ändern geht nur mit Verbindung.")
             }
 
             if justSaved {
                 Section {
-                    Label("Gespeichert. Der Plan ist jetzt auch im Flugmodus da.",
+                    Label("Gespeichert. Die Reise steht jetzt auch im Flugmodus in der Liste.",
                           systemImage: "checkmark.seal")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -77,5 +79,39 @@ struct TripOfflineView: View {
         .navigationTitle("Unterwegs ohne Netz")
         .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// The line over a screen that shows what is kept on the phone (§3.9):
+/// that it is offline, and from when the shown state is. Without it a
+/// plan from Tuesday looked exactly like the plan from now. A tap asks
+/// the server again, for when the network is back.
+struct TripOfflineBar: View {
+    let since: Date
+    let retry: () -> Void
+
+    var body: some View {
+        Button(action: retry) {
+            HStack(spacing: 8) {
+                Image(systemName: "wifi.slash")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Offline · \(TripOfflineWording.stamp(since))")
+                        .font(.footnote.weight(.semibold))
+                    Text("Ändern geht erst wieder mit Verbindung.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.clockwise")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Neu laden")
     }
 }

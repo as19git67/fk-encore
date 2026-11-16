@@ -15,6 +15,14 @@ struct TripPlansListView: View {
     @State private var plans: [TripPlanSummary] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    /// Set when the list on screen is the one kept on the phone, because
+    /// the server could not be reached (§3.9): the moment of that list.
+    /// Without it the planner was empty in flight mode, even for a trip
+    /// somebody had just loaded for the way.
+    @State private var offlineSince: Date?
+    /// The trips whose bundle is on the phone. Read with the list, so a
+    /// row can say what comes along and, offline, what can be opened.
+    @State private var stored: Set<Int> = []
     /// A delete or leave that the server refused. An alert rather than
     /// the list's error state: the list is still perfectly good, and
     /// swapping it for a full-screen error took the way back with it.
@@ -151,6 +159,10 @@ struct TripPlansListView: View {
                 shareBanner(pendingShare)
                 Divider()
             }
+            if let offlineSince {
+                TripOfflineBar(since: offlineSince) { Task { await load() } }
+                Divider()
+            }
             content
         }
         .sheet(isPresented: $isCreating) {
@@ -223,6 +235,11 @@ struct TripPlansListView: View {
             await load()
             pendingShare = TripShareInbox.peek()
         }
+        .onAppear {
+            // Back from "Unterwegs ohne Netz": the row should say at once
+            // that the trip now comes along.
+            stored = TripOfflineStore.shared.storedPlanIds()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { pendingShare = TripShareInbox.peek() }
         }
@@ -270,51 +287,68 @@ struct TripPlansListView: View {
             }
         } else {
             List(plans) { plan in
-                NavigationLink {
-                    TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: plan.id))
+                if offlineSince != nil, !stored.contains(plan.id) {
+                    // Offline, a trip that was never loaded for the way
+                    // has nothing to open. It stays in its place, so the
+                    // list looks like the list, and says why it is grey.
+                    VStack(alignment: .leading, spacing: 4) {
+                        row(plan)
+                        Text("Nicht für unterwegs geladen")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .opacity(0.5)
+                } else {
+                    planLink(plan)
+                }
+            }
+        }
+    }
+
+    private func planLink(_ plan: TripPlanSummary) -> some View {
+        NavigationLink {
+            TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: plan.id))
+        } label: {
+            row(plan)
+        }
+        .contextMenu {
+            Button { aux = TripPlanAux(planId: plan.id, kind: .documents) } label: {
+                Label("Dokumente", systemImage: "doc.text")
+            }
+            Button { aux = TripPlanAux(planId: plan.id, kind: .journal) } label: {
+                Label("Änderungen", systemImage: "arrow.uturn.backward")
+            }
+            Button { aux = TripPlanAux(planId: plan.id, kind: .readiness) } label: {
+                Label("Reisebereit?", systemImage: "checklist")
+            }
+            Button { aux = TripPlanAux(planId: plan.id, kind: .review) } label: {
+                Label("Danach", systemImage: "clock.arrow.circlepath")
+            }
+            Button { aux = TripPlanAux(planId: plan.id, kind: .offline) } label: {
+                Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
+            }
+            Button { Task { await exportTrip(plan) } } label: {
+                Label("Als Datei exportieren …", systemImage: "square.and.arrow.up")
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            if plan.organises {
+                Button(role: .destructive) {
+                    // Asked first, and by name. Everything else in
+                    // the planner is reversible; this is the one
+                    // thing that is not, and it takes the trip away
+                    // from everybody it was shared with.
+                    deleting = plan
                 } label: {
-                    row(plan)
+                    Label("Löschen", systemImage: "trash")
                 }
-                .contextMenu {
-                    Button { aux = TripPlanAux(planId: plan.id, kind: .documents) } label: {
-                        Label("Dokumente", systemImage: "doc.text")
-                    }
-                    Button { aux = TripPlanAux(planId: plan.id, kind: .journal) } label: {
-                        Label("Änderungen", systemImage: "arrow.uturn.backward")
-                    }
-                    Button { aux = TripPlanAux(planId: plan.id, kind: .readiness) } label: {
-                        Label("Reisebereit?", systemImage: "checklist")
-                    }
-                    Button { aux = TripPlanAux(planId: plan.id, kind: .review) } label: {
-                        Label("Danach", systemImage: "clock.arrow.circlepath")
-                    }
-                    Button { aux = TripPlanAux(planId: plan.id, kind: .offline) } label: {
-                        Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
-                    }
-                    Button { Task { await exportTrip(plan) } } label: {
-                        Label("Als Datei exportieren …", systemImage: "square.and.arrow.up")
-                    }
-                }
-                .swipeActions(edge: .trailing) {
-                    if plan.organises {
-                        Button(role: .destructive) {
-                            // Asked first, and by name. Everything else in
-                            // the planner is reversible; this is the one
-                            // thing that is not, and it takes the trip away
-                            // from everybody it was shared with.
-                            deleting = plan
-                        } label: {
-                            Label("Löschen", systemImage: "trash")
-                        }
-                    } else {
-                        // A companion cannot delete, and the server said
-                        // so every time. What they can do is leave.
-                        Button(role: .destructive) {
-                            leaving = plan
-                        } label: {
-                            Label("Verlassen", systemImage: "person.badge.minus")
-                        }
-                    }
+            } else {
+                // A companion cannot delete, and the server said
+                // so every time. What they can do is leave.
+                Button(role: .destructive) {
+                    leaving = plan
+                } label: {
+                    Label("Verlassen", systemImage: "person.badge.minus")
                 }
             }
         }
@@ -360,7 +394,17 @@ struct TripPlansListView: View {
             // Which trip you are actually on is said once, by the
             // schedule line below in the accent colour — a second chip
             // said the same thing twice in one cell.
-            Text(plan.displayTitle).font(.headline)
+            HStack(spacing: 6) {
+                Text(plan.displayTitle).font(.headline)
+                // What comes along without a network, said before
+                // leaving rather than discovered at the gate.
+                if stored.contains(plan.id) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Für unterwegs geladen")
+                }
+            }
             HStack(spacing: 6) {
                 Text(plan.dayCountLabel)
                 if let route = plan.routeLabel {
@@ -502,14 +546,27 @@ struct TripPlansListView: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
+        let store = TripOfflineStore.shared
         do {
             let response: ListTripPlansResponse =
                 try await APIClient.shared.get("/trip-planner/plans")
             plans = response.plans
             errorMessage = nil
+            offlineSince = nil
+            store.saveList(response.plans)
         } catch {
-            errorMessage = TripErrorText.describe(error)
+            // Without a network, the list from the last time — or, if
+            // there is none yet, the trips whose bundle is on the phone
+            // (§3.9). A refusal from the server is an answer and stays one.
+            if TripOfflineReach.meansUnreachable(error), let kept = store.keptList() {
+                plans = kept.plans
+                offlineSince = kept.storedAt
+                errorMessage = nil
+            } else {
+                errorMessage = TripErrorText.describe(error)
+            }
         }
+        stored = store.storedPlanIds()
     }
 }
 
