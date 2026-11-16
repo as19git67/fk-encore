@@ -88,6 +88,7 @@ struct TripDayAnchorSheet: View {
     /// The form holds what the sheet was opened with; from here on a
     /// difference is an edit.
     @State private var adopted = false
+    @State private var confirmingRemove = false
     @Environment(\.dismiss) private var dismiss
 
     private var windowed: Bool { onSaveWindow != nil && span == .window }
@@ -174,15 +175,15 @@ struct TripDayAnchorSheet: View {
                     }
                 }
 
+                // Always the same order (review B6): place, how long,
+                // the times, how far.
                 if windowed {
                     windowHours
+                } else {
+                    hours
                 }
 
                 reachSection
-
-                if !windowed {
-                    hours
-                }
 
                 if let onMove, !moveTargets.isEmpty, excursion != nil || current != nil {
                     Section {
@@ -206,15 +207,10 @@ struct TripDayAnchorSheet: View {
                     }
                 }
 
-                if let excursion, let onRemoveExcursion {
+                if let excursion, onRemoveExcursion != nil {
                     Section {
                         Button(role: .destructive) {
-                            saving = true
-                            Task {
-                                await onRemoveExcursion()
-                                saving = false
-                                dismiss()
-                            }
+                            confirmingRemove = true
                         } label: {
                             Label("Ausflug entfernen", systemImage: "trash")
                         }
@@ -225,12 +221,7 @@ struct TripDayAnchorSheet: View {
                 } else if let current {
                     Section {
                         Button(role: .destructive) {
-                            saving = true
-                            Task {
-                                failure = await onSave(nil)
-                                saving = false
-                                if failure == nil { dismiss() }
-                            }
+                            confirmingRemove = true
                         } label: {
                             Label("Ausflug entfernen", systemImage: "house")
                         }
@@ -240,6 +231,28 @@ struct TripDayAnchorSheet: View {
                              + "Bisher: \(current.summary).")
                     }
                 }
+            }
+            // Nothing to undo afterwards, so asked once (review D4).
+            .confirmationDialog("Ausflug entfernen?", isPresented: $confirmingRemove,
+                                titleVisibility: .visible) {
+                Button("Ausflug entfernen", role: .destructive) {
+                    saving = true
+                    Task {
+                        if excursion != nil, let onRemoveExcursion {
+                            await onRemoveExcursion()
+                            saving = false
+                            dismiss()
+                        } else {
+                            failure = await onSave(nil)
+                            saving = false
+                            if failure == nil { dismiss() }
+                        }
+                    }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text(excursion.map { "Die Spots von \($0.displayName) gehen zurück zu den Ideen." }
+                     ?? "Der Tag findet dann wieder rund um die Unterkunft statt.")
             }
             .navigationTitle(after != nil && excursion == nil ? "Weiteres Ziel" : "Ausflug")
             .navigationBarTitleDisplayMode(.inline)
@@ -302,25 +315,22 @@ struct TripDayAnchorSheet: View {
         }
     }
 
-    /// The two hours, each behind its own switch.
+    /// The two hours, each open until somebody names it (review D2: the
+    /// same "offen · festlegen" row as everywhere).
     ///
-    /// Off by default, because the ordinary case is a day trip nobody
+    /// Open by default, because the ordinary case is a day trip nobody
     /// has timed yet — and an hour the app filled in for them would be
     /// a claim about their day rather than a question about it.
     private var hours: some View {
         Section {
-            Toggle("Abfahrt angeben", isOn: $saysDeparture.animation())
-            if saysDeparture {
-                DatePicker("Abfahrt", selection: $departure, displayedComponents: .hourAndMinute)
-                if let arrival = estimatedArrival {
-                    LabeledContent("Ankunft geschätzt", value: arrival)
-                        .foregroundStyle(.secondary)
-                }
+            TripOptionalClockRow(title: "Abfahrt", clock: optionalClock($departure, says: $saysDeparture),
+                                 defaultMinutes: 8 * 60 + 30)
+            if saysDeparture, let arrival = estimatedArrival {
+                LabeledContent("Ankunft geschätzt", value: arrival)
+                    .foregroundStyle(.secondary)
             }
-            Toggle("Rückfahrt angeben", isOn: $saysReturn.animation())
-            if saysReturn {
-                DatePicker("Rückfahrt", selection: $back, displayedComponents: .hourAndMinute)
-            }
+            TripOptionalClockRow(title: "Rückfahrt", clock: optionalClock($back, says: $saysReturn),
+                                 defaultMinutes: 17 * 60 + 30)
             if !hoursAddUp {
                 Label("Die Rückfahrt liegt vor der Abfahrt.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
@@ -335,6 +345,21 @@ struct TripDayAnchorSheet: View {
                  + "Routenplaner. Mit Abfahrt startet der Tag ab dort, mit Rückfahrt plant "
                  + "er nichts mehr dahinter.")
         }
+    }
+
+    /// An hour as the optional clock row reads it: nil while unsaid.
+    private func optionalClock(_ date: Binding<Date>, says: Binding<Bool>) -> Binding<String?> {
+        Binding(
+            get: { says.wrappedValue ? TripClock.format(TripDayTimeline.minutesOfDay(date.wrappedValue)) : nil },
+            set: { value in
+                guard let value, let minutes = TripClock.minutes(fromClock: value) else {
+                    says.wrappedValue = false
+                    return
+                }
+                says.wrappedValue = true
+                date.wrappedValue = Self.at(hour: minutes / 60, minute: minutes % 60)
+            },
+        )
     }
 
     /// The window of an excursion: both hours, and what the drive makes

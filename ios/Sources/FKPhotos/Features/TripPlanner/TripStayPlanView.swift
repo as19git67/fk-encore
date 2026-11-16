@@ -112,13 +112,6 @@ struct TripStayPlanView: View {
         }
         .navigationTitle(title ?? viewModel.leg?.displayTitle ?? "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
-        // Only the stay's own data: "Bearbeiten" would not say that the
-        // spots and excursions are edited elsewhere (Anton, 11.11.).
-        .toolbarTitleMenu {
-            Button("Ort, Tage und Unterkunft …", systemImage: "info.circle") {
-                Task { await openStay() }
-            }
-        }
         .sheet(item: $fillRequest) { request in
             TripDayFillSheet(planId: viewModel.planId, legIndex: viewModel.legIndex, request: request) { days in
                 await acceptFill(days, fromMinutes: request.fromMinutes)

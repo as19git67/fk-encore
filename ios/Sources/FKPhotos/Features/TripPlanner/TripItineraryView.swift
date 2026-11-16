@@ -339,49 +339,44 @@ struct TripItineraryView: View {
                 }
             }
         }
-        .swipeActions(edge: .leading) {
-            Button {
-                sheet = .stay(stay.id)
-            } label: {
-                Label("Bearbeiten", systemImage: "pencil")
-            }
-            .tint(.accentColor)
-        }
         .contextMenu {
+            stayActions(stay, position: position, in: draft)
+        }
+    }
+
+    /// What one does with a stay (review F): plan it, move it, take it
+    /// out. Its place, days and lodging are in its sheet, which a tap on
+    /// the card opens; the "⋯" and a long press show these same entries.
+    @ViewBuilder
+    private func stayActions(_ stay: TripItineraryItem, position: Int, in draft: TripItineraryDraft) -> some View {
+        Button {
+            plan(stay, day: nil)
+        } label: {
+            Label("Planen", systemImage: "calendar")
+        }
+        if draft.startDate == nil, draft.stayCount > 1 {
             Button {
-                plan(stay, day: nil)
+                var next = draft
+                next.moveStay(id: stay.id, up: true)
+                Task { if let refusal = await commit(next) { errorMessage = refusal } }
             } label: {
-                Label("Planen", systemImage: "calendar")
+                Label("Nach oben", systemImage: "arrow.up")
             }
+            .disabled(position == 0)
             Button {
-                sheet = .stay(stay.id)
+                var next = draft
+                next.moveStay(id: stay.id, up: false)
+                Task { if let refusal = await commit(next) { errorMessage = refusal } }
             } label: {
-                Label("Bearbeiten", systemImage: "pencil")
+                Label("Nach unten", systemImage: "arrow.down")
             }
-            if draft.startDate == nil, draft.stayCount > 1 {
-                Button {
-                    var next = draft
-                    next.moveStay(id: stay.id, up: true)
-                    Task { if let refusal = await commit(next) { errorMessage = refusal } }
-                } label: {
-                    Label("Nach oben", systemImage: "arrow.up")
-                }
-                .disabled(position == 0)
-                Button {
-                    var next = draft
-                    next.moveStay(id: stay.id, up: false)
-                    Task { if let refusal = await commit(next) { errorMessage = refusal } }
-                } label: {
-                    Label("Nach unten", systemImage: "arrow.down")
-                }
-                .disabled(position == draft.stayCount - 1)
-            }
-            if draft.stayCount > 1 {
-                Button(role: .destructive) {
-                    remove(stay, in: draft)
-                } label: {
-                    Label("Entfernen", systemImage: "trash")
-                }
+            .disabled(position == draft.stayCount - 1)
+        }
+        if draft.stayCount > 1 {
+            Button(role: .destructive) {
+                remove(stay, in: draft)
+            } label: {
+                Label("Entfernen", systemImage: "trash")
             }
         }
     }
@@ -389,31 +384,57 @@ struct TripItineraryView: View {
     private func stayCard(_ stay: TripItineraryItem, dated: TripItineraryDated,
                           in draft: TripItineraryDraft) -> some View {
         let rows = dayRows(stay, dated: dated, in: draft)
+        let position = draft.stays.firstIndex { $0.id == stay.id } ?? 0
         return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                plan(stay, day: nil)
-            } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(draft.title(of: stay))
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        Spacer(minLength: 8)
-                        Text(TripItineraryText.stayLength(days: stay.days ?? 1))
-                            .font(.subheadline)
+            HStack(alignment: .top, spacing: 4) {
+                // A tap opens the stay's sheet (review F): place, days,
+                // arrival and departure, lodging.
+                Button {
+                    sheet = .stay(stay.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(draft.title(of: stay))
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            if draft.isPinned(stay.id) {
+                                Image(systemName: "pin.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .accessibilityLabel("Beginn steht fest")
+                            }
+                            Spacer(minLength: 8)
+                            Text(TripItineraryText.stayLength(days: stay.days ?? 1))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(staySubtitle(stay, dated: dated, in: draft))
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
-                    Text(staySubtitle(stay, dated: dated, in: draft))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(.rect)
+                .buttonStyle(.plain)
+                .accessibilityHint("Ort, Tage und Unterkunft")
+
+                Button("Planen") { plan(stay, day: nil) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.top, 10)
+                Menu {
+                    stayActions(stay, position: position, in: draft)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("Aktionen für \(draft.title(of: stay))")
+                .padding(.trailing, 4)
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Aufenthalt planen")
 
             ForEach(rows) { row in
                 Divider().padding(.leading, 12)
@@ -465,7 +486,7 @@ struct TripItineraryView: View {
                         Text(journeyLine(journey, in: draft))
                             .font(.subheadline)
                             .foregroundStyle(.primary)
-                        if let nights = journey.nights, nights > 0 {
+                        if let nights = dated.item.nights, nights > 0 {
                             Text(nights == 1 ? "1 Nacht unterwegs" : "\(nights) Nächte unterwegs")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -674,7 +695,6 @@ struct TripItineraryView: View {
                     onCommit: { next in await commit(next, shortened: stay) },
                     onPlan: { plan(stay, day: nil) },
                     onRemove: { remove(stay, in: draft) },
-                    onOpenJourney: { journeyId in openLater(.journey(journeyId)) },
                 )
             }
         case .journey(let id):
