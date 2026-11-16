@@ -248,3 +248,53 @@ export const PROPOSAL_COLLAGE_BLOCK: ResultBlock = {
     },
   }],
 }
+
+/** Sums per tag with the pie the server derives from them (`assistant/charts.ts`). */
+export const ANALYSIS_PIE_BLOCK: ResultBlock = {
+  ...ANALYSIS_BLOCK,
+  rows: [{
+    sum: -905.4, count: 41, currency: 'EUR', group_by: 'tag',
+    groups: [
+      { label: 'Lebensmittel', sum: -380.1, count: 20 }, { label: 'Tanken', sum: -210.0, count: 4 },
+      { label: 'Drogerie', sum: -92.3, count: 6 }, { label: 'Restaurant', sum: -148.0, count: 5 }, { label: 'Bücher', sum: -75.0, count: 6 },
+    ],
+  }],
+  chart: {
+    type: 'pie', labels: ['Lebensmittel', 'Tanken', 'Restaurant', 'Drogerie', 'Bücher'],
+    series: [{ name: 'Ausgaben', values: [380.1, 210, 148, 92.3, 75] }], format: 'money', unit: 'EUR',
+    caption: 'Ausgaben als Beträge ohne Vorzeichen',
+  },
+}
+
+const DAYS = Array.from({ length: 40 }, (_, i) => {
+  const d = new Date(Date.UTC(2026, 0, 2 + i * 7))
+  return `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${d.getUTCFullYear()}`
+})
+
+/** The depot value over a year beside the invested capital. */
+export const PERFORMANCE_BLOCK: ResultBlock = {
+  kind: 'performance',
+  tool: 'portfolio_performance',
+  subtitle: 'Zeitraum YTD',
+  route: '/finanzen/portfolio?period=YTD',
+  rows: [{ id: 'EUR', currency: 'EUR', from: '2026-01-02', to: '2026-10-09', start_value: '11000.00', end_value: '12500.00', gain: '900.00', twr_pct: '7.90', xirr_pct: '9.80', route: '/finanzen/portfolio?period=YTD' }],
+  chart: {
+    type: 'line', labels: DAYS, format: 'money', unit: 'EUR',
+    series: [
+      { name: 'Depotwert', values: DAYS.map((_, i) => Math.round(11000 + i * 32 + Math.sin(i / 3) * 250)) },
+      { name: 'Investiertes Kapital', values: DAYS.map((_, i) => 10000 + Math.floor(i / 4) * 50) },
+    ],
+  },
+}
+
+/** Consumption per month as bars in the meter's unit. */
+export const CONSUMPTION_BLOCK: ResultBlock = {
+  kind: 'consumption',
+  tool: 'consumption_report',
+  route: '/zaehler/1',
+  rows: ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun'].map((m, i) => ({ period: `${m} 2026`, consumption: [410, 372, 330, 268, 231, 214][i], coverage: 1, unit: 'kWh' })),
+  chart: {
+    type: 'bar', labels: ['Jan 2026', 'Feb 2026', 'Mär 2026', 'Apr 2026', 'Mai 2026', 'Jun 2026'],
+    series: [{ name: 'Verbrauch', values: [410, 372, 330, 268, 231, 214] }], format: 'number', unit: 'kWh',
+  },
+}

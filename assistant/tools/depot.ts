@@ -7,6 +7,7 @@
 
 import { finance } from "~encore/clients";
 import { digestOf, int, isoDate, money, query, str, table } from "../format";
+import { thinIndices } from "../charts";
 import type { ToolSpec } from "../types";
 
 const FINANCE = ["module.finance", "finance.view"];
@@ -382,4 +383,72 @@ export const positionNews: ToolSpec = {
   },
 };
 
-export const DEPOT_TOOLS = [portfolioOverview, positionDetail, depotTransactions, quotes, positionNews];
+interface PerformancePoint { day: string; value: string | null; invested: string; twr_pct: string | null }
+interface PerformanceGroup {
+  currency: string; account_ids: number[]; from: string; to: string; shortened: boolean;
+  start_value: string; end_value: string; net_flow: string; income: string; gain: string;
+  twr_pct: string | null; twr_pa_pct: string | null; xirr_pct: string | null; unvalued_days: number;
+  points: PerformancePoint[]; gaps: { from: string; to: string }[];
+}
+interface PerformanceResponse { period: string; today: string; mixed_currency: boolean; groups: PerformanceGroup[] }
+
+const PERIODS = ["1M", "YTD", "1Y", "3Y", "max"] as const;
+
+export const portfolioPerformance: ToolSpec = {
+  name: "portfolio_performance",
+  kind: "read",
+  summary: "How the depot value developed over a period (1M, YTD, 1Y, 3Y or max): start and end value, money paid in and out, gain, time-weighted return (TWR) and money-weighted return (XIRR), all computed by the server, with the value over time drawn as a line beside the answer. For the portfolio, one depot (account_ids) or one security (position = key). Use it for 'Verlauf', 'Entwicklung', 'Rendite seit', 'wie hat sich mein Depot entwickelt'; for the holdings today, portfolio_overview.",
+  permissions: FINANCE,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      period: { type: "string", enum: [...PERIODS], description: "1M, YTD (this year), 1Y, 3Y or max (since the first transaction); default 1Y" },
+      account_ids: { type: "array", items: { type: "integer" }, description: "only these depots (ids from list_accounts); default: every depot" },
+      position: { type: "string", description: "only this security: its key as portfolio_overview printed it; a name works when it matches one security" },
+    },
+  },
+  async run(args) {
+    const period = PERIODS.find((p) => p === str(args.period)) ?? "1Y";
+    const asked = str(args.position);
+    const position = asked ? await resolveKey(asked) : undefined;
+    const res = (await finance.getPortfolioPerformance({ accounts: accountsParam(args), period, position })) as unknown as PerformanceResponse;
+    if (!res.groups.length) {
+      return {
+        text: "No depot with transactions or holdings in scope: there is no value to follow over time.",
+        digest: "[earlier result of portfolio_performance: no depot]",
+        rowCount: 0,
+      };
+    }
+    const lines = res.groups.map((g) => [
+      `${g.currency}, ${g.account_ids.length} depot${g.account_ids.length === 1 ? "" : "s"}${position ? `, security ${position}` : ""}, from ${g.from} to ${g.to}${g.shortened ? " (the history starts later than the period)" : ""}:`,
+      `value ${money(g.start_value)} → ${money(g.end_value)}; net paid in ${money(g.net_flow)}; dividends ${money(g.income)}; gain ${money(g.gain)}`,
+      `TWR ${pct(g.twr_pct) ?? "n/a"}${g.twr_pa_pct ? ` (${pct(g.twr_pa_pct)} p.a.)` : ""}; XIRR ${g.xirr_pct ? `${pct(g.xirr_pct)} p.a.` : "n/a"}${g.unvalued_days ? `; ${g.unvalued_days} days without a price` : ""}`,
+    ].join("\n"));
+    const first = res.groups[0]!;
+    const route = position ? `${positionRoute(position)}?period=${period}` : `/finanzen/portfolio?period=${period}`;
+    return {
+      text: `Period ${res.period}${res.mixed_currency ? ", one group per currency" : ""}:\n${lines.join("\n\n")}\nThe values over time are drawn as a chart beside the answer; repeat the figures above, never read values off the chart.`,
+      digest: `[earlier result of portfolio_performance: ${res.period}, value ${money(first.start_value)} → ${money(first.end_value)} ${first.currency}, gain ${money(first.gain)}]`,
+      rowCount: res.groups.length,
+      block: {
+        kind: "performance",
+        tool: "portfolio_performance",
+        subtitle: `Zeitraum ${res.period === "max" ? "seit Beginn" : res.period}`,
+        rows: res.groups.map((g) => {
+          // The block is stored with the message: a long history goes in thinned.
+          const idx = thinIndices(g.points.length);
+          return {
+            id: g.currency, currency: g.currency, from: g.from, to: g.to,
+            start_value: g.start_value, end_value: g.end_value, net_flow: g.net_flow, gain: g.gain,
+            twr_pct: g.twr_pct, xirr_pct: g.xirr_pct, route,
+            points: idx.map((i) => g.points[i]!).map((p) => ({ day: p.day, value: p.value, invested: p.invested })),
+          };
+        }),
+        route,
+      },
+    };
+  },
+};
+
+export const DEPOT_TOOLS = [portfolioOverview, positionDetail, depotTransactions, quotes, positionNews, portfolioPerformance];

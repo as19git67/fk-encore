@@ -3,6 +3,8 @@
  * (documentation/plans/ki-assistent.md, stage 2).
  */
 
+import type { BlockChart } from "./charts";
+
 /** The asking user, as the auth handler resolved them. */
 export interface AssistantUser {
   userID: string;
@@ -48,6 +50,7 @@ export type BlockKind =
   | "businesses"
   | "business_assets"
   | "euer"
+  | "performance"
   | "proposal"
   | "table";
 
@@ -66,6 +69,8 @@ export interface ResultBlock {
   subtitle?: string;
   /** The block's heading for a client without a renderer per kind (`present.ts`). */
   title?: string;
+  /** A chart of the rows, derived by the server (`charts.ts`); never written by the model. */
+  chart?: BlockChart;
 }
 
 /** The kinds of objects a later tool can take over from an earlier result. */

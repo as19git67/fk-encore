@@ -4,6 +4,9 @@ import { http, HttpResponse } from 'msw'
 import { defaultHandlers } from './handlers'
 import {
   ANALYSIS_BLOCK,
+  ANALYSIS_PIE_BLOCK,
+  CONSUMPTION_BLOCK,
+  PERFORMANCE_BLOCK,
   DEBITS_BLOCK,
   DOCUMENTS_BLOCK,
   METERS_BLOCK,
@@ -242,5 +245,14 @@ export const VorschlagCollage: Story = {
     role: 'assistant',
     content: 'Ich habe eine Collage aus den vier Fotos vorgeschlagen, mit dem Text unten links. Layout und Text kannst du auf der Karte noch ändern.',
     blocks: [PROPOSAL_COLLAGE_BLOCK],
+  },
+}
+
+export const Diagramme: Story = {
+  name: 'Antwort mit Diagrammen (Kuchen, Linie, Balken)',
+  args: {
+    role: 'assistant',
+    content: 'Dein Depot ist dieses Jahr von 11.000 € auf 12.500 € gestiegen, davon 900 € Gewinn.',
+    blocks: [PERFORMANCE_BLOCK, ANALYSIS_PIE_BLOCK, CONSUMPTION_BLOCK],
   },
 }

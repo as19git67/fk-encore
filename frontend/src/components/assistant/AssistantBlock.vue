@@ -16,6 +16,7 @@ import { PHOTO_IDS_QUERY_KEY, pinnedPhotoIdsQuery } from '../../utils/photoIdsQu
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import DocumentThumbnail from '../DocumentThumbnail.vue'
+import AssistantChart from './AssistantChart.vue'
 import { formatCurrency, formatIsoDate } from '../../utils/financeFormat'
 
 const props = withDefaults(defineProps<{
@@ -94,6 +95,7 @@ const TITLES: Record<string, string> = {
   businesses: 'Betriebe',
   business_assets: 'Anlagegüter und Flächen',
   euer: 'Einnahmen-Überschuss-Rechnung',
+  performance: 'Wertentwicklung',
   table: 'Ergebnis',
 }
 
@@ -263,6 +265,9 @@ const analysisGroups = computed(() =>
         <span v-else-if="block.kind !== 'analysis'" class="block-count">{{ total }}</span>
       </button>
     </header>
+
+    <!-- The chart is the answer at a glance: it stays while the rows are folded. -->
+    <AssistantChart v-if="block.chart" :chart="block.chart" :label="`Diagramm: ${title}`" />
 
     <div v-if="open" :id="bodyId">
 
@@ -536,6 +541,23 @@ const analysisGroups = computed(() =>
       <li v-for="(r, i) in shown" :key="str(r.id ?? i)" class="row row--static">
         <span class="row-main"><span class="row-title">{{ block.kind === 'readings' ? date(r.taken_at) : str(r.period) }}</span></span>
         <span class="amount">{{ str(block.kind === 'readings' ? r.value : r.consumption) }}</span>
+      </li>
+    </ul>
+
+    <!-- Depot value over a period: the figures, the course is the chart above -->
+    <ul v-else-if="block.kind === 'performance'" class="rows">
+      <li v-for="(r, i) in shown" :key="str(r.id ?? i)">
+        <component
+          :is="r.route ? 'RouterLink' : 'div'"
+          :to="r.route ? str(r.route) : undefined"
+          :class="['row', { 'row--static': !r.route }]"
+        >
+          <span class="row-main">
+            <span class="row-title">{{ date(r.from) }} – {{ date(r.to) }}</span>
+            <span class="row-sub">{{ [r.gain !== null && r.gain !== undefined ? `Gewinn ${withUnit(r.gain, r.currency)}` : '', r.twr_pct ? `TWR ${str(r.twr_pct)} %` : '', r.xirr_pct ? `XIRR ${str(r.xirr_pct)} % p. a.` : ''].filter(Boolean).join(' · ') }}</span>
+          </span>
+          <span :class="amountClass(r.gain)">{{ withUnit(r.end_value, r.currency) }}</span>
+        </component>
       </li>
     </ul>
 

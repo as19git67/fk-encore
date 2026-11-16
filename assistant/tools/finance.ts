@@ -361,6 +361,7 @@ export const transactionTotals: ToolSpec = {
           sum: res.total / 100,
           count: res.count,
           currency: res.currency,
+          group_by: grouping.group_by,
           groups: res.groups.map((g) => ({ label: g.label, sum: g.sum / 100, count: g.count })),
         }],
       },

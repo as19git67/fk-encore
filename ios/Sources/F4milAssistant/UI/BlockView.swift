@@ -46,6 +46,10 @@ struct BlockView: View {
                     .padding(.bottom, 6)
             }
             Divider()
+            if let chart = block.chart, ["line", "bar", "pie"].contains(chart.type) {
+                ChartView(chart: chart)
+                Divider()
+            }
             if block.rows.isEmpty {
                 Text("Keine Einträge")
                     .font(.footnote)

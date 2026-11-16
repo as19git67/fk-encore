@@ -621,6 +621,19 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "portfolio-course",
+    title: "Depotverlauf",
+    question: "Wie hat sich mein Depot dieses Jahr entwickelt?",
+    firstTools: ["portfolio_performance", "portfolio_overview"],
+    expect: [{ tool: "portfolio_performance", args: { period: "YTD" } }],
+    results: {
+      portfolio_performance: {
+        summary: "EUR, 1 depot, from 2026-01-02 to 2026-10-16: value 11000.00 → 12500.00; net paid in 600.00; dividends 120.00; gain 900.00; TWR 7.90 %; XIRR 9.80 % p.a.",
+      },
+      portfolio_overview: { rows: [{ key: "DE0000000001", name: "Beispiel AG", value: "7500.00" }] },
+    },
+  },
+  {
     id: "dividends-this-year",
     title: "Dividenden dieses Jahr",
     question: "Welche Dividenden habe ich dieses Jahr bekommen?",
