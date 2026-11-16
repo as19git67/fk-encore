@@ -44,6 +44,14 @@ enum TripTickQueue {
         return ticks
     }
 
+    private static func save(_ ticks: [TripQueuedTick], to store: UserDefaults) {
+        if ticks.isEmpty {
+            store.removeObject(forKey: key)
+        } else if let data = try? JSONEncoder().encode(ticks) {
+            store.set(data, forKey: key)
+        }
+    }
+
     /// Adds a tick. A newer status for the same stop replaces the older
     /// one — "Erledigt" and then "Doch nicht" in the tunnel is one
     /// "Doch nicht" for the server, not two writes.
