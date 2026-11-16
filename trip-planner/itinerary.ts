@@ -604,7 +604,7 @@ function journeyDepartureOf(leg: StoredLeg): { startMinutes: number; label: stri
   return fix ? { startMinutes: fix.startMinutes, label: fix.label } : null;
 }
 
-function itineraryResponse(plan: StoredPlan): ItineraryResponse {
+export function itineraryResponse(plan: StoredPlan): ItineraryResponse {
   const chain = itineraryOf(plan);
   const frames = deriveFrames(chain, { home: plan.home !== null, homeLabel: plan.home?.label ?? "Zuhause" });
   const zones = chain.items.map((item) => (item.kind === "stay" ? zoneAt(item.anchor) : null));

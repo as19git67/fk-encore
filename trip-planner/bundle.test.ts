@@ -120,6 +120,17 @@ describe("the offline bundle", () => {
     expect(stops.every((s) => s.name !== null && s.name !== undefined)).toBe(true);
   });
 
+  it("carries the itinerary the trip opens on", async () => {
+    const plan = await datedTrip();
+
+    const bundle = await offlineBundle({ planId: plan.id });
+
+    expect(bundle.itinerary.planId).toBe(plan.id);
+    expect(bundle.itinerary.startDate).toBe("2026-06-18");
+    const stays = bundle.itinerary.items.filter((item) => item.kind === "stay");
+    expect(stays).toHaveLength(1);
+  });
+
   it("brings the light of every detailed day along", async () => {
     const plan = await datedTrip();
 

@@ -306,6 +306,14 @@ struct TripPlanDayView: View {
                 // "Neue Reise" asked for the itinerary, and this is it.
                 viewModel.wantsItinerary = false
             }
+            .safeAreaInset(edge: .top, spacing: 0) { offlineBar }
+    }
+
+    /// Over every screen of the trip while it is shown from the phone.
+    @ViewBuilder private var offlineBar: some View {
+        if let since = viewModel.offlineSince {
+            TripOfflineBar(since: since) { Task { await viewModel.load() } }
+        }
     }
 
     /// While the trip runs it opens straight on the day being lived, in
@@ -391,6 +399,7 @@ struct TripPlanDayView: View {
             // carries the way back to the itinerary.
             title: "",
         )
+        .safeAreaInset(edge: .top, spacing: 0) { offlineBar }
     }
 
     /// Put geofences around the next stops of the day on screen (§7.1).

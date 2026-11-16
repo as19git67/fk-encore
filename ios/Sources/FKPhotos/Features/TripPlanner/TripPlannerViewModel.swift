@@ -324,6 +324,18 @@ final class TripPlannerViewModel {
     /// of the light hints while there is no network.
     private var offlineBundle: TripOfflineBundle?
 
+    /// True while what is on screen came from the phone. Every screen of
+    /// the trip asks this one place, so none of them needs its own rule
+    /// for when a change may be tried.
+    var isOffline: Bool { offlineSince != nil }
+
+    /// The itinerary as it was stored with the plan, for the screen the
+    /// trip opens on. Nil online, and for a bundle from an older build.
+    var offlineItinerary: TripItineraryResponse? {
+        guard isOffline else { return nil }
+        return offlineBundle?.itinerary
+    }
+
     /// Fetch the whole plan and keep it (§3.9).
     ///
     /// Returns false when it could not be stored, so the screen can say
@@ -1583,7 +1595,7 @@ final class TripPlannerViewModel {
     /// A write needs the server. Offline, the banner said so and every
     /// control kept working — and failing without a word. Now the
     /// refusal is the same sentence, said at the tap.
-    private static let offlineText = "Offline — Änderungen brauchen eine Verbindung. Der Plan bleibt, wie er ist."
+    static let offlineText = "Offline – ändern geht erst wieder mit Verbindung. Gezeigt wird der Stand auf dem Gerät."
 
     private func requireOnline() -> Bool {
         guard offlineSince != nil else { return true }

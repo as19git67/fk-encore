@@ -14,7 +14,7 @@ enum TripErrorText {
             switch urlError.code {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed,
                  .internationalRoamingOff:
-                return "Keine Verbindung. Der Plan bleibt, wie er ist — bitte später noch einmal."
+                return "Keine Verbindung zum Server, nichts wurde geändert. Sobald wieder Netz da ist, noch einmal tippen."
             case .timedOut:
                 return "Der Server hat nicht rechtzeitig geantwortet."
             case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
