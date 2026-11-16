@@ -28,12 +28,13 @@ import { loadPlan } from "./plan-store";
 import { shelterOf, type Shelter } from "./shelter";
 import { hoursWithin, summarise, type BlockWeather } from "./weather";
 import { forecastFor } from "./weather-service";
+import { stayOffsetMinutes } from "./time-zone";
 
 export interface DayForecastRequest {
   planId: number;
   legIndex?: number;
   dayIndex: number;
-  /** The destination's offset from UTC in minutes — see the light endpoint. */
+  /** The caller's offset from UTC in minutes, a fallback — see the light endpoint. */
   utcOffsetMinutes?: number;
 }
 
@@ -96,6 +97,9 @@ export const dayForecast = api(
     // — and a forecast for the quarters would send somebody out with
     // the wrong jacket, confidently.
     const { byDay } = await forecastFor(day.anchor ?? leg.anchor, [date]);
+    // Hours are placed on the clock of the place (offline review O7);
+    // the caller's offset only for a place without a known zone.
+    const clock = stayOffsetMinutes(day.anchor ?? leg.anchor, date, offset);
     const hours = byDay.get(date) ?? [];
 
     const blocks: BlockForecast[] = day.blocks.map((block) => ({
@@ -112,7 +116,7 @@ export const dayForecast = api(
           date,
           block.startMinutes,
           block.startMinutes + block.budgetMinutes,
-          offset,
+          clock,
         )),
     }));
 
