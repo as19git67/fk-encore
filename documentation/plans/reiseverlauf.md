@@ -32,12 +32,25 @@ chain is created and edited on one screen, the **itinerary**
 (Reiseverlauf). Every fact has exactly one owner:
 
 - A **stay** owns place, lodging, number of days and the mode of transport
-  on site. It owns no date and no time.
+  on site. It owns no time of its own, except the first stay's arrival
+  when no journey leads in and the last stay's departure when none leaves
+  (`departAt`, written as the fixpoint "Abreise").
 - A **journey** owns its departure time, its arrival time, its mode and,
   when it takes longer than a day, the nights on the way. It owns no date.
 - The **trip** owns exactly one date, its first day. Every other date is
   computed: stay 2 begins on the day journey 1 arrives; journey 2 leaves
-  on the last day of stay 2.
+  on the last day of stay 2. On screen the first stay's "Von" sets that
+  date, counted back over the nights of the way there when home is known.
+- A stay may be **pinned** to its first day (`pinnedStart`, column
+  `trip_plan_legs.start_pinned`): a booked hotel, a port of call. It
+  keeps that day whatever changes before it; the journey before it takes
+  up the gap as nights on the way. A gap that runs backwards (the stays
+  overlap) or is longer than a journey may last (6 nights, 30 by ship)
+  is refused with what to do: shorten before, insert a stay, or loosen
+  the pin. Free days in front of a pin are not shown as a row of their
+  own; the refusal says how many. The first stay is never pinned (its day
+  is the trip's date), and a trip without a date pins nothing (review of
+  the trip planner sheets, 15–16 Nov 2026).
 
 Without a date the chain works the same way ("Tag 1 bis 3"). The date
 can be added at any time; a separate "Termin steht fest" switch is gone.

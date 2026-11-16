@@ -215,8 +215,7 @@ Bildschirme (je Titel ein Bildschirm): Neue Reise, Reise, Reiseverlauf
 Plus auf der Linie, Umsortieren, ein Datum im Kopf), Spot hinzufügen (Suche, Chips
 Alles, Ideen, Highlights, Ausflüge, Strecken, Essen, Mehr; Abstimmungs-Ring je Idee,
 Feste Zeit, Für andere Reisen merken, Priorität, Aus den Ideen entfernen), Tagesablauf (Blöcke, feste Zeiten, Fotostopp,
-Wetter, „Ab hier umplanen“, „Umräumen“, „Gruppe trennen“ /
-„Wieder zusammen“), Ausflug, Karte, Strecken (anlegen,
+Wetter, „Ab hier umplanen“, „Umräumen“), Ausflug, Karte, Strecken (anlegen,
 auf der Karte, Als GPX exportieren), Reisezeiten prüfen,
 Fortbewegung, Ideen (In der Nähe, Ausflug, Essen in der Nähe, Artikel
 lesen und auslesen, Artikel-Sprachen, „In eine Reise übernehmen“, „Wer
@@ -230,18 +229,40 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 
 ### IOS-PLN-01 Reise anlegen und Aufenthalte planen
 
-- „Neue Reise“ öffnet den leeren Reiseverlauf; das Plus „Aufenthalt
-  hinzufügen“ fragt Wo, Von (optional), Wie lange, Vor Ort und ob schon
-  etwas gebucht ist. „Hinzufügen“ legt die Reise an und öffnet den
+- „Neue Reise“ öffnet gleich das Blatt „Neuer Aufenthalt“, dasselbe wie
+  im Reiseverlauf: Wo, Wann (Von, Bis), Ankunft und Abfahrt, Vor Ort und
+  Übernachtung. „Hinzufügen“ legt die Reise an und öffnet den
   Reiseverlauf mit einem Namensvorschlag (ändern über Koffer ›
   Einstellungen); dort weitere Aufenthalte und die
   Weiterreisen dazwischen. Ein Plus unter einer Schiffsfahrt fügt einen
   Hafen ein.
-- Das Blatt einer Weiterreise hat Verkehrsmittel, Abfahrt und Ankunft,
-  Nächte unterwegs und eine Notiz (Flugnummer, Sitzplatz), die auch auf
-  ihrer Karte im Verlauf steht. „‹Weiterreise› entfernen“ nimmt
-  Verkehrsmittel, Zeiten, Nächte und Notiz weg; die Verbindung zwischen
-  den Aufenthalten bleibt mit offenen Zeiten.
+- Die Aufenthalte sind das Gerüst der Reise. Das Blatt eines Aufenthalts
+  fragt unter „Wann?“ Von und Bis; die Länge steht als „4 Tage · 3
+  Nächte“ darunter. Das „Von“ des ersten Aufenthalts ist der Beginn der
+  Reise, auch mit Zuhause (die Anreise rechnet rückwärts). Jeder weitere
+  Aufenthalt rutscht mit, wenn sich davor etwas ändert, außer er ist
+  angepinnt: „Beginn steht fest“ (ein gebuchtes Hotel, ein Hafen) hält
+  ihn an seinem Tag, und die Weiterreise davor bekommt die Nächte
+  dazwischen. Passt das nicht (davor zu lang, oder mehr als sechs Nächte
+  frei, mit dem Schiff 30), sichert das Blatt nicht und sagt, was zu tun
+  ist: davor kürzen, einen Aufenthalt einfügen oder den Pin lösen. Ein
+  angepinnter Aufenthalt trägt im Reiseverlauf eine Nadel. Ohne Datum
+  gibt es nichts anzupinnen, und die Länge ist ein Zähler.
+- Ankunft und Abfahrt stehen im Blatt des Aufenthalts und lassen sich
+  dort ändern; es sind dieselben Zeiten wie an der Weiterreise daneben
+  („Auto von …“). Der erste Aufenthalt ohne Anreise hat seine eigene
+  Ankunft, der letzte ohne Heimreise seine eigene Abfahrt („Abreise“ am
+  letzten Tag). In einem Hafen heißen sie „An Land ab“ und „An Bord bis“.
+  Eine offene Zeit zeigt „offen · festlegen“ und, womit der Tag rechnet
+  („rechnet mit 15:00“). Unter „Übernachtung“ steht eine Wahl aus
+  „Unterkunft steht fest“, „Noch nichts gebucht“ und „An Bord“.
+- Das Blatt einer Weiterreise hat Verkehrsmittel, Abfahrt und Ankunft
+  (je „offen · festlegen“), Nächte unterwegs und eine Notiz (Flugnummer,
+  Sitzplatz), die auch auf ihrer Karte im Verlauf steht. Ist der
+  Aufenthalt danach angepinnt, ergeben sich die Nächte daraus und stehen
+  nur da. „Angaben zurücksetzen“ nimmt Verkehrsmittel, Zeiten, Nächte und
+  Notiz weg; die Verbindung zwischen den Aufenthalten bleibt mit offenen
+  Zeiten.
 - Mit Auto, Rad oder zu Fuß an einem Tag hat das Blatt den Abschnitt
   „Halte unterwegs“: „Halt hinzufügen“ öffnet die Spot-Auswahl mit Orten
   nah am Weg (die Entfernung ist der Umweg), „Unterwegs einplanen“ legt
@@ -280,9 +301,11 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Aufenthalt gilt das, sonst Bahn und Bus. Deshalb schlägt der Chip
   „Ausflüge“ auch bei einem Aufenthalt zu Fuß die Städte der Umgebung vor.
 - Eine Reise öffnet sich mit ihrem Reiseverlauf. Ein Tipp auf einen
-  Aufenthalt oder eine seiner Tageszeilen öffnet die Planung des
-  Aufenthalts mit allen Tagen auf einem Bildschirm, „Zurück“ führt in den
-  Verlauf. Unterwegs öffnet sich die Reise gleich in der Planung, am
+  Aufenthalt öffnet sein Blatt; „Planen“ daneben oder eine seiner
+  Tageszeilen öffnet die Planung des Aufenthalts mit allen Tagen auf
+  einem Bildschirm, „Zurück“ führt in den Verlauf. Das „⋯“ an der Karte
+  (auch langes Drücken) trägt „Planen“, ohne Datum „Nach oben“ und „Nach
+  unten“, und „Entfernen“. Unterwegs öffnet sich die Reise gleich in der Planung, am
   laufenden Tag. Ein Tag hat keinen eigenen Bildschirm: sein „⋯“ im Kopf
   trägt „Reihenfolge vorschlagen“, „Pause einfügen“, „Feste Zeit
   eintragen“ und „Ausflug planen“. Feste Zeiten ohne Spot und Pausen
@@ -313,19 +336,19 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Liste. Der Kopf eines Aufenthalts öffnet dieselbe Auswahl über „Spot
   hinzufügen“, „Ideen (n)“, „Ausflüge“ und „Strecken“, jeweils auf ihrem
   Chip. Ort, Tage und Unterkunft ändert ein Tipp auf die Kopfzeile der
-  Planung (Name und Tage, mit „>“) oder der Eintrag „Ort, Tage und
-  Unterkunft …“ im Menü des Titels; beides öffnet das Blatt „Aufenthalt“
+  Planung (Name und Tage, mit „>“); er öffnet das Blatt „Aufenthalt“
   wie im Reiseverlauf.
 - **Noch offen.** Über den Tagen steht, was noch keinem Tag gehört: eine
   Zeile „ca. Muss … · Will … · frei …“ (oder wie viel zu viel ist) und die
-  offenen Spots, Muss zuerst. Ein offener Spot kommt per Ziehen oder über
-  „⋯“ fest auf einen Tag. „Tag füllen“ unter einem Tag (oder „Alle Tage
+  offenen Spots, Muss zuerst. Ein Tipp auf einen offenen Spot öffnet
+  seine Details. Per Ziehen oder über „⋯“ kommt er fest auf einen Tag. „Tag füllen“ unter einem Tag (oder „Alle Tage
   füllen“) schlägt passende Spots mit Grund vor; „–“ lässt einen offen,
   erst „Übernehmen“ legt sie auf den Tag, mit „Rückgängig“. Was so auf
   einen Tag kam, trägt „von der App“ und ist abends wieder offen, wenn der
-  Tag es nicht erreicht hat. Langes Drücken auf eine Idee (oder ihre Details) bietet dazu
-  „Feste Zeit …“ (legt sie auf den Tag und hält die Uhrzeit), „Für später
-  merken“, die Priorität, die Aufenthaltsdauer und „Aus den Ideen entfernen“.
+  Tag es nicht erreicht hat. Das „⋯“ einer Idee (auch langes Drücken, in
+  der Spot-Auswahl ebenso) trägt dazu „Für andere Reisen merken“ und „Aus
+  den Ideen entfernen“. Priorität, Dauer und „Feste Zeit“ (legt sie auf
+  den Tag und hält die Uhrzeit) stehen in den Details unter „Planung“.
 - **Regen.** Regnet es laut Vorhersage an einem Tag mit Spots draußen,
   steht oben am Tag in der Planung des Aufenthalts ein Hinweis. „Mit Fr
   tauschen“ zeigt erst ein Blatt, welcher Tag was bekommt und was mit
@@ -360,8 +383,8 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   kennt.
 - Jede Idee hat eine Priorität: **Muss**, **Will** (Standard) oder **Wenn
   Zeit**. Langes Drücken auf „Zur Reise“ fragt sie beim Übernehmen, beim
-  Teilen steht sie als Auswahl dabei; danach ändert man sie im Menü der
-  Idee oder des Stopps. Neben dem Namen steht, was zählt: die Priorität,
+  Teilen steht sie als Auswahl dabei; danach ändert man sie in den
+  Details der Idee oder des Stopps unter „Planung“. Neben dem Namen steht, was zählt: die Priorität,
   ein gebuchtes Ticket, an welchen Tagen des Aufenthalts der Ort laut
   OpenStreetMap geschlossen ist (auf einem Tag: „an diesem Tag
   geschlossen“) oder „Öffnungszeiten unklar“, wenn die App die Angabe
@@ -379,17 +402,20 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Fotostopp markieren, Abendlicht in den Details des Spots, Wetter prüfen, Route in der
   Karten-App öffnen („Ganzen Block in Karten öffnen“, „Route hierher“),
   „Erledigt“ unterwegs, „Löschen“ (ganz unten im „⋯“ oder nach links
-  wischen; der Spot kommt zurück zu den Ideen). Das „⋯“ eines Spots hat
-  immer dieselben Einträge; was gerade nicht geht, ist ausgegraut.
+  wischen; der Spot kommt zurück zu den Ideen). Für jeden Spot gilt:
+  ein Tipp öffnet die Details, das „⋯“ handelt (Tag, Erledigt,
+  Übersprungen, Route, Löschen), und was man über den Spot sagt
+  (Priorität, Dauer, feste Zeit, Fotostopp, Titel, Notiz, Link, Art),
+  steht in den Details und wird dort geändert. Das „⋯“ hat immer
+  dieselben Einträge; was gerade nicht geht, ist ausgegraut.
 - Umsortieren: eine Karte lange drücken und ziehen; eine Linie zeigt, wo
   sie landet, auch auf einem anderen Tag. Setzt man einem Spot eine feste
   Zeit, rückt ein Spot davor, der sonst in die feste Zeit liefe, dahinter.
-- Ein Pin steht nur an einer Karte mit fester Zeit. „Feste Zeit …“ im
-  „⋯“ öffnet ihr Blatt: dort wird sie mit Grund eingetragen, geändert
-  oder unten mit „Feste Zeit entfernen“ wieder weggenommen. Unter
-  „Aufenthaltsdauer“ im selben „⋯“ steht, wie lange man bleibt (15 min
-  bis 8 h, die aktuelle mit Haken); die Uhrzeiten des Tags rücken sofort
-  nach. Die Zeile über dem Tag nennt Wege und Besuche („3 h 20 von 10 h“)
+- Ein Pin steht nur an einer Karte mit fester Zeit. „Feste Zeit“ unter
+  „Planung“ in den Details öffnet ihr Blatt: dort wird sie mit Grund
+  eingetragen, geändert oder unten mit „Feste Zeit entfernen“ wieder
+  weggenommen. „Dauer“ im selben Abschnitt sagt, wie lange man bleibt
+  (15 min bis 8 h); die Uhrzeiten des Tags rücken sofort nach. Die Zeile über dem Tag nennt Wege und Besuche („3 h 20 von 10 h“)
   und, wo man vor einer Tür auf die Öffnung wartet, die Wartezeit extra
   („…, 1 h warten“). Ohne Foto zeigt die Karte kein
   Bild und keinen Platzhalter.
@@ -398,21 +424,29 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Weiterwischen), dann Name, Art und Entfernung zur Unterkunft, der kurze
   Satz mit seiner Quelle („aus Wikivoyage“) und eine Zeile mit
   Öffnungszeit, Dauer und Priorität (dazu die feste Zeit), darunter
-  Ticket, „Geplant“ und Notiz, dann Karte und der ganze Text. Unten stehen immer „Route“, „Karte“, „Anderer Tag“ (in der
+  Ticket und „Geplant“, dann „Planung“ (Priorität, Dauer, feste Zeit,
+  Fotostopp), Titel, Notiz und Link (gesichert beim Verlassen des Felds,
+  kurz bestätigt mit „Gesichert“), Karte und der ganze Text. Unten stehen immer „Route“, „Karte“, „Anderer Tag“ (in der
   Spot-Auswahl „Hinzufügen“ mit „+“) und „Mehr“ mit allen übrigen
   Aktionen. Die Details einer Strecke haben dieselbe Leiste: „Route“ zum
   Start, „Karte“, „Hinzufügen“ und unter „Mehr“ „Als GPX exportieren“. Die Spot-Auswahl gliedert sich in „Eure Ideen“ und
   „Highlights in der Nähe“; Eingeplantes zeigt „✓ Tag n“.
-- In den Details eines Spots stehen Art, Aufenthaltsdauer und die Namen
+- In den Details eines Spots stehen Art und die Namen
   weiter unten; die Art lässt sich dort ändern (nicht bei einer
   Strecke). Die Ideenliste der Spot-Auswahl zeigt unter dem Namen die
   Notiz, sonst die Beschreibung des Orts.
 - Hat ein Aufenthalt nur einen Tag, fragt die App nicht nach dem Tag: ein
   Tipp auf eine Idee in der Karte legt sie auf diesen Tag, und das Blatt
   für eine feste Zeit zeigt keine Tagauswahl.
-- „Feste Zeit …“ an einem Spot fragt nur Uhrzeit, Tag, Grund (Ticket,
+- „Feste Zeit“ an einem Spot fragt nur Uhrzeit, Tag, Grund (Ticket,
   Licht, Reservierung, Ereignis, Abfahrt) und Dauer; Ort und Weg sind die
-  des Spots.
+  des Spots. Vom Tag aus („Feste Zeit eintragen“) ist eine feste Zeit
+  ein Termin; wählt man dort einen Spot, fragt das Blatt nur noch
+  dasselbe. Die Abfahrt am Ende eines Aufenthalts steht in dessen Blatt.
+- Das Blatt „Ausflug“ fragt immer in derselben Reihenfolge: Ziel, wie
+  lange (ganzer Tag oder Zeitfenster), Zeiten, wie weit. Am ganzen Tag
+  sind Abfahrt und Rückfahrt „offen · festlegen“. Einen Ausflug oder
+  Zuhause zu entfernen fragt einmal nach.
 - Dieselben Aktionen in Liste, Detail („Alle Details“), Pin-Sheet und
   Karte.
 - Die Etappenleiste oben zeigt die Reise als Kette: Aufenthalte als
