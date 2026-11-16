@@ -126,6 +126,50 @@ public struct ResultRow: Codable, Hashable, Sendable {
     }
 }
 
+/// A chart of a block's rows (`BlockChart` in assistant/charts.ts). The
+/// package draws whatever it says and knows no block kind for it.
+public struct BlockChart: Codable, Hashable, Sendable {
+    /// `line`, `bar` or `pie`; an unknown type is not drawn.
+    public let type: String
+    /// The x values of a line or bar chart, the slices of a pie, in order.
+    public let labels: [String]
+    public let series: [Series]
+    /// `money` (in `unit`, a currency code) or `number` (with `unit` after it).
+    public let format: String
+    public let unit: String?
+    /// One line under the chart: what it leaves out.
+    public let caption: String?
+
+    public struct Series: Codable, Hashable, Sendable {
+        public let name: String
+        public let values: [Double?]
+
+        public init(name: String, values: [Double?]) {
+            self.name = name
+            self.values = values
+        }
+    }
+
+    public init(type: String, labels: [String], series: [Series], format: String,
+                unit: String? = nil, caption: String? = nil) {
+        self.type = type
+        self.labels = labels
+        self.series = series
+        self.format = format
+        self.unit = unit
+        self.caption = caption
+    }
+
+    /// A value as the chart's axis and the spoken summary read it.
+    public func formatted(_ value: Double) -> String {
+        if format == "money" {
+            return value.formatted(.currency(code: unit ?? "EUR").locale(Locale(identifier: "de_DE")))
+        }
+        let number = value.formatted(.number.precision(.fractionLength(0...2)).locale(Locale(identifier: "de_DE")))
+        return unit.map { "\(number) \($0)" } ?? number
+    }
+}
+
 /// Rows the model saw, for the client (`ResultBlock` in assistant/types.ts).
 public struct ResultBlock: Codable, Hashable, Sendable {
     public let kind: String
@@ -138,9 +182,13 @@ public struct ResultBlock: Codable, Hashable, Sendable {
     public let subtitle: String?
     /// The heading the server gives a block of this kind (stage 1).
     public let title: String?
+    /// A chart of the rows, derived by the server from the tool's result
+    /// (`assistant/charts.ts`); absent when the rows make none.
+    public let chart: BlockChart?
 
     public init(kind: String, tool: String, rows: [ResultRow], total: Int? = nil,
-                route: String? = nil, subtitle: String? = nil, title: String? = nil) {
+                route: String? = nil, subtitle: String? = nil, title: String? = nil,
+                chart: BlockChart? = nil) {
         self.kind = kind
         self.tool = tool
         self.rows = rows
@@ -148,6 +196,7 @@ public struct ResultBlock: Codable, Hashable, Sendable {
         self.route = route
         self.subtitle = subtitle
         self.title = title
+        self.chart = chart
     }
 
     /// The heading, with a fallback for a block stored before the server sent titles.

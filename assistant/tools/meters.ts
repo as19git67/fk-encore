@@ -108,7 +108,7 @@ export const consumptionReport: ToolSpec = {
       block: {
         kind: "consumption",
         tool: "consumption_report",
-        rows: res.buckets.map((b) => ({ period: b.label, consumption: b.consumption, coverage: b.coverage })),
+        rows: res.buckets.map((b) => ({ period: b.label, consumption: b.consumption, coverage: b.coverage, unit: res.unit })),
         route: `/zaehler/${id}`,
       },
     };

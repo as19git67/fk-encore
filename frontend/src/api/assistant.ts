@@ -15,7 +15,22 @@ export type BlockKind =
   | 'accounts' | 'transactions' | 'analysis' | 'debits' | 'categories'
   | 'documents' | 'document' | 'photos' | 'recaps' | 'albums'
   | 'meters' | 'readings' | 'consumption' | 'trip_plans'
-  | 'positions' | 'depot_transactions' | 'quotes' | 'news' | 'comments' | 'activity' | 'businesses' | 'business_assets' | 'euer' | 'table' | 'proposal'
+  | 'positions' | 'depot_transactions' | 'quotes' | 'news' | 'comments' | 'activity' | 'businesses' | 'business_assets' | 'euer' | 'performance' | 'table' | 'proposal'
+
+/**
+ * A chart of a block's rows, derived by the server (`assistant/charts.ts`),
+ * never written by the model.
+ */
+export interface BlockChart {
+  type: 'line' | 'bar' | 'pie'
+  /** The x values of a line or bar chart, the slices of a pie. */
+  labels: string[]
+  series: { name: string; values: (number | null)[] }[]
+  /** Money in `unit` (a currency code), or a plain number with `unit` after it. */
+  format: 'money' | 'number'
+  unit?: string
+  caption?: string
+}
 
 /** Rows a tool returned, for display beside the answer. */
 export interface ResultBlock {
@@ -27,6 +42,7 @@ export interface ResultBlock {
   route?: string
   /** A line under the title: the account and its balance of a booking list. */
   subtitle?: string
+  chart?: BlockChart
 }
 
 export interface ConversationSummary {

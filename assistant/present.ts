@@ -16,6 +16,7 @@
  * client only (`agent.ts`), so adding to them costs no tokens.
  */
 
+import { chartOf } from "./charts";
 import type { ResultBlock } from "./types";
 
 type Row = Record<string, unknown>;
@@ -62,6 +63,7 @@ export const BLOCK_TITLES: Record<string, string> = {
   businesses: "Betriebe",
   business_assets: "Anlagegüter und Flächen",
   euer: "Einnahmen-Überschuss-Rechnung",
+  performance: "Wertentwicklung",
   proposal: "Vorschlag",
   table: "Ergebnis",
 };
@@ -305,6 +307,18 @@ export function displayOf(kind: string, r: Row, columns: string[] = genericColum
         tone: tone(r.sum),
       };
     }
+    case "performance":
+      return {
+        title: join([r.depot, `${formatDate(r.from)} – ${formatDate(r.to)}`]),
+        subtitle: join([
+          has(r.gain) ? `Gewinn ${formatMoney(r.gain, r.currency)}` : "",
+          has(r.twr_pct) ? `TWR ${str(r.twr_pct)} %` : "",
+          has(r.xirr_pct) ? `XIRR ${str(r.xirr_pct)} % p. a.` : "",
+        ]) || undefined,
+        value: formatMoney(r.end_value, r.currency) || undefined,
+        tone: has(r.gain) ? tone(r.gain) : "neutral",
+        route: route(r),
+      };
     case "proposal":
       return {
         title: str(r.summary),
@@ -337,10 +351,12 @@ function clean(d: RowDisplay): RowDisplay {
 /** The block with a `display` on every row and a `title` of its own. */
 export function presentBlock(block: ResultBlock): ResultBlock {
   const columns = genericColumns(block.rows[0] ?? {});
+  const chart = chartOf(block);
   return {
     ...block,
     title: BLOCK_TITLES[block.kind] ?? "Ergebnis",
     rows: block.rows.map((r) => ({ ...r, display: clean(displayOf(block.kind, r, columns)) })),
+    ...(chart ? { chart } : {}),
   };
 }
 
