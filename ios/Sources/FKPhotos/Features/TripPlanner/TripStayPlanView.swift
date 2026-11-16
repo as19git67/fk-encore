@@ -738,7 +738,7 @@ struct TripStayPlanView: View {
                                   later: { afterOpenDetail = $0 })
             NavigationStack {
                 TripSpotDetailView(
-                    spot: {
+                    spot: { () -> TripSpotDetail in
                         var detail = TripSpotDetail(candidate)
                         detail.distance = TripSpotDetailContext.distance(to: detail.coordinate, in: leg)
                         return detail

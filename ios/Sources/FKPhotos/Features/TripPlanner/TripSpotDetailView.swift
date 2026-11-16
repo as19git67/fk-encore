@@ -522,7 +522,9 @@ struct TripSpotDetailView<Actions: View>: View {
                     Button {
                         Task {
                             await fixedTime.run()
-                            if fixedTime.closes { (closeAll ?? { dismiss() })() }
+                            if fixedTime.closes {
+                                if let closeAll { closeAll() } else { dismiss() }
+                            }
                         }
                     } label: {
                         HStack {
