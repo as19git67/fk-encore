@@ -41,7 +41,7 @@ struct TripMapsSettingsView: View {
             } header: {
                 Text("Navigation öffnen mit")
             } footer: {
-                Text("Routen und ganze Blöcke folgen dieser Wahl; bei „Jedes Mal fragen“ "
+                Text("Routen und ganze Tage folgen dieser Wahl; bei „Jedes Mal fragen“ "
                      + "fragt der Dialog auch nach „immer“. Einen Ort nachschlagen öffnet die "
                      + "gewählte App, sonst Apple Karten.")
             }

@@ -150,7 +150,7 @@ struct TripSpotDetailView<Actions: View>: View {
                         // spot landed — said out loud, because a plan
                         // that quietly weighs something is a plan
                         // nobody can argue with (§8.3).
-                        Label("Fotostopp — der Planer bevorzugt diesen Ort im guten Licht",
+                        Label("Fotostopp — die App bevorzugt diesen Ort im guten Licht",
                               systemImage: "camera")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -515,7 +515,7 @@ struct TripSpotDetailView<Actions: View>: View {
     @ViewBuilder
     private var dwellRow: some View {
         if onSave != nil {
-            Picker("Aufenthalt", selection: Binding(get: { draft.dwellMinutes }, set: { minutes in
+            Picker("Dauer", selection: Binding(get: { draft.dwellMinutes }, set: { minutes in
                 draft.dwellMinutes = minutes
                 save()
             })) {
@@ -525,7 +525,7 @@ struct TripSpotDetailView<Actions: View>: View {
             }
             .pickerStyle(.menu)
         } else {
-            LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
+            LabeledContent("Dauer", value: TripClock.duration(spot.dwellMinutes))
         }
     }
 

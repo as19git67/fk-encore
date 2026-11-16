@@ -291,7 +291,7 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Eine neue Reise beginnt je Aufenthalt mit einer leeren Liste „Ideen“:
   die App sucht und plant nichts selbst. Ideen kommen über „Spot hinzufügen“,
   „Hier, wo ich bin“, Entdecken („Gegend wählen“, „Andere Gegend…“), Teilen
-  aus Apple Karten oder Google Maps und „Aus den Ideen übernehmen“; von dort
+  aus Apple Karten oder Google Maps und „Aus dem Ideenvorrat“ im Koffer-Menü; von dort
   legt man sie auf einen Tag. Wird die Reise neu geplant (Einstellung,
   fester Termin, Reiseverlauf), bleiben die Stopps auf ihren Tagen; fällt
   ein Tag weg, gehen seine Stopps zurück zu den Ideen. Auch Reisen von

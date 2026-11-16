@@ -153,8 +153,8 @@ struct TripDayAnchorSheet: View {
                     // taken off its blocks — that is the whole point,
                     // and it is why the day gets shorter.
                     Text("Der Tag wird um diesen Ort herum geplant, statt um die Unterkunft. "
-                         + "Hin- und Rückfahrt gehen von den Blöcken dieses Tages ab — eine "
-                         + "Stunde hin und eine zurück heißt: sechs Stunden statt acht.")
+                         + "Hin- und Rückfahrt gehen von der Zeit dieses Tages ab — eine "
+                         + "Stunde hin und eine zurück heißt: zwei Stunden weniger vor Ort.")
                 }
 
                 if onSaveWindow != nil && excursion == nil && allowsWholeDay && after == nil {
@@ -319,7 +319,7 @@ struct TripDayAnchorSheet: View {
             }
             Toggle("Rückfahrt angeben", isOn: $saysReturn.animation())
             if saysReturn {
-                DatePicker("Rückfahrt um", selection: $back, displayedComponents: .hourAndMinute)
+                DatePicker("Rückfahrt", selection: $back, displayedComponents: .hourAndMinute)
             }
             if !hoursAddUp {
                 Label("Die Rückfahrt liegt vor der Abfahrt.", systemImage: "exclamationmark.triangle")
@@ -331,7 +331,7 @@ struct TripDayAnchorSheet: View {
         } footer: {
             // Why anybody would bother: the estimate is arithmetic on a
             // straight line, and a named hour is not.
-            Text("Freiwillig. Ohne Angabe schätzt der Planer die Fahrzeit — grob, ohne "
+            Text("Freiwillig. Ohne Angabe schätzt die App die Fahrzeit — grob, ohne "
                  + "Routenplaner. Mit Abfahrt startet der Tag ab dort, mit Rückfahrt plant "
                  + "er nichts mehr dahinter.")
         }
@@ -350,7 +350,7 @@ struct TripDayAnchorSheet: View {
                 LabeledContent("Ankunft am Ziel", value: "ca. \(TripClock.format(depart + travel))")
                     .foregroundStyle(.secondary)
             }
-            DatePicker("Rückfahrt um", selection: $back, displayedComponents: .hourAndMinute)
+            DatePicker("Rückfahrt", selection: $back, displayedComponents: .hourAndMinute)
             if excursion?.backMinutes == 0 {
                 Text("Von hier geht es zum nächsten Ziel weiter, nicht zurück.")
                     .font(.footnote)

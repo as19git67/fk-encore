@@ -104,7 +104,7 @@ enum TripLateArrival {
     static func sentence(planned: Int, now: Int, certain: Bool) -> String {
         certain
             ? "Angekommen um \(TripClock.format(now)) statt \(TripClock.format(planned)). "
-                + "Den Tag ab jetzt umplanen? Was vorher lag, geht zurück zu den Kandidaten."
+                + "Den Tag ab jetzt umplanen? Was vorher lag, geht zurück zu den Ideen."
             : "Geplant war die Ankunft um \(TripClock.format(planned)), jetzt ist es "
                 + "\(TripClock.format(now)). Seid ihr schon da? Dann lässt sich der Tag ab "
                 + "jetzt umplanen."
@@ -147,7 +147,7 @@ enum TripLeftover {
         let shown = names.prefix(3).joined(separator: ", ") + (count > 3 ? " …" : "")
         let when = date.map { "Tag \(dayNumber) (\($0))" } ?? "Tag \(dayNumber)"
         let what = count == 1 ? "blieb 1 Spot liegen" : "blieben \(count) Spots liegen"
-        return "Von \(when) \(what): \(shown) — zurück zu den Kandidaten? "
+        return "Von \(when) \(what): \(shown) — zurück zu den Ideen? "
             + "Dann kommen sie an den nächsten Tagen zuerst dran."
     }
 }

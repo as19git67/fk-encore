@@ -65,7 +65,7 @@ struct TripRoutingMeasureView: View {
                 }
             } footer: {
                 Text("Vergleicht die geschätzten Reisezeiten deiner geplanten Tage mit dem "
-                     + "Routing-Dienst – Unterkunft, Stopps und zurück, bis zu 80 Wege. "
+                     + "Routing-Dienst – Unterkunft, Spots und zurück, bis zu 80 Wege. "
                      + "An den Reisen ändert sich nichts.")
             }
 
@@ -101,7 +101,7 @@ struct TripRoutingMeasureView: View {
     private func verdict(_ result: TripRoutingMeasurement) -> some View {
         let answered = result.modes.reduce(0) { $0 + $1.answered }
         if result.pairs == 0 {
-            Label("Keine geplanten Tage mit Stopps – erst eine Reise planen, dann vergleichen.",
+            Label("Keine geplanten Tage mit Spots – erst eine Reise planen, dann vergleichen.",
                   systemImage: "calendar.badge.exclamationmark")
                 .foregroundStyle(.secondary)
         } else if answered == 0 {

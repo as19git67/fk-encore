@@ -78,10 +78,10 @@ enum TripArrivalHeuristic {
         if overrun < toleranceMinutes { return .quiet }
 
         return .offer(reason: s.remainingStops == 1
-            ? "Der letzte Stopp braucht noch etwa \(s.remainingWorkMinutes) Minuten, "
-                + "der Block hat noch \(s.remainingMinutes). Umplanen?"
-            : "Die \(s.remainingStops) offenen Stopps brauchen noch etwa "
-                + "\(s.remainingWorkMinutes) Minuten, der Block hat noch "
+            ? "Der letzte Spot braucht noch etwa \(s.remainingWorkMinutes) Minuten, "
+                + "der Tag hat noch \(s.remainingMinutes). Umplanen?"
+            : "Die \(s.remainingStops) offenen Spots brauchen noch etwa "
+                + "\(s.remainingWorkMinutes) Minuten, der Tag hat noch "
                 + "\(s.remainingMinutes). Umplanen?")
     }
 }

@@ -102,11 +102,11 @@ final class TripIdeasOutingTests: XCTestCase {
         // an idea without anybody noticing.
         XCTAssertEqual(
             accepted(planned: [1], inPool: [2]).sentence,
-            "Der Ausflug steht als Reise — eine Idee liegt bei den Kandidaten der Reise.",
+            "Der Ausflug steht als Reise — eine Idee liegt noch ohne Tag in der Reise.",
         )
         XCTAssertEqual(
             accepted(planned: [1], inPool: [2, 3]).sentence,
-            "Der Ausflug steht als Reise — 2 Ideen liegen bei den Kandidaten der Reise.",
+            "Der Ausflug steht als Reise — 2 Ideen liegen noch ohne Tag in der Reise.",
         )
     }
 

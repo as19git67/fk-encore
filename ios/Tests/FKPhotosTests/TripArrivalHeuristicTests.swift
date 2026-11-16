@@ -52,7 +52,7 @@ final class TripArrivalHeuristicTests: XCTestCase {
     func testASingleRemainingStopReadsAsOne() {
         guard case let .offer(reason) = TripArrivalHeuristic.evaluate(halfway(work: 160, stops: 1))
         else { return XCTFail("expected an offer") }
-        XCTAssertTrue(reason.contains("letzte Stopp"), reason)
+        XCTAssertTrue(reason.contains("letzte Spot"), reason)
     }
 
     // MARK: - When it stays quiet

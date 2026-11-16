@@ -71,7 +71,7 @@ struct TripSpotActionSubmenu: Equatable, Sendable {
     static let days = TripSpotActionSubmenu(title: "Auf einen Tag", systemImage: "calendar")
     /// How long the group stays at a spot (Anton, 14.11.: next to the
     /// day and the fixed time, not only behind "Bearbeiten").
-    static let dwell = TripSpotActionSubmenu(title: "Aufenthaltsdauer", systemImage: "hourglass")
+    static let dwell = TripSpotActionSubmenu(title: "Dauer", systemImage: "hourglass")
 }
 
 /// What an action is about, in the order a menu shows them.

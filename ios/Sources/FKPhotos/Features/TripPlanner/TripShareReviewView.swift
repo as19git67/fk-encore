@@ -77,8 +77,8 @@ struct TripShareReviewView: View {
             Button("Abbrechen", role: .cancel) {}
         } message: {
             Text(model.readyCount == 1
-                 ? "Ein Ort ist bereit, aber noch nicht bei den Kandidaten."
-                 : "\(model.readyCount) Orte sind bereit, aber noch nicht bei den Kandidaten.")
+                 ? "Ein Ort ist bereit, aber noch nicht bei den Ideen."
+                 : "\(model.readyCount) Orte sind bereit, aber noch nicht bei den Ideen.")
         }
         .task { await model.analyse() }
         .onChange(of: model.added.count) { _, count in
@@ -177,7 +177,7 @@ struct TripShareReviewView: View {
                 if model.addingId == proposal.id {
                     HStack { ProgressView(); Text("Wird übernommen…") }
                 } else {
-                    Label("Zu den Kandidaten", systemImage: "plus.circle")
+                    Label("Zu den Ideen", systemImage: "plus.circle")
                 }
             }
             .disabled(!model.isReady(proposal))

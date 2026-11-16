@@ -5,7 +5,7 @@ import SwiftUI
 /// ship journey, and home.
 ///
 /// Every sheet edits a copy of the chain and hands the whole copy back
-/// on "Hinzufügen" or "Fertig". The itinerary saves it at once
+/// on "Hinzufügen" or "Sichern". The itinerary saves it at once
 /// (`PUT …/itinerary`), so a sheet that closes without an error has
 /// written what it shows; "Abbrechen" leaves the trip as it was.
 
@@ -165,7 +165,7 @@ struct TripStaySheet: View {
                 Button {
                     Task { await save() }
                 } label: {
-                    if saving { ProgressView() } else { Text(purpose == .new ? "Hinzufügen" : "Fertig") }
+                    if saving { ProgressView() } else { Text(purpose == .new ? "Hinzufügen" : "Sichern") }
                 }
                 .disabled(saving || stay.anchor == nil)
             }
@@ -436,7 +436,7 @@ struct TripJourneySheet: View {
 
             if draft.hasDetails(journeyId) {
                 Section {
-                    Button("\(draft.name(of: journey)) entfernen", role: .destructive) {
+                    Button("Angaben zurücksetzen", role: .destructive) {
                         confirmingClear = true
                     }
                     .frame(maxWidth: .infinity)
@@ -445,9 +445,9 @@ struct TripJourneySheet: View {
                 }
             }
         }
-        .confirmationDialog("\(draft.name(of: journey)) entfernen?", isPresented: $confirmingClear,
+        .confirmationDialog("Angaben zurücksetzen?", isPresented: $confirmingClear,
                             titleVisibility: .visible) {
-            Button("Entfernen", role: .destructive) {
+            Button("Zurücksetzen", role: .destructive) {
                 var next = draft
                 next.clearJourney(id: journeyId)
                 draft = next
@@ -465,7 +465,7 @@ struct TripJourneySheet: View {
                 Button {
                     Task { await save() }
                 } label: {
-                    if saving { ProgressView() } else { Text("Fertig") }
+                    if saving { ProgressView() } else { Text("Sichern") }
                 }
                 .disabled(saving)
             }

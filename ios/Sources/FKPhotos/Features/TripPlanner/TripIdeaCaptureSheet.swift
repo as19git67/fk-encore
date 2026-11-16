@@ -51,7 +51,7 @@ struct TripIdeaCaptureSheet: View {
                 Section {
                     TripDurationPicker(minutes: $dwellMinutes)
                 } header: {
-                    Text("Aufenthaltsdauer")
+                    Text("Dauer")
                 } footer: {
                     // Why it is asked rather than guessed, and what
                     // happens to the answer.

@@ -122,6 +122,13 @@ struct TripPlanDayView: View {
                             }
                         }
                         Section("Rund um die Reise") {
+                            // What the collection holds near the stays;
+                            // its only way in was a screen nothing opened.
+                            NavigationLink {
+                                TripPlanIdeasView(viewModel: viewModel)
+                            } label: {
+                                Label("Aus dem Ideenvorrat", systemImage: "lightbulb")
+                            }
                             NavigationLink {
                                 TripDocumentsView(planId: viewModel.planId)
                             } label: {
@@ -238,9 +245,6 @@ struct TripPlanDayView: View {
                     planId: viewModel.planId,
                     constraints: viewModel.plan?.constraints,
                     title: viewModel.plan?.title,
-                    // The date lives on the legs rather than in the
-                    // constraints, so it is handed over separately.
-                    startDate: viewModel.plan?.startDate,
                 ) {
                     // Saving re-plans the days, so the screen behind has
                     // to be told rather than left showing the old ones.

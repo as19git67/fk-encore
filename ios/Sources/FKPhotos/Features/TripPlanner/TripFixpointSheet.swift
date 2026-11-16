@@ -190,9 +190,9 @@ struct TripFixpointSheet: View {
                     .pickerStyle(.segmented)
                 } footer: {
                     Text(kind == .departure
-                         ? "Nach der Abfahrt ist der Tag vorbei — der Planer rechnet von hier "
+                         ? "Nach der Abfahrt ist der Tag vorbei — die App rechnet von hier "
                            + "rückwärts und plant nichts dahinter."
-                         : "Nach einem Termin geht der Tag weiter. Der Planer hält die Zeit frei "
+                         : "Nach einem Termin geht der Tag weiter. Die App hält die Zeit frei "
                            + "und plant um sie herum.")
                 }
 
@@ -265,8 +265,7 @@ struct TripFixpointSheet: View {
                     } header: {
                         Text("Dauer")
                     } footer: {
-                        Text("Wie lange der Termin selbst dauert. Diese Zeit ist für den Planer "
-                             + "belegt.")
+                        Text("Wie lange der Termin selbst dauert. Diese Zeit ist im Tag belegt.")
                     }
                 }
 
@@ -294,17 +293,17 @@ struct TripFixpointSheet: View {
                         }
                     }
                 } header: {
-                    Text("Wo")
+                    Text("Wo?")
                 } footer: {
                     // This is the half that does something, so it says
                     // what: the day is routed from or to this point
                     // instead of from and to the accommodation.
                     Text(kind == .departure
-                         ? "Bahnhof, Flughafen, Hafen. Mit einem Ort hier endet der letzte Block "
+                         ? "Bahnhof, Flughafen, Hafen. Mit einem Ort hier endet der Tag "
                            + "dort statt an der Unterkunft — den Rückweg ins Hotel geht ja niemand "
                            + "mehr."
-                         : "Wenn der Termin vor dem ersten Block liegt — die Ankunft —, startet "
-                           + "der Tag von hier statt von der Unterkunft. Ohne Ort bleibt alles "
+                         : "Liegt der Termin am Anfang des Tages — die Ankunft —, beginnt "
+                           + "der Tag hier statt an der Unterkunft. Ohne Ort bleibt alles "
                            + "wie bisher.")
                 }
 
@@ -330,7 +329,7 @@ struct TripFixpointSheet: View {
                     } footer: {
                         // Asking for it as well would take the same
                         // minutes off the day twice.
-                        Text("Vom letzten Stopp des Tages zum genannten Ort — dafür ist die "
+                        Text("Vom letzten Spot des Tages zum genannten Ort — dafür ist die "
                              + "Adresse da. Der Puffer von 20 Minuten kommt weiterhin dazu.")
                     }
                 }

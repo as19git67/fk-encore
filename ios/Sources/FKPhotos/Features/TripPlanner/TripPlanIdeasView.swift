@@ -37,7 +37,7 @@ struct TripPlanIdeasView: View {
                 }
             }
         }
-        .navigationTitle("Aus den Ideen übernehmen")
+        .navigationTitle("Aus dem Ideenvorrat")
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.loadIdeasForPlan() }, dismiss: { viewModel.errorMessage = nil })
         .task { await viewModel.loadIdeasForPlan() }
         .refreshable { await viewModel.loadIdeasForPlan() }

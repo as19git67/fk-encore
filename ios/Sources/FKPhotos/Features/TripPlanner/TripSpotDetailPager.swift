@@ -85,9 +85,6 @@ struct TripSpotDetailPager: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }
-                }
             }
         }
         .sheet(item: $wayStop) { stop in

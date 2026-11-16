@@ -317,8 +317,8 @@ struct TripOutingAcceptResponse: Codable, Sendable {
     var sentence: String {
         if inPool.isEmpty { return "Der Ausflug steht als Reise." }
         let left = inPool.count == 1
-            ? "eine Idee liegt bei den Kandidaten der Reise"
-            : "\(inPool.count) Ideen liegen bei den Kandidaten der Reise"
+            ? "eine Idee liegt noch ohne Tag in der Reise"
+            : "\(inPool.count) Ideen liegen noch ohne Tag in der Reise"
         return "Der Ausflug steht als Reise — \(left)."
     }
 }
@@ -336,7 +336,7 @@ struct TripIdeaTakeResponse: Codable, Sendable {
 
     func sentence(idea: String, plan: String) -> String {
         taken
-            ? "\(idea) liegt jetzt bei den Kandidaten von „\(plan)“."
+            ? "\(idea) liegt jetzt bei den Ideen von „\(plan)“."
             : "\(idea) war schon in „\(plan)“."
     }
 }

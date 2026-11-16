@@ -196,7 +196,7 @@ struct TripFoodListView: View {
                             if placingRef == place.osmRef {
                                 HStack(spacing: 6) { ProgressView(); Text("Wird eingetragen\u{2026}") }
                             } else {
-                                Label("In den Block", systemImage: "plus.circle")
+                                Label("Auf den Tag", systemImage: "plus.circle")
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -287,7 +287,7 @@ struct TripFoodListView: View {
                 ),
             )
         } catch {
-            errorMessage = "\(place.displayName) ließ sich nicht zu den Kandidaten legen."
+            errorMessage = "\(place.displayName) ließ sich nicht zu den Ideen legen."
             return
         }
 
@@ -304,14 +304,14 @@ struct TripFoodListView: View {
             // Over budget is said, never hidden (§8.4): the traveller
             // decided, and the cost of the decision is theirs to see.
             placed[place.osmRef] = result.overfullBlockIds.contains(target.blockId)
-                ? "Im Block — der ist damit übervoll."
-                : "Im Block."
+                ? "Auf dem Tag — der ist damit übervoll."
+                : "Auf dem Tag."
             errorMessage = nil
             await onPlaced?()
         } catch {
             placed[place.osmRef] = added.merged
-                ? "Bei den Kandidaten (war schon dabei) — in den Block ließ es sich nicht setzen."
-                : "Bei den Kandidaten — in den Block ließ es sich nicht setzen."
+                ? "Bei den Ideen (war schon dabei) — auf den Tag ließ es sich nicht legen."
+                : "Bei den Ideen — auf den Tag ließ es sich nicht legen."
         }
     }
 
