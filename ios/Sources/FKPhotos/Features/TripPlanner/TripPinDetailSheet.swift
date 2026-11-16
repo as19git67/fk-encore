@@ -69,9 +69,6 @@ struct TripSpotActionSubmenu: Equatable, Sendable {
     static let priority = TripSpotActionSubmenu(title: "Priorität", systemImage: "star")
     /// The days (and excursions) a spot can go to, in the spot picker.
     static let days = TripSpotActionSubmenu(title: "Auf einen Tag", systemImage: "calendar")
-    /// How long the group stays at a spot (Anton, 14.11.: next to the
-    /// day and the fixed time, not only behind "Bearbeiten").
-    static let dwell = TripSpotActionSubmenu(title: "Aufenthaltsdauer", systemImage: "hourglass")
 }
 
 /// What an action is about, in the order a menu shows them.
@@ -86,6 +83,11 @@ enum TripSpotActionGroup: Int, CaseIterable, Comparable {
     case plan
     /// Taking it out of the trip altogether.
     case remove
+    /// Not an action but something said about the spot: its priority,
+    /// its fixed time (review F, "Tipp öffnet, ⋯ handelt, Angaben im
+    /// Blatt"). Never drawn in a menu or a list of actions; the details
+    /// show these in their section "Planung", where they are read.
+    case details
 
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
@@ -98,7 +100,7 @@ struct TripSpotActionMenuItems: View {
     var perform: (@MainActor (TripPinSheetAction) -> Void)? = nil
 
     var body: some View {
-        ForEach(TripSpotActionGroup.allCases, id: \.self) { group in
+        ForEach(TripSpotActionGroup.allCases.filter { $0 != .details }, id: \.self) { group in
             let members = actions.filter { $0.group == group }
             if !members.isEmpty {
                 Section {
@@ -163,13 +165,13 @@ struct TripSpotActionSections: View {
 
     private var ordered: [TripPinSheetAction] {
         // Stable: within a group the caller's order stands.
-        actions.enumerated()
+        actions.filter { $0.group != .details }.enumerated()
             .sorted { ($0.element.group, $0.offset) < ($1.element.group, $1.offset) }
             .map(\.element)
     }
 
     var body: some View {
-        if !actions.isEmpty {
+        if !ordered.isEmpty {
             Section {
                 ForEach(ordered.filter { $0.submenu == nil }) { action in
                     Button(role: action.role) {
@@ -336,7 +338,9 @@ struct TripPinDetailSheet: View {
                             // lose what can be done with it by being
                             // reached through the map.
                             TripSpotDetailView(spot: spot, mode: mode, onSave: onSave,
-                                               light: light, shelter: shelter) { closeDetail in
+                                               light: light, shelter: shelter,
+                                               details: actions.filter { $0.group == .details },
+                                               closeAll: { dismiss() }) { closeDetail in
                                 TripSpotActionSections(
                                     // The detail screen has its own way there.
                                     actions: actions.filter { $0.group != .navigate },

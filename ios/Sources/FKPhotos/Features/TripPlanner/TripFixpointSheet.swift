@@ -7,10 +7,12 @@ import SwiftUI
 /// last train, the booked slot, check-in from three. Those are the
 /// **frame**, and the frame is the one thing the planner may not guess.
 ///
-/// Two kinds, and the difference decides what the rest of the day looks
-/// like: after an appointment you come back and the afternoon goes on;
-/// after a departure you are gone, and everything behind it is a
-/// promise nobody can keep.
+/// An appointment: after it you come back and the afternoon goes on.
+/// The departure at the end of a stay is the stay's own (its sheet,
+/// "Abfahrt"), so a new fixed time is always an appointment; the kind
+/// "Abfahrt" is only shown to change one written before (review B1).
+/// Once a spot is chosen the sheet asks only what a spot's time needs
+/// (review B3).
 struct TripFixpointSheet: View {
     let dayLabel: String
     /// The spots an appointment can be for — the leg's planned stops and
@@ -66,7 +68,7 @@ struct TripFixpointSheet: View {
     /// See `TripDayAnchorSheet.changingPlace`.
     @State private var changingPlace = false
     @State private var label = ""
-    @State private var kind = Kind.departure
+    @State private var kind = Kind.appointment
     @State private var time = Self.defaultTime
     @State private var travelMinutes = 15
     @State private var durationMinutes = 60
@@ -117,15 +119,36 @@ struct TripFixpointSheet: View {
         Calendar.current.date(bySettingHour: 17, minute: 45, second: 0, of: Date()) ?? Date()
     }
 
-    /// Opened from a spot: only what a fixed time of that spot needs.
-    /// The spot is where it happens and the way there is the day's, so
-    /// the kind, the place and the way are not asked (Anton, 10.11.).
-    private var forSpot: Bool { presetSpot != nil }
+    /// A spot is chosen: only what a fixed time of that spot needs. The
+    /// spot is where it happens and the way there is the day's, so the
+    /// kind, the name, the place and the way are not asked (Anton, 10.11.).
+    private var forSpot: Bool { presetSpot != nil || (kind == .appointment && spot != nil) }
+
+    /// The kind is a choice only for a departure written before; a new
+    /// fixed time is an appointment.
+    private var offersKind: Bool { existing?.isDeparture == true }
+
+    /// The spot as a row that can be changed or taken off, when the
+    /// sheet was opened from the day rather than from the spot.
+    @ViewBuilder
+    private var spotChoiceRow: some View {
+        NavigationLink {
+            TripSpotPickAndReturn(spots: spots, selected: spot?.osmRef) { picked in
+                spot = picked
+            }
+            .navigationTitle("Spot für den Termin")
+        } label: {
+            LabeledContent("Spot", value: spot?.name ?? "Keiner")
+        }
+    }
 
     /// A spot's fixed time: when, on which day, why, and how long.
     @ViewBuilder
     private var spotForm: some View {
         Section {
+            if presetSpot == nil, !spots.isEmpty {
+                spotChoiceRow
+            }
             DatePicker("Uhrzeit", selection: $time, displayedComponents: .hourAndMinute)
             if days.count > 1 {
                 Picker("Tag", selection: $dayIndex) {
@@ -135,7 +158,7 @@ struct TripFixpointSheet: View {
                 }
             }
         } header: {
-            Text(presetSpot?.name ?? "Spot")
+            Text(presetSpot?.name ?? headerLabel)
         } footer: {
             Text("Zu dieser Uhrzeit steht der Spot fest im Tag, auf keinem anderen Tag, "
                  + "und die App plant den Rest um ihn herum.")
@@ -181,44 +204,29 @@ struct TripFixpointSheet: View {
               if forSpot {
                 spotForm
               } else {
-                Section {
-                    Picker("Art", selection: $kind) {
-                        ForEach(Kind.allCases, id: \.self) { kind in
-                            Text(kind.label).tag(kind)
+                if offersKind {
+                    Section {
+                        Picker("Art", selection: $kind) {
+                            ForEach(Kind.allCases, id: \.self) { kind in
+                                Text(kind.label).tag(kind)
+                            }
                         }
+                        .pickerStyle(.segmented)
+                    } footer: {
+                        Text(kind == .departure
+                             ? "Nach der Abfahrt ist der Tag vorbei. Die Abfahrt am Ende eines "
+                               + "Aufenthalts steht künftig in seinem Blatt."
+                             : "Nach einem Termin geht der Tag weiter. Die App hält die Zeit frei "
+                               + "und plant um sie herum.")
                     }
-                    .pickerStyle(.segmented)
-                } footer: {
-                    Text(kind == .departure
-                         ? "Nach der Abfahrt ist der Tag vorbei — der Planer rechnet von hier "
-                           + "rückwärts und plant nichts dahinter."
-                         : "Nach einem Termin geht der Tag weiter. Der Planer hält die Zeit frei "
-                           + "und plant um sie herum.")
                 }
 
                 if kind == .appointment, !spots.isEmpty {
                     Section {
-                        NavigationLink {
-                            TripSpotPickAndReturn(spots: spots, selected: spot?.osmRef) { picked in
-                                spot = picked
-                            }
-                            .navigationTitle("Spot für den Termin")
-                        } label: {
-                            LabeledContent("Spot", value: spot?.name ?? "Keiner")
-                        }
-                        if spot != nil {
-                            Picker("Warum fest?", selection: $pinReason) {
-                                ForEach(TripPinReason.allCases) { reason in
-                                    Label(reason.label, systemImage: reason.systemImage).tag(reason)
-                                }
-                            }
-                        }
+                        spotChoiceRow
                     } footer: {
-                        Text(spot == nil
-                             ? "Ein Ticket für eine Sehenswürdigkeit? Mit dem Spot steht sie zur "
-                               + "Uhrzeit im Tag und wird nicht noch einmal eingeplant."
-                             : "Der Spot steht zur Uhrzeit des Termins im Tag, angeheftet, und "
-                               + "verschwindet von jedem anderen Tag.")
+                        Text("Ein Ticket für eine Sehenswürdigkeit? Mit dem Spot steht sie zur "
+                             + "Uhrzeit im Tag und wird nicht noch einmal eingeplant.")
                     }
                 }
 
@@ -265,8 +273,7 @@ struct TripFixpointSheet: View {
                     } header: {
                         Text("Dauer")
                     } footer: {
-                        Text("Wie lange der Termin selbst dauert. Diese Zeit ist für den Planer "
-                             + "belegt.")
+                        Text("Wie lange der Termin selbst dauert. Diese Zeit ist im Tag belegt.")
                     }
                 }
 
@@ -294,17 +301,17 @@ struct TripFixpointSheet: View {
                         }
                     }
                 } header: {
-                    Text("Wo")
+                    Text("Wo?")
                 } footer: {
                     // This is the half that does something, so it says
                     // what: the day is routed from or to this point
                     // instead of from and to the accommodation.
                     Text(kind == .departure
-                         ? "Bahnhof, Flughafen, Hafen. Mit einem Ort hier endet der letzte Block "
+                         ? "Bahnhof, Flughafen, Hafen. Mit einem Ort hier endet der Tag "
                            + "dort statt an der Unterkunft — den Rückweg ins Hotel geht ja niemand "
                            + "mehr."
-                         : "Wenn der Termin vor dem ersten Block liegt — die Ankunft —, startet "
-                           + "der Tag von hier statt von der Unterkunft. Ohne Ort bleibt alles "
+                         : "Liegt der Termin am Anfang des Tages — die Ankunft —, beginnt "
+                           + "der Tag hier statt an der Unterkunft. Ohne Ort bleibt alles "
                            + "wie bisher.")
                 }
 
@@ -330,7 +337,7 @@ struct TripFixpointSheet: View {
                     } footer: {
                         // Asking for it as well would take the same
                         // minutes off the day twice.
-                        Text("Vom letzten Stopp des Tages zum genannten Ort — dafür ist die "
+                        Text("Vom letzten Spot des Tages zum genannten Ort — dafür ist die "
                              + "Adresse da. Der Puffer von 20 Minuten kommt weiterhin dazu.")
                     }
                 }

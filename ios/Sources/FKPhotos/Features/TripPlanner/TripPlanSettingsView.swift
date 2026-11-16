@@ -13,12 +13,8 @@ import SwiftUI
 /// everything anybody put in the pool by hand (§9.2).
 struct TripPlanSettingsView: View {
     @State private var model: TripPlanSettingsViewModel
-    @State private var editingDayShape = false
     @Environment(\.dismiss) private var dismiss
 
-    /// Kept beside the model because the day-shape editor is its own
-    /// screen with its own request — it does not go through the
-    /// settings save.
     private let planId: Int
     /// A trip of ideas: its day is one window, and nothing is searched
     /// but the highlights (ideen-statt-pool.md).
@@ -31,11 +27,10 @@ struct TripPlanSettingsView: View {
         planId: Int,
         constraints: TripConstraints?,
         title: String?,
-        startDate: String? = nil,
         onSaved: @escaping () -> Void,
     ) {
         _model = State(initialValue: TripPlanSettingsViewModel(
-            planId: planId, constraints: constraints, title: title, startDate: startDate))
+            planId: planId, constraints: constraints, title: title))
         self.planId = planId
         self.ideas = constraints?.ideas == true
         self.onSaved = onSaved
@@ -51,7 +46,7 @@ struct TripPlanSettingsView: View {
             + "Orte, die zu keinem der Themen gehören — alles an heißt alles, "
             + "was die Karte kennt. Die Liste ist kurz, weil sie nur enthält, was "
             + "OpenStreetMap wirklich unterscheidet: „Burgen“ kann die Karte "
-            + "beantworten, „Barock“ nicht.\n\nSpeichern plant die Tage neu."
+            + "beantworten, „Barock“ nicht.\n\nSichern plant die Tage neu."
     }
 
     var body: some View {
@@ -80,36 +75,18 @@ struct TripPlanSettingsView: View {
                 Text("Tempo und Begleitung")
             } footer: {
                 Text("Gilt für die ganze Reise und bestimmt, wie viel an einem Tag Platz hat. "
-                     + "Sichern plant die Tage neu. Wie ihr vor Ort unterwegs seid, steht je "
-                     + "Aufenthalt im Reiseverlauf.")
+                     + (ideas ? "" : "Sichern plant die Tage neu. ")
+                     + "Wie ihr vor Ort unterwegs seid, steht je Aufenthalt im Reiseverlauf.")
             }
 
             Section {
                 Toggle("Abstimmen", isOn: $model.voting)
             } header: {
-                Text("Planen mit")
+                Text("Abstimmung")
             } footer: {
                 Text("Mit Abstimmung zeigt die Liste je Ort einen Ring für Herzenswunsch, Gern und "
                      + "Lieber nicht, dazu Fairness und „Damit neu planen“. Ohne sie entscheidet ihr "
                      + "über die Priorität jeder Idee.")
-            }
-
-            // A trip of ideas has no Vormittag or Nachmittag to change:
-            // its day is one window (ideen-statt-pool.md, stage 4).
-            if !ideas {
-                Section {
-                    Button {
-                        editingDayShape = true
-                    } label: {
-                        Label("Tagesablauf ändern", systemImage: "list.bullet.indent")
-                    }
-                } footer: {
-                    // §4.1: the four-part day is a default, not a fixed
-                    // set — this is where it stops being fixed.
-                    Text("Vormittag, Mittagspause, Nachmittag, Abend sind ein Vorschlag. "
-                         + "Blöcke lassen sich umbenennen, verlängern, verschieben und "
-                         + "streichen — die Mittagspause zum Beispiel.")
-                }
             }
 
             if !model.options.isEmpty {
@@ -152,11 +129,8 @@ struct TripPlanSettingsView: View {
             Text(reason)
         }
         .task { await model.loadInterests() }
-        .sheet(isPresented: $editingDayShape) {
-            TripDayShapeView(planId: planId, onSaved: onSaved)
-        }
         .discardGuard(tracking: [model.title, model.pace, model.withChildren, model.limitedMobility,
-                                 model.isDated, model.startDate, model.voting,
+                                 model.voting,
                                  model.interests] as [AnyHashable],
                       ready: model.interestsLoaded, busy: model.isSaving)
         .toolbar {
@@ -185,11 +159,6 @@ final class TripPlanSettingsViewModel {
     var pace: TripPace
     var withChildren: Bool
     var limitedMobility: Bool
-    /// Whether the trip has dates at all. A trip planned for "some
-    /// time" is a real plan, and turning this off says so rather than
-    /// leaving a date nobody meant.
-    var isDated: Bool
-    var startDate: Date
     /// „Abstimmen“ under „Planen mit“ (ideas plan, stage 7).
     var voting: Bool
 
@@ -218,21 +187,13 @@ final class TripPlanSettingsViewModel {
 
     private let maxWalkMinutes: Int?
 
-    /// What the trip's dates were when the screen opened, so a save
-    /// that did not touch them sends nothing at all.
-    private let originalStartDate: String?
-
     init(
         planId: Int,
         constraints: TripConstraints?,
         title: String?,
-        startDate: String? = nil,
     ) {
         self.planId = planId
         self.title = title ?? ""
-        self.originalStartDate = startDate
-        self.isDated = startDate != nil
-        self.startDate = startDate.flatMap { TripCalendar.date(fromIsoDay: $0) } ?? Date()
         self.pace = constraints?.pace.flatMap(TripPace.init(rawValue:)) ?? .normal
         self.withChildren = constraints?.group?.withChildren ?? false
         self.limitedMobility = constraints?.group?.limitedMobility ?? false
@@ -249,15 +210,6 @@ final class TripPlanSettingsViewModel {
         self.interests = Set(constraints?.interests ?? [])
         self.maxWalkMinutes = constraints?.maxWalkMinutes
         self.voting = constraints?.isVoting ?? true
-    }
-
-    /// What to send for the dates: nothing, a date, or an explicit
-    /// null. Nil means "not mentioned", `.some(nil)` means "take the
-    /// dates off".
-    var dateChange: String?? {
-        let wanted = isDated ? TripCalendar.isoDay(startDate) : nil
-        if wanted == originalStartDate { return nil }
-        return .some(wanted)
     }
 
     /// The interests the planner can match, from the server.
@@ -297,14 +249,13 @@ final class TripPlanSettingsViewModel {
             /// Double optional on purpose: absent leaves the dates
             /// alone, explicit null takes them off. `encodeIfPresent`
             /// tells the two apart; a plain optional could not.
-            let startDate: String??
             let voting: Bool
             let replan: Bool
             struct Group: Encodable { let withChildren: Bool; let limitedMobility: Bool }
 
             enum CodingKeys: String, CodingKey {
                 case title, pace, group, categories, interests, maxWalkMinutes
-                case startDate, voting, replan
+                case voting, replan
             }
 
             func encode(to encoder: Encoder) throws {
@@ -315,7 +266,6 @@ final class TripPlanSettingsViewModel {
                 try c.encodeIfPresent(categories, forKey: .categories)
                 try c.encodeIfPresent(interests, forKey: .interests)
                 try c.encodeIfPresent(maxWalkMinutes, forKey: .maxWalkMinutes)
-                if let startDate { try c.encode(startDate, forKey: .startDate) }
                 try c.encode(voting, forKey: .voting)
                 try c.encode(replan, forKey: .replan)
             }
@@ -331,7 +281,6 @@ final class TripPlanSettingsViewModel {
                     categories: categories,
                     interests: Array(interests).sorted(),
                     maxWalkMinutes: maxWalkMinutes,
-                    startDate: dateChange,
                     voting: voting,
                     replan: replan,
                 ))

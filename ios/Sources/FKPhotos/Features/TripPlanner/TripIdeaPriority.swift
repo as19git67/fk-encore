@@ -141,7 +141,7 @@ extension TripIdeaPriority {
         allCases.map { priority in
             TripPinSheetAction(id: "priority-\(priority.rawValue)", title: "Priorität: \(priority.label)",
                                systemImage: priority == current ? "checkmark" : priority.systemImage,
-                               closes: false, group: .plan, submenu: .priority,
+                               closes: false, group: .details, submenu: .priority,
                                disabled: priority == current) {
                 await set(priority)
             }

@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// "Which block?" — the one screen that answers it (§8.4).
+/// "Which day?" — the one screen that answers it (§8.4). On a trip of
+/// ideas a day is one window, so its one target reads as the day.
 ///
 /// Shared by the pool (placing a candidate) and the day plan (moving a
 /// planned stop), because these were three different gestures for one
@@ -65,7 +66,7 @@ struct TripBlockPickerView: View {
         List {
             if let leg, daysAhead.count < leg.days.count {
                 Text(daysAhead.isEmpty
-                     ? "Die Reise ist vorbei — es gibt keinen Tag mehr, in den ein Stopp passt."
+                     ? "Die Reise ist vorbei — es gibt keinen Tag mehr für diesen Spot."
                      : "Vergangene Tage werden nicht angeboten.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -85,10 +86,10 @@ struct TripBlockPickerView: View {
                                                              category: category)
                         if targets.isEmpty {
                             Text(current?.dayIndex == day.dayIndex
-                                 ? "Hier steht der Stopp schon."
+                                 ? "Hier steht der Spot schon."
                                  : leg.flatMap { TripBlockTargets.todayIndex(in: $0, now: now) } == day.dayIndex
-                                     ? "Heute ist kein Block mehr übrig."
-                                     : "Kein Block, in den ein Stopp passt.")
+                                     ? "Heute ist keine Zeit mehr übrig."
+                                     : "An diesem Tag passt der Spot nicht hin.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }

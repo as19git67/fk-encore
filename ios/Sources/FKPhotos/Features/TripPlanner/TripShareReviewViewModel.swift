@@ -167,7 +167,7 @@ final class TripShareReviewViewModel {
             // should see which happened (§9.2, rule 3).
             markAdded(proposal.id, outcome: result.merged
                 ? "mit einem vorhandenen Eintrag zusammengeführt"
-                : "bei den Kandidaten")
+                : "bei den Ideen")
             errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)

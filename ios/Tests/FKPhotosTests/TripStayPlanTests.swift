@@ -132,12 +132,8 @@ final class TripStayPlanTests: XCTestCase {
         XCTAssertEqual(TripStayPlan.fillLine(d), "2 h 50 von 9 h, 1 h 30 warten")
     }
 
-    @MainActor
-    func testTheStayIsAChoiceWithTheCurrentOneTicked() {
-        let actions = TripSpotEdit.dwellActions(current: 50) { _ in }
-        XCTAssertTrue(actions.allSatisfy { $0.submenu == .dwell })
-        XCTAssertEqual(actions.filter(\.disabled).map(\.id), ["dwell-50"])
-        XCTAssertEqual(actions.first { $0.id == "dwell-50" }?.systemImage, "checkmark")
+    func testAnEditWithAnotherLengthKeepsEverythingElse() {
+        XCTAssertEqual(TripSpotEdit.dwellChoices(current: 50).filter { $0 == 50 }, [50])
         XCTAssertEqual(TripSpotEdit(osmRef: "node:1", note: "x", dwellMinutes: 45).with(dwellMinutes: 15),
                        TripSpotEdit(osmRef: "node:1", note: "x", dwellMinutes: 15))
     }

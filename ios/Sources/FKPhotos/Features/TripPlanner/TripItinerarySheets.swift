@@ -5,7 +5,7 @@ import SwiftUI
 /// ship journey, and home.
 ///
 /// Every sheet edits a copy of the chain and hands the whole copy back
-/// on "Hinzufügen" or "Fertig". The itinerary saves it at once
+/// on "Hinzufügen" or "Sichern". The itinerary saves it at once
 /// (`PUT …/itinerary`), so a sheet that closes without an error has
 /// written what it shows; "Abbrechen" leaves the trip as it was.
 
@@ -26,8 +26,6 @@ struct TripStaySheet: View {
     var onPlan: (() -> Void)? = nil
     /// "Aufenthalt entfernen", with the itinerary's undo.
     var onRemove: (() -> Void)? = nil
-    /// The journey on one side, whose times the stay only shows.
-    var onOpenJourney: ((TripItineraryItem.ID) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var finder = TripPlaceFinderModel()
@@ -84,30 +82,9 @@ struct TripStaySheet: View {
                 Text("Ein Ort oder gleich die Unterkunft. Hier fängt jeder Tag an und hört auf.")
             }
 
-            Section {
-                if draft.ownsStart(stayId) {
-                    TripOptionalDateRow(title: "Von", day: $draft.startDate)
-                }
-                Stepper(value: Binding(
-                    get: { stay.days ?? 1 },
-                    set: { value in update { $0.days = value } },
-                ), in: TripItineraryDraft.minStayDays...TripItineraryDraft.maxStayDays) {
-                    LabeledContent("Wie lange?", value: TripItineraryText.stayLength(days: stay.days ?? 1))
-                }
-                LabeledContent(purpose == .new ? "Bis" : "Von, Bis") {
-                    Text(span(dated))
-                        .foregroundStyle(.secondary)
-                }
-            } footer: {
-                Text(draft.ownsStart(stayId)
-                     ? "Das „Von“ des ersten Aufenthalts ist der Beginn der Reise; alle anderen Daten "
-                        + "werden daraus gerechnet. Ohne Datum heißen die Tage „Tag 1“ bis „Tag n“."
-                     : "Von und Bis folgen aus dem Beginn der Reise und den Längen davor.")
-            }
+            datesSection(dated)
 
-            if purpose == .edit {
-                timesSection
-            }
+            timesSection
 
             Section {
                 Picker("Vor Ort", selection: Binding(
@@ -165,7 +142,7 @@ struct TripStaySheet: View {
                 Button {
                     Task { await save() }
                 } label: {
-                    if saving { ProgressView() } else { Text(purpose == .new ? "Hinzufügen" : "Fertig") }
+                    if saving { ProgressView() } else { Text(purpose == .new ? "Hinzufügen" : "Sichern") }
                 }
                 .disabled(saving || stay.anchor == nil)
             }
@@ -175,47 +152,132 @@ struct TripStaySheet: View {
         }
     }
 
-    /// Arrival and departure belong to the journeys; the stay shows
-    /// them and "›" opens the journey that owns them.
+    /// Von and Bis (A1, A2): the first stay's "Von" is the trip's date,
+    /// counted back over the way there; any other stay's "Von" follows
+    /// the chain until it is pinned. "Bis" sets the length. Without a
+    /// date there is nothing to pin, and the length is a stepper.
+    @ViewBuilder
+    private func datesSection(_ dated: TripItineraryDated?) -> some View {
+        let first = draft.isFirstStay(stayId)
+        Section {
+            if first {
+                TripOptionalDateRow(title: "Von", day: Binding(
+                    get: { draft.startDate == nil ? nil : dated?.startDate },
+                    set: { day in draft.setStart(of: stayId, to: day) },
+                ))
+            } else if draft.canPin(stayId) {
+                Toggle(isOn: Binding(
+                    get: { stay.pinnedStart != nil },
+                    set: { on in draft.setPinned(stayId, on) },
+                )) {
+                    Label("Beginn steht fest", systemImage: "pin")
+                }
+                if stay.pinnedStart != nil {
+                    DatePicker("Von", selection: Binding(
+                        get: { (stay.pinnedStart ?? dated?.startDate).flatMap { TripCalendar.date(fromIsoDay: $0) } ?? Date() },
+                        set: { date in draft.setStart(of: stayId, to: TripCalendar.isoDay(date)) },
+                    ), displayedComponents: .date)
+                } else if let start = dated?.startDate {
+                    LabeledContent("Von", value: TripItineraryText.shortDate(start))
+                }
+            }
+            if let start = dated?.startDate, let startDay = TripCalendar.date(fromIsoDay: start),
+               let last = TripCalendar.day(start, plus: TripItineraryDraft.maxStayDays - 1),
+               let lastDay = TripCalendar.date(fromIsoDay: last) {
+                DatePicker("Bis", selection: Binding(
+                    get: { dated?.endDate.flatMap { TripCalendar.date(fromIsoDay: $0) } ?? startDay },
+                    set: { date in draft.setEnd(of: stayId, to: TripCalendar.isoDay(date)) },
+                ), in: startDay...lastDay, displayedComponents: .date)
+                LabeledContent("Ergibt", value: TripItineraryText.stayLength(days: stay.days ?? 1))
+            } else {
+                Stepper(value: Binding(
+                    get: { stay.days ?? 1 },
+                    set: { value in update { $0.days = value } },
+                ), in: TripItineraryDraft.minStayDays...TripItineraryDraft.maxStayDays) {
+                    LabeledContent("Wie lange?", value: TripItineraryText.stayLength(days: stay.days ?? 1))
+                }
+                if !first {
+                    LabeledContent("Tage") {
+                        Text(span(dated)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("Wann?")
+        } footer: {
+            Text(datesFooter(first: first))
+        }
+    }
+
+    private func datesFooter(first: Bool) -> String {
+        if first {
+            return draft.outbound == nil
+                ? "Das „Von“ des ersten Aufenthalts ist der Beginn der Reise; alle anderen Daten werden "
+                    + "daraus gerechnet. Ohne Datum heißen die Tage „Tag 1“ bis „Tag n“."
+                : "Das „Von“ ist der erste Tag hier; die Anreise rechnet von dort rückwärts."
+        }
+        if stay.pinnedStart != nil {
+            return "Der Aufenthalt bleibt an diesem Tag stehen, was auch immer sich davor ändert. "
+                + "Die Weiterreise davor nimmt die Nächte dazwischen."
+        }
+        if draft.canPin(stayId) {
+            return "„Von“ folgt aus den Aufenthalten davor und rutscht mit. Für ein gebuchtes Hotel "
+                + "oder einen Hafen: „Beginn steht fest“."
+        }
+        return "Von und Bis folgen aus dem Beginn der Reise und den Längen davor."
+    }
+
+    /// Arrival and departure (A3, A4): the same times as on the journeys
+    /// next door, seen from the stay, and changed here directly. The
+    /// first stay without a journey before keeps its own arrival, the
+    /// last without a journey after its own departure.
     @ViewBuilder
     private var timesSection: some View {
         let before = draft.journey(before: stayId)
         let after = draft.journey(after: stayId)
+        let aboard = draft.isBetweenShips(stayId) || stay.quartersAboard == true
         Section {
-            if let before {
-                journeyRow("Ankunft", time: before.arriveAt, journey: before)
-            } else {
-                TripOptionalClockRow(title: "Ankunft", clock: Binding(
-                    get: { stay.arriveAt },
-                    set: { value in update { $0.arriveAt = value } },
-                ), defaultMinutes: 15 * 60)
-            }
-            if let after {
-                journeyRow("Abfahrt", time: after.departAt, journey: after)
-            }
+            TripOptionalClockRow(title: aboard ? "An Land ab" : "Ankunft", clock: Binding(
+                get: { before?.arriveAt ?? (before == nil ? stay.arriveAt : nil) },
+                set: { value in setTime(value, on: before, arrival: true) },
+            ), defaultMinutes: 15 * 60, place: before.map(journeyWords(_:)),
+               assumedMinutes: before == nil ? nil : 15 * 60)
+            TripOptionalClockRow(title: aboard ? "An Bord bis" : "Abfahrt", clock: Binding(
+                get: { after?.departAt ?? (after == nil ? stay.departAt : nil) },
+                set: { value in setTime(value, on: after, arrival: false) },
+            ), defaultMinutes: 10 * 60, place: after.map(journeyWords(_:)),
+               assumedMinutes: after == nil ? nil : 10 * 60)
+        } header: {
+            Text("Ankunft und Abfahrt")
         } footer: {
-            Text("Die Zeiten stehen an den Weiterreisen; „›“ öffnet sie.")
+            Text(before == nil && after == nil
+                 ? "Ortszeit. Offen heißt: der erste Tag beginnt am Morgen, der letzte endet am Abend."
+                 : "Ortszeit. Dieselben Zeiten stehen an der Weiterreise; offen rechnet der Tag mit der "
+                    + "angenommenen Zeit.")
         }
     }
 
-    private func journeyRow(_ title: String, time: String?, journey: TripItineraryItem) -> some View {
-        Button {
-            dismiss()
-            onOpenJourney?(journey.id)
-        } label: {
-            HStack {
-                Text(title).foregroundStyle(.primary)
-                Spacer()
-                Text("\(time ?? "offen") · \(draft.name(of: journey))")
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .disabled(onOpenJourney == nil)
+    /// "Auto von Erster Ort", "Schiff nach Hafen": which journey a time
+    /// belongs to.
+    private func journeyWords(_ journey: TripItineraryItem) -> String {
+        let ends = draft.ends(of: journey)
+        let mode = TripJourneySheet.chipLabel(journey.transportMode)
+        return draft.stay(after: journey.id)?.id == stayId ? "\(mode) von \(ends.from)" : "\(mode) nach \(ends.to)"
+    }
+
+    private func setTime(_ value: String?, on journey: TripItineraryItem?, arrival: Bool) {
+        guard var target = journey ?? draft[stayId] else { return }
+        if arrival { target.arriveAt = value } else { target.departAt = value }
+        draft[target.id] = target
+    }
+
+    /// Where the night is (B4): one choice of three, so "nothing booked"
+    /// and "aboard" can no longer both be on.
+    enum Lodging: Hashable { case booked, open, aboard }
+
+    private var lodging: Lodging {
+        if stay.quartersAboard == true { return .aboard }
+        return stay.anchorRadiusM != nil ? .open : .booked
     }
 
     @ViewBuilder
@@ -224,19 +286,22 @@ struct TripStaySheet: View {
             if draft.isBetweenShips(stayId) {
                 LabeledContent("Übernachtung", value: "an Bord")
             } else {
-                Toggle("Noch nichts gebucht", isOn: Binding(
-                    get: { stay.anchorRadiusM != nil },
-                    set: { on in update { $0.anchorRadiusM = on ? ($0.anchorRadiusM ?? 1_000) : nil } },
-                ))
-                Toggle("Übernachtung an Bord", isOn: Binding(
-                    get: { stay.quartersAboard ?? false },
-                    set: { on in
-                        update {
-                            $0.quartersAboard = on
-                            if !on { $0.tenderPort = false }
+                Picker("Übernachtung", selection: Binding(
+                    get: { lodging },
+                    set: { choice in
+                        update { item in
+                            item.quartersAboard = choice == .aboard
+                            if choice != .aboard { item.tenderPort = false }
+                            item.anchorRadiusM = choice == .open ? (item.anchorRadiusM ?? 1_000) : nil
                         }
                     },
-                ))
+                )) {
+                    Text("Unterkunft steht fest").tag(Lodging.booked)
+                    Text("Noch nichts gebucht").tag(Lodging.open)
+                    Text("An Bord").tag(Lodging.aboard)
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
             }
             if draft.isBetweenShips(stayId) || stay.quartersAboard == true {
                 Toggle("Tenderhafen", isOn: Binding(
@@ -247,12 +312,14 @@ struct TripStaySheet: View {
         } header: {
             Text("Übernachtung")
         } footer: {
-            if draft.isBetweenShips(stayId) {
+            if draft.isBetweenShips(stayId) || stay.quartersAboard == true {
                 Text("Davor und danach fährt ein Schiff, also wird an Bord übernachtet. „Alle an Bord“ "
                      + "ist eine Stunde vor der Abfahrt, in einem Tenderhafen anderthalb.")
-            } else {
+            } else if lodging == .open {
                 Text("Ohne Unterkunft ist die Mitte des Orts der Ausgangspunkt, und die App sucht "
                      + "im Umkreis von 15 km.")
+            } else {
+                Text("Hier fängt jeder Tag an und hört auf.")
             }
         }
     }
@@ -322,6 +389,15 @@ struct TripJourneySheet: View {
         [.car, .bike, .foot].contains(journey.transportMode) && (journey.nights ?? 0) == 0
     }
     private var timesOpen: Bool { journey.departAt == nil && journey.arriveAt == nil }
+    /// The stay after this journey, when it is pinned to its first day.
+    private var pinnedNext: TripItineraryItem? {
+        guard let next = draft.stay(after: journeyId), draft.isPinned(next.id) else { return nil }
+        return next
+    }
+    /// The nights as the chain derives them, which a pin decides.
+    private var derivedNights: Int {
+        draft.dated().first { $0.item.id == journeyId }?.item.nights ?? journey.nights ?? 0
+    }
 
     var body: some View {
         let ends = draft.ends(of: journey)
@@ -340,45 +416,20 @@ struct TripJourneySheet: View {
                     .textCase(nil)
             }
 
-            if isOutbound {
-                Section {
-                    LabeledContent("Ab", value: draft.homeLabel)
-                    TripOptionalDateRow(title: "Von", day: $draft.startDate)
-                } footer: {
-                    Text("Zuhause ist einmal festgelegt und gilt für jede Reise. Das „Von“ der "
-                         + "Anreise ist der Beginn der Reise.")
-                }
-            }
-
             Section {
-                Toggle("Zeiten noch offen", isOn: Binding(
-                    get: { timesOpen },
-                    set: { open in
-                        update { item in
-                            if open {
-                                item.departAt = nil
-                                item.arriveAt = nil
-                            } else {
-                                item.departAt = item.departAt ?? TripClock.format(isOutbound ? 8 * 60 : 10 * 60)
-                                item.arriveAt = item.arriveAt ?? TripClock.format(15 * 60)
-                            }
-                        }
-                    },
-                ))
-                if !timesOpen {
-                    TripOptionalClockRow(title: "Abfahrt", clock: Binding(
-                        get: { journey.departAt },
-                        set: { value in update { $0.departAt = value } },
-                    ), defaultMinutes: 10 * 60, place: ends.from)
-                    TripOptionalClockRow(title: "Ankunft", clock: Binding(
-                        get: { journey.arriveAt },
-                        set: { value in update { $0.arriveAt = value } },
-                    ), defaultMinutes: 15 * 60, place: ends.to)
-                }
+                TripOptionalClockRow(title: "Abfahrt", clock: Binding(
+                    get: { journey.departAt },
+                    set: { value in update { $0.departAt = value } },
+                ), defaultMinutes: isOutbound ? 8 * 60 : 10 * 60, place: ends.from,
+                   assumedMinutes: isOutbound ? 8 * 60 : 10 * 60)
+                TripOptionalClockRow(title: "Ankunft", clock: Binding(
+                    get: { journey.arriveAt },
+                    set: { value in update { $0.arriveAt = value } },
+                ), defaultMinutes: 15 * 60, place: ends.to, assumedMinutes: 15 * 60)
             } footer: {
-                if timesOpen {
-                    Text("Solange die Zeiten offen sind, rechnet der Tag mit Vorgaben: Abfahrt 10:00, "
-                         + "Ankunft 15:00, Anreise von Zuhause ab 08:00.")
+                if isOutbound {
+                    Text("Der Tag der Anreise folgt aus dem „Von“ des ersten Aufenthalts und den Nächten "
+                         + "unterwegs. Ortszeit.")
                 } else if let shift = TripItineraryText.zoneShiftSentence(journey.zoneShiftMinutes) {
                     Text("Ortszeit, am Ort der Abfahrt und am Ort der Ankunft. \(shift)")
                 } else {
@@ -387,15 +438,27 @@ struct TripJourneySheet: View {
             }
 
             Section {
-                Stepper(value: Binding(
-                    get: { journey.nights ?? 0 },
-                    set: { value in update { $0.nights = value } },
-                ), in: 0...TripItineraryDraft.maxNights(for: journey.transportMode)) {
-                    LabeledContent("Nächte unterwegs", value: "\(journey.nights ?? 0)")
-                }
-                LabeledContent("Ergibt") {
-                    Text(arrivalText)
+                if let pinned = pinnedNext {
+                    // The stay after is pinned: the gap decides the nights.
+                    LabeledContent("Nächte unterwegs", value: "\(derivedNights)")
+                    LabeledContent("Ergibt") {
+                        Text(arrivalText)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("„\(draft.title(of: pinned))“ hat einen festen Beginn; die Nächte ergeben sich daraus.")
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
+                } else {
+                    Stepper(value: Binding(
+                        get: { journey.nights ?? 0 },
+                        set: { value in update { $0.nights = value } },
+                    ), in: 0...TripItineraryDraft.maxNights(for: journey.transportMode)) {
+                        LabeledContent("Nächte unterwegs", value: "\(journey.nights ?? 0)")
+                    }
+                    LabeledContent("Ergibt") {
+                        Text(arrivalText)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } footer: {
                 Text("Nachtzug, Fähre, Flug über Nacht oder Seetage.")
@@ -436,7 +499,7 @@ struct TripJourneySheet: View {
 
             if draft.hasDetails(journeyId) {
                 Section {
-                    Button("\(draft.name(of: journey)) entfernen", role: .destructive) {
+                    Button("Angaben zurücksetzen", role: .destructive) {
                         confirmingClear = true
                     }
                     .frame(maxWidth: .infinity)
@@ -445,9 +508,9 @@ struct TripJourneySheet: View {
                 }
             }
         }
-        .confirmationDialog("\(draft.name(of: journey)) entfernen?", isPresented: $confirmingClear,
+        .confirmationDialog("Angaben zurücksetzen?", isPresented: $confirmingClear,
                             titleVisibility: .visible) {
-            Button("Entfernen", role: .destructive) {
+            Button("Zurücksetzen", role: .destructive) {
                 var next = draft
                 next.clearJourney(id: journeyId)
                 draft = next
@@ -465,7 +528,7 @@ struct TripJourneySheet: View {
                 Button {
                     Task { await save() }
                 } label: {
-                    if saving { ProgressView() } else { Text("Fertig") }
+                    if saving { ProgressView() } else { Text("Sichern") }
                 }
                 .disabled(saving)
             }
@@ -562,7 +625,7 @@ struct TripJourneySheet: View {
         if let end = dated?.endDate {
             return "an \(TripItineraryText.shortDate(end))\(time)"
         }
-        return TripItineraryText.arrival(nights: journey.nights ?? 0) + time
+        return TripItineraryText.arrival(nights: derivedNights) + time
     }
 
     private func save() async {
@@ -716,6 +779,7 @@ struct TripHomeSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var finder = TripPlaceFinderModel()
+    @State private var confirmingClear = false
 
     var body: some View {
         Form {
@@ -723,10 +787,7 @@ struct TripHomeSheet: View {
                 Section {
                     Label(current.displayLabel, systemImage: "house")
                     Button("Zuhause entfernen", role: .destructive) {
-                        Task {
-                            await onClear()
-                            dismiss()
-                        }
+                        confirmingClear = true
                     }
                 }
             }
@@ -756,6 +817,18 @@ struct TripHomeSheet: View {
                      + "Heimreise als Weiterreisen im Verlauf.")
             }
         }
+        // Nothing to undo afterwards, so asked once (review D4).
+        .confirmationDialog("Zuhause entfernen?", isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("Zuhause entfernen", role: .destructive) {
+                Task {
+                    await onClear()
+                    dismiss()
+                }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Anreise und Heimreise verschwinden aus dem Verlauf, mit ihren Zeiten.")
+        }
         .navigationTitle("Zuhause")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -768,22 +841,36 @@ struct TripHomeSheet: View {
 
 // MARK: - Small rows
 
-/// A day that may not be known yet: a toggle carries the knowledge and
-/// the picker only the date, so "no date" never reads as today.
+/// A day that may not be known yet: "offen · festlegen", or the date
+/// picker with "x" back to open — the same row as an open time (D2), so
+/// "no date" never reads as today.
 struct TripOptionalDateRow: View {
     let title: String
     @Binding var day: String?
 
     var body: some View {
-        Toggle("\(title): Datum steht fest", isOn: Binding(
-            get: { day != nil },
-            set: { on in day = on ? (day ?? TripCalendar.isoDay(Date())) : nil },
-        ))
         if let current = day {
-            DatePicker(title, selection: Binding(
-                get: { TripCalendar.date(fromIsoDay: current) ?? Date() },
-                set: { day = TripCalendar.isoDay($0) },
-            ), displayedComponents: .date)
+            HStack {
+                DatePicker(title, selection: Binding(
+                    get: { TripCalendar.date(fromIsoDay: current) ?? Date() },
+                    set: { day = TripCalendar.isoDay($0) },
+                ), displayedComponents: .date)
+                Button {
+                    day = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("\(title) offen lassen")
+            }
+        } else {
+            HStack {
+                Text(title)
+                Spacer()
+                Button("offen · festlegen") { day = TripCalendar.isoDay(Date()) }
+                    .buttonStyle(.borderless)
+            }
         }
     }
 }
@@ -839,6 +926,9 @@ struct TripOptionalClockRow: View {
     let defaultMinutes: Int
     /// Where the time is: the place a journey leaves from or comes to.
     var place: String? = nil
+    /// What the day reckons with while the time is open (A6), shown
+    /// so the assumption is not invisible.
+    var assumedMinutes: Int? = nil
 
     var body: some View {
         if let current = clock {
@@ -860,8 +950,15 @@ struct TripOptionalClockRow: View {
             HStack {
                 TripClockRowLabel(title: title, place: place)
                 Spacer()
-                Button("offen · festlegen") { clock = TripClock.format(defaultMinutes) }
-                    .buttonStyle(.borderless)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Button("offen · festlegen") { clock = TripClock.format(defaultMinutes) }
+                        .buttonStyle(.borderless)
+                    if let assumedMinutes {
+                        Text("rechnet mit \(TripClock.format(assumedMinutes))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }

@@ -242,7 +242,7 @@ struct TripSpotPickerView: View {
                                                            osmRef: item.detail.osmRef,
                                                            startDate: viewModel.leg?.startDate),
                                onStayLightAccepted: { await viewModel.load() },
-                               bar: detailBar(item)) { _ in EmptyView() }
+                               bar: detailBar(item), closeAll: { detail = nil }) { _ in EmptyView() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen", systemImage: "xmark") { detail = nil }
@@ -613,6 +613,18 @@ struct TripSpotPickerView: View {
                 TripVoteRing(ballot: ballot, entry: entry)
             }
             addButton(item)
+            // The same menu as the long press, visible (review F: a long
+            // press is never the only way).
+            if !item.isPlanned {
+                Menu {
+                    TripSpotActionMenuItems(actions: actions(item))
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(minWidth: 32, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("Aktionen für \(item.title)")
+            }
         }
         // Longer than the window holds: pale, but "+" still adds it.
         .opacity(misfits(item) ? 0.55 : 1)
@@ -813,17 +825,15 @@ struct TripSpotPickerView: View {
         if case .idea(let candidate) = item.source {
             // A ticket for it (§4.4): the idea goes to that day at that
             // hour, and the order keeps it there.
+            // Said about the idea, so shown in its details (review F).
             out.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit …",
-                                          systemImage: "calendar.badge.clock") {
+                                          systemImage: "calendar.badge.clock", group: .details) {
                 later { appointmentFor = candidate }
             })
             out.append(TripPinSheetAction(id: "keep", title: "Für andere Reisen merken", systemImage: "lightbulb",
                                           footer: "Eine Kopie in den Ideenvorrat für eine andere Reise.",
                                           closes: false) {
                 await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
-            })
-            out.append(contentsOf: TripSpotEdit.dwellActions(current: candidate.dwellMinutes) { minutes in
-                await viewModel.saveNote(TripSpotEdit(TripSpotDetail(candidate)).with(dwellMinutes: minutes))
             })
             out.append(contentsOf: TripIdeaPriority.actions(current: candidate.ideaPriority) { priority in
                 await viewModel.setPriority(osmRef: candidate.osmRef, priority)
@@ -864,7 +874,8 @@ struct TripSpotPickerView: View {
         return TripSpotDetailBar(primary: primary,
                                  primaryTitle: suggested.map { _ in "Hinzufügen" },
                                  primaryImage: "plus.circle",
-                                 more: all.filter { $0.id != primary?.id })
+                                 more: all.filter { $0.id != primary?.id && $0.group != .details },
+                                 details: all.filter { $0.group == .details })
     }
 
     private func runAfterDetail() {

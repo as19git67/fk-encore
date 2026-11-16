@@ -216,7 +216,7 @@ struct TripPlansListView: View {
             }
             Button("Abbrechen", role: .cancel) { deleting = nil }
         } message: { plan in
-            Text("„\(plan.displayTitle)“ wird mit allen Tagen, Stopps und Kandidaten gelöscht. "
+            Text("„\(plan.displayTitle)“ wird mit allen Tagen, Spots und Ideen gelöscht. "
                  + "Auch für alle, mit denen die Reise geteilt ist.")
         }
         .task {
@@ -260,7 +260,7 @@ struct TripPlansListView: View {
             ContentUnavailableView {
                 Label("Noch keine Reise geplant", systemImage: "map")
             } description: {
-                Text("Sag, wohin und wie lange — den Rest schlägt der Planer vor.")
+                Text("Sag, wohin und wie lange. Was ihr sehen wollt, sammelt ihr danach je Aufenthalt.")
             } actions: {
                 // The sentence above promised somewhere to say it. For
                 // a while there was nowhere, which left the whole

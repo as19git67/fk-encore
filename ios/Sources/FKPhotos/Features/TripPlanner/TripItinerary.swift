@@ -38,11 +38,18 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
     var radiusM: Int?
     var quartersAboard: Bool?
     var tenderPort: Bool?
+    /// The stay's first day as `YYYY-MM-DD` when it is pinned there: it
+    /// stays on that day whatever changes before it, and the journey
+    /// before it takes up the gap. Nil: the stay follows the chain. Not
+    /// read on the first stay, whose first day is the trip's own date.
+    var pinnedStart: String?
 
     // A journey.
+    /// "HH:MM", or nil while nobody knows. On the last stay this is its
+    /// own departure, when no journey leaves it.
+    var departAt: String?
     /// "HH:MM", or nil while nobody knows. On the first stay this is its
     /// own arrival, when no journey leads into it.
-    var departAt: String?
     var arriveAt: String?
     /// Calendar days between setting off and arriving. Zero by default.
     var nights: Int?
@@ -61,7 +68,7 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case kind, legId, title, anchor, anchorLabel, anchorRadiusM, mode, days, radiusM
-        case quartersAboard, tenderPort, departAt, arriveAt, nights, note, startDate, endDate
+        case quartersAboard, tenderPort, pinnedStart, departAt, arriveAt, nights, note, startDate, endDate
         case timeZone, zoneShiftMinutes
     }
 
@@ -82,6 +89,7 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
         radiusM = try c.decodeIfPresent(Int.self, forKey: .radiusM)
         quartersAboard = try c.decodeIfPresent(Bool.self, forKey: .quartersAboard)
         tenderPort = try c.decodeIfPresent(Bool.self, forKey: .tenderPort)
+        pinnedStart = try c.decodeIfPresent(String.self, forKey: .pinnedStart)
         departAt = try c.decodeIfPresent(String.self, forKey: .departAt)
         arriveAt = try c.decodeIfPresent(String.self, forKey: .arriveAt)
         nights = try c.decodeIfPresent(Int.self, forKey: .nights)
@@ -112,9 +120,12 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
             try c.encodeIfPresent(radiusM, forKey: .radiusM)
             try c.encodeIfPresent(quartersAboard, forKey: .quartersAboard)
             try c.encodeIfPresent(tenderPort, forKey: .tenderPort)
-            // The first stay's own arrival; the server ignores it on
-            // every other stay, where the journey before owns the time.
+            try c.encode(pinnedStart, forKey: .pinnedStart)
+            // The first stay's own arrival and the last stay's own
+            // departure; the server ignores them where a journey owns
+            // the time.
             try c.encode(arriveAt, forKey: .arriveAt)
+            try c.encode(departAt, forKey: .departAt)
         case .journey:
             try c.encode(departAt, forKey: .departAt)
             try c.encode(arriveAt, forKey: .arriveAt)
@@ -368,9 +379,24 @@ struct TripItineraryDraft: Equatable {
 
     /// Every item with its dates: the cursor walks the chain from the
     /// first day. Nil everywhere while the trip has no date.
+    ///
+    /// A pinned stay (`pinnedStart`) keeps its first day: the journey
+    /// before it gets as many nights as the gap holds, as on the server
+    /// (`settleBeforePin` in `itinerary.ts`). A gap that runs backwards
+    /// or is longer than a journey may last is left as it is here and
+    /// named by `problems()`.
     func dated(timeZone: TimeZone = .current) -> [TripItineraryDated] {
         var cursor = startDate
-        return items.map { item in
+        var out: [TripItineraryDated] = []
+        for (index, item) in items.enumerated() {
+            if item.isStay, let pin = activePin(at: index), let last = out.last,
+               let from = last.startDate, let nights = TripCalendar.days(from: from, to: pin, timeZone: timeZone),
+               nights >= 0, nights <= Self.maxNights(for: last.item.transportMode) {
+                var journey = last.item
+                journey.nights = nights
+                out[out.count - 1] = TripItineraryDated(item: journey, startDate: from, endDate: pin)
+                cursor = pin
+            }
             let start = cursor
             let end: String?
             if item.isStay {
@@ -379,8 +405,80 @@ struct TripItineraryDraft: Equatable {
                 end = cursor.flatMap { TripCalendar.day($0, plus: max(0, item.nights ?? 0), timeZone: timeZone) }
             }
             cursor = end
-            return TripItineraryDated(item: item, startDate: start, endDate: end)
+            out.append(TripItineraryDated(item: item, startDate: start, endDate: end))
         }
+        return out
+    }
+
+    /// The pin the chain reads at this index: a stay that is not the
+    /// first, with a journey before it, on a trip with a date.
+    private func activePin(at index: Int) -> String? {
+        guard startDate != nil, index > 0, items[index].isStay, items[index - 1].isJourney,
+              index != items.firstIndex(where: \.isStay) else { return nil }
+        return items[index].pinnedStart
+    }
+
+    /// Whether this stay can be pinned: it is not the first, and the
+    /// trip has a date.
+    func canPin(_ stayId: TripItineraryItem.ID) -> Bool {
+        guard startDate != nil, let i = index(of: stayId), items[i].isStay else { return false }
+        return i != items.firstIndex(where: \.isStay) && i > 0 && items[i - 1].isJourney
+    }
+
+    /// Whether this stay is pinned to its first day and the pin counts.
+    func isPinned(_ stayId: TripItineraryItem.ID) -> Bool {
+        guard let i = index(of: stayId) else { return false }
+        return activePin(at: i) != nil
+    }
+
+    /// Whether this stay is the first of the chain: its "Von" is the
+    /// trip's date, whatever journey from home leads into it (A1).
+    func isFirstStay(_ stayId: TripItineraryItem.ID) -> Bool {
+        items.first(where: \.isStay)?.id == stayId
+    }
+
+    /// Set a stay's first day. On the first stay that is the trip's date,
+    /// counted back over the nights of the way there; on any other stay
+    /// it pins the stay there.
+    mutating func setStart(of stayId: TripItineraryItem.ID, to day: String?, timeZone: TimeZone = .current) {
+        if isFirstStay(stayId) {
+            guard let day else {
+                startDate = nil
+                return
+            }
+            let back = outbound.map { -max(0, $0.nights ?? 0) } ?? 0
+            startDate = TripCalendar.day(day, plus: back, timeZone: timeZone) ?? day
+            return
+        }
+        guard var stay = self[stayId] else { return }
+        stay.pinnedStart = day
+        self[stayId] = stay
+    }
+
+    /// Pin a stay on the day it falls on now, or loosen it. A loosened
+    /// stay keeps the gap before it: the journey keeps the nights the
+    /// pin gave it, so nothing moves the moment the pin comes off.
+    mutating func setPinned(_ stayId: TripItineraryItem.ID, _ on: Bool, timeZone: TimeZone = .current) {
+        let dated = self.dated(timeZone: timeZone)
+        guard let i = index(of: stayId), var stay = self[stayId] else { return }
+        if on {
+            stay.pinnedStart = dated[i].startDate
+        } else {
+            stay.pinnedStart = nil
+            if i > 0, items[i - 1].isJourney {
+                items[i - 1].nights = dated[i - 1].item.nights
+            }
+        }
+        self[stayId] = stay
+    }
+
+    /// Set a stay's last day: its length follows, within 1 to 14 days.
+    mutating func setEnd(of stayId: TripItineraryItem.ID, to day: String, timeZone: TimeZone = .current) {
+        guard let start = dated(timeZone: timeZone).first(where: { $0.item.id == stayId })?.startDate,
+              let span = TripCalendar.days(from: start, to: day, timeZone: timeZone),
+              var stay = self[stayId] else { return }
+        stay.days = min(Self.maxStayDays, max(Self.minStayDays, span + 1))
+        self[stayId] = stay
     }
 
     /// The day after the whole trip — the last stay's last day, or the
@@ -397,7 +495,9 @@ struct TripItineraryDraft: Equatable {
         for (position, stay) in stays.enumerated() where stay.anchor == nil {
             found.append("Aufenthalt \(position + 1) hat noch keinen Ort.")
         }
-        for journey in items where journey.isJourney {
+        found.append(contentsOf: pinProblems())
+        // A pin decides the nights of the journey before it.
+        for journey in dated().map(\.item) where journey.isJourney {
             if (journey.nights ?? 0) == 0,
                let depart = journey.departAt.flatMap(TripClock.minutes(fromClock:)),
                let arrive = journey.arriveAt.flatMap(TripClock.minutes(fromClock:)),
@@ -405,6 +505,32 @@ struct TripItineraryDraft: Equatable {
                 let (from, to) = ends(of: journey)
                 found.append("Die Weiterreise von \(from) nach \(to) kommt an, bevor sie abfährt — "
                              + "oder sie kommt erst am nächsten Tag an.")
+            }
+        }
+        return found
+    }
+
+    /// What a pinned stay cannot hold: the stays before it run into it,
+    /// or leave more days free than a journey may last. Said the way the
+    /// server says it.
+    private func pinProblems(timeZone: TimeZone = .current) -> [String] {
+        var found: [String] = []
+        let dated = self.dated(timeZone: timeZone)
+        for index in items.indices {
+            guard let pin = activePin(at: index), let from = dated[index - 1].startDate,
+                  let nights = TripCalendar.days(from: from, to: pin, timeZone: timeZone) else { continue }
+            let pinnedName = title(of: items[index])
+            let previousName = index >= 2 ? title(of: items[index - 2]) : homeLabel
+            let most = Self.maxNights(for: items[index - 1].transportMode)
+            if nights < 0 {
+                let over = -nights
+                found.append("„\(pinnedName)“ ist auf den \(TripItineraryText.shortDate(pin, timeZone: timeZone)) "
+                             + "festgelegt, aber davor ist \(over == 1 ? "ein Tag" : "\(over) Tage") zu viel. "
+                             + "Davor kürzen oder „\(pinnedName)“ lösen.")
+            } else if nights > most {
+                found.append("Zwischen „\(previousName)“ und „\(pinnedName)“ liegen \(nights) Nächte; eine Weiterreise "
+                             + "trägt höchstens \(most). Einen Aufenthalt einfügen, „\(previousName)“ verlängern "
+                             + "oder „\(pinnedName)“ lösen.")
             }
         }
         return found

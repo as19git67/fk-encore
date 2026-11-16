@@ -3700,6 +3700,10 @@ export const tripPlanLegs = pgTable(
     arrival_mode: text("arrival_mode"),
     // Optional real dates; absent means "day 1, day 2, …".
     start_date: date("start_date"),
+    // A stay whose first day stays put whatever changes before it
+    // (migration 0319): a booked hotel, a port of call. The journey
+    // before it takes up the difference.
+    start_pinned: boolean("start_pinned").notNull().default(false),
     // What this leg was searched with, so it can be searched again when
     // the settings change and the days are re-planned (migration 0165).
     // Null means "the planner default", which is what rows written

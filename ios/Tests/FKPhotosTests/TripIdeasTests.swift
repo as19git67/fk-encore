@@ -107,7 +107,7 @@ final class TripIdeasTests: XCTestCase {
             TripIdeaTakeResponse.self, from: Data(#"{ "taken": true, "osmRef": "way:42" }"#.utf8))
         XCTAssertEqual(
             taken.sentence(idea: "Biergarten Mühlinsel", plan: "Sommer in Musterstadt"),
-            "Biergarten Mühlinsel liegt jetzt bei den Kandidaten von „Sommer in Musterstadt“.")
+            "Biergarten Mühlinsel liegt jetzt bei den Ideen von „Sommer in Musterstadt“.")
     }
 
     func testAlreadyInTheTripIsAnAnswerNotAFault() throws {

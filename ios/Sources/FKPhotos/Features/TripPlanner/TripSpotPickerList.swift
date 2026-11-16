@@ -30,7 +30,7 @@ struct TripSpotPickerList: View {
             Section {
                 ForEach(filtered) { spot in
                     row(title: spot.name,
-                        subtitle: spot.plannedOn.map { "eingeplant: \($0)" } ?? "Kandidat",
+                        subtitle: spot.plannedOn.map { "eingeplant: \($0)" } ?? "Idee",
                         isSelected: selected == spot.osmRef) {
                         onPick(spot)
                     }

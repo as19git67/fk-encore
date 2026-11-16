@@ -105,6 +105,44 @@ final class TripNewPlanViewModel {
 
     // MARK: - Creating
 
+    /// Create the plan from the sheet "Neuer Aufenthalt" (review B2):
+    /// place, length, date, mode and lodging go with the plan; what the
+    /// plan cannot take at once (aboard, the stay's own times) follows
+    /// over the itinerary. Answers the id, or nil with `errorMessage`.
+    func create(from chain: TripItineraryDraft, stayId: TripItineraryItem.ID) async -> Int? {
+        guard let stay = chain[stayId], let place = stay.place else { return nil }
+        draft.stay.place = place
+        draft.stay.days = stay.days ?? 3
+        draft.stay.mode = stay.transportMode
+        draft.stay.anchorIsApproximate = stay.anchorRadiusM != nil
+        if let radius = stay.anchorRadiusM { draft.stay.anchorRadiusM = radius }
+        if let day = chain.startDate, let date = TripCalendar.date(fromIsoDay: day) {
+            draft.isDated = true
+            draft.startDate = date
+        } else {
+            draft.isDated = false
+        }
+        guard let id = await create() else { return nil }
+        guard stay.quartersAboard == true || stay.arriveAt != nil || stay.departAt != nil else { return id }
+        do {
+            let path = "/trip-planner/plans/\(id)/itinerary"
+            let response: TripItineraryResponse = try await APIClient.shared.get(path)
+            var saved = TripItineraryDraft(response: response)
+            if var first = saved.stays.first {
+                first.quartersAboard = stay.quartersAboard
+                first.tenderPort = stay.tenderPort
+                first.arriveAt = stay.arriveAt
+                first.departAt = stay.departAt
+                saved[first.id] = first
+                let _: TripPlanResponse = try await APIClient.shared.put(path, body: saved.request)
+            }
+        } catch {
+            // The trip is there; the rest can be said in its itinerary.
+            errorMessage = nil
+        }
+        return id
+    }
+
     /// Create the plan and answer its id, or nil when it failed.
     func create() async -> Int? {
         guard let body = draft.createRequest() else { return nil }

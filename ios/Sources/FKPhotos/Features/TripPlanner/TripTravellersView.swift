@@ -74,7 +74,7 @@ struct TripTravellersView: View {
                     }
                 } footer: {
                     Text("Für alle ohne Konto — ein Kind, eine Oma von auswärts. Mit Geburtsdatum "
-                         + "weiß der Planer, ob ein Kind mitfährt.")
+                         + "weiß die App, ob ein Kind mitfährt.")
                 }
             }
         }
@@ -340,7 +340,7 @@ struct TripManualTravellerSheet: View {
                                in: ...Date(), displayedComponents: .date)
                 }
             } footer: {
-                Text("Mit Geburtsdatum weiß der Planer, ob ein Kind mitfährt. Ohne wird "
+                Text("Mit Geburtsdatum weiß die App, ob ein Kind mitfährt. Ohne wird "
                      + "die Person als erwachsen geplant.")
             }
             Section {
@@ -352,7 +352,7 @@ struct TripManualTravellerSheet: View {
                 // What it does, in the terms the plan uses: less in a
                 // block, not shorter walks — the name it had once
                 // promised the latter.
-                Text("Jeder Block bekommt dann weniger Programm — mehr Zeit pro Ort, mehr "
+                Text("Jeder Tag bekommt dann weniger Programm — mehr Zeit pro Ort, mehr "
                      + "Pausen. Die Weglängen ändert das nicht. Wird nie aus dem Alter "
                      + "geschlossen — nur, wenn du es hier sagst.")
             }
@@ -512,8 +512,8 @@ struct TripGetsAboutChoiceView: View {
                     .accessibilityAddTraits(candidate == getsAbout ? .isSelected : [])
                 }
             } footer: {
-                Text("Mit Rollstuhl, Rollator oder Kinderwagen schlägt der Planer keine "
-                     + "Strecken mit Anstieg vor. Die beiden unterscheidet er nicht — "
+                Text("Mit Rollstuhl, Rollator oder Kinderwagen schlägt die App keine "
+                     + "Strecken mit Anstieg vor. Die beiden unterscheidet sie nicht — "
                      + "für einen Weg, der bergauf geht, ist es dieselbe Antwort.")
             }
         }

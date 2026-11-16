@@ -2227,6 +2227,13 @@
       "when": 1791200000000,
       "tag": "0318_trip_journey_modes",
       "breakpoints": true
+    },
+    {
+      "idx": 319,
+      "version": "7",
+      "when": 1791300000000,
+      "tag": "0319_trip_stay_pinned_start",
+      "breakpoints": true
     }
   ]
 }

@@ -59,25 +59,4 @@ final class TripSplitTests: XCTestCase {
         XCTAssertFalse(block.isSplit)
         XCTAssertNil(block.branches)
     }
-
-    func testTheSuggestionIsAbsentWhenTheGroupAgrees() throws {
-        let json = #"{ "suggestion": null }"#
-        let answer = try JSONDecoder()
-            .decode(TripSplitSuggestionResponse.self, from: Data(json.utf8))
-
-        XCTAssertNil(answer.suggestion)
-    }
-
-    func testTheSuggestionNamesBothSidesAndWhoAsked() throws {
-        let json = """
-        { "suggestion": { "sentence": "… spalten die Gruppe …",
-            "a": { "osmRef": "node:1", "name": "Technikmuseum", "voterNames": ["Anna"] },
-            "b": { "osmRef": "node:2", "name": "Markt", "voterNames": ["Papa", "Kind A"] } } }
-        """
-        let answer = try JSONDecoder()
-            .decode(TripSplitSuggestionResponse.self, from: Data(json.utf8))
-
-        XCTAssertEqual(answer.suggestion?.a.name, "Technikmuseum")
-        XCTAssertEqual(answer.suggestion?.b.voterNames, ["Papa", "Kind A"])
-    }
 }

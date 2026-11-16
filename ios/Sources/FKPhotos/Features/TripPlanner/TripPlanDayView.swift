@@ -48,7 +48,6 @@ struct TripPlanDayView: View {
     /// The destination a new excursion goes on from (Mock 18).
     @State private var appendingAfter: TripExcursion?
     /// The block being split (§6.5), while its sheet is open.
-    @State private var splitting: TripSplitTarget?
     /// A stay's planning view, pushed from the itinerary, which is where
     /// a trip opens (reise-planen-und-unterwegs-design.md, "Der
     /// Reiseverlauf"). A running trip pushes it at once, on today.
@@ -122,6 +121,13 @@ struct TripPlanDayView: View {
                             }
                         }
                         Section("Rund um die Reise") {
+                            // What the collection holds near the stays;
+                            // its only way in was a screen nothing opened.
+                            NavigationLink {
+                                TripPlanIdeasView(viewModel: viewModel)
+                            } label: {
+                                Label("Aus dem Ideenvorrat", systemImage: "lightbulb")
+                            }
                             NavigationLink {
                                 TripDocumentsView(planId: viewModel.planId)
                             } label: {
@@ -177,15 +183,6 @@ struct TripPlanDayView: View {
                 Button("Abbrechen", role: .cancel) {}
             }
         }
-        .sheet(item: $splitting) { target in
-            TripSplitView(
-                planId: viewModel.planId,
-                dayIndex: viewModel.dayIndex,
-                blockIndex: target.blockIndex,
-                blockLabel: target.blockLabel,
-                candidates: viewModel.leg?.pool ?? [],
-            ) { Task { await viewModel.load() } }
-        }
         .sheet(isPresented: $settingDayAnchor, onDismiss: {
             editingExcursion = nil
             appendingAfter = nil
@@ -238,9 +235,6 @@ struct TripPlanDayView: View {
                     planId: viewModel.planId,
                     constraints: viewModel.plan?.constraints,
                     title: viewModel.plan?.title,
-                    // The date lives on the legs rather than in the
-                    // constraints, so it is handed over separately.
-                    startDate: viewModel.plan?.startDate,
                 ) {
                     // Saving re-plans the days, so the screen behind has
                     // to be told rather than left showing the old ones.
@@ -554,8 +548,11 @@ struct TripPlanDayView: View {
         // hour, and on no other day. One entry, "Feste Zeit …" (Anton,
         // 10.11.): its sheet enters a time with its reason, or changes
         // the one there is, or takes it off.
+        // Said about the spot, so it stands in the details' "Planung",
+        // not in the menu (review F).
         actions.append(TripPinSheetAction(id: "appointment", title: "Feste Zeit …",
                                           systemImage: fixed == nil ? "calendar.badge.clock" : "calendar.badge.checkmark",
+                                          group: .details,
                                           disabled: status != .planned && fixed == nil) {
             later {
                 if let day { viewModel.select(dayIndex: day.dayIndex) }
@@ -564,15 +561,7 @@ struct TripPlanDayView: View {
                 addingFixpoint = true
             }
         })
-        // How long the visit takes, next to its day and its fixed time
-        // (Anton, 14.11.); the times of the day follow from the server.
-        actions.append(contentsOf: TripSpotEdit.dwellActions(current: stop.dwellMinutes) { minutes in
-            await viewModel.saveNote(TripSpotEdit(TripSpotDetail(stop)).with(dwellMinutes: minutes))
-        }.map { action in
-            var action = action
-            action.disabled = action.disabled || status != .planned
-            return action
-        })
+        // How long the visit takes is in the details' "Planung" (review F).
         // Holding a stop in its slot when the planner plans again: a
         // trip of ideas never plans again, and there "gepinnt" is a
         // fixed time.

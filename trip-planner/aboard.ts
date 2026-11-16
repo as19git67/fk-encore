@@ -39,7 +39,8 @@ export function allAboardBuffer(leg: Pick<AboardLeg, "tenderPort">): number {
  */
 export function journeyDeparture(
   leg: AboardLeg,
-  nextTitle: string,
+  /** Where the journey goes; null for the last stay's own departure. */
+  nextTitle: string | null,
   departAt: string,
   lastDayIndex: number,
 ): FixpointRequest {
@@ -53,7 +54,9 @@ export function journeyDeparture(
     lon: leg.anchor.lon,
     travelMinutes: 0,
   };
-  if (!leg.quartersAboard) return { ...base, label: `Weiterreise nach ${nextTitle}` };
+  if (!leg.quartersAboard) {
+    return { ...base, label: nextTitle === null ? "Abreise" : `Weiterreise nach ${nextTitle}` };
+  }
   return { ...base, label: "Alle an Bord", bufferMinutes: allAboardBuffer(leg) };
 }
 

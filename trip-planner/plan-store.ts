@@ -141,6 +141,11 @@ export interface StoredLeg {
   /** ISO date of this leg's first day, or null when the trip has no dates. */
   startDate: string | null;
   /**
+   * A stay that keeps its first day whatever changes before it
+   * (migration 0319). Optional so a leg built in a test needs none.
+   */
+  startPinned?: boolean;
+  /**
    * What this leg was searched with (migration 0165). Null means the
    * planner default — which is also what legs written before that
    * migration were planned with, so reading null and applying the
@@ -1501,6 +1506,7 @@ export async function loadPlan(
       departureMode: l.departure_mode as TransportMode | null,
       arrivalMode: l.arrival_mode as TransportMode | null,
       startDate: l.start_date,
+      startPinned: l.start_pinned,
       radiusM: l.radius_m,
       dayStartMinutes: l.day_starts_at,
       // The drive is filled in here rather than stored: it follows from
@@ -1866,6 +1872,8 @@ export interface LegFrameUpdate {
   mode?: TransportMode;
   /** ISO date, or null to take the dates off the trip again. */
   startDate?: string | null;
+  /** Whether a stay keeps its first day (migration 0319). */
+  startPinned?: boolean;
 }
 
 /**
@@ -1882,9 +1890,10 @@ export async function updateLegFrames(
   db: Db = dbDefault,
 ): Promise<void> {
   for (const update of updates) {
-    const values: { mode?: string; start_date?: string | null } = {};
+    const values: { mode?: string; start_date?: string | null; start_pinned?: boolean } = {};
     if (update.mode !== undefined) values.mode = update.mode;
     if (update.startDate !== undefined) values.start_date = update.startDate;
+    if (update.startPinned !== undefined) values.start_pinned = update.startPinned;
     if (Object.keys(values).length === 0) continue;
     await db
       .update(tripPlanLegs)

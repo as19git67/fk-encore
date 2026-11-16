@@ -232,6 +232,7 @@ export async function exportTrip(planId: number, now: Date = new Date()): Promis
     departureMode: l.departure_mode as TransportMode | null,
     arrivalMode: l.arrival_mode as TransportMode | null,
     startDate: l.start_date,
+    startPinned: l.start_pinned,
     radiusM: l.radius_m,
     dayStartsAt: l.day_starts_at,
     days: (daysByLeg.get(l.id) ?? []).map(exportDay),
@@ -390,6 +391,7 @@ async function importLeg(tx: Tx, planId: number, position: number, leg: Exchange
     departure_mode: leg.departureMode ?? null,
     arrival_mode: leg.arrivalMode ?? null,
     start_date: leg.startDate,
+    start_pinned: leg.startPinned ?? false,
     radius_m: leg.radiusM,
     day_starts_at: leg.dayStartsAt,
   }).returning({ id: tripPlanLegs.id });
