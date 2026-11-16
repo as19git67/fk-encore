@@ -206,7 +206,12 @@ struct TripSpotPickerView: View {
     }
 
     private var errorText: String? {
-        search.errorMessage ?? viewModel.errorMessage ?? ballot.errorMessage
+        // Offline a failed search is no surprise and needs no error:
+        // one sentence on what does work (offline review O11).
+        if viewModel.isOffline, search.errorMessage != nil {
+            return "Suche und Highlights brauchen eine Verbindung. Eure Ideen sind trotzdem da."
+        }
+        return search.errorMessage ?? viewModel.errorMessage ?? ballot.errorMessage
     }
 
     @ViewBuilder
@@ -746,7 +751,38 @@ struct TripSpotPickerView: View {
 
     // MARK: - Food
 
+    @ViewBuilder
     private func food(_ leg: TripLeg) -> some View {
+        if viewModel.isOffline {
+            offlineFood(leg)
+        } else {
+            onlineFood(leg)
+        }
+    }
+
+    /// Offline the search for places to eat has nobody to ask; the
+    /// trip's own food ideas are on the phone, so they stand here as a
+    /// list (offline review O11).
+    private func offlineFood(_ leg: TripLeg) -> some View {
+        let ideas = leg.pool.filter { $0.category == "food" || $0.category == "cafe" }
+        return List {
+            Section {
+                if ideas.isEmpty {
+                    Text("Noch keine Essens-Ideen bei dieser Reise.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(ideas) { idea in
+                    Label(idea.name ?? "Ohne Namen", systemImage: "fork.knife")
+                }
+            } header: {
+                Text("Eure Essens-Ideen")
+            } footer: {
+                Text("Neue Orte zum Essen sucht die App, sobald wieder Netz da ist.")
+            }
+        }
+    }
+
+    private func onlineFood(_ leg: TripLeg) -> some View {
         let day = TripSpotPicker.foodDay(leg.days)
         let block = day.flatMap(TripSpotPicker.spotsBlock(of:))
         return TripFoodListView(

@@ -59,10 +59,11 @@ struct TripOfflineView: View {
                 Text("Ohne Netz")
             } footer: {
                 Text("Auf dem iPhone liegt danach die ganze Reise: Reiseverlauf, Aufenthalte, "
-                     + "Tage, Spots, Ideen, die Bilder der Spots und das Licht der ausgeplanten "
-                     + "Tage. Jede Änderung kommt von selbst nach. Ohne Netz steht die Reise in "
-                     + "der Liste, und die App zeigt diesen Stand und sagt, von wann er ist. "
-                     + "Erkannte Besuche schickt sie nach, sobald wieder Netz da ist.\n\nNicht "
+                     + "Tage, Spots, Ideen, die Bilder der Spots, das Licht der ausgeplanten "
+                     + "Tage und die Dokumente der Reise als PDF. Jede Änderung kommt von selbst "
+                     + "nach. Ohne Netz steht die Reise in der Liste, und die App zeigt diesen "
+                     + "Stand und sagt, von wann er ist. Abhaken geht auch ohne Netz; das und "
+                     + "erkannte Besuche schickt sie nach, sobald wieder Netz da ist.\n\nNicht "
                      + "dabei sind die Karte in der App und die Wettervorhersage. Die Route öffnet "
                      + "Apple Karten, das mit seinen eigenen Offline-Karten weiter funktioniert. "
                      + "Planen und ändern geht nur mit Verbindung.")

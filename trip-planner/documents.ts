@@ -37,8 +37,10 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, asc, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
+import fs from "node:fs";
 import db from "../db/database";
 import { documents, tripPlanDocuments, users } from "../db/schema";
+import { assertPathUnderDocumentsRoot } from "../documents/documents.service";
 import { loadUserGroupIds, visibleDocumentsWhere } from "../documents/visibility";
 import { requirePermission } from "../user/auth-handler";
 import {
@@ -419,6 +421,86 @@ export async function linkedDocuments(
 }
 
 /** Every date the trip covers, earliest first. */
+/**
+ * The PDF of a document linked to this trip, for the phone to keep for
+ * the road (offline review, F3; Anton 16.11.): only the file, none of
+ * the document module's details. The same reading rule as the list:
+ * on the trip, linked to it, and visible to the caller — a document
+ * the list shows as "nur für den sichtbar, der es hochgeladen hat"
+ * has no file here either.
+ */
+export async function linkedDocumentFile(
+  planId: number,
+  documentId: number,
+  userId: number,
+): Promise<{ diskPath: string; mimeType: string } | null> {
+  if (!(await isOnTrip(planId, userId))) return null;
+  const [link] = await db
+    .select({ id: tripPlanDocuments.id })
+    .from(tripPlanDocuments)
+    .where(and(eq(tripPlanDocuments.plan_id, planId), eq(tripPlanDocuments.document_id, documentId)))
+    .limit(1);
+  if (!link) return null;
+  const groupIds = await loadUserGroupIds(userId);
+  const [row] = await db
+    .select({ diskPath: documents.disk_path, mimeType: documents.mime_type })
+    .from(documents)
+    .where(and(eq(documents.id, documentId), visibleDocumentsWhere(userId, groupIds)))
+    .limit(1);
+  if (!row?.diskPath) return null;
+  return { diskPath: row.diskPath, mimeType: row.mimeType || "application/pdf" };
+}
+
+export const planDocumentFile = api.raw(
+  {
+    expose: true,
+    method: "GET",
+    path: "/trip-planner/plans/:planId/documents/:documentId/file",
+    auth: true,
+  },
+  async (req, res) => {
+    const auth = getAuthData();
+    if (!auth) {
+      res.statusCode = 401;
+      res.end("Unauthorized");
+      return;
+    }
+    try {
+      requirePermission(auth, "photos.view");
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+    const m = /\/trip-planner\/plans\/(\d+)\/documents\/(\d+)\/file/.exec(req.url ?? "");
+    if (!m) {
+      res.statusCode = 400;
+      res.end("Invalid id");
+      return;
+    }
+    try {
+      const file = await linkedDocumentFile(Number(m[1]), Number(m[2]), parseInt(auth.userID, 10));
+      if (!file) {
+        res.statusCode = 404;
+        res.end("Not found");
+        return;
+      }
+      assertPathUnderDocumentsRoot(file.diskPath);
+      const stat = await fs.promises.stat(file.diskPath);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", file.mimeType);
+      res.setHeader("Content-Length", String(stat.size));
+      res.setHeader("Content-Disposition", "inline");
+      const stream = fs.createReadStream(file.diskPath);
+      stream.pipe(res);
+      stream.on("error", () => res.end());
+    } catch {
+      res.statusCode = 404;
+      res.end("Not found");
+    }
+  },
+);
+
 function tripDates(plan: StoredPlan): string[] {
   const dates = new Set<string>();
   for (const leg of plan.legs) {

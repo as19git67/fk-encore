@@ -19,7 +19,7 @@ struct TripPlan: Codable, Identifiable, Sendable {
     /// because it is a free-form object on the server and an older plan
     /// may carry fields this build has not learned about.
     let constraints: TripConstraints?
-    let legs: [TripLeg]
+    var legs: [TripLeg]
     /// Where the trip sets off from and returns to (§22.7), or nil
     /// while nobody said. Optional so an older server still decodes.
     var home: TripHome? = nil
@@ -130,7 +130,7 @@ struct TripLeg: Codable, Identifiable, Sendable {
     var curation: String? = nil
     /// "YYYY-MM-DD", or nil when the trip has no dates yet.
     let startDate: String?
-    let days: [TripDay]
+    var days: [TripDay]
     /// Scored candidates not placed in any day — the working set the
     /// whole replanning mechanic turns on (§5), and at trip resolution
     /// the actual planning result (§4.3).
@@ -298,7 +298,7 @@ struct TripDay: Codable, Identifiable, Sendable {
     /// every ordinary day. A day that is simply empty looks like one
     /// the planner failed to fill; only the sentence tells them apart.
     var bufferReason: String?
-    let blocks: [TripBlock]
+    var blocks: [TripBlock]
     let fixpoints: [TripFixpoint]
     /// Where this day happens when it is a day trip (§4.5) — nil for
     /// every ordinary day, which stays at the quarters. Optional so a
@@ -524,7 +524,7 @@ struct TripBlock: Codable, Identifiable, Sendable {
     /// kept — the slider then has nothing to show for that day, which is
     /// more honest than a guessed hour.
     let startMinutes: Int?
-    let stops: [TripStop]
+    var stops: [TripStop]
     /// The branches this block is split into (§6.5). Empty whenever the
     /// group is together, which is every block until somebody
     /// separates — so a card that knows nothing about splits still
@@ -644,7 +644,7 @@ struct TripStop: Codable, Identifiable, Sendable {
     let travelFromPrevious: TripTravel
     /// planned | done | skipped — anything but `planned` is past and is
     /// never moved by a redistribution (§5).
-    let status: String
+    var status: String
     /// Pinned stops are fixed points: kept where they are (§8.4).
     let pinned: Bool
     /// Why it was saved and where from, carried over from the pool

@@ -492,7 +492,11 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   gespeicherte Stand samt Bildern der Spots kommt nach jeder Änderung von
   selbst nach. „Anstehende Reisen von selbst laden“ (ab Werk an) lädt im
   WLAN jede Reise, die in den nächsten 7 Tagen beginnt oder läuft; eine
-  von Hand gelöschte bleibt gelöscht.
+  von Hand gelöschte bleibt gelöscht. Abhaken („Erledigt“, „Doch nicht“,
+  „Wart ihr hier?“) geht auch ohne Netz: die Karte zeigt es sofort mit
+  „Wird gesendet, sobald wieder Netz da ist“. Die Dokumente der Reise
+  liegen als PDF mit auf dem Gerät; ein Tipp in „Dokumente“ öffnet das
+  PDF, auch ohne Netz.
 - Am laufenden Tag zeigt die Aufenthaltsplanung oben das Besuchte, dann
   eine „jetzt“-Linie und was noch kommt; ein Kreis hakt ab, „Doch nicht“
   nimmt es zurück, „Neu ordnen“ plant den Rest ab jetzt.

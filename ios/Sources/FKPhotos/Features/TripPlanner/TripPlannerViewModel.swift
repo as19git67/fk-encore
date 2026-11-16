@@ -300,6 +300,7 @@ final class TripPlannerViewModel {
             apply(response)
             offlineSince = nil
             bundleStoredAt = offlineStore.storedAt(planId: planId)
+            await sendQueuedTicks()
             // Somebody who once asked for this trip to be available
             // offline meant "keep it", not "keep that one afternoon".
             // A plan changed at breakfast has to be the plan in the
@@ -311,7 +312,11 @@ final class TripPlannerViewModel {
             // the traveller as one.
             if TripOfflineReach.meansUnreachable(error),
                let snapshot = offlineStore.load(planId: planId) {
-                apply(TripPlanResponse(plan: snapshot.bundle.plan, droppedBlocks: nil))
+                // With the ticks that wait for a network on top: the
+                // traveller ticked them, so they are ticked.
+                apply(TripPlanResponse(plan: TripTickQueue.applied(to: snapshot.bundle.plan),
+                                       droppedBlocks: nil))
+                queuedStopIds = TripTickQueue.queuedStopIds(planId: planId)
                 offlineBundle = snapshot.bundle
                 offlineSince = snapshot.storedAt
                 bundleStoredAt = snapshot.storedAt
@@ -353,6 +358,7 @@ final class TripPlannerViewModel {
             offlineBundle = bundle
             TripOfflineAutoLoad.accept(planId)
             await TripOfflineThumbnails.prefetch(bundle, into: offlineStore)
+            await TripOfflineDocuments.fetch(bundle, planId: planId, into: offlineStore)
             return true
         } catch {
             errorMessage = TripErrorText.describe(error)
@@ -371,6 +377,7 @@ final class TripPlannerViewModel {
         bundleStoredAt = try? offlineStore.save(bundle, planId: planId)
         offlineBundle = bundle
         await TripOfflineThumbnails.prefetch(bundle, into: offlineStore)
+        await TripOfflineDocuments.fetch(bundle, planId: planId, into: offlineStore)
     }
 
     /// The pending quiet refresh, if a change is waiting to reach the
@@ -612,8 +619,13 @@ final class TripPlannerViewModel {
     /// request to rearrange the afternoon. What it does do is set what a
     /// later redistribution reads as past.
     func mark(_ stop: TripStop, as status: TripStopStatus) async {
-        guard requireOnline() else { return }
         guard let plan else { return }
+        // Ticking off works in a tunnel too (offline review, F2): the
+        // tick waits on the phone and is shown at once.
+        if isOffline {
+            queue(.status(planId: plan.id, stopId: stop.rowId, status: status))
+            return
+        }
         struct Body: Encodable {
             let stopId: Int
             let status: String
@@ -624,8 +636,32 @@ final class TripPlannerViewModel {
                 body: Body(stopId: stop.rowId, status: status.rawValue),
             )
             apply(response)
+        } catch let error where TripOfflineReach.meansUnreachable(error) {
+            queue(.status(planId: plan.id, stopId: stop.rowId, status: status))
         } catch {
             errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// The stops whose tick waits for a network, for the card to say so.
+    private(set) var queuedStopIds: Set<Int> = []
+
+    private func queue(_ tick: TripQueuedTick) {
+        TripTickQueue.append(tick)
+        if let plan { self.plan = TripTickQueue.applied([tick], to: plan) }
+        queuedStopIds = TripTickQueue.queuedStopIds(planId: planId)
+        errorMessage = nil
+    }
+
+    /// Sends the ticks that waited, then reads the plan again when any
+    /// of them was this trip's.
+    private func sendQueuedTicks() async {
+        guard !TripTickQueue.load().isEmpty else { return }
+        let changed = await TripTickQueue.flush()
+        queuedStopIds = TripTickQueue.queuedStopIds(planId: planId)
+        if changed.contains(planId),
+           let response: TripPlanResponse = try? await APIClient.shared.get("/trip-planner/plans/\(planId)") {
+            apply(response)
         }
     }
 

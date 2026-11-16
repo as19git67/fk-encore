@@ -24,6 +24,10 @@ struct TripOfflineBundle: Codable, Sendable {
     /// Optional: a bundle stored by an older build has none, and is
     /// still a plan.
     var itinerary: TripItineraryResponse? = nil
+    /// The trip's paperwork as the list shows it to this traveller. The
+    /// files of the readable ones are kept beside the bundle (offline
+    /// review, F3). Nil from an older server.
+    var documents: [TripDocument]? = nil
     let light: [TripBundledDayLight]
     /// What the server knowingly left out — "weather", "map" (§14).
     let omits: [String]
@@ -140,6 +144,7 @@ struct TripOfflineStore: Sendable {
     func forget(planId: Int) {
         try? FileManager.default.removeItem(at: file(planId))
         pruneThumbs()
+        pruneDocuments()
     }
 
     func has(planId: Int) -> Bool {
@@ -160,7 +165,11 @@ struct TripOfflineStore: Sendable {
             let found = try? FileManager.default.attributesOfItem(atPath: thumbFile(url.absoluteString).path)
             return sum + ((found?[.size] as? NSNumber)?.intValue ?? 0)
         } ?? 0
-        return plan + pictures
+        let papers = (load(planId: planId)?.bundle.documents ?? []).reduce(0) { sum, document in
+            let found = try? FileManager.default.attributesOfItem(atPath: documentFile(document.documentId).path)
+            return sum + ((found?[.size] as? NSNumber)?.intValue ?? 0)
+        }
+        return plan + pictures + papers
     }
 
     /// The plan and the pictures only it needed. A picture another
@@ -168,6 +177,7 @@ struct TripOfflineStore: Sendable {
     func remove(planId: Int) {
         try? FileManager.default.removeItem(at: file(planId))
         pruneThumbs()
+        pruneDocuments()
     }
 
     // MARK: - Pictures
@@ -197,6 +207,43 @@ struct TripOfflineStore: Sendable {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? target.setResourceValues(values)
+    }
+
+    // MARK: - Documents
+
+    /// The PDFs of the trip's paperwork — only the file, none of the
+    /// document module's details (Anton, 16.11.).
+    private var documentsDirectory: URL { directory.appendingPathComponent("documents", isDirectory: true) }
+
+    private func documentFile(_ documentId: Int) -> URL {
+        documentsDirectory.appendingPathComponent("document-\(documentId).pdf")
+    }
+
+    /// The kept file of a document, if it is on the phone.
+    func storedDocument(_ documentId: Int) -> URL? {
+        let url = documentFile(documentId)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func saveDocument(_ data: Data, documentId: Int) {
+        try? FileManager.default.createDirectory(at: documentsDirectory, withIntermediateDirectories: true)
+        var target = documentFile(documentId)
+        try? data.write(to: target, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? target.setResourceValues(values)
+    }
+
+    /// Drops every document no stored trip lists as readable any more —
+    /// also one that somebody took off the trip or may no longer read.
+    func pruneDocuments() {
+        let wanted = Set(storedPlanIds().flatMap { planId in
+            (load(planId: planId)?.bundle.documents ?? []).filter(\.readable).map(\.documentId)
+        }.map { "document-\($0).pdf" })
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: documentsDirectory.path)) ?? []
+        for name in names where !wanted.contains(name) {
+            try? FileManager.default.removeItem(at: documentsDirectory.appendingPathComponent(name))
+        }
     }
 
     /// Drops every picture no stored trip shows any more.
@@ -324,6 +371,24 @@ enum TripOfflineThumbnails {
     }
 }
 
+/// Loads the files of the trip's readable documents next to the bundle
+/// (offline review, F3). Quietly, like the pictures: a file that does
+/// not come is a row that opens once there is a network again.
+enum TripOfflineDocuments {
+    static func fetch(_ bundle: TripOfflineBundle, planId: Int,
+                      into store: TripOfflineStore = .shared) async {
+        for document in bundle.documents ?? [] where document.readable {
+            guard store.storedDocument(document.documentId) == nil,
+                  let data = try? await APIClient.shared.downloadData(
+                      "/trip-planner/plans/\(planId)/documents/\(document.documentId)/file"),
+                  !data.isEmpty
+            else { continue }
+            store.saveDocument(data, documentId: document.documentId)
+        }
+        store.pruneDocuments()
+    }
+}
+
 /// Trips that load themselves for the road (§3.9, Anton 16.11.): one
 /// that starts within a week or is running now, on Wi-Fi and with room
 /// on the phone. A trip whose bundle somebody deleted by hand stays
@@ -402,6 +467,7 @@ enum TripOfflineAutoLoad {
                   (try? store.save(bundle, planId: plan.id)) != nil
             else { continue }
             await TripOfflineThumbnails.prefetch(bundle, into: store)
+            await TripOfflineDocuments.fetch(bundle, planId: plan.id, into: store)
         }
     }
 

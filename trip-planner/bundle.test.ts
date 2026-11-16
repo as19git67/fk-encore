@@ -120,6 +120,12 @@ describe("the offline bundle", () => {
     expect(stops.every((s) => s.name !== null && s.name !== undefined)).toBe(true);
   });
 
+  it("lists the trip's paperwork, empty when there is none", async () => {
+    const plan = await datedTrip();
+    const bundle = await offlineBundle({ planId: plan.id });
+    expect(bundle.documents).toEqual([]);
+  });
+
   it("carries the itinerary the trip opens on", async () => {
     const plan = await datedTrip();
 
