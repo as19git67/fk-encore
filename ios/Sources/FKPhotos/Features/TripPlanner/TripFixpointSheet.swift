@@ -73,6 +73,9 @@ struct TripFixpointSheet: View {
     @State private var travelMinutes = 15
     @State private var durationMinutes = 60
     @State private var saving = false
+    /// Whether anything differs from what the sheet opened with;
+    /// "Sichern" waits for it (nothing changed, nothing to save).
+    @State private var changed = false
     @State private var spot: TripSpotChoice?
     @State private var pinReason: TripPinReason = .ticket
     @State private var dayIndex = 0
@@ -347,7 +350,7 @@ struct TripFixpointSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .discardGuard(tracking: [place, label, kind, time, travelMinutes, durationMinutes,
                                      spot, pinReason, dayIndex] as [AnyHashable],
-                          ready: seeded, busy: saving)
+                          ready: seeded, busy: saving, changed: $changed)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -371,7 +374,7 @@ struct TripFixpointSheet: View {
                     } label: {
                         if saving { ProgressView() } else { Text("Sichern") }
                     }
-                    .disabled(saving || effectiveLabel.isEmpty)
+                    .disabled(saving || effectiveLabel.isEmpty || (existing != nil && !changed))
                 }
             }
             .confirmationDialog("Feste Zeit entfernen?", isPresented: $confirmingRemove,

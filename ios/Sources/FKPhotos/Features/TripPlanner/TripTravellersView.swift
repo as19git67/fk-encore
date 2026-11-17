@@ -336,8 +336,8 @@ struct TripManualTravellerSheet: View {
             Section {
                 Toggle("Geburtsdatum angeben", isOn: $knowsBirthDate)
                 if knowsBirthDate {
-                    DatePicker("Geburtsdatum", selection: $birthDate,
-                               in: ...Date(), displayedComponents: .date)
+                    TripDateField(title: "Geburtsdatum", selection: $birthDate,
+                                  range: Date.distantPast...Date())
                 }
             } footer: {
                 Text("Mit Geburtsdatum weiß die App, ob ein Kind mitfährt. Ohne wird "

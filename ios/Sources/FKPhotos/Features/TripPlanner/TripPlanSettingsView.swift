@@ -13,6 +13,8 @@ import SwiftUI
 /// everything anybody put in the pool by hand (§9.2).
 struct TripPlanSettingsView: View {
     @State private var model: TripPlanSettingsViewModel
+    /// Whether a setting differs from the trip's; "Sichern" waits for it.
+    @State private var changed = false
     @Environment(\.dismiss) private var dismiss
 
     private let planId: Int
@@ -132,7 +134,7 @@ struct TripPlanSettingsView: View {
         .discardGuard(tracking: [model.title, model.pace, model.withChildren, model.limitedMobility,
                                  model.voting,
                                  model.interests] as [AnyHashable],
-                      ready: model.interestsLoaded, busy: model.isSaving)
+                      ready: model.interestsLoaded, busy: model.isSaving, changed: $changed)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -140,7 +142,7 @@ struct TripPlanSettingsView: View {
                 } label: {
                     if model.isSaving { ProgressView() } else { Text("Sichern") }
                 }
-                .disabled(model.isSaving)
+                .disabled(model.isSaving || !changed)
             }
         }
     }
