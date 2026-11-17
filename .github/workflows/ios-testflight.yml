@@ -8,14 +8,15 @@ name: iOS TestFlight
 # day and should not ship a build each time; a TestFlight release is a
 # decision, so it is a button.
 #
-# Signing happens only at export, with an App Store Connect API key
+# Signing is Xcode's automatic signing with an App Store Connect API key
 # (`-allowProvisioningUpdates`): Xcode uses a cloud-managed distribution
 # certificate and creates the App Store profiles for all three bundle IDs
 # itself. No certificate or profile lives in the repository or in secrets.
-# The archive itself is signed ad hoc (`CODE_SIGN_IDENTITY=-`), which keeps
-# the entitlements in the binaries for the export to re-sign with. Signing
-# the archive automatically made every fresh runner create a new Apple
-# Development certificate, until the account hit Apple's limit.
+# Archiving still signs for development, and on a fresh runner Xcode makes
+# a new Apple Development certificate for that. Apple allows only a few per
+# account, so the run notes the existing ones first and revokes the one it
+# made at the end (ios/scripts/dev-certs.rb). Ad-hoc signing instead is
+# refused by the iOS SDK.
 #
 # Secrets (repository › Settings › Secrets and variables › Actions):
 #   ASC_KEY_ID     App Store Connect API key ID
@@ -83,6 +84,11 @@ jobs:
           chmod 600 "$key_path"
           echo "ASC_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
+      - name: Note the development certificates
+        # Archiving on a fresh runner makes a new Apple Development
+        # certificate; the last step revokes it again (dev-certs.rb).
+        run: ruby scripts/dev-certs.rb list "$RUNNER_TEMP/dev-certs-before"
+
       - name: Work out version and build number
         run: |
           # Commit count plus the workflow's run number: the count never
@@ -110,10 +116,10 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             -skipMacroValidation \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY=- \
-            CODE_SIGNING_REQUIRED=NO \
-            PROVISIONING_PROFILE_SPECIFIER= \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             2>&1 | tee "$RUNNER_TEMP/archive.log"
 
@@ -175,6 +181,13 @@ jobs:
             ${{ runner.temp }}/archive.log
             ${{ runner.temp }}/export.log
           if-no-files-found: ignore
+
+      - name: Revoke the development certificate of this run
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/dev-certs-before" ]; then
+            ruby scripts/dev-certs.rb revoke "$RUNNER_TEMP/dev-certs-before"
+          fi
 
       - name: Remove the API key
         if: always()
