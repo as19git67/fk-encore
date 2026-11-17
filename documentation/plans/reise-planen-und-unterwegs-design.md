@@ -60,6 +60,8 @@ Start und Ende der Aufenthalte sind das Gerüst, die Weiterreisen füllen auf. J
 
 „Sichern“ ist in jedem Blatt, das etwas Bestehendes ändert (Aufenthalt, Weiterreise, feste Zeit, Ausflug, Einstellungen der Reise), grau, bis sich etwas geändert hat; „Hinzufügen“ in einem Blatt für etwas Neues hängt nur daran, dass die Angaben vollständig sind. Der Mock zeigt beide Blätter mit einer Änderung.
 
+Ein Datum steht in jedem Blatt gleich da, im Format des Geräts (mittlerer Stil, auf Deutsch „27.11.2026“), auch direkt nach dem Einschalten von „Beginn steht fest“. Das „x“ neben einem Datum oder einer Uhrzeit setzt den Wert zurück auf „offen“; es ist grau wie ein Hinweistext, nicht blass wie ein gesperrter Knopf, und hält Abstand zum Feld. Zeilen ohne „x“ halten denselben Platz frei, damit „Von“ und „Bis“ untereinander stehen.
+
 **Das Blatt einer Weiterreise** hat Verkehrsmittel, Abfahrt und Ankunft (Ortszeit), Nächte unterwegs und eine Notiz für Flugnummer oder Sitzplatz. Einen Schalter „Zeiten noch offen“ gibt es nicht: eine leere Zeit ist offen, und der Tag rechnet mit Vorgaben (Abfahrt 10:00, Ankunft 15:00, Anreise von Zuhause ab 08:00). Die Anreise hat kein eigenes „Von“; ihr Tag folgt aus dem „Von“ des ersten Aufenthalts. Ist der Aufenthalt danach angepinnt, stehen die Nächte nur zum Lesen da, sie ergeben sich aus dem Pin.
 
 ## Einen Aufenthalt planen

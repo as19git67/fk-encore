@@ -70,7 +70,7 @@ struct TripIdeasOutingView: View {
                     }
 
                     Section("Als Reise übernehmen") {
-                        DatePicker("Tag", selection: $date, displayedComponents: .date)
+                        TripDateField(title: "Tag", selection: $date)
                         TextField("Name (optional)", text: $title)
                         Button {
                             Task { await accept() }

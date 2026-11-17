@@ -176,21 +176,23 @@ struct TripStaySheet: View {
                     Label("Beginn steht fest", systemImage: "pin")
                 }
                 if stay.pinnedStart != nil {
-                    DatePicker("Von", selection: Binding(
+                    TripDateField(title: "Von", selection: Binding(
                         get: { (stay.pinnedStart ?? dated?.startDate).flatMap { TripCalendar.date(fromIsoDay: $0) } ?? Date() },
                         set: { date in draft.setStart(of: stayId, to: TripCalendar.isoDay(date)) },
-                    ), displayedComponents: .date)
+                    ))
                 } else if let start = dated?.startDate {
-                    LabeledContent("Von", value: TripItineraryText.shortDate(start))
+                    LabeledContent("Von", value: TripCalendar.date(fromIsoDay: start).map(TripDateField.text) ?? start)
                 }
             }
             if let start = dated?.startDate, let startDay = TripCalendar.date(fromIsoDay: start),
                let last = TripCalendar.day(start, plus: TripItineraryDraft.maxStayDays - 1),
                let lastDay = TripCalendar.date(fromIsoDay: last) {
-                DatePicker("Bis", selection: Binding(
+                // Under the first stay's "Von", which has an "x", "Bis"
+                // keeps the same room so the two dates line up.
+                TripDateField(title: "Bis", selection: Binding(
                     get: { dated?.endDate.flatMap { TripCalendar.date(fromIsoDay: $0) } ?? startDay },
                     set: { date in draft.setEnd(of: stayId, to: TripCalendar.isoDay(date)) },
-                ), in: startDay...lastDay, displayedComponents: .date)
+                ), range: startDay...lastDay, reservesClearSpace: first)
                 LabeledContent("Ergibt", value: TripItineraryText.stayLength(days: stay.days ?? 1))
             } else {
                 Stepper(value: Binding(
@@ -856,26 +858,17 @@ struct TripOptionalDateRow: View {
 
     var body: some View {
         if let current = day {
-            HStack {
-                DatePicker(title, selection: Binding(
-                    get: { TripCalendar.date(fromIsoDay: current) ?? Date() },
-                    set: { day = TripCalendar.isoDay($0) },
-                ), displayedComponents: .date)
-                Button {
-                    day = nil
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("\(title) offen lassen")
-            }
+            TripDateField(title: title, selection: Binding(
+                get: { TripCalendar.date(fromIsoDay: current) ?? Date() },
+                set: { day = TripCalendar.isoDay($0) },
+            ), onClear: { day = nil })
         } else {
-            HStack {
+            HStack(spacing: 0) {
                 Text(title)
                 Spacer()
                 Button("offen · festlegen") { day = TripCalendar.isoDay(Date()) }
                     .buttonStyle(.borderless)
+                TripClearValueButton.placeholder
             }
         }
     }
@@ -938,22 +931,16 @@ struct TripOptionalClockRow: View {
 
     var body: some View {
         if let current = clock {
-            HStack {
+            HStack(spacing: 0) {
                 TripClockRow(title: title, clock: Binding(
                     get: { current },
                     set: { clock = $0 },
                 ), defaultMinutes: defaultMinutes, place: place)
-                Button {
-                    clock = nil
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("\(title) offen lassen")
+                TripClearValueButton(label: "\(title) offen lassen") { clock = nil }
             }
         } else {
-            HStack {
+            // The same right edge as a set time, which has an "x".
+            HStack(spacing: 0) {
                 TripClockRowLabel(title: title, place: place)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
@@ -965,6 +952,7 @@ struct TripOptionalClockRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                TripClearValueButton.placeholder
             }
         }
     }
