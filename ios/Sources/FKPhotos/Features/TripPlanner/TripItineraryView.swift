@@ -345,20 +345,20 @@ struct TripItineraryView: View {
             }
         }
         .contextMenu {
-            stayActions(stay, position: position, in: draft)
+            if draft.stayCount > 1 {
+                stayActions(stay, position: position, in: draft)
+            }
         }
     }
 
-    /// What one does with a stay (review F): plan it, move it, take it
-    /// out. Its place, days and lodging are in its sheet, which a tap on
-    /// the card opens; the "⋯" and a long press show these same entries.
+    /// What one does with a stay (review F): move it, take it out. Its
+    /// place, days and lodging are in its sheet, which a tap on the card
+    /// opens; "Planen" is the button on the card itself and so not in
+    /// the menu a second time (Anton, 17.11.). The "⋯" and a long press
+    /// show these same entries — and both are left out on a trip with a
+    /// single stay, which can be neither moved nor removed.
     @ViewBuilder
     private func stayActions(_ stay: TripItineraryItem, position: Int, in draft: TripItineraryDraft) -> some View {
-        Button {
-            plan(stay, day: nil)
-        } label: {
-            Label("Planen", systemImage: "calendar")
-        }
         if draft.startDate == nil, draft.stayCount > 1 {
             Button {
                 var next = draft
@@ -429,16 +429,19 @@ struct TripItineraryView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .padding(.top, 10)
-                Menu {
-                    stayActions(stay, position: position, in: draft)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.title3)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(.rect)
+                    .padding(.trailing, draft.stayCount > 1 ? 0 : 12)
+                if draft.stayCount > 1 {
+                    Menu {
+                        stayActions(stay, position: position, in: draft)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(.rect)
+                    }
+                    .accessibilityLabel("Aktionen für \(draft.title(of: stay))")
+                    .padding(.trailing, 4)
                 }
-                .accessibilityLabel("Aktionen für \(draft.title(of: stay))")
-                .padding(.trailing, 4)
             }
 
             ForEach(rows) { row in

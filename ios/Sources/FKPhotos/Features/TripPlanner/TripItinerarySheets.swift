@@ -32,6 +32,9 @@ struct TripStaySheet: View {
     @State private var searching = false
     @State private var saving = false
     @State private var error: String?
+    /// Whether anything differs from what the sheet opened with;
+    /// "Sichern" waits for it (nothing changed, nothing to save).
+    @State private var changed = false
 
     private var stay: TripItineraryItem { draft[stayId] ?? TripItineraryItem(kind: .stay) }
 
@@ -136,7 +139,7 @@ struct TripStaySheet: View {
         }
         .navigationTitle(purpose == .new ? "Neuer Aufenthalt" : "Aufenthalt")
         .navigationBarTitleDisplayMode(.inline)
-        .discardGuard(tracking: draft, busy: saving)
+        .discardGuard(tracking: draft, busy: saving, changed: $changed)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -144,7 +147,7 @@ struct TripStaySheet: View {
                 } label: {
                     if saving { ProgressView() } else { Text(purpose == .new ? "Hinzufügen" : "Sichern") }
                 }
-                .disabled(saving || stay.anchor == nil)
+                .disabled(saving || stay.anchor == nil || (purpose == .edit && !changed))
             }
         }
         .onAppear {
@@ -371,6 +374,9 @@ struct TripJourneySheet: View {
     @State private var saving = false
     @State private var error: String?
     @State private var confirmingClear = false
+    /// Whether anything differs from what the sheet opened with;
+    /// "Sichern" waits for it (nothing changed, nothing to save).
+    @State private var changed = false
 
     /// The modes a journey offers, in the order people name them.
     private static let modes: [TripTransportMode] = [.plane, .transit, .car, .ship, .bike, .foot]
@@ -522,7 +528,7 @@ struct TripJourneySheet: View {
         }
         .navigationTitle(draft.name(of: journey))
         .navigationBarTitleDisplayMode(.inline)
-        .discardGuard(tracking: draft, busy: saving)
+        .discardGuard(tracking: draft, busy: saving, changed: $changed)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -530,7 +536,7 @@ struct TripJourneySheet: View {
                 } label: {
                     if saving { ProgressView() } else { Text("Sichern") }
                 }
-                .disabled(saving)
+                .disabled(saving || !changed)
             }
         }
     }

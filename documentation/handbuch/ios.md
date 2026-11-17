@@ -304,8 +304,10 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   Aufenthalt öffnet sein Blatt; „Planen“ daneben oder eine seiner
   Tageszeilen öffnet die Planung des Aufenthalts mit allen Tagen auf
   einem Bildschirm, „Zurück“ führt in den Verlauf. Das „⋯“ an der Karte
-  (auch langes Drücken) trägt „Planen“, ohne Datum „Nach oben“ und „Nach
-  unten“, und „Entfernen“. Unterwegs öffnet sich die Reise gleich in der Planung, am
+  (auch langes Drücken) trägt ohne Datum „Nach oben“ und „Nach unten“,
+  und „Entfernen“; eine Reise mit nur einem Aufenthalt hat kein „⋯“.
+  „Sichern“ in einem Blatt wird erst aktiv, wenn sich etwas geändert
+  hat. Unterwegs öffnet sich die Reise gleich in der Planung, am
   laufenden Tag. Ein Tag hat keinen eigenen Bildschirm: sein „⋯“ im Kopf
   trägt „Reihenfolge vorschlagen“, „Pause einfügen“, „Feste Zeit
   eintragen“ und „Ausflug planen“. Feste Zeiten ohne Spot und Pausen

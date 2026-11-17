@@ -82,6 +82,9 @@ struct TripDayAnchorSheet: View {
     @State private var departure = Self.defaultDeparture
     @State private var back = Self.defaultReturn
     @State private var saving = false
+    /// Whether anything differs from what the sheet opened with;
+    /// "Sichern" waits for it (nothing changed, nothing to save).
+    @State private var changed = false
     @State private var span = Span.window
     /// What the server said when saving failed.
     @State private var failure: String?
@@ -96,6 +99,10 @@ struct TripDayAnchorSheet: View {
     /// Out at 10:00, back at 13:00: half a day, as in the mock.
     static var defaultWindowDeparture: Date { at(hour: 10, minute: 0) }
     static var defaultWindowReturn: Date { at(hour: 13, minute: 0) }
+
+    /// Changing an excursion or the day's anchor, not adding one:
+    /// then "Sichern" waits for a change.
+    private var editing: Bool { excursion != nil || (current != nil && after == nil) }
 
     private var travelMinutes: Int? { excursion?.travelMinutes ?? current?.travelMinutes }
 
@@ -258,7 +265,7 @@ struct TripDayAnchorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .discardGuard(tracking: [place, reach, saysDeparture, saysReturn, departure, back,
                                      span] as [AnyHashable],
-                          ready: adopted, busy: saving)
+                          ready: adopted, busy: saving, changed: $changed)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -284,7 +291,7 @@ struct TripDayAnchorSheet: View {
                     } label: {
                         if saving { ProgressView() } else { Text("Sichern") }
                     }
-                    .disabled(saving || place == nil || !hoursAddUp)
+                    .disabled(saving || place == nil || !hoursAddUp || (editing && !changed))
                 }
             }
             .onAppear {
