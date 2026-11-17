@@ -8,10 +8,14 @@ name: iOS TestFlight
 # day and should not ship a build each time; a TestFlight release is a
 # decision, so it is a button.
 #
-# Signing is Xcode's automatic signing with an App Store Connect API key
+# Signing happens only at export, with an App Store Connect API key
 # (`-allowProvisioningUpdates`): Xcode uses a cloud-managed distribution
 # certificate and creates the App Store profiles for all three bundle IDs
 # itself. No certificate or profile lives in the repository or in secrets.
+# The archive itself is signed ad hoc (`CODE_SIGN_IDENTITY=-`), which keeps
+# the entitlements in the binaries for the export to re-sign with. Signing
+# the archive automatically made every fresh runner create a new Apple
+# Development certificate, until the account hit Apple's limit.
 #
 # Secrets (repository › Settings › Secrets and variables › Actions):
 #   ASC_KEY_ID     App Store Connect API key ID
@@ -106,10 +110,10 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             -skipMacroValidation \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            PROVISIONING_PROFILE_SPECIFIER= \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             2>&1 | tee "$RUNNER_TEMP/archive.log"
 
