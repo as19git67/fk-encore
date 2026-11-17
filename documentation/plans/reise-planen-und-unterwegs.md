@@ -555,8 +555,17 @@ stage 7 runs in this order, one PR each:
    delete) and "Halt hinzufügen", which saves the chain first and then
    opens the spot picker on the journey ("Unterwegs einplanen"); the
    stops stand under the journey in the itinerary. Without both times
-   there is no day to stop on, and the sheet says so. Still open: the
-   stops as points on the itinerary map.
+   there is no day to stop on, and the sheet says so. **Like the spots
+   of an excursion (Anton, 2026-11-17):** each stop is a row of its own
+   on the itinerary's line under its journey, with its estimated time
+   and duration; a tap opens the spot details (paging through the
+   journey's stops), "⋯" holds the actions of a planned stop
+   (`stopActions`, which finds the leg holding the stop, so priority,
+   note and fixed time go to the journey's leg), "+" opens the spot
+   picker on the journey. On the itinerary map the journey's line runs
+   through its stops, each a small marker, and a journey with stops has
+   a card of its own between the stays (its stops with times,
+   "Bearbeiten" opens its sheet).
 8. **Day trips with a time window (Anton, 2026-11-10/11).** A day trip
    need not take the whole day: half a day in one town, the rest at the
    quarters, and as many on one day as fit (mock 16 in the design copy).

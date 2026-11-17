@@ -672,7 +672,9 @@ final class TripPlannerViewModel {
     /// kept on the row would last until the next settings change. The
     /// whole plan comes back, because a title changes what the day
     /// screen reads too.
-    func saveNote(_ edit: TripSpotEdit) async {
+    /// `onLeg` names another leg than the one on screen: a stop on the
+    /// way of a journey, changed from the itinerary.
+    func saveNote(_ edit: TripSpotEdit, onLeg: Int? = nil) async {
         guard requireOnline() else { return }
         struct Body: Encodable {
             let osmRef: String
@@ -687,7 +689,7 @@ final class TripPlannerViewModel {
         }
         do {
             let _: Response = try await APIClient.shared.patch(
-                "/trip-planner/plans/\(planId)/legs/\(legIndex)/spot",
+                "/trip-planner/plans/\(planId)/legs/\(onLeg ?? legIndex)/spot",
                 body: Body(osmRef: edit.osmRef, title: edit.title, note: edit.note,
                            url: edit.url, dwellMinutes: edit.dwellMinutes,
                            photoStop: edit.photoStop),
@@ -808,7 +810,9 @@ final class TripPlannerViewModel {
 
     /// How much an idea matters (ideas plan, stage 3), wherever it is:
     /// on the list or already on a day.
-    func setPriority(osmRef: String, _ priority: TripIdeaPriority) async {
+    /// `onLeg` names another leg than the one on screen: a stop on the
+    /// way of a journey, changed from the itinerary.
+    func setPriority(osmRef: String, _ priority: TripIdeaPriority, onLeg: Int? = nil) async {
         guard requireOnline() else { return }
         busyRequests += 1
         defer { busyRequests -= 1 }
@@ -823,7 +827,7 @@ final class TripPlannerViewModel {
         do {
             let response: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/ideas/priority",
-                body: Body(legIndex: legIndex, osmRef: osmRef, priority: priority.rawValue),
+                body: Body(legIndex: onLeg ?? legIndex, osmRef: osmRef, priority: priority.rawValue),
             )
             plan = response.plan
             errorMessage = nil
