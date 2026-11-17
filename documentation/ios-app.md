@@ -123,10 +123,12 @@ decision, not a side effect of a merge.
   (`-allowProvisioningUpdates`, cloud-managed distribution certificate). The
   key (Admin role) lives in the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
   `ASC_KEY_P8`; no certificate or profile is in the repository.
-- **Build number** is the commit count of the checked-out ref, never below
-  `CURRENT_PROJECT_VERSION` in the project, passed to `xcodebuild` for all
-  three targets and not committed. A second run on the same commit yields
-  the same number and App Store Connect refuses it.
+- **Build number** is the commit count of the checked-out ref plus the
+  workflow's run number, passed to `xcodebuild` for all three targets and
+  not committed. It rises with every run, so a second run on the same
+  commit uploads too. The count alone (or `CURRENT_PROJECT_VERSION`) did
+  not: a squash merge after a branch that had uploaded with its longer
+  history gave a number App Store Connect already had.
 - **Version** is `MARKETING_VERSION` from the project; raise it there for a
   new release line.
 - The archive uses the shared scheme `FKPhotos`
