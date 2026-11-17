@@ -22,7 +22,10 @@ import SwiftUI
 /// Every sheet saves at once (`PUT …/itinerary`), so the screen never
 /// holds unsaved changes: what it shows is the trip.
 struct TripItineraryView: View {
-    @State var viewModel: TripPlannerViewModel
+    /// Owned by the trip's screen; observed here directly. Not `@State`:
+    /// the view is compared by it (`==` below), and a `@State` read
+    /// outside of `body` is only its first value.
+    let viewModel: TripPlannerViewModel
     /// What to open, when the screen was entered from a leg or from one
     /// of the times a journey wrote on a day.
     var focus: TripItineraryFocus? = nil
@@ -61,6 +64,9 @@ struct TripItineraryView: View {
         var id: Int { legPosition }
     }
     @State private var undo: UndoOffer?
+    /// The dates, subtitles, day rows and problems, built again only
+    /// when the chain or the plan's days change.
+    @State private var layoutMemo = TripItineraryLayoutMemo()
 
     /// "Liste | Karte", remembered for the screen.
     @AppStorage("trip.itinerary.layout") private var layout = Layout.list.rawValue
@@ -189,11 +195,35 @@ struct TripItineraryView: View {
 
     // MARK: - The list
 
+    /// The rows on the line, top to bottom. Every journey, halt, plus
+    /// and stay card is a row of its own: a stay used to be one tall
+    /// row with its journey, its plus rows and its card, which the list
+    /// had to build and measure at once when it scrolled into view.
+    private enum LineRow: Hashable, Identifiable {
+        case addFirst
+        case journey(TripItineraryItem.ID)
+        case halt(legId: Int, stopRowId: Int)
+        case addHalt(legId: Int)
+        case addPort(TripItineraryItem.ID)
+        case stay(TripItineraryItem.ID)
+        case addStay(after: TripItineraryItem.ID)
+        case addLast
+
+        var id: Self { self }
+
+        var isStay: Bool {
+            if case .stay = self { return true }
+            return false
+        }
+    }
+
     private func list(_ draft: TripItineraryDraft) -> some View {
-        let dated = draft.dated()
-        let stays = draft.stays
+        let legList = viewModel.plan?.legs ?? []
+        let layout = layoutMemo.layout(of: draft, legs: legList)
+        let legs = Dictionary(legList.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let rows = lineRows(draft, legs: legs)
         return List {
-            header(draft)
+            header(draft, span: layout.span)
                 .listRowSeparator(.hidden)
 
             if let suggestion, let target = suggestionTarget(suggestion, in: draft) {
@@ -201,38 +231,18 @@ struct TripItineraryView: View {
                     .listRowSeparator(.hidden)
             }
 
-            plusRow(draft.outbound == nil ? "Aufenthalt am Anfang einfügen" : "Aufenthalt nach der Anreise einfügen",
-                    isFirst: true) {
-                startNewStay(after: nil, in: draft)
+            ForEach(rows) { row in
+                lineRow(row, draft: draft, layout: layout, legs: legs)
+                    .moveDisabled(!row.isStay)
             }
-            .disabled(!draft.canAddStay)
-
-            if let outbound = draft.outbound, let at = draft.index(of: outbound.id) {
-                journeyWithStops(outbound, dated: dated[at], in: draft)
-            }
-
-            ForEach(stays) { stay in
-                stayRow(stay, in: draft, dated: dated)
-            }
-            .onMove(perform: mover(draft))
-
-            if let last = draft.items.last, last.isJourney, draft.items.count > 1,
-               let at = draft.index(of: last.id) {
-                journeyWithStops(last, dated: dated[at], in: draft)
-            }
-
-            plusRow(draft.hasHome ? "Aufenthalt vor der Heimreise anhängen" : "Aufenthalt anhängen", isLast: true) {
-                startNewStay(after: stays.last?.id, in: draft)
-            }
-            .disabled(!draft.canAddStay)
+            .onMove(perform: mover(draft, rows: rows))
 
             homeRow
                 .listRowSeparator(.hidden)
 
-            let problems = draft.problems()
-            if !problems.isEmpty {
+            if !layout.problems.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(problems, id: \.self) { problem in
+                    ForEach(layout.problems, id: \.self) { problem in
                         Label(problem, systemImage: "exclamationmark.circle")
                     }
                 }
@@ -248,13 +258,93 @@ struct TripItineraryView: View {
         .buttonStyle(.borderless)
     }
 
+    /// The chain as rows: the way there, then per stay the journey into
+    /// it (with its halts and, on a ship, the port plus), the stay and
+    /// the plus after it, then the way home.
+    private func lineRows(_ draft: TripItineraryDraft, legs: [Int: TripLeg]) -> [LineRow] {
+        var rows: [LineRow] = [.addFirst]
+        func journey(_ item: TripItineraryItem) {
+            rows.append(.journey(item.id))
+            if let leg = stoppableLeg(of: item, in: legs) {
+                rows += leg.stopsOnTheWay.map { LineRow.halt(legId: leg.id, stopRowId: $0.rowId) }
+                rows.append(.addHalt(legId: leg.id))
+            }
+        }
+        if let outbound = draft.outbound { journey(outbound) }
+        let stays = draft.stays
+        for (position, stay) in stays.enumerated() {
+            // The journey into this stay from the one before; the way
+            // there from home has its own row above.
+            if position > 0, let before = draft.journey(before: stay.id) {
+                journey(before)
+                // A plus on the ship puts a port in and splits the
+                // voyage; the end of the trip stays (mock "Ablauf 3").
+                if before.transportMode == .ship { rows.append(.addPort(before.id)) }
+            }
+            rows.append(.stay(stay.id))
+            if position < stays.count - 1 { rows.append(.addStay(after: stay.id)) }
+        }
+        if let last = draft.items.last, last.isJourney, draft.items.count > 1 { journey(last) }
+        rows.append(.addLast)
+        return rows
+    }
+
+    @ViewBuilder
+    private func lineRow(_ row: LineRow, draft: TripItineraryDraft, layout: TripItineraryLayout,
+                         legs: [Int: TripLeg]) -> some View {
+        switch row {
+        case .addFirst:
+            plusRow(draft.outbound == nil ? "Aufenthalt am Anfang einfügen" : "Aufenthalt nach der Anreise einfügen",
+                    isFirst: true) {
+                startNewStay(after: nil, in: draft)
+            }
+            .disabled(!draft.canAddStay)
+        case .journey(let id):
+            if let at = draft.index(of: id) {
+                journeyRow(draft.items[at], dated: layout.dated[at], in: draft)
+            }
+        case .halt(let legId, let stopRowId):
+            if let leg = legs[legId], let stop = leg.stopsOnTheWay.first(where: { $0.rowId == stopRowId }) {
+                haltRow(stop, leg: leg)
+            }
+        case .addHalt(let legId):
+            if let leg = legs[legId] {
+                plusRow(leg.stopsOnTheWay.isEmpty ? "Halt unterwegs einplanen" : "Weiteren Halt einplanen") {
+                    pickStops(on: leg)
+                }
+                .disabled(viewModel.isOffline)
+            }
+        case .addPort(let id):
+            plusRow("Hafen in diese Fahrt einfügen") { sheet = .port(id) }
+                .disabled(!draft.canAddStay)
+        case .stay(let id):
+            if let stay = draft[id] {
+                stayRow(stay, in: draft, layout: layout)
+            }
+        case .addStay(let after):
+            plusRow("Aufenthalt einfügen") { startNewStay(after: after, in: draft) }
+                .disabled(!draft.canAddStay)
+        case .addLast:
+            plusRow(draft.hasHome ? "Aufenthalt vor der Heimreise anhängen" : "Aufenthalt anhängen", isLast: true) {
+                startNewStay(after: draft.stays.last?.id, in: draft)
+            }
+            .disabled(!draft.canAddStay)
+        }
+    }
+
     /// Dragging a stay, only while the trip has no date: with a date
-    /// the order makes the dates (plan, "Reordering stays").
-    private func mover(_ draft: TripItineraryDraft) -> ((IndexSet, Int) -> Void)? {
+    /// the order makes the dates (plan, "Reordering stays"). The list
+    /// counts rows; the chain counts stays.
+    private func mover(_ draft: TripItineraryDraft, rows: [LineRow]) -> ((IndexSet, Int) -> Void)? {
         guard draft.startDate == nil, draft.stayCount > 1 else { return nil }
+        func staysAbove(_ row: Int) -> Int {
+            rows[..<min(max(0, row), rows.count)].filter(\.isStay).count
+        }
         return { from, to in
+            let sources = IndexSet(from.filter { rows.indices.contains($0) && rows[$0].isStay }.map(staysAbove))
+            guard !sources.isEmpty else { return }
             var next = draft
-            next.moveStays(fromOffsets: from, toOffset: to)
+            next.moveStays(fromOffsets: sources, toOffset: staysAbove(to))
             Task {
                 if let refusal = await commit(next) { errorMessage = refusal }
             }
@@ -263,7 +353,7 @@ struct TripItineraryView: View {
 
     // MARK: - Header: the name and the span
 
-    private func header(_ draft: TripItineraryDraft) -> some View {
+    private func header(_ draft: TripItineraryDraft, span: String) -> some View {
         let title = viewModel.plan?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Only a label: the name is changed under the suitcase ›
         // Einstellungen (Anton, 10.11.), where the other settings of the
@@ -277,7 +367,7 @@ struct TripItineraryView: View {
                     .accessibilityAddTraits(.isHeader)
                 if suggestingName { ProgressView() }
             }
-            Text(TripItineraryText.tripSpan(draft))
+            Text(span)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let suggestedName, suggestedName == title {
@@ -325,33 +415,13 @@ struct TripItineraryView: View {
         }
     }
 
-    @ViewBuilder
     private func stayRow(_ stay: TripItineraryItem, in draft: TripItineraryDraft,
-                         dated: [TripItineraryDated]) -> some View {
+                         layout: TripItineraryLayout) -> some View {
         let index = draft.index(of: stay.id) ?? 0
         let position = draft.stays.firstIndex { $0.id == stay.id } ?? 0
-        VStack(spacing: 0) {
-            // The journey into this stay from the one before; the way
-            // there from home has its own row above.
-            if position > 0, let before = draft.journey(before: stay.id) {
-                journeyWithStops(before, dated: dated[index - 1], in: draft)
-                // A plus on the ship puts a port in and splits the
-                // voyage; the end of the trip stays (mock "Ablauf 3").
-                if before.transportMode == .ship {
-                    plusRow("Hafen in diese Fahrt einfügen") { sheet = .port(before.id) }
-                        .disabled(!draft.canAddStay)
-                }
-            }
-            onLine(node: .stay) {
-                stayCard(stay, dated: dated[index], in: draft)
-            }
-            if position < draft.stayCount - 1 {
-                plusRow("Aufenthalt einfügen") { startNewStay(after: stay.id, in: draft) }
-                    .disabled(!draft.canAddStay)
-            }
+        return onLine(node: .stay) {
+            stayCard(stay, dated: layout.dated[index], layout: layout, in: draft)
         }
-        .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing) {
             if draft.stayCount > 1 {
                 Button(role: .destructive) {
@@ -404,8 +474,8 @@ struct TripItineraryView: View {
     }
 
     private func stayCard(_ stay: TripItineraryItem, dated: TripItineraryDated,
-                          in draft: TripItineraryDraft) -> some View {
-        let rows = dayRows(stay, dated: dated, in: draft)
+                          layout: TripItineraryLayout, in draft: TripItineraryDraft) -> some View {
+        let rows = layout.dayRows[stay.id] ?? []
         let position = draft.stays.firstIndex { $0.id == stay.id } ?? 0
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 4) {
@@ -430,7 +500,7 @@ struct TripItineraryView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(staySubtitle(stay, dated: dated, in: draft))
+                        Text(layout.subtitles[stay.id] ?? "")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
@@ -572,24 +642,10 @@ struct TripItineraryView: View {
 
     // MARK: - Stops on the way, on the line
 
-    /// A journey and, under it, its stops on the way — each on the line
-    /// as a stay's days stand under the stay, and handled like a spot of
-    /// an excursion: a tap opens its details, "⋯" acts, "+" adds one
-    /// (Anton, 17.11.).
-    @ViewBuilder
-    private func journeyWithStops(_ journey: TripItineraryItem, dated: TripItineraryDated,
-                                  in draft: TripItineraryDraft) -> some View {
-        journeyRow(journey, dated: dated, in: draft)
-        if let leg = stoppableLeg(of: journey) {
-            ForEach(leg.stopsOnTheWay, id: \.rowId) { stop in
-                haltRow(stop, leg: leg)
-            }
-            plusRow(leg.stopsOnTheWay.isEmpty ? "Halt unterwegs einplanen" : "Weiteren Halt einplanen") {
-                pickStops(on: leg)
-            }
-            .disabled(viewModel.isOffline)
-        }
-    }
+    // A journey's stops on the way stand under it, each on the line as
+    // a stay's days stand under the stay, and are handled like a spot
+    // of an excursion: a tap opens its details, "⋯" acts, "+" adds one
+    // (Anton, 17.11.). `lineRows` puts them there.
 
     private func haltRow(_ stop: TripStop, leg: TripLeg) -> some View {
         let fixed = TripItineraryStops.pin(of: stop, in: leg)
@@ -720,24 +776,6 @@ struct TripItineraryView: View {
 
     // MARK: - Words on the rows
 
-    /// "Hotel Beispiel", "noch nichts gebucht", "an Bord", with the span.
-    private func staySubtitle(_ stay: TripItineraryItem, dated: TripItineraryDated,
-                              in draft: TripItineraryDraft) -> String {
-        let offsets = TripItineraryText.dayOffsets(of: draft)
-        let at = draft.index(of: stay.id) ?? 0
-        var parts = [TripItineraryText.span(dated, dayOffsets: offsets[min(at, offsets.count - 1)])]
-        if stay.anchor == nil {
-            parts.append("noch kein Ort")
-        } else if draft.isBetweenShips(stay.id) || stay.quartersAboard == true {
-            parts.append("an Bord")
-        } else if stay.anchorRadiusM != nil {
-            parts.append("noch nichts gebucht")
-        } else if let label = stay.anchorLabel, !label.isEmpty, label != draft.title(of: stay) {
-            parts.append(label)
-        }
-        return parts.joined(separator: " · ")
-    }
-
     /// "Anreise · Flug · ab 08:00 · an 12:30", "Schiff · Zeiten offen".
     private func journeyLine(_ journey: TripItineraryItem, in draft: TripItineraryDraft) -> String {
         var parts = [draft.name(of: journey)]
@@ -751,14 +789,6 @@ struct TripItineraryView: View {
         case (nil, nil): parts.append("Zeiten offen")
         }
         return parts.joined(separator: " · ")
-    }
-
-    private func dayRows(_ stay: TripItineraryItem, dated: TripItineraryDated,
-                         in draft: TripItineraryDraft) -> [TripItineraryDayRow] {
-        let leg = stay.legId.flatMap { id in viewModel.plan?.legs.first { $0.id == id } }
-        let arrival = draft.journey(before: stay.id)?.arriveAt ?? (draft.ownsStart(stay.id) ? stay.arriveAt : nil)
-        let departure = draft.journey(after: stay.id)?.departAt
-        return TripItineraryDays.rows(stay: stay, dated: dated, days: leg?.days ?? [], arrival: arrival, departure: departure)
     }
 
     // MARK: - The suggestion
@@ -855,6 +885,12 @@ struct TripItineraryView: View {
     }
 
     // MARK: - Stops on the way
+
+    /// The journey's own leg among `legs`, when one can stop on it.
+    private func stoppableLeg(of journey: TripItineraryItem?, in legs: [Int: TripLeg]) -> TripLeg? {
+        guard let legId = journey?.legId, let leg = legs[legId], leg.isStoppable else { return nil }
+        return leg
+    }
 
     /// The journey's own leg, when one can stop on it (`isStoppable`).
     private func stoppableLeg(of journey: TripItineraryItem?) -> TripLeg? {
@@ -1093,6 +1129,22 @@ struct TripItineraryView: View {
         UserDefaults.standard.set(true, forKey: TripTransitSuggestion.dismissKey(
             planId: viewModel.planId, afterLegIndex: found.afterLegIndex))
         suggestion = nil
+    }
+}
+
+/// The trip's screen builds this view again whenever anything it reads
+/// of the model changes — the day's light, the forecast, the minute on a
+/// running day — and hands it new closures each time, which SwiftUI
+/// cannot compare: without this the whole itinerary was rebuilt with
+/// it, mid-scroll. The itinerary observes the model itself, so it only
+/// has to be rebuilt from outside when it is given another model or
+/// another focus. Used through `.equatable()`.
+extension TripItineraryView: Equatable {
+    nonisolated static func == (lhs: TripItineraryView, rhs: TripItineraryView) -> Bool {
+        lhs.viewModel === rhs.viewModel
+            && lhs.focus == rhs.focus
+            && (lhs.onPlan == nil) == (rhs.onPlan == nil)
+            && (lhs.stopActions == nil) == (rhs.stopActions == nil)
     }
 }
 

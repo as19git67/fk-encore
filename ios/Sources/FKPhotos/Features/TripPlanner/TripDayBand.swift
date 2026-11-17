@@ -190,17 +190,29 @@ struct TripDayBand: View {
 struct TripDayFillMark: View {
     let fill: Double
 
+    // A shape rather than a GeometryReader: the mark stands in every
+    // day row of the itinerary, and a GeometryReader per row costs the
+    // list an extra layout pass while it scrolls.
     var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule()
-                    .fill(fill > 1 ? Color.red : Color.accentColor)
-                    .frame(width: proxy.size.width * min(1, max(0, fill)))
-            }
+        ZStack(alignment: .leading) {
+            Capsule().fill(.quaternary)
+            LeadingCapsule(fraction: fill)
+                .fill(fill > 1 ? Color.red : Color.accentColor)
         }
         .frame(height: 3)
         .accessibilityHidden(true)
+    }
+}
+
+/// A capsule over the leading `fraction` (0…1) of its rect — what a
+/// capsule framed to that width inside a GeometryReader drew.
+private struct LeadingCapsule: Shape {
+    var fraction: Double
+
+    func path(in rect: CGRect) -> Path {
+        let width = rect.width * min(1, max(0, fraction))
+        guard width > 0 else { return Path() }
+        return Capsule().path(in: CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height))
     }
 }
 
