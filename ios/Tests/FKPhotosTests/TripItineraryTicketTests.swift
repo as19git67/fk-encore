@@ -88,6 +88,19 @@ final class TripItineraryTicketTests: XCTestCase {
         XCTAssertEqual(undated.dated(timeZone: berlin)[2].startDate, "2027-06-12")
     }
 
+    func testTheFirstStayOfADatedTripAndAStayAfterATicketStartFixed() {
+        var draft = chain
+        let first = draft.items[1].id
+        let second = draft.items[3].id
+        XCTAssertTrue(draft.startsFixed(first))
+        XCTAssertFalse(draft.startsFixed(second))
+        draft.setTicket(draft.items[2].id, day: "2027-06-05", timeZone: berlin)
+        XCTAssertTrue(draft.startsFixed(second))
+
+        let undated = TripItineraryDraft(startDate: nil, hasHome: false, items: [stay("Ort A", days: 2)])
+        XCTAssertFalse(undated.startsFixed(undated.items[0].id))
+    }
+
     func testTakingTheTicketOffMovesNothingAndTheTicketIsSent() throws {
         var draft = chain
         let journey = draft.items[2].id

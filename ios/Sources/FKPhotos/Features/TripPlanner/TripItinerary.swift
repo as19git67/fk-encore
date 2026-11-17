@@ -453,6 +453,15 @@ struct TripItineraryDraft: Equatable {
         return activePin(at: i) != nil
     }
 
+    /// Whether this stay's first day stands, whatever changes around
+    /// it: pinned, the first stay of a trip with a date (its "Von" is the
+    /// trip's date), or reached by a journey with a ticket. The card
+    /// shows a pin for all three.
+    func startsFixed(_ stayId: TripItineraryItem.ID) -> Bool {
+        if isPinned(stayId) || arrivesByTicket(stayId) { return true }
+        return startDate != nil && isFirstStay(stayId)
+    }
+
     // MARK: - Tickets
 
     /// Whether the journey before this stay has a ticket: then the

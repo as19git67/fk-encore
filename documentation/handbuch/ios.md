@@ -245,8 +245,10 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   ihn an seinem Tag, und die Weiterreise davor bekommt die Nächte
   dazwischen. Passt das nicht (davor zu lang, oder mehr als sechs Nächte
   frei, mit dem Schiff 30), sichert das Blatt nicht und sagt, was zu tun
-  ist: davor kürzen, einen Aufenthalt einfügen oder den Pin lösen. Ein
-  angepinnter Aufenthalt trägt im Reiseverlauf eine Nadel. Ohne Datum
+  ist: davor kürzen, einen Aufenthalt einfügen oder den Pin lösen. Eine
+  Nadel im Reiseverlauf trägt jeder Aufenthalt, dessen Beginn feststeht:
+  angepinnt, der erste einer Reise mit Datum, oder erreicht über eine
+  Weiterreise mit festem Termin. Ohne Datum
   gibt es nichts anzupinnen, und die Länge ist ein Zähler.
 - Ankunft und Abfahrt stehen im Blatt des Aufenthalts und lassen sich
   dort ändern; es sind dieselben Zeiten wie an der Weiterreise daneben

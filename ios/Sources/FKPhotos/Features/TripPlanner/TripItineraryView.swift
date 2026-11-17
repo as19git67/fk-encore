@@ -402,7 +402,7 @@ struct TripItineraryView: View {
                             Text(draft.title(of: stay))
                                 .font(.headline)
                                 .foregroundStyle(.primary)
-                            if draft.isPinned(stay.id) {
+                            if draft.startsFixed(stay.id) {
                                 Image(systemName: "pin.fill")
                                     .font(.caption)
                                     .foregroundStyle(.orange)
