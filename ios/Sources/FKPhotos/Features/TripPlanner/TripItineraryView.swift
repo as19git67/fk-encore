@@ -31,6 +31,10 @@ struct TripItineraryView: View {
     /// planning view through this, after selecting it, and there is no
     /// "Fertig".
     var onPlan: ((TripItineraryItem, Int?) -> Void)? = nil
+    /// The actions of a planned stop, from the one place that builds
+    /// them (CLAUDE.md, "Aktionen an Spots"): a stop on the way of a
+    /// journey is a planned stop like any other.
+    var stopActions: ((TripStop) -> [TripPinSheetAction])? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -43,6 +47,14 @@ struct TripItineraryView: View {
     /// the planner was on before, to go back to when it closes.
     @State private var stopsPick: StopsPick?
     @State private var stopsReturnTo: Int?
+    /// A stop on the way whose details are open, over the itinerary.
+    @State private var haltDetail: HaltPick?
+
+    private struct HaltPick: Identifiable {
+        let stop: TripStop
+        let legId: Int
+        var id: Int { stop.rowId }
+    }
 
     private struct StopsPick: Identifiable {
         let legPosition: Int
@@ -99,6 +111,8 @@ struct TripItineraryView: View {
                         plan: viewModel.plan,
                         selected: $selectedStay,
                         onPlan: { stay, day in plan(stay, day: day) },
+                        onStop: { stop, leg in haltDetail = HaltPick(stop: stop, legId: leg.id) },
+                        onJourney: { id in sheet = .journey(id) },
                     )
                 } else {
                     list(draft)
@@ -154,6 +168,9 @@ struct TripItineraryView: View {
         }) { _ in
             TripSpotPickerView(viewModel: viewModel)
         }
+        .sheet(item: $haltDetail) { pick in
+            haltDetailSheet(pick)
+        }
         .task {
             if draft == nil { await load() }
             if userHome == nil { userHome = await TripUserHome.load() }
@@ -191,7 +208,7 @@ struct TripItineraryView: View {
             .disabled(!draft.canAddStay)
 
             if let outbound = draft.outbound, let at = draft.index(of: outbound.id) {
-                journeyRow(outbound, dated: dated[at], in: draft)
+                journeyWithStops(outbound, dated: dated[at], in: draft)
             }
 
             ForEach(stays) { stay in
@@ -201,7 +218,7 @@ struct TripItineraryView: View {
 
             if let last = draft.items.last, last.isJourney, draft.items.count > 1,
                let at = draft.index(of: last.id) {
-                journeyRow(last, dated: dated[at], in: draft)
+                journeyWithStops(last, dated: dated[at], in: draft)
             }
 
             plusRow(draft.hasHome ? "Aufenthalt vor der Heimreise anhängen" : "Aufenthalt anhängen", isLast: true) {
@@ -317,7 +334,7 @@ struct TripItineraryView: View {
             // The journey into this stay from the one before; the way
             // there from home has its own row above.
             if position > 0, let before = draft.journey(before: stay.id) {
-                journeyRow(before, dated: dated[index - 1], in: draft)
+                journeyWithStops(before, dated: dated[index - 1], in: draft)
                 // A plus on the ship puts a port in and splits the
                 // voyage; the end of the trip stays (mock "Ablauf 3").
                 if before.transportMode == .ship {
@@ -513,14 +530,6 @@ struct TripItineraryView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        if let stops = stoppableLeg(of: journey)?.stopsOnTheWay, !stops.isEmpty {
-                            Label(stops.map(\.displayName).joined(separator: " · "), systemImage: "mappin")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .accessibilityLabel("Halte unterwegs: "
-                                                    + stops.map(\.displayName).joined(separator: ", "))
-                        }
                     }
                     Spacer(minLength: 6)
                     if let shift = TripItineraryText.zoneShiftBadge(journey.zoneShiftMinutes) {
@@ -559,6 +568,111 @@ struct TripItineraryView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Stops on the way, on the line
+
+    /// A journey and, under it, its stops on the way — each on the line
+    /// as a stay's days stand under the stay, and handled like a spot of
+    /// an excursion: a tap opens its details, "⋯" acts, "+" adds one
+    /// (Anton, 17.11.).
+    @ViewBuilder
+    private func journeyWithStops(_ journey: TripItineraryItem, dated: TripItineraryDated,
+                                  in draft: TripItineraryDraft) -> some View {
+        journeyRow(journey, dated: dated, in: draft)
+        if let leg = stoppableLeg(of: journey) {
+            ForEach(leg.stopsOnTheWay, id: \.rowId) { stop in
+                haltRow(stop, leg: leg)
+            }
+            plusRow(leg.stopsOnTheWay.isEmpty ? "Halt unterwegs einplanen" : "Weiteren Halt einplanen") {
+                pickStops(on: leg)
+            }
+            .disabled(viewModel.isOffline)
+        }
+    }
+
+    private func haltRow(_ stop: TripStop, leg: TripLeg) -> some View {
+        let fixed = TripItineraryStops.pin(of: stop, in: leg)
+        let actions = stopActions?(stop) ?? []
+        return onLine(node: .halt) {
+            HStack(spacing: 4) {
+                Button {
+                    haltDetail = HaltPick(stop: stop, legId: leg.id)
+                } label: {
+                    HStack(spacing: 8) {
+                        if fixed != nil {
+                            Image(systemName: "pin.fill")
+                                .font(.caption)
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel("Feste Zeit")
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(TripSpotName.line(stop.displayName, local: stop.localName))
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .strikethrough(stop.stopStatus == .skipped)
+                                .lineLimit(2)
+                            Text(TripItineraryStops.line(stop))
+                                .font(.caption)
+                                .foregroundStyle(stop.outsideHours == true ? Color.red : Color.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        if stop.stopStatus == .done {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .accessibilityLabel("Erledigt")
+                        }
+                    }
+                    .padding(.leading, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Details des Halts")
+                if !actions.isEmpty {
+                    Menu {
+                        TripSpotActionMenuItems(actions: actions)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(.rect)
+                    }
+                    .accessibilityLabel("Aktionen für \(stop.displayName)")
+                    .padding(.trailing, 4)
+                }
+            }
+            .background(.background.secondary, in: .rect(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+            .contextMenu {
+                if !actions.isEmpty { TripSpotActionMenuItems(actions: actions) }
+            }
+        }
+    }
+
+    /// The details of a stop on the way, leafing through the journey's
+    /// stops — the same sheet a spot of a stay opens.
+    @ViewBuilder
+    private func haltDetailSheet(_ pick: HaltPick) -> some View {
+        let leg = viewModel.plan?.legs.first { $0.id == pick.legId }
+        TripSpotDetailPager(
+            stops: leg?.stopsOnTheWay ?? [pick.stop],
+            selected: pick.stop,
+            mode: leg?.transportMode ?? .car,
+            onSave: { edit in await viewModel.saveNote(edit, onLeg: leg?.position) },
+            actions: stopActions ?? { _ in [] },
+            onCategory: { osmRef, category in await viewModel.setCategory(osmRef: osmRef, category) },
+            detailOf: { stop in TripItineraryStops.detail(stop, leg: leg) },
+        )
+    }
+
+    /// The spot picker on the journey; the leg the planner was on comes
+    /// back when it closes.
+    private func pickStops(on leg: TripLeg) {
+        stopsReturnTo = viewModel.legIndex
+        viewModel.select(leg: leg.position)
+        stopsPick = StopsPick(legPosition: leg.position)
     }
 
     private var homeRow: some View {
@@ -985,7 +1099,7 @@ struct TripItineraryView: View {
 // MARK: - The line
 
 enum TimelineNode {
-    case stay, journey, plus
+    case stay, journey, halt, plus
 }
 
 /// The column left of every row: the line, and on it a filled dot for a
@@ -1007,7 +1121,7 @@ struct TimelineGutter: View {
                     .frame(maxHeight: .infinity)
             }
             nodeView
-                .padding(.top, node == .stay ? 14 : 13)
+                .padding(.top, node == .stay ? 14 : node == .halt ? 22 : 13)
         }
         .frame(width: 24)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -1024,6 +1138,8 @@ struct TimelineGutter: View {
                 .strokeBorder(Color.secondary.opacity(0.6), lineWidth: 1.5)
                 .background(Circle().fill(Color(uiColor: .systemBackground)))
                 .frame(width: 12, height: 12)
+        case .halt:
+            Circle().fill(Color.secondary.opacity(0.6)).frame(width: 8, height: 8)
         case .plus:
             Image(systemName: "plus.circle")
                 .font(.body)
@@ -1031,5 +1147,38 @@ struct TimelineGutter: View {
                 .background(Circle().fill(Color(uiColor: .systemBackground)))
                 .frame(width: 18, height: 18)
         }
+    }
+}
+
+// MARK: - Stops on the way
+
+/// How the itinerary and its map show a stop on the way of a journey.
+enum TripItineraryStops {
+    /// "ca. 11:20 · 45 min", or the duration while the time is unknown.
+    static func line(_ stop: TripStop) -> String {
+        var parts: [String] = []
+        if let eta = stop.etaMinutes { parts.append("ca. \(TripClock.format(eta))") }
+        parts.append(TripClock.duration(stop.dwellMinutes))
+        return parts.joined(separator: " · ")
+    }
+
+    /// The fixed time that holds the stop at its hour, if any.
+    static func pin(of stop: TripStop, in leg: TripLeg) -> TripFixpoint? {
+        leg.days.flatMap(\.fixpoints).first { $0.isVisit && $0.spotRef == stop.osmRef }
+    }
+
+    /// The details: "Unterwegs · ca. 11:20 bis 12:05" rather than a day
+    /// of a stay, and no distance from quarters the journey has not got.
+    static func detail(_ stop: TripStop, leg: TripLeg?) -> TripSpotDetail {
+        var detail = TripSpotDetail(stop)
+        var planned = "Unterwegs"
+        if let eta = stop.etaMinutes {
+            planned += " · ca. \(TripClock.format(eta)) bis \(TripClock.format(eta + stop.dwellMinutes))"
+        }
+        detail.planned = planned
+        if let leg, let fix = pin(of: stop, in: leg) {
+            detail.pin = TripSpotDetailPin(reason: fix.reason, startMinutes: fix.startMinutes)
+        }
+        return detail
     }
 }

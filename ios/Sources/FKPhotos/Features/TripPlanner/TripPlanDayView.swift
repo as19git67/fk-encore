@@ -233,7 +233,8 @@ struct TripPlanDayView: View {
             viewModel.wantsStayPlan = false
         }) { focus in
             NavigationStack {
-                TripItineraryView(viewModel: viewModel, focus: focus)
+                TripItineraryView(viewModel: viewModel, focus: focus,
+                                  stopActions: { stop in stopActions(stop) })
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -308,7 +309,8 @@ struct TripPlanDayView: View {
     /// line, the journeys between them. A stay or one of its days opens
     /// the stay's planning view on top, so "Zurück" leads back here.
     private var itineraryRoot: some View {
-        TripItineraryView(viewModel: viewModel, onPlan: { _, _ in showingStay = true })
+        TripItineraryView(viewModel: viewModel, onPlan: { _, _ in showingStay = true },
+                          stopActions: { stop in stopActions(stop) })
             .onAppear {
                 // "Neue Reise" asked for the itinerary, and this is it.
                 viewModel.wantsItinerary = false
@@ -476,12 +478,25 @@ struct TripPlanDayView: View {
         dayHolding(stop)?.fixpoints.first { $0.holdsSpot && $0.spotRef == stop.osmRef }
     }
 
-    /// The day of the leg on screen that holds this stop; the selected
-    /// day when none does (a stop just moved, a list from elsewhere).
+    /// The day that holds this stop; the selected day when none does
+    /// (a stop just moved, a list from elsewhere).
     private func dayHolding(_ stop: TripStop) -> TripDay? {
-        viewModel.leg?.days.first { day in
+        legHolding(stop)?.days.first { day in
             day.blocks.contains { block in block.stops.contains { $0.rowId == stop.rowId } }
         } ?? viewModel.day
+    }
+
+    /// The leg that holds this stop: the leg on screen, or another one
+    /// for a stop on the way of a journey, whose rows the itinerary
+    /// shows while a stay is selected.
+    private func legHolding(_ stop: TripStop) -> TripLeg? {
+        let holds = { (leg: TripLeg) in
+            leg.days.contains { day in
+                day.blocks.contains { block in block.stops.contains { $0.rowId == stop.rowId } }
+            }
+        }
+        if let leg = viewModel.leg, holds(leg) { return leg }
+        return viewModel.plan?.legs.first(where: holds) ?? viewModel.leg
     }
 
     /// Everything one can do with a planned stop — one list for every
@@ -503,12 +518,13 @@ struct TripPlanDayView: View {
         // The stay's planning view shows every day at once, so the day
         // a stop is on is its own, not the one selected.
         let day = dayHolding(stop)
+        let leg = legHolding(stop)
         let ideas = viewModel.plan?.isIdeasTrip == true
         let fixed = visit(of: stop)
         // Done or skipped only means something from the day itself on:
         // a spot next month cannot have been visited yet.
         let canSettle: Bool = {
-            guard let leg = viewModel.leg, let day else { return isTravelling }
+            guard let leg, let day else { return isTravelling }
             let phase = TripOnTheRoad.phase(of: day.dayIndex, in: leg, today: TripCalendar.isoDay(Date()))
             return phase == .running || phase == .past || (phase == .undated && isTravelling)
         }()
@@ -536,7 +552,7 @@ struct TripPlanDayView: View {
         // Routing somewhere is only useful once you are travelling: a
         // route from home to a café you will walk to next month is a
         // number nobody wants.
-        let mode = viewModel.leg?.transportMode ?? .foot
+        let mode = leg?.transportMode ?? .foot
         actions.append(TripPinSheetAction(id: "route", title: "Route hierher",
                                           systemImage: "arrow.triangle.turn.up.right.circle",
                                           group: .navigate, disabled: !isTravelling) {
@@ -551,7 +567,7 @@ struct TripPlanDayView: View {
         // holds at its hour (the way is to take the time off), not on a
         // stay of one day: the server refuses each of them.
         let blockId = day?.blocks.first(where: { $0.stops.contains { $0.rowId == stop.rowId } })?.id
-        let canMove = status != .done && fixed == nil && (viewModel.leg?.days.count ?? 0) > 1 && blockId != nil
+        let canMove = status != .done && fixed == nil && (leg?.days.count ?? 0) > 1 && blockId != nil
         actions.append(TripPinSheetAction(id: "move", title: "Auf einen anderen Tag",
                                           systemImage: "calendar", disabled: !canMove) {
             guard let day, let blockId else { return }
@@ -571,6 +587,9 @@ struct TripPlanDayView: View {
                                           group: .details,
                                           disabled: status != .planned && fixed == nil) {
             later {
+                // A stop on the way of a journey: the fixed time is
+                // written to the journey, not to the stay on screen.
+                if let leg, leg.position != viewModel.legIndex { viewModel.select(leg: leg.position) }
                 if let day { viewModel.select(dayIndex: day.dayIndex) }
                 fixpointPreset = TripSpotChoice(osmRef: stop.osmRef, name: stop.displayName, plannedOn: nil)
                 editingFixpoint = fixed
@@ -600,7 +619,7 @@ struct TripPlanDayView: View {
         ) {
             if let fixed {
                 await viewModel.removeFixpoint(fixed)
-                let again = viewModel.leg?.days
+                let again = (viewModel.plan?.legs.first { $0.id == leg?.id } ?? viewModel.leg)?.days
                     .flatMap { $0.blocks.flatMap(\.stops) }
                     .first { $0.osmRef == stop.osmRef }
                 if let again { await viewModel.returnToPool(again) }
@@ -626,7 +645,7 @@ struct TripPlanDayView: View {
         // still to come.
         if ideas {
             actions.append(contentsOf: TripIdeaPriority.actions(current: stop.ideaPriority) { priority in
-                await viewModel.setPriority(osmRef: stop.osmRef, priority)
+                await viewModel.setPriority(osmRef: stop.osmRef, priority, onLeg: leg?.position)
             }.map { action in
                 var action = action
                 action.disabled = action.disabled || status != .planned

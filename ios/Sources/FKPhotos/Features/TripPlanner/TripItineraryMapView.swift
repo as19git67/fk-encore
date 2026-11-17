@@ -6,21 +6,45 @@ import SwiftUI
 /// while its times are open, a great circle for a flight — and the
 /// selected stay's card below with its days and "Planen". Swiping the
 /// card selects the next stay; a tapped marker selects its stay.
+///
+/// A journey with stops on the way runs through them, each a small
+/// marker on its line, and has a card of its own between the stays
+/// (Anton, 17.11.): its stops with their times, a tap opens one.
 struct TripItineraryMapView: View {
     let draft: TripItineraryDraft
     let plan: TripPlan?
     @Binding var selected: TripItineraryItem.ID?
     let onPlan: (TripItineraryItem, Int?) -> Void
+    /// A stop on the way tapped, on the map or on its journey's card.
+    var onStop: (TripStop, TripLeg) -> Void = { _, _ in }
+    /// "Bearbeiten" on a journey's card: its sheet.
+    var onJourney: (TripItineraryItem.ID) -> Void = { _ in }
 
     @State private var position: MapCameraPosition = .automatic
 
     private var stays: [TripItineraryItem] { draft.stays.filter { $0.anchor != nil } }
 
+    /// The cards in the order of the trip: every stay with a place, and
+    /// between them the journeys that stop on the way.
+    private var cards: [TripItineraryItem] {
+        draft.items.filter { item in
+            item.isStay ? item.anchor != nil : !(stopLeg(of: item)?.stopsOnTheWay.isEmpty ?? true)
+        }
+    }
+
+    /// The journey's own leg, when one can stop on it.
+    private func stopLeg(of journey: TripItineraryItem) -> TripLeg? {
+        guard journey.isJourney, let legId = journey.legId,
+              let leg = plan?.legs.first(where: { $0.id == legId }), leg.isStoppable
+        else { return nil }
+        return leg
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Map(position: $position) {
                 ForEach(lines) { line in
-                    MapPolyline(coordinates: [line.from, line.to],
+                    MapPolyline(coordinates: line.points,
                                 contourStyle: line.mode == .plane ? .geodesic : .straight)
                         .stroke(Color.accentColor.opacity(0.8),
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round,
@@ -33,6 +57,24 @@ struct TripItineraryMapView: View {
                             .foregroundStyle(.white)
                             .frame(width: 26, height: 26)
                             .background(Color.secondary, in: .circle)
+                    }
+                }
+                ForEach(stopMarkers) { marker in
+                    Annotation(marker.stop.displayName, coordinate: marker.coordinate) {
+                        Button {
+                            withAnimation(.snappy) { selected = marker.journeyId }
+                            onStop(marker.stop, marker.leg)
+                        } label: {
+                            Image(systemName: "mappin")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .background(selected == marker.journeyId ? Color.orange : Color.orange.opacity(0.7),
+                                            in: .circle)
+                                .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Halt unterwegs: \(marker.stop.displayName)")
                     }
                 }
                 ForEach(markers) { marker in
@@ -55,24 +97,34 @@ struct TripItineraryMapView: View {
             }
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
 
-            if !stays.isEmpty {
+            if !cards.isEmpty {
                 TabView(selection: Binding(
-                    get: { selected ?? stays.first?.id },
+                    get: { selected ?? cards.first?.id },
                     set: { id in withAnimation(.snappy) { selected = id } },
                 )) {
-                    ForEach(Array(stays.enumerated()), id: \.element.id) { number, stay in
-                        card(stay, number: number + 1)
-                            .padding(.horizontal, 16)
-                            .tag(Optional(stay.id))
+                    ForEach(cards) { item in
+                        Group {
+                            if let leg = stopLeg(of: item) {
+                                journeyCard(item, leg: leg)
+                            } else {
+                                card(item, number: (stays.firstIndex { $0.id == item.id } ?? 0) + 1)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .tag(Optional(item.id))
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: stays.count > 1 ? .always : .never))
+                .tabViewStyle(.page(indexDisplayMode: cards.count > 1 ? .always : .never))
                 .indexViewStyle(.page(backgroundDisplayMode: .always))
                 .frame(height: 250)
                 .background(.background)
             }
         }
         .onChange(of: selected) { _, id in
+            if let id, let line = lines.first(where: { $0.id == id }), line.points.count > 2 {
+                withAnimation { position = .rect(Self.rect(around: line.points)) }
+                return
+            }
             guard let id, let anchor = draft[id]?.anchor else { return }
             withAnimation {
                 position = .camera(MapCamera(
@@ -133,6 +185,90 @@ struct TripItineraryMapView: View {
         .padding(.top, 12)
     }
 
+    /// A journey's card: where from and where to, its stops on the way
+    /// with their times, each opening its details.
+    private func journeyCard(_ journey: TripItineraryItem, leg: TripLeg) -> some View {
+        let ends = draft.ends(of: journey)
+        let stops = leg.stopsOnTheWay
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("\(ends.from) → \(ends.to)", systemImage: journey.transportMode.systemImage)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                Button("Bearbeiten") { onJourney(journey.id) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            Text(timesLine(journey, stops: stops.count))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(stops.prefix(4), id: \.rowId) { stop in
+                Button {
+                    onStop(stop, leg)
+                } label: {
+                    HStack {
+                        Image(systemName: "mappin")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Text(stop.displayName)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(TripItineraryStops.line(stop))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minHeight: 30)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
+            if stops.count > 4 {
+                Text("und \(stops.count - 4) weitere Halte")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 12)
+    }
+
+    /// "ab 09:00 · an 17:30 · 2 Halte".
+    private func timesLine(_ journey: TripItineraryItem, stops: Int) -> String {
+        var parts: [String] = [draft.name(of: journey)]
+        if let depart = journey.departAt { parts.append("ab \(depart)") }
+        if let arrive = journey.arriveAt { parts.append("an \(arrive)") }
+        parts.append(stops == 1 ? "1 Halt" : "\(stops) Halte")
+        return parts.joined(separator: " · ")
+    }
+
+    /// A stop on the way, on the line of its journey.
+    private struct StopMarker: Identifiable {
+        let stop: TripStop
+        let leg: TripLeg
+        let journeyId: TripItineraryItem.ID
+        var id: Int { stop.rowId }
+        var coordinate: CLLocationCoordinate2D {
+            CLLocationCoordinate2D(latitude: stop.lat, longitude: stop.lon)
+        }
+    }
+
+    private var stopMarkers: [StopMarker] {
+        draft.items.flatMap { item -> [StopMarker] in
+            guard let leg = stopLeg(of: item) else { return [] }
+            return leg.stopsOnTheWay.map { StopMarker(stop: $0, leg: leg, journeyId: item.id) }
+        }
+    }
+
+    /// The map's frame around a journey and its stops, with a margin.
+    static func rect(around points: [CLLocationCoordinate2D]) -> MKMapRect {
+        let rects = points.map { MKMapRect(origin: MKMapPoint($0), size: MKMapSize(width: 0, height: 0)) }
+        let union = rects.dropFirst().reduce(rects.first ?? .null) { $0.union($1) }
+        let margin = max(union.size.width, union.size.height) * 0.25 + 2_000
+        return union.insetBy(dx: -margin, dy: -margin)
+    }
+
     /// One numbered marker per stay with a place.
     private struct StayMarker: Identifiable {
         let id: TripItineraryItem.ID
@@ -152,8 +288,8 @@ struct TripItineraryMapView: View {
     /// One line per journey whose two ends have a place.
     private struct Line: Identifiable {
         let id: TripItineraryItem.ID
-        let from: CLLocationCoordinate2D
-        let to: CLLocationCoordinate2D
+        /// From, the stops on the way in their order, to.
+        let points: [CLLocationCoordinate2D]
         let mode: TripTransportMode
         let timed: Bool
     }
@@ -169,7 +305,10 @@ struct TripItineraryMapView: View {
                   let from = point(draft.stay(before: item.id)),
                   let to = point(draft.stay(after: item.id))
             else { return nil }
-            return Line(id: item.id, from: from, to: to, mode: item.transportMode, timed: item.isTimed)
+            let via = (stopLeg(of: item)?.stopsOnTheWay ?? []).map {
+                CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+            }
+            return Line(id: item.id, points: [from] + via + [to], mode: item.transportMode, timed: item.isTimed)
         }
     }
 }

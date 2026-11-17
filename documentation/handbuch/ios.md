@@ -278,9 +278,15 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 - Mit Auto, Rad oder zu Fuß an einem Tag hat das Blatt den Abschnitt
   „Halte unterwegs“: „Halt hinzufügen“ öffnet die Spot-Auswahl mit Orten
   nah am Weg (die Entfernung ist der Umweg), „Unterwegs einplanen“ legt
-  einen auf die Fahrt. Wischen löscht einen Halt. Die Halte stehen auch
-  unter der Weiterreise im Verlauf. Ohne Abfahrt und Ankunft gibt es
-  noch keine Halte.
+  einen auf die Fahrt. Wischen löscht einen Halt. Ohne Abfahrt und
+  Ankunft gibt es noch keine Halte.
+- Im Reiseverlauf steht jeder Halt als eigene Zeile unter seiner
+  Weiterreise, mit geschätzter Uhrzeit und Dauer. Ein Tipp öffnet die
+  Details (Dauer, feste Zeit, Notiz; Wischen blättert zum nächsten
+  Halt), „⋯“ hat dieselben Aktionen wie ein Spot an einem Tag, „Halt
+  unterwegs einplanen“ darunter öffnet die Spot-Auswahl. Auf der Karte
+  läuft die Linie der Weiterreise über ihre Halte; eine Weiterreise mit
+  Halten hat eine eigene Karte zwischen den Aufenthalten.
 - Die Planung eines Aufenthalts beginnt mit seinem Namen, darunter Tage,
   Daten und Unterkunft (unterwegs „Tag n von m · heute“ und das Wetter),
   und der Knopf „Ideen (n) und Suche“ öffnet die Spot-Auswahl. Oben steht
