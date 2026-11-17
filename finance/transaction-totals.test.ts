@@ -18,7 +18,7 @@ import {
   financeTagTransaction,
   financeTransaction,
 } from "../db/schema";
-import { computeTotals, NO_OTHER_TAG, NO_TAG, OTHER_TAGS, type TotalsBooking } from "./transaction-totals";
+import { cleanCriteria, computeTotals, NO_OTHER_TAG, NO_TAG, normalizeTotalsSpec, OTHER_TAGS, type TotalsBooking } from "./transaction-totals";
 import { transactionTotals } from "./transaction-totals-api";
 import { createRuleCollection, setCollectionRule } from "../collections/collections";
 
@@ -107,6 +107,45 @@ describe("computeTotals", () => {
   });
 });
 
+describe("top tag groups", () => {
+  const sumOfGroups = (t: { groups: { sum: number; count: number }[] }) =>
+    t.groups.reduce((s, g) => ({ sum: s.sum + g.sum, count: s.count + g.count }), { sum: 0, count: 0 });
+  const many = [
+    b(1, "2026-10-01", "-50.00", ["A"]),
+    b(2, "2026-10-02", "-40.00", ["B"]),
+    b(3, "2026-10-03", "-30.00", ["C"]),
+    b(4, "2026-10-04", "-20.00", ["D"]),
+    b(5, "2026-10-05", "-10.00", ["D"]),
+    b(6, "2026-10-06", "-5.00"),
+  ];
+
+  it("keeps the largest tags, folds the others into Sonstige and keeps the untagged apart", () => {
+    const t = computeTotals(many, { group_by: "tag", top: 2 });
+    expect(t.groups.map((g) => [g.label, g.count, g.sum])).toEqual([
+      ["A", 1, -5000],
+      ["B", 1, -4000],
+      [OTHER_TAGS, 3, -6000],
+      [NO_TAG, 1, -500],
+    ]);
+    expect(sumOfGroups(t)).toEqual({ sum: t.total, count: t.count });
+  });
+
+  it("changes nothing when there are no more tags than the top", () => {
+    const t = computeTotals(many, { group_by: "tag", top: 5 });
+    expect(t.groups.map((g) => g.label)).toEqual(["A", "B", "C", "D", NO_TAG]);
+  });
+
+  it("keeps top only for tag groups when normalizing", () => {
+    expect(normalizeTotalsSpec({ group_by: "tag", top: 5 })).toEqual({ group_by: "tag", top: 5 });
+    expect(normalizeTotalsSpec({ group_by: "month", top: 5 })).toEqual({ group_by: "month" });
+    expect(normalizeTotalsSpec({ group_by: "tag", top: 0 })).toEqual({ group_by: "tag" });
+  });
+
+  it("keeps the tags to leave out in the criteria", () => {
+    expect(cleanCriteria({ without_tags: [" Umbuchung ", "Umbuchung", 3] })).toEqual({ without_tags: ["Umbuchung"] });
+  });
+});
+
 function setAuth(userID: number) {
   vi.mocked(getAuthData).mockReturnValue({ userID: String(userID), permissions: ["module.finance", "finance.view"] } as never);
 }
@@ -172,6 +211,12 @@ describe("transaction totals endpoint", () => {
     const t = await transactionTotals({ criteria: { tags: [TAGS[0]] }, group_by: "tag" });
     expect(t.groups.map((g) => [g.label, g.count, g.sum])).toEqual([[TAGS[1], 1, -8000], [NO_OTHER_TAG, 1, -12050]]);
     expect(t.groups.reduce((s, g) => s + g.sum, 0)).toBe(t.total);
+  });
+
+  it("leaves out the bookings with a tag named in without_tags", async () => {
+    const t = await transactionTotals({ criteria: { from: "2026-01-01", without_tags: [TAGS[1]] }, group_by: "tag" });
+    expect(t.count).toBe(1);
+    expect(t.groups.map((g) => [g.label, g.sum])).toEqual([[TAGS[0], -12050]]);
   });
 
   it("refuses a request that names no bookings", async () => {

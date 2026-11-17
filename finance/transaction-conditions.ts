@@ -104,6 +104,8 @@ export interface TransactionCriteria {
   account_ids?: number[];
   /** Every one of these tags (as the list's tag filter). */
   tags?: string[];
+  /** None of these tags ("Ausgaben außer Umbuchungen"). */
+  without_tags?: string[];
   /** The list's search: text in counterparty, purpose, notice or references, or an amount. */
   text?: string;
   /** Booking date range, YYYY-MM-DD. */
@@ -132,5 +134,6 @@ export function criteriaConditions(c: TransactionCriteria): SQL[] {
   }
   conds.push(...amountConditions({ min: c.amount_min, max: c.amount_max, direction: c.direction }));
   for (const tag of c.tags ?? []) conds.push(taggedWithCondition(tag));
+  for (const tag of c.without_tags ?? []) conds.push(not(taggedWithCondition(tag)));
   return conds;
 }

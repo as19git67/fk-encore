@@ -491,6 +491,7 @@ export function deleteAnyCollection(id: number): Promise<{ deleted: boolean }> {
 export interface TransactionRuleCriteria {
   account_ids?: number[]
   tags?: string[]
+  without_tags?: string[]
   text?: string
   from?: string
   to?: string

@@ -111,6 +111,8 @@ export function normalizeMemberRule(input: unknown, keepExcluded: number[] = [])
       if (accounts) criteria.account_ids = accounts;
       const tags = Array.isArray(c.tags) ? [...new Set(c.tags.map(text).filter((t): t is string => !!t))] : [];
       if (tags.length) criteria.tags = tags;
+      const without = Array.isArray(c.without_tags) ? [...new Set(c.without_tags.map(text).filter((t): t is string => !!t))] : [];
+      if (without.length) criteria.without_tags = without;
       const t = text(c.text);
       if (t) criteria.text = t;
       if (typeof c.from === "string" && ISO_DATE.test(c.from)) criteria.from = c.from;
