@@ -402,7 +402,7 @@ struct TripItineraryView: View {
                             Text(draft.title(of: stay))
                                 .font(.headline)
                                 .foregroundStyle(.primary)
-                            if draft.isPinned(stay.id) {
+                            if draft.startsFixed(stay.id) {
                                 Image(systemName: "pin.fill")
                                     .font(.caption)
                                     .foregroundStyle(.orange)
@@ -491,9 +491,17 @@ struct TripItineraryView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(journeyLine(journey, in: draft))
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(journeyLine(journey, in: draft))
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            if journey.isTicketed {
+                                Image(systemName: "pin.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .accessibilityLabel("Termin steht fest")
+                            }
+                        }
                         if let nights = dated.item.nights, nights > 0 {
                             Text(nights == 1 ? "1 Nacht unterwegs" : "\(nights) Nächte unterwegs")
                                 .font(.caption)

@@ -42,6 +42,10 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
     /// stays on that day whatever changes before it, and the journey
     /// before it takes up the gap. Nil: the stay follows the chain. Not
     /// read on the first stay, whose first day is the trip's own date.
+    ///
+    /// On a journey: its departure day when a ticket fixes it (a train,
+    /// a flight). It keeps that day, its times and its nights; the stay
+    /// before it ends that day, the stays after follow its arrival.
     var pinnedStart: String?
 
     // A journey.
@@ -130,6 +134,7 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
             try c.encode(departAt, forKey: .departAt)
             try c.encode(arriveAt, forKey: .arriveAt)
             try c.encode(nights ?? 0, forKey: .nights)
+            try c.encode(pinnedStart, forKey: .pinnedStart)
             let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
             try c.encode(trimmed?.isEmpty == false ? trimmed : nil, forKey: .note)
         }
@@ -161,6 +166,10 @@ struct TripItineraryItem: Codable, Identifiable, Equatable, Sendable {
     /// days the planner fills. With one or none it only tells its
     /// neighbours what it knows.
     var isTimed: Bool { departAt != nil && arriveAt != nil }
+
+    /// A journey with a fixed date: a ticket. It is pinned like a stay
+    /// whose start stands (`pinnedStart` is its departure day).
+    var isTicketed: Bool { isJourney && pinnedStart != nil }
 
     // MARK: - Making new links
 
@@ -389,7 +398,20 @@ struct TripItineraryDraft: Equatable {
         var cursor = startDate
         var out: [TripItineraryDated] = []
         for (index, item) in items.enumerated() {
-            if item.isStay, let pin = activePin(at: index), let last = out.last,
+            if item.isTicketed, let pin = item.pinnedStart, cursor != nil {
+                // A ticket keeps its day. `settleTickets` has already
+                // fitted the stay before to it; where it could not, the
+                // dates show the gap and `problems()` names it.
+                if let last = out.last, last.item.isStay, let from = last.startDate,
+                   let span = TripCalendar.days(from: from, to: pin, timeZone: timeZone),
+                   span >= 0, span < Self.maxStayDays {
+                    var stay = last.item
+                    stay.days = span + 1
+                    out[out.count - 1] = TripItineraryDated(item: stay, startDate: from, endDate: pin)
+                }
+                cursor = pin
+            }
+            if item.isStay, let pin = activePin(at: index), let last = out.last, !last.item.isTicketed,
                let from = last.startDate, let nights = TripCalendar.days(from: from, to: pin, timeZone: timeZone),
                nights >= 0, nights <= Self.maxNights(for: last.item.transportMode) {
                 var journey = last.item
@@ -431,6 +453,88 @@ struct TripItineraryDraft: Equatable {
         return activePin(at: i) != nil
     }
 
+    /// Whether this stay's first day stands, whatever changes around
+    /// it: pinned, the first stay of a trip with a date (its "Von" is the
+    /// trip's date), or reached by a journey with a ticket. The card
+    /// shows a pin for all three.
+    func startsFixed(_ stayId: TripItineraryItem.ID) -> Bool {
+        if isPinned(stayId) || arrivesByTicket(stayId) { return true }
+        return startDate != nil && isFirstStay(stayId)
+    }
+
+    // MARK: - Tickets
+
+    /// Whether the journey before this stay has a ticket: then the
+    /// stay's first day is the ticket's arrival.
+    func arrivesByTicket(_ stayId: TripItineraryItem.ID) -> Bool {
+        journey(before: stayId)?.isTicketed == true
+    }
+
+    /// Whether the journey after this stay has a ticket: then the
+    /// stay's last day is the ticket's departure, and its length follows.
+    func leavesByTicket(_ stayId: TripItineraryItem.ID) -> Bool {
+        journey(after: stayId)?.isTicketed == true
+    }
+
+    /// Give a journey a ticket on this day, or take it off (nil).
+    ///
+    /// A ticket needs both times: open ones get the times the day
+    /// already reckons with. On a trip without a date the ticket gives
+    /// the trip one. Taken off, nothing moves: the stays keep the
+    /// lengths the ticket gave them.
+    mutating func setTicket(_ journeyId: TripItineraryItem.ID, day: String?, timeZone: TimeZone = .current) {
+        guard let i = index(of: journeyId), items[i].isJourney else { return }
+        if let day {
+            if startDate == nil {
+                let offset = TripItineraryText.dayOffsets(of: self)[i].first
+                startDate = TripCalendar.day(day, plus: -offset, timeZone: timeZone) ?? day
+            }
+            if items[i].departAt == nil { items[i].departAt = TripClock.format(i == 0 ? 8 * 60 : 10 * 60) }
+            if items[i].arriveAt == nil {
+                let depart = TripClock.minutes(fromClock: items[i].departAt ?? "") ?? 10 * 60
+                items[i].arriveAt = TripClock.format(max(15 * 60, min(depart + 60, 23 * 60 + 59)))
+            }
+        }
+        items[i].pinnedStart = day
+        settleTickets(timeZone: timeZone)
+    }
+
+    /// Set the arrival day of a journey with a ticket: its nights follow,
+    /// within what a journey of its mode may last.
+    mutating func setTicketArrival(_ journeyId: TripItineraryItem.ID, day: String, timeZone: TimeZone = .current) {
+        guard let i = index(of: journeyId), let pin = items[i].pinnedStart,
+              let nights = TripCalendar.days(from: pin, to: day, timeZone: timeZone) else { return }
+        items[i].nights = min(Self.maxNights(for: items[i].transportMode), max(0, nights))
+        settleTickets(timeZone: timeZone)
+    }
+
+    /// Fit the chain to its tickets, as the server does (`deriveFrames`):
+    /// a ticket on the way there is the trip's first day, and every
+    /// other ticket ends the stay before it on its day, so the stay's
+    /// length follows. A stay that cannot be fitted (the ticket leaves
+    /// before it begins, or would need more than 14 days) is left as it
+    /// is and named by `problems()`.
+    mutating func settleTickets(timeZone: TimeZone = .current) {
+        guard let firstTicket = items.firstIndex(where: \.isTicketed) else { return }
+        if startDate == nil, let pin = items[firstTicket].pinnedStart {
+            // A ticket on a trip without a date gives the trip its date.
+            let offset = TripItineraryText.dayOffsets(of: self)[firstTicket].first
+            startDate = TripCalendar.day(pin, plus: -offset, timeZone: timeZone) ?? pin
+        }
+        for i in items.indices where items[i].isTicketed {
+            guard let pin = items[i].pinnedStart else { continue }
+            if i == 0 {
+                startDate = pin
+                continue
+            }
+            guard items[i - 1].isStay,
+                  let from = dated(timeZone: timeZone)[i - 1].startDate,
+                  let span = TripCalendar.days(from: from, to: pin, timeZone: timeZone),
+                  span >= 0, span < Self.maxStayDays else { continue }
+            items[i - 1].days = span + 1
+        }
+    }
+
     /// Whether this stay is the first of the chain: its "Von" is the
     /// trip's date, whatever journey from home leads into it (A1).
     func isFirstStay(_ stayId: TripItineraryItem.ID) -> Bool {
@@ -448,6 +552,7 @@ struct TripItineraryDraft: Equatable {
             }
             let back = outbound.map { -max(0, $0.nights ?? 0) } ?? 0
             startDate = TripCalendar.day(day, plus: back, timeZone: timeZone) ?? day
+            settleTickets(timeZone: timeZone)
             return
         }
         guard var stay = self[stayId] else { return }
@@ -496,6 +601,7 @@ struct TripItineraryDraft: Equatable {
             found.append("Aufenthalt \(position + 1) hat noch keinen Ort.")
         }
         found.append(contentsOf: pinProblems())
+        found.append(contentsOf: ticketProblems())
         // A pin decides the nights of the journey before it.
         for journey in dated().map(\.item) where journey.isJourney {
             if (journey.nights ?? 0) == 0,
@@ -517,7 +623,7 @@ struct TripItineraryDraft: Equatable {
         var found: [String] = []
         let dated = self.dated(timeZone: timeZone)
         for index in items.indices {
-            guard let pin = activePin(at: index), let from = dated[index - 1].startDate,
+            guard let pin = activePin(at: index), !items[index - 1].isTicketed, let from = dated[index - 1].startDate,
                   let nights = TripCalendar.days(from: from, to: pin, timeZone: timeZone) else { continue }
             let pinnedName = title(of: items[index])
             let previousName = index >= 2 ? title(of: items[index - 2]) : homeLabel
@@ -536,6 +642,43 @@ struct TripItineraryDraft: Equatable {
         return found
     }
 
+    /// What a ticket cannot hold: a time left open, a stay before it
+    /// that begins after it leaves or would need more than 14 days, a
+    /// pinned stay after it on another day than it arrives. Said the way
+    /// the server says it.
+    func ticketProblems(timeZone: TimeZone = .current) -> [String] {
+        var found: [String] = []
+        let dated = self.dated(timeZone: timeZone)
+        for (i, journey) in items.enumerated() where journey.isTicketed {
+            guard let pin = journey.pinnedStart else { continue }
+            let name = self.name(of: journey)
+            if !journey.isTimed {
+                found.append("Ein fester Termin braucht Abfahrt und Ankunft (\(name)).")
+            }
+            if i > 0, items[i - 1].isStay, let from = dated[i - 1].startDate,
+               let span = TripCalendar.days(from: from, to: pin, timeZone: timeZone) {
+                let stay = title(of: items[i - 1])
+                if span < 0 {
+                    found.append("\(name) hat einen festen Termin am \(TripItineraryText.shortDate(pin, timeZone: timeZone)), "
+                                 + "aber „\(stay)“ beginnt erst am \(TripItineraryText.shortDate(from, timeZone: timeZone)). "
+                                 + "Davor kürzen, „\(stay)“ lösen oder den Termin ändern.")
+                } else if span + 1 > Self.maxStayDays {
+                    found.append("\(name) hat einen festen Termin am \(TripItineraryText.shortDate(pin, timeZone: timeZone)); "
+                                 + "„\(stay)“ müsste dafür \(span + 1) Tage dauern, ein Aufenthalt hat höchstens "
+                                 + "\(Self.maxStayDays). Einen Aufenthalt einfügen oder den Termin ändern.")
+                }
+            }
+            if i + 1 < items.count, items[i + 1].isStay, let stayPin = activePin(at: i + 1),
+               let arrives = dated[i].endDate, stayPin != arrives {
+                let stay = title(of: items[i + 1])
+                found.append("„\(stay)“ ist auf den \(TripItineraryText.shortDate(stayPin, timeZone: timeZone)) festgelegt, "
+                             + "\(name) kommt mit festem Termin aber am "
+                             + "\(TripItineraryText.shortDate(arrives, timeZone: timeZone)) an. Einen der beiden Termine lösen.")
+            }
+        }
+        return found
+    }
+
     var request: TripItineraryRequest {
         TripItineraryRequest(startDate: startDate, items: items)
     }
@@ -549,6 +692,7 @@ struct TripItineraryDraft: Equatable {
         set {
             guard let newValue, let i = index(of: id) else { return }
             items[i] = newValue
+            settleTickets()
         }
     }
 
@@ -621,6 +765,7 @@ struct TripItineraryDraft: Equatable {
     func hasDetails(_ id: TripItineraryItem.ID) -> Bool {
         guard let journey = self[id] else { return false }
         return journey.departAt != nil || journey.arriveAt != nil || (journey.nights ?? 0) != 0
+            || journey.pinnedStart != nil
             || !(journey.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -742,6 +887,7 @@ struct TripItineraryDraft: Equatable {
             fixed[i].mode = TripItineraryItem.newJourney(from: from, to: to).mode
         }
         items = fixed
+        settleTickets()
     }
 }
 

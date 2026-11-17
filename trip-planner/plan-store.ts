@@ -1872,7 +1872,7 @@ export interface LegFrameUpdate {
   mode?: TransportMode;
   /** ISO date, or null to take the dates off the trip again. */
   startDate?: string | null;
-  /** Whether a stay keeps its first day (migration 0319). */
+  /** Whether a stay keeps its first day, or a journey with a ticket its departure day (migration 0319). */
   startPinned?: boolean;
 }
 

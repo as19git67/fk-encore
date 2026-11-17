@@ -245,8 +245,10 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   ihn an seinem Tag, und die Weiterreise davor bekommt die Nächte
   dazwischen. Passt das nicht (davor zu lang, oder mehr als sechs Nächte
   frei, mit dem Schiff 30), sichert das Blatt nicht und sagt, was zu tun
-  ist: davor kürzen, einen Aufenthalt einfügen oder den Pin lösen. Ein
-  angepinnter Aufenthalt trägt im Reiseverlauf eine Nadel. Ohne Datum
+  ist: davor kürzen, einen Aufenthalt einfügen oder den Pin lösen. Eine
+  Nadel im Reiseverlauf trägt jeder Aufenthalt, dessen Beginn feststeht:
+  angepinnt, der erste einer Reise mit Datum, oder erreicht über eine
+  Weiterreise mit festem Termin. Ohne Datum
   gibt es nichts anzupinnen, und die Länge ist ein Zähler.
 - Ankunft und Abfahrt stehen im Blatt des Aufenthalts und lassen sich
   dort ändern; es sind dieselben Zeiten wie an der Weiterreise daneben
@@ -260,9 +262,19 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   (je „offen · festlegen“), Nächte unterwegs und eine Notiz (Flugnummer,
   Sitzplatz), die auch auf ihrer Karte im Verlauf steht. Ist der
   Aufenthalt danach angepinnt, ergeben sich die Nächte daraus und stehen
-  nur da. „Angaben zurücksetzen“ nimmt Verkehrsmittel, Zeiten, Nächte und
-  Notiz weg; die Verbindung zwischen den Aufenthalten bleibt mit offenen
-  Zeiten.
+  nur da. Neben Abfahrt und Ankunft steht der Tag, auf den sie fallen,
+  zum Lesen. „Angaben zurücksetzen“ nimmt Verkehrsmittel, Termin, Zeiten,
+  Nächte und Notiz weg; die Verbindung zwischen den Aufenthalten bleibt
+  mit offenen Zeiten.
+- Mit einem Ticket (Zug, Flug, Fähre) schaltet „Termin steht fest“ im
+  Blatt der Anreise, Weiterreise oder Heimreise Abfahrtstag und
+  Ankunftstag frei. Die Weiterreise ist dann angepinnt: der Aufenthalt
+  davor endet am Abfahrtstag (seine Länge folgt daraus), die Aufenthalte
+  danach rücken mit der Ankunft. Was sich verschiebt, steht vor „Sichern“
+  im Blatt. Liegt der Termin vor dem Beginn des Aufenthalts davor, müsste
+  der länger als 14 Tage dauern oder beginnt ein angepinnter Aufenthalt
+  danach an einem anderen Tag, sagt das Blatt das in Rot und sichert
+  nicht. Eine Weiterreise mit Termin trägt im Verlauf eine Nadel.
 - Mit Auto, Rad oder zu Fuß an einem Tag hat das Blatt den Abschnitt
   „Halte unterwegs“: „Halt hinzufügen“ öffnet die Spot-Auswahl mit Orten
   nah am Weg (die Entfernung ist der Umweg), „Unterwegs einplanen“ legt
