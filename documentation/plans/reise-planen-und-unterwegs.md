@@ -82,6 +82,18 @@ What is still wrong is the shape of the app around it:
   an unpinned stay moves with the chain (Anton, 15.11.). The stay sheet
   carries "Wann?" (Von, Bis, the pin) and the neighbouring journeys' times;
   the journey sheet has no "Zeiten noch offen" switch and no "Von".
+- A journey with a ticket (train, flight, ferry) is pinned too ("Termin
+  steht fest", Anton, 17.11.): `pinnedStart` on a journey is its departure
+  day, stored as `start_pinned` on its transit leg, so it needs both times.
+  It keeps its day and its nights; the stay before ends on the departure day
+  (its length follows), the stays after follow the arrival. On the way there
+  it is the trip's first day; on a trip without a date it gives one. A
+  ticket before the stay before begins, one that would stretch that stay
+  past 14 days, or a pinned stay after it on another day than the arrival is
+  refused with what to do (`settleBeforeJourneyPin` in `itinerary.ts`); the
+  sheet says the same before "Sichern", and what the ticket moves. Without a
+  ticket the journey sheet shows the derived days next to the times, read
+  only. Mock 19.
 - Spot cards show picture, duration, priority and estimated time. Drag
   reorders, also into another day. `⋯` opens the actions, a tap the details.
 - **Pinned** is a spot with a fixed time the ordering must not move: ticket

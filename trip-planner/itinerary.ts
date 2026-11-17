@@ -15,7 +15,11 @@
  *   - the **trip** owns one date, its first day;
  *   - a stay may be **pinned** to its first day (`pinnedStart`): a
  *     booked hotel, a port of call. It stays there whatever changes
- *     before it, and the journey before it takes up the difference.
+ *     before it, and the journey before it takes up the difference;
+ *   - a journey may be **pinned** to its departure day as well: a
+ *     ticket for a train or a flight. It keeps its day, its times and
+ *     its nights; the stay before it ends on that day, and the stays
+ *     after it follow from its arrival.
  *
  * Every other date is derived, deterministically, by `deriveFrames`:
  * a stay runs from the cursor over its days, the journey after it
@@ -144,6 +148,10 @@ export interface ItineraryItem {
   nights?: number;
   /** What to keep in mind on the way: the flight number, the seat. */
   note?: string | null;
+  // A journey reads `pinnedStart` too: its departure day, when a ticket
+  // fixes it. It needs both times, and keeps its nights; the stay
+  // before it ends that day (its length follows), and the chain goes on
+  // from the arrival. On a trip without a date it gives the trip one.
 }
 
 /** An item as the trip reads it back: with the dates the chain gives it. */
@@ -581,6 +589,7 @@ function journeyFromTransit(leg: StoredLeg): ItineraryItem {
     arriveAt: leg.endMinutes === null ? null : formatMinutes(leg.endMinutes),
     nights: Math.max(0, leg.days.length - 1),
     mode: leg.mode,
+    pinnedStart: leg.startPinned && leg.startDate ? leg.startDate : null,
   };
 }
 
@@ -664,6 +673,8 @@ export interface JourneyFrame {
   endMinutes: number | null;
   /** Both times known: this journey is a transit leg of its own. */
   timed: boolean;
+  /** Its departure day is pinned (`pinnedStart`), by a ticket. */
+  pinned: boolean;
   /** Index of the stay it leaves, or null for home. */
   from: number | null;
   /** Index of the stay it reaches, or null for home. */
@@ -709,7 +720,8 @@ export function deriveFrames(
 
   const frames: ItineraryFrame[] = [];
   const firstStay = items.findIndex((i) => i.kind === "stay");
-  let cursor = chain.startDate;
+  // A ticket on a trip without a date gives the trip its date.
+  let cursor = chain.startDate ?? startFromJourneyPin(items);
   for (const [index, item] of items.entries()) {
     if (item.kind === "stay") {
       const days = validateStayDays(item.days, index);
@@ -718,7 +730,18 @@ export function deriveFrames(
       const after = items[index + 1];
       const pin = index === firstStay ? null : pinnedStartOf(item, index);
       const pinned = pin !== null && cursor !== null && before?.kind === "journey";
-      if (pinned) {
+      const ticketBefore = frames.at(-1)?.kind === "journey" && (frames.at(-1) as JourneyFrame).pinned;
+      if (pinned && ticketBefore) {
+        // A ticket brings the group on its own day; a pinned stay
+        // after it has to be that day, the journey cannot stretch.
+        if (pin !== cursor) {
+          throw APIError.failedPrecondition(
+            `„${stayTitle(item, index, options.homeLabel)}" ist auf den ${germanDate(pin)} festgelegt, `
+              + `${journeyName(items, index - 1, options.homeLabel)} hat aber einen festen Termin und kommt am `
+              + `${germanDate(cursor as string)} an. Einen der beiden Termine lösen.`,
+          );
+        }
+      } else if (pinned) {
         cursor = settleBeforePin(frames, items, index, pin, options.homeLabel);
       }
       const arriveMinutes = before
@@ -758,16 +781,26 @@ export function deriveFrames(
       if (nights === 0 && departMinutes !== null && endMinutes !== null && endMinutes <= departMinutes) {
         throw APIError.invalidArgument(`items[${index}]: die Ankunft muss nach der Abfahrt liegen`);
       }
+      const pin = journeyPinOf(item, index);
+      if (pin !== null) {
+        if (departMinutes === null || endMinutes === null) {
+          throw APIError.invalidArgument(`items[${index}]: ein fester Termin braucht Abfahrt und Ankunft`);
+        }
+        cursor = frames.at(-1)?.kind === "stay"
+          ? settleBeforeJourneyPin(frames, items, index, pin, options.homeLabel)
+          : pin;
+      }
       const endDate = cursor ? addDays(cursor, nights) : null;
       frames.push({
         kind: "journey",
-        item,
+        item: { ...item, pinnedStart: pin },
         startDate: cursor,
         endDate,
         days: nights + 1,
         departMinutes,
         endMinutes,
         timed: departMinutes !== null && endMinutes !== null,
+        pinned: pin !== null,
         from: index === 0 ? null : index - 1,
         to: index === items.length - 1 ? null : index + 1,
       });
@@ -784,6 +817,79 @@ function pinnedStartOf(item: ItineraryItem, index: number): string | null {
     throw APIError.invalidArgument(`items[${index}].pinnedStart must be YYYY-MM-DD, got '${pin}'`);
   }
   return pin;
+}
+
+function journeyPinOf(item: ItineraryItem, index: number): string | null {
+  const pin = item.pinnedStart;
+  if (pin === undefined || pin === null) return null;
+  if (!isCalendarDate(pin)) {
+    throw APIError.invalidArgument(`items[${index}].pinnedStart must be YYYY-MM-DD, got '${pin}'`);
+  }
+  return pin;
+}
+
+/**
+ * The trip's first day, counted back from the first journey with a
+ * ticket, for a trip that has no date yet; null without one.
+ */
+function startFromJourneyPin(items: readonly ItineraryItem[]): string | null {
+  let offset = 0;
+  for (const [index, item] of items.entries()) {
+    if (item.kind === "journey") {
+      const pin = journeyPinOf(item, index);
+      if (pin !== null) return addDays(pin, -offset);
+      offset += Math.max(0, item.nights ?? 0);
+    } else {
+      offset += Math.max(1, item.days ?? 1) - 1;
+    }
+  }
+  return null;
+}
+
+/**
+ * A journey with a ticket keeps its departure day: the stay before it —
+ * already derived, the last frame — ends that day, and its length
+ * follows. A ticket before the stay has begun, or one that would make
+ * the stay longer than a stay may be, is refused with what to do about
+ * it. Answers the departure day, where the journey starts.
+ */
+function settleBeforeJourneyPin(
+  frames: ItineraryFrame[],
+  items: readonly ItineraryItem[],
+  index: number,
+  pin: string,
+  homeLabel: string,
+): string {
+  const stay = frames[frames.length - 1] as StayFrame;
+  if (stay.startDate === null) return pin;
+  const days = daysBetween(stay.startDate, pin) + 1;
+  const name = stayTitle(items[index - 1], index - 1, homeLabel);
+  const journey = journeyName(items, index, homeLabel);
+  if (days < 1) {
+    throw APIError.failedPrecondition(
+      `${capitalised(journey)} hat einen festen Termin am ${germanDate(pin)}, aber „${name}" beginnt erst am `
+        + `${germanDate(stay.startDate)}. Davor kürzen, „${name}" lösen oder den Termin ändern.`,
+    );
+  }
+  if (days > MAX_STAY_DAYS) {
+    throw APIError.failedPrecondition(
+      `${capitalised(journey)} hat einen festen Termin am ${germanDate(pin)}; „${name}" müsste dafür ${days} Tage `
+        + `dauern, ein Aufenthalt hat höchstens ${MAX_STAY_DAYS}. Einen Aufenthalt einfügen oder den Termin ändern.`,
+    );
+  }
+  frames[frames.length - 1] = { ...stay, days, endDate: pin, item: { ...stay.item, days } };
+  return pin;
+}
+
+/** "die Anreise", "die Heimreise", "die Weiterreise nach Zweiter Ort". */
+function journeyName(items: readonly ItineraryItem[], index: number, homeLabel: string): string {
+  if (index === 0) return "die Anreise";
+  if (index === items.length - 1) return "die Heimreise";
+  return `die Weiterreise nach „${stayTitle(items[index + 1], index + 1, homeLabel)}"`;
+}
+
+function capitalised(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
@@ -1162,13 +1268,17 @@ async function writeSlots(plan: StoredPlan, resolved: Resolved, planned: Planned
     if (!slot.existing) {
       if (!result) throw APIError.internal("a new leg was not planned");
       const legId = await insertLeg(plan.id, index, result.leg);
-      if (slot.frame.kind === "stay" && slot.frame.pinned) {
+      if (slot.frame.pinned) {
         await updateLegFrames(plan.id, [{ legId, startPinned: true }]);
       }
       continue;
     }
     const legId = slot.existing.id;
     if (slot.frame.kind === "journey") {
+      // The ticket is kept whether or not the days are planned again.
+      if (slot.existing.startPinned !== slot.frame.pinned) {
+        await updateLegFrames(plan.id, [{ legId, startPinned: slot.frame.pinned }]);
+      }
       if (!result) continue;
       const request = slot.request;
       await updateTransitLeg(plan.id, legId, {

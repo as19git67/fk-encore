@@ -189,6 +189,80 @@ describe("deriveFrames", () => {
     expect(() => deriveFrames(chain(2, "2027-6-20"), options)).toThrow(/pinnedStart/);
   });
 
+  it("keeps a journey with a ticket on its day: the stay before ends there, the stays after follow", () => {
+    const options = { home: true, homeLabel: "Zuhause" };
+    const items = (pin: string | null, firstDays = 4) => [
+      journey({ departAt: "08:00", arriveAt: "12:00" }),
+      stay("Erster Ort", firstDays),
+      journey({ departAt: "21:30", arriveAt: "07:15", nights: 1, pinnedStart: pin }),
+      stay("Zweiter Ort", 3),
+      journey(),
+    ];
+    const frames = deriveFrames({ startDate: "2027-06-03", items: items("2027-06-05") }, options);
+    expect(frames.map((f) => [f.startDate, f.endDate])).toEqual([
+      ["2027-06-03", "2027-06-03"],
+      ["2027-06-03", "2027-06-05"],
+      ["2027-06-05", "2027-06-06"],
+      ["2027-06-06", "2027-06-08"],
+      ["2027-06-08", "2027-06-08"],
+    ]);
+    // The stay before is shortened to the ticket, the ticket keeps its night.
+    expect(frames[1]).toMatchObject({ days: 3, item: { days: 3 } });
+    expect(frames[2]).toMatchObject({ pinned: true, days: 2, item: { pinnedStart: "2027-06-05", nights: 1 } });
+
+    // A later ticket lengthens it; a ticket before the stay begins, or
+    // one that needs more than 14 days, is refused.
+    expect(deriveFrames({ startDate: "2027-06-03", items: items("2027-06-09") }, options)[1])
+      .toMatchObject({ days: 7, endDate: "2027-06-09" });
+    expect(() => deriveFrames({ startDate: "2027-06-03", items: items("2027-06-02") }, options))
+      .toThrow(/beginnt erst am 3\.6\.2027/);
+    expect(() => deriveFrames({ startDate: "2027-06-03", items: items("2027-06-30") }, options))
+      .toThrow(/höchstens 14/);
+
+    // A ticket needs both of its times.
+    const untimed = items("2027-06-05");
+    untimed[2] = journey({ departAt: "21:30", pinnedStart: "2027-06-05" });
+    expect(() => deriveFrames({ startDate: "2027-06-03", items: untimed }, options)).toThrow(/Abfahrt und Ankunft/);
+  });
+
+  it("dates a trip without a date from its ticket, and an outbound ticket sets the first day", () => {
+    const options = { home: true, homeLabel: "Zuhause" };
+    const undated = deriveFrames({
+      startDate: null,
+      items: [
+        journey(),
+        stay("Erster Ort", 3),
+        journey({ departAt: "10:00", arriveAt: "14:00", pinnedStart: "2027-06-12" }),
+        stay("Zweiter Ort", 2),
+        journey(),
+      ],
+    }, options);
+    expect(undated.map((f) => f.startDate)).toEqual(["2027-06-10", "2027-06-10", "2027-06-12", "2027-06-12", "2027-06-13"]);
+
+    const outbound = deriveFrames({
+      startDate: "2027-06-01",
+      items: [
+        journey({ departAt: "06:00", arriveAt: "11:00", pinnedStart: "2027-06-04" }),
+        stay("Erster Ort", 2),
+        journey(),
+      ],
+    }, options);
+    expect(outbound.map((f) => f.startDate)).toEqual(["2027-06-04", "2027-06-04", "2027-06-05"]);
+  });
+
+  it("refuses a pinned stay after a ticket that arrives on another day", () => {
+    const options = { home: false, homeLabel: "Zuhause" };
+    const items = (pin: string) => [
+      stay("Erster Ort", 2),
+      journey({ departAt: "10:00", arriveAt: "14:00", pinnedStart: "2027-06-04" }),
+      stay("Hafen", 2, { pinnedStart: pin }),
+    ];
+    expect(deriveFrames({ startDate: "2027-06-03", items: items("2027-06-04") }, options)[2])
+      .toMatchObject({ pinned: true, startDate: "2027-06-04" });
+    expect(() => deriveFrames({ startDate: "2027-06-03", items: items("2027-06-06") }, options))
+      .toThrow(/Einen der beiden Termine lösen/);
+  });
+
   it("refuses what is not a chain", () => {
     const options = { home: false, homeLabel: "Zuhause" };
     expect(() => deriveFrames({ startDate: null, items: [stay("A", 1), stay("B", 1)] }, options))
@@ -500,6 +574,39 @@ describe("PUT /trip-planner/plans/:planId/itinerary", () => {
     const loose = read.items.map((i) => (i.kind === "stay" ? { ...i, pinnedStart: null } : { ...i }));
     const { plan: loosened } = await putTripItinerary({ planId: plan.id, startDate: read.startDate, items: loose });
     expect(loosened.legs.map((l) => l.startDate)).toEqual(["2026-09-05", "2026-09-08", "2026-09-10"]);
+  });
+
+  it("keeps a ticket on its journey, shortens the stay before it, and reads the ticket back", async () => {
+    const plan = await threeStays();
+    const chain = await getTripItinerary({ planId: plan.id });
+    const items = chain.items.map((i) => ({ ...i }));
+    // The journey between the first and the second stay gets a ticket a
+    // day earlier than the chain would leave.
+    const journeyIndex = items.findIndex((i) => i.kind === "journey");
+    const leaves = chain.items[journeyIndex].startDate as string;
+    const [y, m, d] = leaves.split("-").map(Number);
+    const earlier = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+    items[journeyIndex] = { ...items[journeyIndex], departAt: "09:00", arriveAt: "11:00", pinnedStart: earlier };
+
+    const { plan: after } = await putTripItinerary({ planId: plan.id, startDate: chain.startDate, items });
+    const transit = after.legs.find((l) => l.kind === "transit");
+    expect(transit).toMatchObject({ startDate: earlier, startPinned: true });
+    expect(after.legs[0].days.length).toBe((chain.items[0].days ?? 0) - 1);
+
+    const read = await getTripItinerary({ planId: plan.id });
+    expect(read.items[journeyIndex]).toMatchObject({ kind: "journey", pinnedStart: earlier, startDate: earlier });
+
+    // A longer first stay does not move the ticket: the ticket decides its length.
+    const longer = read.items.map((i) => ({ ...i }));
+    longer[0].days = (longer[0].days ?? 1) + 5;
+    const { plan: kept } = await putTripItinerary({ planId: plan.id, startDate: read.startDate, items: longer });
+    expect(kept.legs.find((l) => l.kind === "transit")?.startDate).toBe(earlier);
+    expect(kept.legs[0].days.length).toBe(after.legs[0].days.length);
+
+    // Without the ticket the journey stays a timed journey, no longer pinned.
+    const loose = read.items.map((i) => (i.kind === "journey" ? { ...i, pinnedStart: null } : { ...i }));
+    const { plan: loosened } = await putTripItinerary({ planId: plan.id, startDate: read.startDate, items: loose });
+    expect(loosened.legs.find((l) => l.kind === "transit")).toMatchObject({ startPinned: false });
   });
 
   it("ends the last stay with its own departure when no journey leaves it, and reads it back", async () => {
