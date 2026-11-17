@@ -81,9 +81,14 @@ jobs:
 
       - name: Work out version and build number
         run: |
+          # Commit count plus the workflow's run number: the count never
+          # goes back on main and the run number rises with every run, so
+          # the sum rises with every upload. The project's own number (or
+          # the count alone) did not: a squash merge after a branch that
+          # uploaded with its longer history, or a second run on the same
+          # commit, gave a number App Store Connect already had.
           count=$(git rev-list --count HEAD)
-          project=$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\);.*/\1/p' FKPhotos.xcodeproj/project.pbxproj | head -1)
-          build=$(( count > ${project:-0} ? count : ${project:-0} ))
+          build=$(( count + GITHUB_RUN_NUMBER ))
           version=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' FKPhotos.xcodeproj/project.pbxproj | head -1)
           echo "BUILD_NUMBER=$build" >> "$GITHUB_ENV"
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
@@ -142,7 +147,7 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee "$RUNNER_TEMP/export.log"; then
             if grep -qiE 'bundle version must be higher|has already been (used|uploaded)|CFBundleVersion.*(already|previously)' "$RUNNER_TEMP/export.log"; then
-              echo "::error::Build $BUILD_NUMBER is already in App Store Connect. Merge something new to main (or raise MARKETING_VERSION) and run again."
+              echo "::error::Build $BUILD_NUMBER is already in App Store Connect. Run the workflow again; each run gets a higher number."
             fi
             exit 1
           fi
