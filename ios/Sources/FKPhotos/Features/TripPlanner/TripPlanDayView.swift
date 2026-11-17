@@ -235,6 +235,7 @@ struct TripPlanDayView: View {
             NavigationStack {
                 TripItineraryView(viewModel: viewModel, focus: focus,
                                   stopActions: { stop in stopActions(stop) })
+                    .equatable()
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -311,6 +312,9 @@ struct TripPlanDayView: View {
     private var itineraryRoot: some View {
         TripItineraryView(viewModel: viewModel, onPlan: { _, _ in showingStay = true },
                           stopActions: { stop in stopActions(stop) })
+            // Rebuilt only when it gets another model: it observes the
+            // model itself (see `TripItineraryView: Equatable`).
+            .equatable()
             .onAppear {
                 // "Neue Reise" asked for the itinerary, and this is it.
                 viewModel.wantsItinerary = false
