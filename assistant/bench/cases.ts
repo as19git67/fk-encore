@@ -449,6 +449,40 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    // A feedback case: the Kategorien of bookings are tags, so the top N with
+    // a chart is one transaction_totals by tag — not a counterparty ranking —
+    // and "ohne Umbuchungen" leaves that tag out instead of being ignored.
+    id: "top-tag-expenses-chart",
+    title: "Größte Kategorien ohne eine Kategorie als Diagramm",
+    question: "Zeig mir als Diagramm die fünf Kategorien mit den höchsten Ausgaben im laufenden Monat, Umbuchungen nicht mitgezählt.",
+    firstTools: ["transaction_totals"],
+    expect: [{
+      tool: "transaction_totals",
+      args: {
+        group_by: "tag",
+        top: 5,
+        without_tags: { $contains: "umbuchung" },
+        direction: "out",
+        from: "2026-10-01",
+        to: { $in: ["2026-10-31", "2026-10-15"] },
+      },
+    }],
+    results: {
+      transaction_totals: {
+        total: -1830.4, count: 41, currency: "EUR",
+        groups: [
+          { group: "Lebensmittel", sum: -520.1, count: 14 },
+          { group: "Wohnen", sum: -480.0, count: 2 },
+          { group: "Auto", sum: -260.3, count: 4 },
+          { group: "Freizeit", sum: -190.0, count: 6 },
+          { group: "Versicherung", sum: -150.0, count: 3 },
+          { group: "Sonstige", sum: -130.0, count: 7 },
+          { group: "Ohne Tag", sum: -100.0, count: 5 },
+        ],
+      },
+    },
+  },
+  {
     id: "bookings-by-counterparty",
     title: "Buchungen eines Händlers",
     question: "Zeig mir alle Buchungen von Musterhandel im September.",

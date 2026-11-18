@@ -61,6 +61,8 @@ export interface TransactionTotalsRequest {
   group_by?: TotalsGroupBy;
   /** By tag: only these tags get a group of their own. */
   group_tags?: string[];
+  /** By tag: only the largest this many tag groups, the rest as "Sonstige". */
+  group_top?: number;
 }
 
 /**
@@ -80,7 +82,7 @@ export const transactionTotals = api(
     if (!collectionId && Object.keys(criteria).length === 0) {
       throw APIError.invalidArgument("say which bookings: criteria or collection_id");
     }
-    const spec = normalizeTotalsSpec({ group_by: req.group_by, tags: req.group_tags }) ?? { group_by: "none" as const };
+    const spec = normalizeTotalsSpec({ group_by: req.group_by, tags: req.group_tags, top: req.group_top }) ?? { group_by: "none" as const };
 
     const readable = await readableFinanceAccountIds(auth);
     const conds: SQL[] = [...criteriaConditions(criteria)];

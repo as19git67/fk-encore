@@ -30,7 +30,15 @@ export interface TotalsSpec {
   group_by: TotalsGroupBy;
   /** By tag: only these tags get a group of their own, the rest is "Sonstige". */
   tags?: string[];
+  /**
+   * By tag: only the `top` largest tag groups stay (the "top 5 categories");
+   * the other tag groups fold into "Sonstige", so the sums still add up.
+   */
+  top?: number;
 }
+
+/** The most groups `top` may keep. */
+export const MAX_TOP = 50;
 
 export const NO_TAG = "Ohne Tag";
 export const OTHER_TAGS = "Sonstige";
@@ -101,7 +109,29 @@ export function normalizeTotalsSpec(raw: unknown): TotalsSpec | null {
   const tags = Array.isArray(o.tags)
     ? [...new Set(o.tags.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean))]
     : [];
-  return group_by === "tag" && tags.length ? { group_by, tags } : { group_by };
+  if (group_by !== "tag") return { group_by };
+  const top = typeof o.top === "number" && Number.isInteger(o.top) && o.top >= 1 ? Math.min(o.top, MAX_TOP) : undefined;
+  return { group_by, ...(tags.length ? { tags } : {}), ...(top ? { top } : {}) };
+}
+
+/**
+ * The `top` largest tag groups by amount, the other tag groups folded into
+ * one "Sonstige"; the groups without a tag of their own stay as they are.
+ */
+export function keepTopTagGroups(sorted: TotalsGroup[], top: number): TotalsGroup[] {
+  const own = sorted.filter((g) => g.key !== NO_TAG && g.key !== NO_OTHER_TAG && g.key !== OTHER_TAGS);
+  if (own.length <= top) return sorted;
+  const kept = [...own].sort((a, b) => Math.abs(b.sum) - Math.abs(a.sum) || a.key.localeCompare(b.key)).slice(0, top);
+  const keep = new Set(kept.map((g) => g.key));
+  const untagged = (g: TotalsGroup) => g.key === NO_TAG || g.key === NO_OTHER_TAG;
+  const folded = sorted.filter((g) => !keep.has(g.key) && !untagged(g));
+  const other: TotalsGroup = {
+    key: OTHER_TAGS,
+    label: OTHER_TAGS,
+    count: folded.reduce((s, g) => s + g.count, 0),
+    sum: folded.reduce((s, g) => s + g.sum, 0),
+  };
+  return [...kept, other, ...sorted.filter(untagged)];
 }
 
 function periodOf(date: string, by: "month" | "quarter" | "year"): { key: string; label: string } {
@@ -172,11 +202,12 @@ export function computeTotals(
     }
   }
 
-  const sorted = [...groups.values()];
+  let sorted = [...groups.values()];
   if (spec.group_by === "tag") {
     // Biggest movement first; then the other tags, then the untagged.
     const tail = (g: TotalsGroup) => (g.key === NO_TAG || g.key === NO_OTHER_TAG ? 2 : g.key === OTHER_TAGS ? 1 : 0);
     sorted.sort((a, b) => tail(a) - tail(b) || Math.abs(b.sum) - Math.abs(a.sum) || a.key.localeCompare(b.key));
+    if (spec.top) sorted = keepTopTagGroups(sorted, spec.top);
   } else {
     sorted.sort((a, b) => a.key.localeCompare(b.key));
   }
@@ -205,6 +236,10 @@ export function cleanCriteria(raw: unknown): TransactionCriteria {
     ? [...new Set(c.tags.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean))]
     : [];
   if (tags.length) out.tags = tags;
+  const without = Array.isArray(c.without_tags)
+    ? [...new Set(c.without_tags.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean))]
+    : [];
+  if (without.length) out.without_tags = without;
   if (typeof c.text === "string" && c.text.trim()) out.text = c.text.trim().slice(0, 200);
   const iso = /^\d{4}-\d{2}-\d{2}$/;
   if (typeof c.from === "string" && iso.test(c.from)) out.from = c.from;

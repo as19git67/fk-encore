@@ -617,6 +617,7 @@ function criteriaWords(c: TransactionCriteria): string {
   const parts: string[] = [];
   if (c.text) parts.push(`Suche „${c.text}“`);
   if (c.tags?.length) parts.push(`${c.tags.length === 1 ? "Tag" : "Tags"} ${c.tags.map((t) => `„${t}“`).join(", ")}`);
+  if (c.without_tags?.length) parts.push(`ohne ${c.without_tags.map((t) => `„${t}“`).join(", ")}`);
   if (c.from && c.to) parts.push(`${deDate(c.from)}–${deDate(c.to)}`);
   else if (c.from) parts.push(`ab ${deDate(c.from)}`);
   else if (c.to) parts.push(`bis ${deDate(c.to)}`);
