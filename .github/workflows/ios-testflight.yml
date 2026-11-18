@@ -25,12 +25,9 @@ name: iOS TestFlight
 # The key needs the Admin role; App Manager may not create the
 # distribution certificate that cloud signing needs.
 #
-# Build number: the commit count of the checked-out ref, never lower than
-# the number in the project (which the pre-commit hook keeps at the commit
-# count, see scripts/sync-ios-build-number.sh). It is passed to xcodebuild
-# and applies to all three targets alike; nothing is committed. Running
-# twice on the same commit gives the same number, which App Store Connect
-# refuses — the run then says so.
+# Build number: 2500 plus the workflow's run number, which rises with
+# every run on any branch. It is passed to xcodebuild and applies to all
+# three targets alike; nothing is committed.
 
 on:
   workflow_dispatch:
@@ -51,9 +48,6 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The build number is the commit count, so the whole history.
-          fetch-depth: 0
 
       - name: Select latest Xcode
         run: |
@@ -91,14 +85,13 @@ jobs:
 
       - name: Work out version and build number
         run: |
-          # Commit count plus the workflow's run number: the count never
-          # goes back on main and the run number rises with every run, so
-          # the sum rises with every upload. The project's own number (or
-          # the count alone) did not: a squash merge after a branch that
-          # uploaded with its longer history, or a second run on the same
-          # commit, gave a number App Store Connect already had.
-          count=$(git rev-list --count HEAD)
-          build=$(( count + GITHUB_RUN_NUMBER ))
+          # The run number rises with every run of this workflow, on any
+          # branch, so every upload gets a higher number. Anything built
+          # from the commit count did not: a branch has more commits than
+          # main after its squash merge, so a run on main after a run on
+          # the branch went lower (2479 after 2480). 2500 lies above every
+          # build uploaded so far.
+          build=$(( 2500 + GITHUB_RUN_NUMBER ))
           version=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' FKPhotos.xcodeproj/project.pbxproj | head -1)
           echo "BUILD_NUMBER=$build" >> "$GITHUB_ENV"
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
