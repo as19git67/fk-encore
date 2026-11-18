@@ -122,7 +122,11 @@ decision, not a side effect of a merge.
 - **Signing** is automatic signing with an App Store Connect API key
   (`-allowProvisioningUpdates`, cloud-managed distribution certificate). The
   key (Admin role) lives in the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
-  `ASC_KEY_P8`; no certificate or profile is in the repository.
+  `ASC_KEY_P8`; no certificate or profile is in the repository. Archiving on
+  a fresh runner creates an Apple Development certificate; the run revokes
+  it again at the end (`ios/scripts/dev-certs.rb`), because Apple allows
+  only a few per account and the archive fails once they are used up
+  (November 2026).
 - **Build number** is the commit count of the checked-out ref plus the
   workflow's run number, passed to `xcodebuild` for all three targets and
   not committed. It rises with every run, so a second run on the same
