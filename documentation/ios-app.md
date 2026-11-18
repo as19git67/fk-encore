@@ -127,12 +127,12 @@ decision, not a side effect of a merge.
   it again at the end (`ios/scripts/dev-certs.rb`), because Apple allows
   only a few per account and the archive fails once they are used up
   (November 2026).
-- **Build number** is the commit count of the checked-out ref plus the
-  workflow's run number, passed to `xcodebuild` for all three targets and
-  not committed. It rises with every run, so a second run on the same
-  commit uploads too. The count alone (or `CURRENT_PROJECT_VERSION`) did
-  not: a squash merge after a branch that had uploaded with its longer
-  history gave a number App Store Connect already had.
+- **Build number** is 2500 plus the workflow's run number, passed to
+  `xcodebuild` for all three targets and not committed. The run number
+  rises with every run on any branch, so every upload is higher than the
+  last. Anything based on the commit count was not: a branch has more
+  commits than main after its squash merge, so a run on main after a run
+  on the branch got a lower number.
 - **Version** is `MARKETING_VERSION` from the project; raise it there for a
   new release line.
 - The archive uses the shared scheme `FKPhotos`
