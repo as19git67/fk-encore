@@ -14,6 +14,7 @@ export const FINANCE_AREA: Area = {
   ],
   rules: [
     'A Sammelmappe or Mappe of bookings, with or without Zwischensummen, is create_transaction_folder (the folder keeps its rule and shows the sums); transaction_report is a PDF report, never a folder. The order of list_transactions is `order` (desc/asc) — `direction` there is money in or out.',
+    'The Kategorien of bookings are the user\'s tags: amounts per Kategorie, the largest Kategorien and a chart of them are transaction_totals(group_by = "tag"), never list_transactions grouped by counterparty; "außer X" is without_tags = [X], "die top N" is top = N. The answer shows the chart of the subtotals by itself.',
   ],
   examples: [
     '"Zeige mir die 10 neuesten Buchungen." → list_transactions(limit = 10) → name what the rows show; the rows themselves appear beside the answer.',
@@ -21,8 +22,9 @@ export const FINANCE_AREA: Area = {
     '"Liste alle Buchungen zur Wohnung mit Zwischensummen für Kauf, Reparatur und Mieteinnahmen und ermittle die Rendite." → list_transactions (as needed) → transaction_report(title = …, groups = [{name: "Kauf", transaction_ids: […]}, {name: "Reparatur", …}, {name: "Mieteinnahmen", tag: "Miete"}], transaction_ids = all bookings found, yield = {investment_group: "Kauf", income_groups: ["Mieteinnahmen"], cost_groups: ["Reparatur"]}) → repeat only the subtotals and the yield formula the tool printed, and name bookings whose group was doubtful.',
     '"Füge den Buchungen vom Baumarkt im September den Tag Renovierung hinzu." → list_transactions(q = "Baumarkt", from/to = September) → tag_transactions(from_previous_result = true, add = ["Renovierung"]) → say how many bookings get the tag and that it waits for "Ausführen" on the card; never ask first whether you should.',
     '"Was war dieses Jahr in jedem Monat meine größte Ausgabe?" → list_transactions(direction = "out", rank_by = "amount", order = "desc", group_by = "month", from = start of this year); "für jeden Monat/jedes Jahr das …" is one call with group_by, never one call per month.',
+    '"Welche drei Kategorien haben dieses Jahr am meisten gekostet, Steuern nicht mitgerechnet? Als Diagramm bitte." → transaction_totals(group_by = "tag", top = 3, without_tags = ["Steuern"], direction = "out", from = start of this year) → name the subtotals the tool printed; the chart appears beside the answer.',
   ],
   keywords:
-    "konto|konten|kontostand|saldo|buchung|umsatz|umsätze|lastschrift|überweisung|abbuchung|ausgabe|einnahme|zahlung|bezahlt|überwiesen|miete|rendite|zwischensumme|girokonto|"
+    "konto|konten|umbuchung|kontostand|saldo|buchung|umsatz|umsätze|lastschrift|überweisung|abbuchung|ausgabe|einnahme|zahlung|bezahlt|überwiesen|miete|rendite|zwischensumme|girokonto|"
     + "account|balance|booking|transaction|debit|payment|expense|income|rent",
 };

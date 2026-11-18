@@ -973,19 +973,13 @@ enum TripItineraryText {
     /// "Do 3.12.2026": the end of a trip, with its year.
     static func longDate(_ isoDay: String, timeZone: TimeZone = .current) -> String {
         guard let date = TripCalendar.date(fromIsoDay: isoDay, timeZone: timeZone) else { return isoDay }
-        let formatter = DateFormatter()
-        formatter.timeZone = timeZone
-        formatter.setLocalizedDateFormatFromTemplate("EEE d. MMM yyyy")
-        return formatter.string(from: date)
+        return TripFormatterCache.shared.localized("EEE d. MMM yyyy", timeZone: timeZone).string(from: date)
     }
 
     /// "Mo, 3.6." — short enough for a card, in the phone's own words.
     static func shortDate(_ isoDay: String, timeZone: TimeZone = .current) -> String {
         guard let date = TripCalendar.date(fromIsoDay: isoDay, timeZone: timeZone) else { return isoDay }
-        let formatter = DateFormatter()
-        formatter.timeZone = timeZone
-        formatter.setLocalizedDateFormatFromTemplate("EEE d. MMM")
-        return formatter.string(from: date)
+        return TripFormatterCache.shared.localized("EEE d. MMM", timeZone: timeZone).string(from: date)
     }
 
     /// "Mo, 3.6. – Mi, 5.6." or "Mo, 3.6." for one day; "Tag 1 – 3"
@@ -1104,5 +1098,102 @@ enum TripItineraryDays {
                                        label: parts.joined(separator: " · "), summary: summary,
                                        fill: noTime ? nil : fill, noTime: noTime)
         }
+    }
+}
+
+// MARK: - What the itinerary shows, reckoned once
+
+/// Everything on the itinerary that takes reckoning: the dates of the
+/// chain, the span under the name, the problems, and per stay its
+/// subtitle and its day rows. Built from the draft and the plan's days
+/// in one go, so a row that scrolls into view only reads it — building
+/// it per row, with the date chain walked three times and a formatter
+/// per date, cost the list its frames.
+struct TripItineraryLayout {
+    let dated: [TripItineraryDated]
+    let span: String
+    let problems: [String]
+    let subtitles: [TripItineraryItem.ID: String]
+    let dayRows: [TripItineraryItem.ID: [TripItineraryDayRow]]
+
+    /// `legDays` are the days of every leg as the plan has them, by
+    /// leg id; a stay not saved yet has none.
+    init(draft: TripItineraryDraft, legDays: [Int: [TripDay]], timeZone: TimeZone = .current) {
+        let dated = draft.dated(timeZone: timeZone)
+        let offsets = TripItineraryText.dayOffsets(of: draft)
+        self.dated = dated
+        span = TripItineraryText.tripSpan(draft, timeZone: timeZone)
+        problems = draft.problems()
+        var subtitles: [TripItineraryItem.ID: String] = [:]
+        var dayRows: [TripItineraryItem.ID: [TripItineraryDayRow]] = [:]
+        for (index, stay) in draft.items.enumerated() where stay.isStay {
+            subtitles[stay.id] = Self.subtitle(stay, dated: dated[index],
+                                               dayOffsets: offsets[min(index, offsets.count - 1)],
+                                               in: draft, timeZone: timeZone)
+            let arrival = draft.journey(before: stay.id)?.arriveAt ?? (draft.ownsStart(stay.id) ? stay.arriveAt : nil)
+            let departure = draft.journey(after: stay.id)?.departAt
+            dayRows[stay.id] = TripItineraryDays.rows(
+                stay: stay, dated: dated[index], days: stay.legId.flatMap { legDays[$0] } ?? [],
+                arrival: arrival, departure: departure, timeZone: timeZone)
+        }
+        self.subtitles = subtitles
+        self.dayRows = dayRows
+    }
+
+    /// "Hotel Beispiel", "noch nichts gebucht", "an Bord", with the span.
+    static func subtitle(_ stay: TripItineraryItem, dated: TripItineraryDated,
+                         dayOffsets: (first: Int, last: Int), in draft: TripItineraryDraft,
+                         timeZone: TimeZone = .current) -> String {
+        var parts = [TripItineraryText.span(dated, dayOffsets: dayOffsets, timeZone: timeZone)]
+        if stay.anchor == nil {
+            parts.append("noch kein Ort")
+        } else if draft.isBetweenShips(stay.id) || stay.quartersAboard == true {
+            parts.append("an Bord")
+        } else if stay.anchorRadiusM != nil {
+            parts.append("noch nichts gebucht")
+        } else if let label = stay.anchorLabel, !label.isEmpty, label != draft.title(of: stay) {
+            parts.append(label)
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// What of a day the itinerary's day rows read — compared to tell
+/// whether the plan changed in a way the rows show.
+struct TripItineraryDayKey: Equatable {
+    let dayIndex: Int
+    let spots: Int
+    let hasSpotsBlock: Bool
+    let window: TripDayWindow?
+    let plannedMinutes: Int?
+    let overrunMinutes: Int?
+
+    init(_ day: TripDay) {
+        dayIndex = day.dayIndex
+        spots = day.blocks.reduce(0) { $0 + $1.stops.count }
+        hasSpotsBlock = day.blocks.contains { $0.kind == "spots" }
+        window = day.window
+        plannedMinutes = day.plannedMinutes
+        overrunMinutes = day.overrunMinutes
+    }
+}
+
+/// Keeps the last `TripItineraryLayout` and builds a new one only when
+/// the draft or what the day rows read of the plan has changed. Held
+/// by the view; reading it does not invalidate anything.
+final class TripItineraryLayoutMemo {
+    private var draft: TripItineraryDraft?
+    private var keys: [Int: [TripItineraryDayKey]] = [:]
+    private var kept: TripItineraryLayout?
+
+    func layout(of draft: TripItineraryDraft, legs: [TripLeg]) -> TripItineraryLayout {
+        let legDays = Dictionary(legs.map { ($0.id, $0.days) }, uniquingKeysWith: { first, _ in first })
+        let keys = legDays.mapValues { $0.map(TripItineraryDayKey.init) }
+        if let kept, self.draft == draft, self.keys == keys { return kept }
+        let made = TripItineraryLayout(draft: draft, legDays: legDays)
+        self.draft = draft
+        self.keys = keys
+        kept = made
+        return made
     }
 }

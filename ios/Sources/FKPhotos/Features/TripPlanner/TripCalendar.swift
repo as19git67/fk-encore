@@ -18,13 +18,24 @@ enum TripCalendar {
     /// The formatter for a date-only string. Fixed locale and a fixed
     /// format: a German phone would otherwise write "17.09.2026", which
     /// is not what the server means by a date.
+    ///
+    /// Built once per time zone: a list of days asks for it several
+    /// times per row, and building a `DateFormatter` costs more than a
+    /// frame can spare while the list scrolls.
     private static func formatter(_ timeZone: TimeZone) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
+        TripFormatterCache.shared.formatter("iso|\(timeZone.identifier)") {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = timeZone
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter
+        }
+    }
+
+    /// The Gregorian calendar on the given clock, built once per zone.
+    static func gregorian(_ timeZone: TimeZone) -> Calendar {
+        TripFormatterCache.shared.calendar(timeZone)
     }
 
     /// The day `date` falls on, as `YYYY-MM-DD`.
@@ -43,15 +54,13 @@ enum TripCalendar {
     static func days(from: String, to: String, timeZone: TimeZone = .current) -> Int? {
         guard let start = date(fromIsoDay: from, timeZone: timeZone),
               let end = date(fromIsoDay: to, timeZone: timeZone) else { return nil }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
+        let calendar = gregorian(timeZone)
         return calendar.dateComponents([.day], from: start, to: end).day
     }
 
     /// A day and a time of day as one moment on the given clock.
     static func moment(_ isoDay: String, minutes: Int, timeZone: TimeZone = .current) -> Date? {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
+        let calendar = gregorian(timeZone)
         let parts = isoDay.split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3 else { return nil }
         return calendar.date(from: DateComponents(
@@ -61,10 +70,58 @@ enum TripCalendar {
     /// `startDate` plus `offset` days.
     static func day(_ day: String, plus offset: Int, timeZone: TimeZone = .current) -> String? {
         guard let date = date(fromIsoDay: day, timeZone: timeZone) else { return nil }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
+        let calendar = gregorian(timeZone)
         guard let shifted = calendar.date(byAdding: .day, value: offset, to: date) else { return nil }
         return isoDay(shifted, timeZone: timeZone)
+    }
+}
+
+/// Date formatters and calendars, built once per zone, template and
+/// locale. Building a `DateFormatter` — above all one with a localized
+/// template — is expensive, and the trip's lists format several dates
+/// per row: built on every call, they cost the itinerary its frames
+/// while it scrolled. A formatter is safe to share between threads
+/// once configured; the lock only guards the dictionary.
+final class TripFormatterCache: @unchecked Sendable {
+    static let shared = TripFormatterCache()
+
+    private let lock = NSLock()
+    private var formatters: [String: DateFormatter] = [:]
+    private var calendars: [String: Calendar] = [:]
+
+    /// The formatter stored under `key`, built by `make` the first time.
+    func formatter(_ key: String, make: () -> DateFormatter) -> DateFormatter {
+        lock.lock()
+        defer { lock.unlock() }
+        if let found = formatters[key] { return found }
+        let made = make()
+        formatters[key] = made
+        return made
+    }
+
+    /// A formatter for a localized template ("EEE d. MMM") in the
+    /// phone's current locale on the given clock. The locale is part of
+    /// the key, so a change of language in the settings is followed.
+    func localized(_ template: String, timeZone: TimeZone) -> DateFormatter {
+        let locale = Locale.current
+        return formatter("tpl|\(template)|\(timeZone.identifier)|\(locale.identifier)") {
+            let formatter = DateFormatter()
+            formatter.locale = locale
+            formatter.timeZone = timeZone
+            formatter.setLocalizedDateFormatFromTemplate(template)
+            return formatter
+        }
+    }
+
+    /// The Gregorian calendar on the given clock.
+    func calendar(_ timeZone: TimeZone) -> Calendar {
+        lock.lock()
+        defer { lock.unlock() }
+        if let found = calendars[timeZone.identifier] { return found }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        calendars[timeZone.identifier] = calendar
+        return calendar
     }
 }
 
@@ -244,11 +301,7 @@ extension TripLeg {
               let day = TripCalendar.day(startDate, plus: dayIndex, timeZone: timeZone),
               let date = TripCalendar.date(fromIsoDay: day, timeZone: timeZone)
         else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.timeZone = timeZone
-        formatter.setLocalizedDateFormatFromTemplate("EEEdMMM")
-        return formatter.string(from: date)
+        return TripFormatterCache.shared.localized("EEEdMMM", timeZone: timeZone).string(from: date)
     }
 
     /// Is this day of this leg today?

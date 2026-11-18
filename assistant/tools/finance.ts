@@ -9,7 +9,7 @@ import type { ToolSpec } from "../types";
 import { compositeKey, dateKey, groupProperties, groupSummary, groupRows, parseGrouping, parseRanking, rankNote, rankProperties, rankRequires, type RankField } from "./ranking";
 import { loosenAdvice, periodLabel, type LoosenAdvice, type Probe } from "./hints";
 import { parseAmountBound, parseDirection, type TransactionCriteria } from "../../finance/transaction-conditions";
-import { parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
+import { MAX_TOP, parseGroupBy, type TotalsGroupBy, type TransactionTotals } from "../../finance/transaction-totals";
 
 const FINANCE = ["module.finance", "finance.view"];
 
@@ -150,7 +150,7 @@ async function emptyBookingsHint(params: ListParams): Promise<LoosenAdvice> {
 export const listTransactions: ToolSpec = {
   name: "list_transactions",
   kind: "read",
-  summary: `Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first, or by amount (rank_by with order), ${groupSummary(GROUPS)}. For 'Ausgaben' (expenses, spending) set direction "out", for 'Einnahmen' (income) "in"; only 'Buchungen' without either word lists both. For sums use transaction_totals.`,
+  summary: `Finance bookings filtered by text (counterparty or purpose), date range, account, tags, direction, amount range and the tax-relevant flag; newest first, or by amount (rank_by with order), ${groupSummary(GROUPS)}. For 'Ausgaben' (expenses, spending) set direction "out", for 'Einnahmen' (income) "in"; only 'Buchungen' without either word lists both. For sums use transaction_totals, also per tag (Kategorie).`,
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -257,6 +257,7 @@ export const CRITERIA_PROPERTIES: Record<string, Record<string, unknown>> = {
   to: { type: "string", description: "last booking date, YYYY-MM-DD" },
   account_ids: { type: "array", items: { type: "integer" }, description: "ids from list_accounts; omit for every account" },
   tags: { type: "array", items: { type: "string" }, description: "the user's tags, all must match" },
+  without_tags: { type: "array", items: { type: "string" }, description: "leave out bookings with any of these tags ('außer …')" },
   direction: { type: "string", enum: ["out", "in"], description: "\"out\" = only money out (Ausgaben), \"in\" = only money in (Einnahmen); omit for both" },
   tax_relevant: { type: "boolean", description: "only bookings flagged tax-relevant (true) or not flagged (false)" },
   amount_min: { type: "number", description: "smallest absolute amount, inclusive" },
@@ -287,6 +288,8 @@ export function criteriaFromArgs(args: Record<string, unknown>): TransactionCrit
   const c: TransactionCriteria = {};
   if (accounts.length) c.account_ids = accounts;
   if (tags.length) c.tags = [...new Set(tags)];
+  const without = Array.isArray(args.without_tags) ? args.without_tags.map((t) => str(t)).filter((t): t is string => !!t) : [];
+  if (without.length) c.without_tags = [...new Set(without)];
   const q = str(args.q);
   if (q) c.text = q;
   const from = isoDate(args.from);
@@ -308,6 +311,44 @@ export function groupByFromArgs(args: Record<string, unknown>): { group_by: Tota
   const group_by = parseGroupBy(args.group_by);
   const tags = Array.isArray(args.group_tags) ? args.group_tags.map((t) => str(t)).filter((t): t is string => !!t) : [];
   return group_by === "tag" && tags.length ? { group_by, group_tags: [...new Set(tags)] } : { group_by };
+}
+
+/** A tag name as people say it: "Umbuchungen" and "umbuchung" both mean the tag "Umbuchung". */
+function tagStem(name: string): string {
+  return name.trim().toLocaleLowerCase("de").replace(/(?:en|n|e|s)$/u, "");
+}
+
+/**
+ * The user's tag each name means: the same name, else the same name in
+ * other case, else the same word in singular or plural. A name that matches
+ * no tag, or several, is an error naming the tags there are — a filter on a
+ * tag nobody has would silently select nothing, or leave nothing out.
+ */
+export function resolveTagNames(names: string[], known: string[]): string[] {
+  return [...new Set(names.map((name) => {
+    if (known.includes(name)) return name;
+    const lower = name.trim().toLocaleLowerCase("de");
+    const byCase = known.filter((k) => k.toLocaleLowerCase("de") === lower);
+    if (byCase.length === 1) return byCase[0]!;
+    const byStem = known.filter((k) => tagStem(k) === tagStem(name));
+    if (byStem.length === 1) return byStem[0]!;
+    const shown = known.slice(0, 60).map((k) => JSON.stringify(k)).join(", ");
+    throw new Error(byStem.length > 1
+      ? `tag ${JSON.stringify(name)} could mean ${byStem.map((k) => JSON.stringify(k)).join(" or ")}; name one`
+      : `no tag ${JSON.stringify(name)}; the user's tags are ${shown || "none"}${known.length > 60 ? ", …" : ""}`);
+  }))];
+}
+
+/** The criteria with every tag name resolved to a tag of the user. */
+async function withKnownTags(c: TransactionCriteria): Promise<TransactionCriteria> {
+  if (!c.tags?.length && !c.without_tags?.length) return c;
+  const res = (await finance.listTags({ source: "all" })) as unknown as { items: { name: string }[] };
+  const known = res.items.map((t) => t.name);
+  return {
+    ...c,
+    ...(c.tags?.length ? { tags: resolveTagNames(c.tags, known) } : {}),
+    ...(c.without_tags?.length ? { without_tags: resolveTagNames(c.without_tags, known) } : {}),
+  };
 }
 
 const GROUP_LABEL: Record<TotalsGroupBy, string> = { none: "", tag: "Tag", month: "Monat", quarter: "Quartal", year: "Jahr" };
@@ -337,18 +378,23 @@ export function totalsText(t: TransactionTotals): string {
 export const transactionTotals: ToolSpec = {
   name: "transaction_totals",
   kind: "read",
-  summary: "Sum of the bookings the transaction list's filter and search select, with subtotals per tag or per month, quarter or year. The server does the arithmetic. Same filter names as list_transactions.",
+  summary: "Sum of the bookings the transaction list's filter and search select, with subtotals per tag (Kategorie) or per month, quarter or year, shown as a chart. The server does the arithmetic. Same filter names as list_transactions.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
     type: "object",
-    properties: { ...CRITERIA_PROPERTIES, ...GROUP_PROPERTIES },
+    properties: {
+      ...CRITERIA_PROPERTIES,
+      ...GROUP_PROPERTIES,
+      top: { type: "integer", description: "with group_by tag: only the N largest tags ('top 5'), the rest as 'Sonstige'" },
+    },
   },
   async run(args) {
-    const criteria = criteriaFromArgs(args);
+    const criteria = await withKnownTags(criteriaFromArgs(args));
     if (Object.keys(criteria).length === 0) throw new Error("say which bookings: a search, a period, tags, an account or a direction");
     const grouping = groupByFromArgs(args);
-    const res = (await finance.transactionTotals({ criteria, ...grouping })) as unknown as TransactionTotals;
+    const top = grouping.group_by === "tag" ? int(args.top, { min: 1, max: MAX_TOP }) : undefined;
+    const res = (await finance.transactionTotals({ criteria, ...grouping, ...(top ? { group_top: top } : {}) })) as unknown as TransactionTotals;
     return {
       text: totalsText(res),
       digest: `[earlier result of transaction_totals: sum ${centsText(res.total)} ${res.currency} over ${res.count} bookings]`,
