@@ -7,9 +7,12 @@ import SwiftUI
 /// lays out with a two-digit year and switches to four digits on the
 /// next pass (Anton, 17.11.). The field shows the date itself, in the
 /// device's locale and in the same style as the picker usually does
-/// (`.medium`: "27.11.2026", "Nov 27, 2026"), and leaves the tap to
-/// the system picker lying invisibly on top, so the calendar that opens
-/// is still Apple's.
+/// (`.medium`: "27.11.2026", "Nov 27, 2026").
+///
+/// The whole pill is one button that opens Apple's calendar in a
+/// popover. An invisible compact picker lying on top only answered
+/// where its own, smaller label happened to be, so most taps on the
+/// pill went nowhere (Anton, 18.11.).
 struct TripDateField: View {
     let title: String
     @Binding var selection: Date
@@ -21,29 +24,45 @@ struct TripDateField: View {
     /// dates under each other line up when only one can be cleared.
     var reservesClearSpace = false
 
+    @State private var picking = false
+
     var body: some View {
         HStack(spacing: 0) {
             Text(title)
             Spacer(minLength: 8)
-            ZStack {
+            Button { picking = true } label: {
                 Text(Self.text(selection))
+                    .foregroundStyle(picking ? Color.accentColor : Color.primary)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 6)
                     .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 6))
-                    .accessibilityHidden(true)
-                picker
-                    .labelsHidden()
-                    // Still hit-testable and read by VoiceOver, but its
-                    // own text no longer shows.
-                    .opacity(0.02)
+                    .contentShape(.rect)
             }
+            .buttonStyle(.borderless)
             .fixedSize()
+            .accessibilityLabel(title)
+            .accessibilityValue(Self.text(selection))
+            .accessibilityHint("Öffnet den Kalender")
+            .popover(isPresented: $picking) {
+                calendar
+                    .presentationCompactAdaptation(.popover)
+            }
             if let onClear {
                 TripClearValueButton(label: "\(title) offen lassen", action: onClear)
             } else if reservesClearSpace {
                 TripClearValueButton.placeholder
             }
         }
+    }
+
+    /// Apple's calendar; picking a day closes it, paging the month does not.
+    private var calendar: some View {
+        picker
+            .datePickerStyle(.graphical)
+            .labelsHidden()
+            .frame(width: 320)
+            .padding(8)
+            .onChange(of: selection) { picking = false }
     }
 
     @ViewBuilder
