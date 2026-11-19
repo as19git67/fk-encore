@@ -56,14 +56,26 @@ struct TripDateField: View {
     }
 
     /// Apple's calendar; picking a day closes it, paging the month does not.
+    ///
+    /// The calendar takes the size it asks for, never less than
+    /// `calendarWidth`. Squeezed into a fixed 320 points the popover came
+    /// out narrower than the calendar: the month arrows lay past its
+    /// edge, where no tap reaches them, and the days were cut off
+    /// (Anton, 18.11.).
     private var calendar: some View {
         picker
             .datePickerStyle(.graphical)
             .labelsHidden()
-            .frame(width: 320)
-            .padding(8)
+            .fixedSize()
+            .frame(minWidth: Self.calendarWidth)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .onChange(of: selection) { picking = false }
     }
+
+    /// Wide enough for seven day columns and the arrows next to the
+    /// month, and still inside the narrowest iPhone.
+    static let calendarWidth: CGFloat = 330
 
     @ViewBuilder
     private var picker: some View {
