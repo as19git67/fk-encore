@@ -38,7 +38,11 @@ concurrency:
 
 jobs:
   upload:
-    runs-on: macos-15
+    # GitHub's Xcode 27 image (macOS 27, Apple Silicon). From April 2027
+    # App Store Connect takes only builds made with the iOS 27 SDK or later
+    # (ITMS-90725); each image carries one major Xcode version, so the
+    # next one means the next label.
+    runs-on: xcode-27
     timeout-minutes: 60
     defaults:
       run:
@@ -53,6 +57,7 @@ jobs:
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
           xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos
 
       - name: Check secrets
         env:

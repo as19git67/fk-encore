@@ -119,6 +119,10 @@ and uploads it to App Store Connect. It runs only when started by hand
 app, or through the API), never on a push: a TestFlight release is a
 decision, not a side effect of a merge.
 
+- **Runner** is GitHub's `xcode-27` image (macOS 27, Apple Silicon, one
+  major Xcode version per image). App Store Connect takes only builds made
+  with the iOS 27 SDK or later from April 2027 (ITMS-90725); the next SDK
+  requirement means the next image label.
 - **Signing** is automatic signing with an App Store Connect API key
   (`-allowProvisioningUpdates`, cloud-managed distribution certificate). The
   key (Admin role) lives in the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
