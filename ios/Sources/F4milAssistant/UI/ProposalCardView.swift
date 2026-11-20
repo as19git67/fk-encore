@@ -8,7 +8,8 @@ import SwiftUI
 ///
 /// A letter shows what will go out; its text is edited on the web (the card
 /// says so while a gap is left, and "Ausführen" waits). A collage shows its
-/// photos and caption; a text document its text.
+/// photos and caption; a text document its text. A write that ran at once
+/// (a note, a line added to one) arrives done and offers "Rückgängig".
 struct ProposalCardView: View {
     let proposal: Proposal
     let store: ConversationStore
@@ -20,7 +21,7 @@ struct ProposalCardView: View {
     @State private var busy: Action?
     @State private var requestError: String?
 
-    enum Action { case execute, discard }
+    enum Action { case execute, discard, undo }
 
     init(proposal: Proposal, store: ConversationStore, opener: RowOpener, conversationId: Int?) {
         self.proposal = proposal
@@ -39,7 +40,7 @@ struct ProposalCardView: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 // Once it ran, the result says what became of it; the proposal's own line may name gaps that are filled by now.
-                if !(current.isExecuted && current.result_summary != nil) {
+                if !((current.isExecuted || current.isUndone) && current.result_summary != nil) {
                     Text(current.summary)
                         .strikethrough(current.isDiscarded)
                         .foregroundStyle(current.isDiscarded ? .secondary : .primary)
@@ -60,13 +61,18 @@ struct ProposalCardView: View {
                         .font(.footnote)
                         .foregroundStyle(.green)
                 }
+                if current.isUndone, let result = current.result_summary {
+                    Label(result, systemImage: "arrow.uturn.backward")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 if let collage = current.collage, !current.isDiscarded {
                     CollagePreviewView(collage: collage)
                 }
                 if current.isExecuted {
                     resultActions
                 }
-                if let error, !current.isExecuted || requestError != nil {
+                if let error, !current.isExecuted || requestError != nil || current.canUndo {
                     Label(error, systemImage: "exclamationmark.circle")
                         .font(.footnote)
                         .foregroundStyle(.red)
@@ -84,14 +90,14 @@ struct ProposalCardView: View {
                 .strokeBorder(current.isPending ? Color.accentColor : Color.clear, lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Vorschlag")
+        .accessibilityLabel(current.ranAtOnce ? "Aktion" : "Vorschlag")
         // The server's copy replaces what the card holds, as on the web.
         .onChange(of: proposal) { _, next in current = next }
     }
 
     private var header: some View {
         HStack {
-            Label("Vorschlag", systemImage: "bolt")
+            Label(current.ranAtOnce ? "Erledigt" : "Vorschlag", systemImage: current.ranAtOnce ? "checkmark.circle" : "bolt")
                 .font(.subheadline.weight(.semibold))
             Spacer()
             Text(current.statusLabel)
@@ -118,7 +124,7 @@ struct ProposalCardView: View {
     @ViewBuilder
     private var resultActions: some View {
         let mail = mailtoURL
-        if current.result_route != nil || current.result_download != nil || mail != nil {
+        if current.result_route != nil || current.result_download != nil || mail != nil || current.canUndo {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { resultButtons(mail: mail) }
                 VStack(alignment: .leading, spacing: 8) { resultButtons(mail: mail) }
@@ -143,6 +149,11 @@ struct ProposalCardView: View {
                 Label("Als E-Mail-Entwurf", systemImage: "envelope")
             }
             .buttonStyle(.bordered)
+        }
+        if current.canUndo {
+            Button("Rückgängig", systemImage: "arrow.uturn.backward") { decide(.undo) }
+                .buttonStyle(.borderless)
+                .disabled(busy != nil)
         }
     }
 
@@ -206,6 +217,7 @@ struct ProposalCardView: View {
                 switch action {
                 case .execute: current = try await store.execute(current)
                 case .discard: current = try await store.discard(current)
+                case .undo: current = try await store.undo(current)
                 }
             } catch {
                 requestError = error.localizedDescription

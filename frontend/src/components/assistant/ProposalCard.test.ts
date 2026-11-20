@@ -9,12 +9,13 @@ vi.mock('../../api/assistant', () => ({
   discardProposal: vi.fn(),
   getProposal: vi.fn(),
   downloadResult: vi.fn(),
+  undoProposal: vi.fn(),
 }))
 
 vi.mock('../../api/documents', () => ({ searchDocuments: vi.fn() }))
 vi.mock('../../api/photos', () => ({ listAlbums: vi.fn(), listPersons: vi.fn(), listPhotoUploaders: vi.fn() }))
 
-import { discardProposal, downloadResult, executeProposal, getProposal } from '../../api/assistant'
+import { discardProposal, downloadResult, executeProposal, getProposal, undoProposal } from '../../api/assistant'
 import { __resetProposalStatesForTests } from '../../utils/proposalStates'
 import { searchDocuments } from '../../api/documents'
 import { listAlbums } from '../../api/photos'
@@ -318,5 +319,55 @@ describe('after Ausführen', () => {
     expect(albums.value.map((a) => a.id)).toEqual([1, 31])
     // Nothing waited on this card.
     expect(onContinue).not.toHaveBeenCalled()
+  })
+})
+
+describe('a write that ran at once', () => {
+  const note: Proposal = {
+    ...pending,
+    proposal_id: 21,
+    tool: 'create_text_document',
+    summary: 'Notiz „Gas ablesen“ anlegen',
+    count: null,
+    status: 'executed',
+    result_summary: 'Notiz „Gas ablesen“ angelegt',
+    result_route: '/dokumente/42',
+    immediate: true,
+    undoable: true,
+  }
+
+  beforeEach(() => {
+    vi.mocked(undoProposal).mockReset()
+    __resetProposalStatesForTests()
+  })
+
+  it('arrives done, without "Ausführen", and offers "Rückgängig"', () => {
+    const el = mountCard(note)
+    expect(el.textContent).toContain('Erledigt')
+    expect(el.textContent).toContain('Notiz „Gas ablesen“ angelegt')
+    expect([...el.querySelectorAll('button')].some((b) => b.textContent?.includes('Ausführen'))).toBe(false)
+    expect(button(el, 'Rückgängig')).toBeTruthy()
+  })
+
+  it('takes it back on "Rückgängig"', async () => {
+    vi.mocked(undoProposal).mockResolvedValue({ ...note, status: 'undone', undoable: false, result_summary: 'Notiz „Gas ablesen“ wieder gelöscht', result_route: null })
+    const el = mountCard(note)
+    button(el, 'Rückgängig').click()
+    await flushPromises()
+    await flushPromises()
+    expect(undoProposal).toHaveBeenCalledWith(21)
+    expect(el.textContent).toContain('Rückgängig gemacht')
+    expect(el.textContent).toContain('wieder gelöscht')
+    expect([...el.querySelectorAll('button')].some((b) => b.textContent?.includes('Rückgängig') && !b.textContent?.includes('gemacht'))).toBe(false)
+  })
+
+  it('says why it stays when the note was changed since', async () => {
+    vi.mocked(undoProposal).mockResolvedValue({ ...note, error: 'Die Notiz wurde inzwischen geändert.' })
+    const el = mountCard(note)
+    button(el, 'Rückgängig').click()
+    await flushPromises()
+    await flushPromises()
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('inzwischen geändert')
+    expect(el.textContent).toContain('Erledigt')
   })
 })

@@ -155,6 +155,8 @@ export interface ToolSpec {
    * results.
    */
   refines?: boolean;
+  /** A write that runs at once instead of making a card to confirm (a note); the user can take it back. */
+  immediate?: boolean;
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome>;
 }
 

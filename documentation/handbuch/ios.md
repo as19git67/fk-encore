@@ -684,6 +684,30 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
   weiter: …“, stellt der Chat diese Frage von selbst (wartet, bis eine
   laufende Antwort fertig ist). Die Albenliste lädt sich neu, wenn ein
   Album entstanden ist.
+- Ausnahme Notizen: eine neue Notiz („Notiere …“) und Text am Ende einer
+  Notiz („Schreib Milch auf die Einkaufsliste“) laufen sofort. Die Karte
+  heißt dann „Erledigt“ und trägt „Rückgängig“ (löscht die neue Notiz bzw.
+  stellt den Text von vorher wieder her). Wurde die Notiz inzwischen
+  geändert, bleibt sie, und die Karte sagt warum. Eine Notiz umschreiben
+  oder kürzen bleibt ein Vorschlag mit „Ausführen“.
+- **Test:** –
+
+### IOS-ASS-05 Notiz per Siri
+
+- „Notiz in F4mil Photos“ (auch „Notiere in …“, „Neue Notiz in …“): Siri
+  fragt „Was soll ich notieren?“ und legt den diktierten Text als neue
+  Notiz (Textdokument) in den Dokumenten an; die ersten Wörter sind der
+  Titel. Die App öffnet sich nicht.
+- „An Notiz anhängen in F4mil Photos“ (auch „Zur Notiz hinzufügen in …“):
+  Siri fragt nach der Notiz (der Titel genügt, „Einkauf“ findet
+  „Einkaufsliste“) und nach dem Text und hängt ihn ans Ende. Endet die
+  Notiz mit einer Liste, wird der Text ihr nächster Punkt.
+- Beide gibt es auch in der Kurzbefehle-App und für die Aktionstaste; dort
+  lässt sich bei „Notiz anlegen“ ein Titel mitgeben.
+- Recht: `documents.upload` zum Anlegen, `documents.edit` zum Anhängen;
+  ohne sagt Siri „Dafür fehlt dir das Recht für Dokumente.“
+- Ohne Assistent und ohne Modell: der Text geht so, wie er gesagt wurde,
+  an den Server.
 - **Test:** –
 
 ## SHR: Share-Extension
@@ -733,6 +757,7 @@ Karten / Google Maps), Spot hinzufügen, Ort bearbeiten, Gefunden / Fund
 | IOS-ASS-02 | Assistent zu Fotos fragen | – |
 | IOS-ASS-03 | Antwort als Mitteilung | – |
 | IOS-ASS-04 | Vorschlag ausführen | – |
+| IOS-ASS-05 | Notiz per Siri | – |
 | IOS-SET-01 | Profil und Server | – |
 | IOS-SET-02 | Foto-Synchronisierung | – |
 | IOS-SET-03 | Benachrichtigungen und Spotlight | – |

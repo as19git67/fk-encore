@@ -46,6 +46,10 @@ export const clients = {
     getDocumentReceiptSuggestion: vi.fn(),
     storeGeneratedDocument: vi.fn(),
     createTextDocument: vi.fn(),
+    listTextDocuments: vi.fn(),
+    appendToTextDocument: vi.fn(),
+    updateTextDocument: vi.fn(),
+    deleteDocument: vi.fn(),
   },
   photo: {
     listPhotos: vi.fn(),

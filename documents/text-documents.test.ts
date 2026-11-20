@@ -17,8 +17,8 @@ import { getAuthData } from "~encore/auth";
 import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { documents } from "../db/schema";
-import { createTextDocument, updateTextDocument } from "./documents";
-import { textDocumentFilename, validateTextDocument } from "./text-documents";
+import { appendToTextDocument, createTextDocument, listTextDocuments, updateTextDocument } from "./documents";
+import { appendedMarkdown, excerptOf, textDocumentFilename, validateTextDocument } from "./text-documents";
 import { markdownTokens, renderMarkdownPdf } from "./markdown-pdf";
 import { extractPdfText } from "./text-extract";
 import { todayIsoDate } from "./follow-ups";
@@ -177,5 +177,84 @@ describe("text document endpoints", () => {
     await db.update(documents).set({ visibility: "private", group_id: null }).where(eq(documents.id, created.id));
     setAuth(OTHER_ID);
     await expect(updateTextDocument({ id: created.id, title: "Privat", markdown: "x\n" })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("appendedMarkdown", () => {
+  it("adds a paragraph of its own and keeps what stood there", () => {
+    expect(appendedMarkdown("Einkauf\n\nnoch etwas\n", "- Milch")).toBe("Einkauf\n\nnoch etwas\n\n- Milch\n");
+    expect(appendedMarkdown("Titelzeile\n\n\n", "  neu  ")).toBe("Titelzeile\n\nneu\n");
+    expect(appendedMarkdown("", "erste Zeile")).toBe("erste Zeile\n");
+  });
+
+  it("continues a list the note ends in", () => {
+    expect(appendedMarkdown("- Brot\n", "- Milch\n- Eier")).toBe("- Brot\n- Milch\n- Eier\n");
+    expect(appendedMarkdown("1. Brot\n", "2. Milch")).toBe("1. Brot\n2. Milch\n");
+    // A plain line stays a paragraph, unless the caller asks it to follow the list.
+    expect(appendedMarkdown("- Brot\n", "Milch")).toBe("- Brot\n\nMilch\n");
+    expect(appendedMarkdown("- Brot\n", "Milch", true)).toBe("- Brot\n- Milch\n");
+    expect(appendedMarkdown("Brot\n", "Milch", true)).toBe("Brot\n\nMilch\n");
+  });
+
+  it("refuses blank text", () => {
+    expect(() => appendedMarkdown("a", " \n ")).toThrow(/nothing to add/);
+  });
+});
+
+describe("excerptOf", () => {
+  it("takes the first line with words, without marks", () => {
+    expect(excerptOf("\n## Beete\n\n- Tomaten")).toBe("Beete");
+    expect(excerptOf("- [x] **Milch** kaufen")).toBe("Milch kaufen");
+    expect(excerptOf("")).toBe("");
+  });
+});
+
+describe("appending and listing notes", () => {
+  it("adds text at the end and re-renders the PDF", async () => {
+    const created = await createTextDocument({ title: "Einkaufsliste", markdown: "- Brot\n" });
+    const appended = await appendToTextDocument({ id: created.id, text: "- Milch" });
+    expect(appended.markdown_source).toBe("- Brot\n- Milch\n");
+    const spoken = await appendToTextDocument({ id: created.id, text: "Eier", follow_list: true });
+    expect(spoken.markdown_source).toBe("- Brot\n- Milch\n- Eier\n");
+    expect(appended.title).toBe("Einkaufsliste");
+    expect(appended.content_revision).not.toBe(created.content_revision);
+  });
+
+  it("refuses an append over a newer version", async () => {
+    const created = await createTextDocument({ title: "Liste", markdown: "a\n" });
+    await appendToTextDocument({ id: created.id, text: "b" });
+    await expect(appendToTextDocument({ id: created.id, text: "c", base_revision: created.content_revision }))
+      .rejects.toThrow(/changed in the meantime/);
+  });
+
+  it("adds to no uploaded document and to no one else's note", async () => {
+    const upload = await createTextDocument({ title: "Upload", markdown: "x\n" });
+    await db.update(documents).set({ markdown_source: null }).where(eq(documents.id, upload.id));
+    await expect(appendToTextDocument({ id: upload.id, text: "y" })).rejects.toThrow(/only text documents/);
+
+    const own = await createTextDocument({ title: "Privat", markdown: "geheim\n" });
+    await db.update(documents).set({ visibility: "private", group_id: null }).where(eq(documents.id, own.id));
+    setAuth(OTHER_ID);
+    await expect(appendToTextDocument({ id: own.id, text: "x" })).rejects.toThrow(/not found/);
+  });
+
+  it("lists the caller's text documents only, filtered by title", async () => {
+    const a = await createTextDocument({ title: "Einkaufsliste", markdown: "## Woche\n\n- Brot\n" });
+    const b = await createTextDocument({ title: "Heizung 100%", markdown: "Filter\n" });
+    const upload = await createTextDocument({ title: "Einkauf Beleg", markdown: "x\n" });
+    await db.update(documents).set({ markdown_source: null }).where(eq(documents.id, upload.id));
+    await db.update(documents).set({ visibility: "private", group_id: null }).where(eq(documents.user_id, USER_ID));
+
+    const all = await listTextDocuments({});
+    expect(all.documents.map((d) => d.id).sort()).toEqual([a.id, b.id].sort());
+    expect(all.documents.find((d) => d.id === a.id)?.excerpt).toBe("Woche");
+
+    expect((await listTextDocuments({ q: "einkauf" })).documents.map((d) => d.id)).toEqual([a.id]);
+    // A % in the search is a character, not a wildcard.
+    expect((await listTextDocuments({ q: "100%" })).documents.map((d) => d.id)).toEqual([b.id]);
+    expect((await listTextDocuments({ q: "%" })).documents.map((d) => d.id)).toEqual([b.id]);
+
+    setAuth(OTHER_ID);
+    expect((await listTextDocuments({})).documents.filter((d) => d.id === a.id || d.id === b.id)).toEqual([]);
   });
 });

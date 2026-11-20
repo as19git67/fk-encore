@@ -90,6 +90,11 @@ public struct AssistantAPI: Sendable {
         try await client.post("/assistant/proposals/\(id)/discard", body: EmptyBody())
     }
 
+    /// Takes back a write that ran at once; refused (with `error` set) when the note was changed since.
+    public func undoProposal(_ id: Int) async throws -> Proposal {
+        try await client.post("/assistant/proposals/\(id)/undo", body: EmptyBody())
+    }
+
     // MARK: - Files behind the rows
 
     /// The PDF of a document, for the preview.

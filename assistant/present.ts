@@ -97,6 +97,15 @@ function has(v: unknown): boolean {
 }
 
 /** `2026-03-04T…` → `04.03.2026`. */
+/** A card's state in words, for a client without its own card. */
+const PROPOSAL_STATUS: Record<string, string> = {
+  pending: "Wartet auf Bestätigung",
+  executing: "Läuft",
+  executed: "Ausgeführt",
+  discarded: "Verworfen",
+  undone: "Rückgängig gemacht",
+};
+
 export function formatDate(v: unknown): string {
   const s = str(v);
   return s.length >= 10 ? `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}` : "";
@@ -322,7 +331,7 @@ export function displayOf(kind: string, r: Row, columns: string[] = genericColum
     case "proposal":
       return {
         title: str(r.summary),
-        subtitle: str(r.result_summary) || (str(r.status) === "pending" ? "Wartet auf Bestätigung" : str(r.status)) || undefined,
+        subtitle: str(r.result_summary) || PROPOSAL_STATUS[str(r.status)] || str(r.status) || undefined,
         route: route(r),
       };
     default: {

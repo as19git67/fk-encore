@@ -309,7 +309,7 @@ public struct Proposal: Codable, Hashable, Sendable, Identifiable {
     public let tool: String
     public let summary: String
     public let count: Int?
-    /// `pending`, `executing`, `executed` or `discarded`.
+    /// `pending`, `executing`, `executed`, `discarded` or `undone`.
     public let status: String
     public let result_summary: String?
     /// The web path of what the action created, once it ran.
@@ -325,13 +325,18 @@ public struct Proposal: Codable, Hashable, Sendable, Identifiable {
     public let collage: CollagePreview?
     /// What the assistant goes on with once the card ran; the chat asks it to right after "Ausführen".
     public let continuation: String?
+    /// It ran at once, without "Ausführen" (a note, a line added to one).
+    public let immediate: Bool?
+    /// "Rückgängig" is offered.
+    public let undoable: Bool?
 
     public var id: Int { proposal_id }
 
     public init(proposal_id: Int, tool: String, summary: String, count: Int? = nil, status: String,
                 result_summary: String? = nil, result_route: String? = nil, result_download: String? = nil,
                 error: String? = nil, letter: LetterDraft? = nil, text_document: TextDocumentPreview? = nil,
-                collage: CollagePreview? = nil, continuation: String? = nil) {
+                collage: CollagePreview? = nil, continuation: String? = nil,
+                immediate: Bool? = nil, undoable: Bool? = nil) {
         self.proposal_id = proposal_id
         self.tool = tool
         self.summary = summary
@@ -345,19 +350,25 @@ public struct Proposal: Codable, Hashable, Sendable, Identifiable {
         self.text_document = text_document
         self.collage = collage
         self.continuation = continuation
+        self.immediate = immediate
+        self.undoable = undoable
     }
 
     public var isPending: Bool { status == "pending" }
     public var isExecuted: Bool { status == "executed" }
     public var isDiscarded: Bool { status == "discarded" }
+    public var isUndone: Bool { status == "undone" }
+    public var ranAtOnce: Bool { immediate == true }
+    public var canUndo: Bool { undoable == true && isExecuted }
 
     /// The status as the web's tag reads it.
     public var statusLabel: String {
         switch status {
         case "pending": return "Wartet auf Bestätigung"
         case "executing": return "Läuft"
-        case "executed": return "Ausgeführt"
+        case "executed": return ranAtOnce ? "Erledigt" : "Ausgeführt"
         case "discarded": return "Verworfen"
+        case "undone": return "Rückgängig gemacht"
         default: return status
         }
     }

@@ -16,7 +16,7 @@ import { createPhotoCollage } from "./collage";
 import { createPhotoBookTool } from "./photo-book";
 import { HIDDEN_PARAM, PERSON_FILTER_PARAMS_BARE, hiddenOf, personFilterOf } from "./photos";
 import { renderLetter } from "./letters";
-import { createTextDocument } from "./text-documents";
+import { appendToTextDocument, createTextDocument, rewriteTextDocument } from "./text-documents";
 import { euerPdf, taxWorksheetPdf } from "./tax";
 import { findInDocuments, pageCount, type Box } from "./text-boxes";
 import { CRITERIA_PROPERTIES, GROUP_PROPERTIES, criteriaFromArgs, groupByFromArgs, totalsText } from "./finance";
@@ -778,6 +778,8 @@ export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   createTransactionFolder,
   renderLetter,
   createTextDocument,
+  appendToTextDocument,
+  rewriteTextDocument,
 ];
 
 export const WRITE_TOOLS = WRITE_TOOL_DEFINITIONS.map(writeTool);

@@ -92,9 +92,9 @@ export function budgetForWindow(window: number): number {
 /**
  * Up to this size every schema goes along with every request; past it the
  * model gets the one-line catalog and fetches schemas with describe_tools.
- * The full catalog of a user with every module is about 11,000 tokens (48
- * tools, ranking and grouping on the three list tools, the photo book and
- * the person filters of the photo tools included); the budget leaves room for a few more before a round goes to
+ * The full catalog of a user with every module is about 12,000 tokens (52
+ * tools, ranking and grouping on the three list tools, the photo book, the
+ * person filters of the photo tools and the three note tools included); the budget leaves room for a few more before a round goes to
  * fetching — and only a turn with every area in play sends the full
  * catalog, since the router (assistent-wegfindung.md) offers the areas'
  * tools. A deployment with a small
@@ -102,7 +102,7 @@ export function budgetForWindow(window: number): number {
  * ASSISTANT_CONTEXT_TOKENS along with the model's window, since the
  * schemas count against that budget on every round.
  */
-const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "11500", 10);
+const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "12500", 10);
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -258,6 +258,11 @@ export function planStatus(steps: PlanStep[]): string {
  * said "call step 2 now", the model called it with an id that did not
  * exist yet and told the user it could not do it.
  */
+/** A card that waits for "Ausführen"; a write that ran at once waits for nothing. */
+function isWaitingCard(block: ResultBlock): boolean {
+  return block.kind === "proposal" && block.rows.some((r) => r.status === "pending");
+}
+
 export function planWaitStatus(steps: PlanStep[]): string {
   const open = steps.filter((s) => !s.done);
   if (!open.length) return planStatus(steps);
@@ -1352,7 +1357,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         if (step) step.done = true;
       }
       const tail = messages[messages.length - 1]!;
-      const status = blocks.some((b) => b.kind === "proposal") ? planWaitStatus(plan) : planStatus(plan);
+      const status = blocks.some(isWaitingCard) ? planWaitStatus(plan) : planStatus(plan);
       if (tail.role === "tool") messages[messages.length - 1] = { ...tail, content: `${tail.content}\n\n${status}` };
     }
   }
