@@ -38,6 +38,7 @@ import {
   createPhotoBook,
   deletePhotoBook,
   fitPhotoBookToEdits,
+  fitPhotoBookToFaces,
   fixPhotoBookLowDpi,
   getPhotoBookView,
   listPhotoBooks,
@@ -239,6 +240,23 @@ describe("photo book pages", () => {
     expect(relayoutPage("a4-landscape", "photos", [])).toBeNull();
     expect(relayoutPage("a4-landscape", "opener", [])).toEqual({ kind: "opener", layout: "opener-text", photoIds: [] });
   });
+
+  it("gives a photo a framed page instead of full bleed when only the frame keeps its faces", () => {
+    // 4:3 nearly fills A4 landscape, but full bleed loses a strip at the top and bottom where the faces are.
+    const faces = [{ x: 0.4, y: 0.01, w: 0.1, h: 0.12 }, { x: 0.5, y: 0.87, w: 0.1, h: 0.12 }];
+    expect(relayoutPage("a4-landscape", "photos", [photo(1, null, { width: 4000, height: 3000 })])?.layout).toBe("full");
+    expect(relayoutPage("a4-landscape", "photos", [photo(1, null, { width: 4000, height: 3000, faces })])?.layout).toBe("single");
+  });
+
+  it("weighs faces when it picks the layout of a page", () => {
+    // Two landscape photos: stacked they keep their width, but a person standing tall loses head or feet.
+    const tall = [{ x: 0.45, y: 0.05, w: 0.1, h: 0.13 }, { x: 0.45, y: 0.8, w: 0.1, h: 0.13 }];
+    const a = photo(1, "2024-06-01 10:00:00");
+    const b = photo(2, "2024-06-01 10:01:00");
+    expect(chooseLayout("a4-landscape", [a, b])!.layout.id).toBe("stack");
+    const withFaces = chooseLayout("a4-landscape", [{ ...a, faces: tall }, b])!;
+    expect(withFaces.layout.id).not.toBe("stack");
+  });
 });
 
 describe("photo book print resolution", () => {
@@ -345,7 +363,7 @@ describe("photo book service", () => {
     expect(view.pages[0].kind).toBe("opener");
     expect(view.chapters).toHaveLength(1);
     expect(view.cover_photo_id).not.toBeNull();
-    expect(view.settings).toEqual({ bleed_mm: 3, crop_marks: false, spreads: true, paper_mm: 0.12, captions: false });
+    expect(view.settings).toEqual({ bleed_mm: 3, crop_marks: false, spreads: true, paper_mm: 0.12, captions: false, face_framing: true });
 
     await expect(getPhotoBookView(other.id, id)).rejects.toThrow(/not found/);
     expect((await listPhotoBooks(user.id)).map((b) => b.title)).toEqual(["Sommer"]);
@@ -557,6 +575,54 @@ describe("photo book service", () => {
     }
   });
 
+  it("keeps faces whole in a new book, and fits an older book to its faces on request", async () => {
+    // The best photo opens the chapter; its two faces sit at the top and the bottom.
+    const group = await upload(user.id, "2024-06-01 10:00:00", { ai_quality_score: 0.99 });
+    await db.insert(faces).values([
+      { photo_id: group.id, bbox: JSON.stringify({ x: 0.4, y: 0.02, width: 0.1, height: 0.13 }), embedding: "[]" },
+      { photo_id: group.id, bbox: JSON.stringify({ x: 0.5, y: 0.85, width: 0.1, height: 0.13 }), embedding: "[]" },
+    ]);
+    const list = [group];
+    for (let i = 1; i < 6; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`, { ai_quality_score: 0.5 }));
+    const id = await createPhotoBook(user.id, { title: "Gruppe", photoIds: list.map((p) => p.id) });
+    const slotOf = (v: Awaited<ReturnType<typeof getPhotoBookView>>) => v.pages.flatMap((p) => p.slots).find((s) => s.photo_id === group.id)!;
+
+    let view = await getPhotoBookView(user.id, id);
+    expect(view.settings.face_framing).toBe(true);
+    expect(view.pages[0].slots[0].photo_id).toBe(group.id);
+    expect(slotOf(view).face_cut).toBe(false);
+    // The opener's wide cell cannot hold both faces: the photo is zoomed out a little and leaves a strip at the sides.
+    expect(slotOf(view).inset.w).toBeLessThan(1);
+    expect(slotOf(view).inset.w).toBeGreaterThanOrEqual(0.8);
+    expect(slotOf(view).inset.h).toBe(1);
+    expect(view.face_cut_count).toBe(0);
+    const render = toRenderBook(await loadPhotoBook(user.id, id));
+    expect(render.pages[0].slots[0].placement!.zoom).toBeLessThan(1);
+
+    // A book made before: photos sit by their focal point, and a face is cut through.
+    await db.update(photoBook).set({ settings: {} }).where(eq(photoBook.id, id));
+    view = await getPhotoBookView(user.id, id);
+    expect(view.settings.face_framing).toBe(false);
+    expect(slotOf(view).face_cut).toBe(true);
+    expect(view.face_cut_count).toBe(1);
+    expect(view.face_fit.photos).toBe(1);
+
+    // A layout the user chose stays.
+    const multi = view.pages.find((p) => p.kind === "photos" && p.slots.length > 1)!;
+    const own = multi.layout_options.find((o) => o.id !== multi.layout)!.id;
+    await setPhotoBookPageLayout(user.id, id, multi.id, own);
+
+    const fit = await fitPhotoBookToFaces(user.id, id);
+    expect(fit.moved).toBe(1);
+    expect(fit.still_cut).toBe(0);
+    view = await getPhotoBookView(user.id, id);
+    expect(view.settings.face_framing).toBe(true);
+    expect(slotOf(view).face_cut).toBe(false);
+    expect(view.face_fit).toEqual({ photos: 0, pages: 0 });
+    expect(view.pages.find((p) => p.id === multi.id)!.layout).toBe(own);
+    expect(view.photo_count).toBe(6);
+  });
+
   it("hands the PDF the chapter titles on openers", async () => {
     const list = [];
     for (let i = 0; i < 4; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`));
@@ -599,7 +665,13 @@ describe("photo book PDF", () => {
       cover: { photoId: 1, focal: null },
       pages: [
         { layout: bookLayouts("opener", 1)[0], chapterTitle: "Samstag, 1. Juni 2024", chapterSubtitle: "Musterstadt", slots: [{ photoId: 1, focal: null }] },
-        { layout: layouts(3, "hero-left"), chapterTitle: null, chapterSubtitle: null, slots: [2, 3, 4].map((photoId) => ({ photoId, focal: null })) },
+        {
+          layout: layouts(3, "hero-left"),
+          chapterTitle: null,
+          chapterSubtitle: null,
+          // The second photo zoomed out for its faces: drawn smaller than its cell.
+          slots: [2, 3, 4].map((photoId) => ({ photoId, focal: null, placement: photoId === 2 ? { cx: 0.3, cy: 0.5, zoom: 0.85 } : null })),
+        },
         { layout: layouts(1, "full"), chapterTitle: null, chapterSubtitle: null, slots: [{ photoId: 5, focal: { x: 0.5, y: 0.5 } }] },
       ],
       bleedMm: 3,

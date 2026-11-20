@@ -20,6 +20,12 @@
  * pages that would fit better laid out again, a notice offers "Seiten
  * anpassen"; a page with a layout the user chose keeps it and only says so.
  *
+ * Faces: a new book places each photo so its faces stay whole (moved in its
+ * cell, zoomed out a little on a framed page, at most a quarter of a face
+ * cut). A book made before that, or one with faces still cut, offers
+ * "Gesichter einpassen", which also arranges rule-made pages anew where
+ * another layout keeps faces better; layouts the user chose stay.
+ *
  * Photos that would print under 200 dpi: the warning jumps from one such page
  * to the next ("Zeigen") and fixes what a layout can ("Beheben": another
  * layout or order, else a page of its own). What is too small even alone
@@ -58,6 +64,7 @@ import {
   acceptPhotoBookChapterSuggestion,
   deletePhotoBook,
   fitPhotoBookToEdits,
+  fitPhotoBookToFaces,
   fixPhotoBookLowDpi,
   movePhotoToOwnPage,
   replacePhotoInBook,
@@ -72,6 +79,7 @@ import {
   updatePhotoBook,
   updatePhotoBookChapter,
   type PhotoBook,
+  type PhotoBookFaceFit,
   type PhotoBookFormat,
   type PhotoBookLowDpiFix,
   type PhotoBookReplacement,
@@ -164,9 +172,49 @@ const coverUrl = computed(() => {
   return photoBookImageUrl({ photoId: b.cover_photo_id, filename: b.cover_filename, editedAt: b.cover_edited_at }, auth.user?.id, 800)
 })
 
+// The front as the PDF cuts it: the server's window, as an object-position.
 const coverFocal = computed(() => {
-  const f = book.value?.cover_focal ?? book.value?.cover_auto_crop
-  return f ? `${f.x * 100}% ${f.y * 100}%` : '50% 50%'
+  const w = book.value?.cover_window
+  if (!w) return '50% 50%'
+  const at = (start: number, size: number) => (size < 0.999 ? (start / (1 - size)) * 100 : 50)
+  return `${at(w.x, w.w)}% ${at(w.y, w.h)}%`
+})
+
+// ── faces ───────────────────────────────────────────────────────────────
+
+const faceFit = ref<PhotoBookFaceFit | null>(null)
+
+/** Whether "Gesichter einpassen" would change anything, or faces are cut that it might save. */
+const offerFaceFit = computed(() => {
+  const b = book.value
+  if (!b) return false
+  return b.face_fit.photos + b.face_fit.pages > 0 || (!b.settings.face_framing && b.face_cut_count > 0)
+})
+
+function fitToFaces() {
+  faceFit.value = null
+  void apply(async () => {
+    const { book: next, fit } = await fitPhotoBookToFaces(bookId.value)
+    faceFit.value = fit
+    return next
+  })
+}
+
+const faceFitText = computed(() => {
+  const f = faceFit.value
+  if (!f) return ''
+  const parts: string[] = []
+  if (f.moved) parts.push(f.moved === 1 ? 'ein Foto neu ausgerichtet' : `${f.moved} Fotos neu ausgerichtet`)
+  if (f.rearranged) parts.push(f.rearranged === 1 ? 'eine Seite neu angeordnet' : `${f.rearranged} Seiten neu angeordnet`)
+  const joined = parts.join(' und ')
+  let text = joined ? `${joined.charAt(0).toUpperCase()}${joined.slice(1)}.` : 'Alle Gesichter passten schon.'
+  if (f.own_layout) {
+    text += ` ${f.own_layout === 1 ? 'Eine Seite mit deinem eigenen Layout bleibt' : `${f.own_layout} Seiten mit deinem eigenen Layout bleiben`}, wie ${f.own_layout === 1 ? 'sie ist' : 'sie sind'}; ein anderes Layout würde Gesichter besser zeigen.`
+  }
+  if (f.still_cut) {
+    text += ` ${f.still_cut === 1 ? 'Auf einem Foto bleibt' : `Auf ${f.still_cut} Fotos bleibt`} ein Gesicht angeschnitten (markiert mit dem Personensymbol): Die Gesichter liegen für ihren Platz zu weit auseinander.`
+  }
+  return text
 })
 
 function fitToEdits() {
@@ -478,6 +526,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
   { key: 'settings', label: 'Buch', title: 'Titel, Format und Bildunterschriften', icon: 'pi pi-pencil', disabled: !book.value || busy.value, command: openSettings },
   { key: 'narrowing', label: 'Auswahl', title: 'Auswahl ändern: Qualität, Ästhetik, Gesichter, Höchstzahl, Gewichte', icon: 'pi pi-filter', disabled: !book.value || busy.value, command: () => (narrowingOpen.value = true) },
   shareLinkItem({ name: 'fotos-photo-book', params: { id: bookId.value } }, book.value?.title),
+  { key: 'faces', title: 'Gesichter einpassen', icon: 'pi pi-user', disabled: !book.value || busy.value, menuOnly: true, command: fitToFaces },
   { key: 'rebuild', title: 'Neu verteilen', icon: 'pi pi-refresh', disabled: !book.value || busy.value, menuOnly: true, command: confirmRebuild },
   { key: 'delete', title: 'Fotobuch löschen', icon: 'pi pi-trash', severity: 'danger', disabled: !book.value, menuOnly: true, command: confirmDelete },
 ])
@@ -516,6 +565,21 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
       </Message>
       <Message v-if="lowDpiFix" severity="success" closable class="pbd-warn" @close="lowDpiFix = null">
         {{ lowDpiFixText }}
+      </Message>
+      <Message v-if="offerFaceFit" severity="info" :closable="false" class="pbd-warn">
+        <div class="pbd-misfit">
+          <span>
+            <template v-if="book.face_cut_count">
+              {{ book.face_cut_count === 1 ? 'Auf einem Foto ist' : `Auf ${book.face_cut_count} Fotos ist` }} ein Gesicht angeschnitten (markiert mit <i class="pi pi-user" aria-label="Personensymbol" />).
+            </template>
+            „Gesichter einpassen“ rückt die Fotos so, dass Gesichter ganz zu sehen sind, zoomt sonst etwas heraus und schneidet höchstens ein Viertel eines Gesichts ab.
+            Seiten, deren Layout du selbst gewählt hast, behalten es.
+          </span>
+          <Button label="Gesichter einpassen" icon="pi pi-user" size="small" :loading="busy" @click="fitToFaces" />
+        </div>
+      </Message>
+      <Message v-if="faceFit" severity="success" closable class="pbd-warn" @close="faceFit = null">
+        {{ faceFitText }}
       </Message>
       <Message v-if="book.edit_misfit_count" severity="info" :closable="false" class="pbd-warn">
         <div class="pbd-misfit">

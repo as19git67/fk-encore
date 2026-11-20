@@ -73,3 +73,37 @@ export function editedPoint(p: Point | null, edit: PhotoEdit | null): Point | nu
       return { x, y };
   }
 }
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * A rectangle of the original (shares 0..1, e.g. a face's `bbox`) in the
+ * edited photo: the part the crop keeps, turned with the photo. Null when the
+ * crop cut it away entirely.
+ */
+export function editedRect(r: Rect, edit: PhotoEdit | null): Rect | null {
+  let x0 = r.x;
+  let y0 = r.y;
+  let x1 = r.x + r.w;
+  let y1 = r.y + r.h;
+  const c = edit?.crop;
+  if (c && c.w > 0 && c.h > 0) {
+    x0 = (x0 - c.x) / c.w;
+    x1 = (x1 - c.x) / c.w;
+    y0 = (y0 - c.y) / c.h;
+    y1 = (y1 - c.y) / c.h;
+  }
+  x0 = clamp01(x0);
+  x1 = clamp01(x1);
+  y0 = clamp01(y0);
+  y1 = clamp01(y1);
+  if (x1 - x0 <= 0 || y1 - y0 <= 0) return null;
+  const a = editedPoint({ x: x0, y: y0 }, edit && { crop: null, rotation: edit.rotation })!;
+  const b = editedPoint({ x: x1, y: y1 }, edit && { crop: null, rotation: edit.rotation })!;
+  return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
+}

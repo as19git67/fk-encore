@@ -31,6 +31,12 @@ export interface PhotoBookSlot {
   edited_at: string | null
   /** Where the photo goes, without its caption strip. */
   rect: PageRect
+  /** The part of the photo the cell shows, as shares of the photo. */
+  window: PageRect
+  /** Where in `rect` the photo is drawn: all of it, unless it is zoomed out for its faces. */
+  inset: PageRect
+  /** A face on the photo loses more than a quarter here. */
+  face_cut: boolean
   dpi: number | null
   low_dpi: boolean
   caption: string | null
@@ -83,6 +89,8 @@ export interface PhotoBookSettings {
   spreads: boolean
   paper_mm: number
   captions: boolean
+  /** Photos sit so their faces stay whole (new books; older ones after "Gesichter einpassen"). */
+  face_framing: boolean
 }
 
 export type PhotoBookSubject = 'people' | 'landscape' | 'nature' | 'buildings'
@@ -120,6 +128,8 @@ export interface PhotoBook {
   cover_auto_crop: { x: number; y: number } | null
   cover_focal: { x: number; y: number } | null
   cover_edited_at: string | null
+  /** The part of the cover photo the front shows. */
+  cover_window: PageRect | null
   settings: PhotoBookSettings
   source: PhotoBookSource
   page_count: number
@@ -128,6 +138,10 @@ export interface PhotoBook {
   low_dpi_count: number
   /** Pages "Seiten anpassen" would lay out again for edited photos. */
   edit_misfit_count: number
+  /** Photos on which a face loses more than a quarter. */
+  face_cut_count: number
+  /** What "Gesichter einpassen" would change: photos it moves, pages it arranges anew. */
+  face_fit: { photos: number; pages: number }
   chapters: PhotoBookChapter[]
   pages: PhotoBookPage[]
   created_at: string
@@ -227,6 +241,22 @@ export function rebuildPhotoBook(id: number, narrowing?: PhotoBookNarrowing) {
 /** "Seiten anpassen": lays out again the pages that edited photos no longer fit. */
 export function fitPhotoBookToEdits(id: number) {
   return apiFetch<PhotoBook>(`/photo-books/${id}/fit-edits`, { method: 'POST' })
+}
+
+export interface PhotoBookFaceFit {
+  /** Photos that now sit elsewhere in their cell, or zoomed out. */
+  moved: number
+  /** Pages arranged anew so faces fit. */
+  rearranged: number
+  /** Pages that would fit faces better in another layout, but keep the user's. */
+  own_layout: number
+  /** Photos on which a face still loses more than a quarter. */
+  still_cut: number
+}
+
+/** "Gesichter einpassen": photos sit so their faces stay whole, rule-made pages are arranged anew where that helps. */
+export function fitPhotoBookToFaces(id: number) {
+  return apiFetch<{ book: PhotoBook; fit: PhotoBookFaceFit }>(`/photo-books/${id}/fit-faces`, { method: 'POST' })
 }
 
 export interface PhotoBookLowDpiFix {

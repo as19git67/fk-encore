@@ -14,8 +14,8 @@ import * as path from "path";
 import { convertHeicToJpeg } from "./heic-convert.service";
 import { resolvePhotoFilePath } from "./photo";
 import { renderUserAndCache } from "./photo-transforms-render.service";
-import { bookSettings, loadPhotoBook, pageCaptioned, type LoadedBook } from "./photo-book.service";
-import { repeatedCaptions } from "./photo-book-layout";
+import { bookSettings, loadPhotoBook, pageCaptioned, slotPlacement, type LoadedBook } from "./photo-book.service";
+import { PHOTO_BOOK_FORMATS, repeatedCaptions, slotGeometry } from "./photo-book-layout";
 import {
   renderCoverPdf,
   renderHomePdf,
@@ -69,23 +69,33 @@ export async function resolvePhotoBookExportFile(name: string): Promise<string |
 /** The book as the PDF needs it: layouts, chapter titles on openers, photo ids and focal points. */
 export function toRenderBook(loaded: LoadedBook): RenderBook {
   const settings = bookSettings(loaded.book.settings);
+  const framing = settings.face_framing;
+  const f = PHOTO_BOOK_FORMATS[loaded.format];
   const chapters = new Map(loaded.chapters.map((c) => [c.id, c]));
   return {
     format: loaded.format,
     title: loaded.book.title,
     subtitle: loaded.book.subtitle,
-    cover: loaded.cover ? { photoId: loaded.cover.photo_id, focal: loaded.cover.focal } : null,
+    cover: loaded.cover
+      ? { photoId: loaded.cover.photo_id, focal: loaded.cover.focal, placement: slotPlacement(loaded.cover, { x: 0, y: 0, w: f.width, h: f.height }, false, framing).placement }
+      : null,
     pages: loaded.pages.map((p) => {
       const ch = p.chapter_id != null ? chapters.get(p.chapter_id) : undefined;
       const texts = p.photos.map((s) => loaded.captions.get(s.photo_id)?.text ?? null);
       const repeats = repeatedCaptions(texts);
+      const captioned = pageCaptioned(loaded, p);
       return {
         layout: p.layout,
         chapterTitle: p.kind === "opener" ? ch?.title ?? null : null,
         chapterSubtitle: p.kind === "opener" ? ch?.subtitle ?? null : null,
-        captioned: pageCaptioned(loaded, p),
+        captioned,
         // A caption that repeats one above it on the page is printed once.
-        slots: p.photos.map((s, i) => ({ photoId: s.photo_id, focal: s.focal, caption: repeats[i] ? null : texts[i] })),
+        slots: p.photos.map((s, i) => {
+          // The PDF widens a full-bleed cell by the bleed; the placement's centre and zoom carry over.
+          const image = slotGeometry(loaded.format, p.layout, p.layout.cells[i]!, captioned).image;
+          const { placement } = slotPlacement(s, image, !p.layout.fullBleed, framing);
+          return { photoId: s.photo_id, focal: s.focal, placement, caption: repeats[i] ? null : texts[i] };
+        }),
       };
     }),
     bleedMm: settings.bleed_mm,

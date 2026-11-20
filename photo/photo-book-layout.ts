@@ -5,6 +5,8 @@
  * build on these, the tests exercise them directly.
  */
 
+import { faceCost, frameFaces, type FaceFraming, type FaceRect } from "./photo-book-faces";
+
 // ── formats ─────────────────────────────────────────────────────────────
 
 // A plain union: Encore's schema parser reads the endpoint types literally.
@@ -264,6 +266,12 @@ export interface BookPhoto {
   city: string | null;
   /** `photos.location_country`; only the chapter rule reads it. */
   country?: string | null;
+  /**
+   * The faces on the photo, in the frame `width`/`height` describe; given
+   * only when the book places photos by their faces (`face_framing`), so the
+   * layout rule weighs a face it would cut.
+   */
+  faces?: FaceRect[];
 }
 
 /** `clip_aesthetics` and `ai_quality_score` are both 0..1. */
@@ -602,6 +610,43 @@ function cellAspect(format: PhotoBookFormat, layout: BookLayout, c: BookCell): n
   return r.w / r.h;
 }
 
+// The rule asks the same photo about the same few cell shapes many times.
+const framingCache = new WeakMap<FaceRect[], Map<string, FaceFraming>>();
+
+/** Where a photo's faces put it in a cell of `aspect` (`frameFaces`), remembered per face list. */
+export function framingOf(p: Pick<BookPhoto, "width" | "height" | "faces">, aspect: number, canZoom: boolean): FaceFraming {
+  const faces = p.faces ?? [];
+  let byShape = framingCache.get(faces);
+  if (!byShape) {
+    byShape = new Map();
+    framingCache.set(faces, byShape);
+  }
+  const key = `${photoAspect(p).toFixed(5)}:${aspect.toFixed(5)}:${canZoom ? 1 : 0}`;
+  let f = byShape.get(key);
+  if (!f) {
+    f = frameFaces(photoAspect(p), aspect, faces, canZoom);
+    byShape.set(key, f);
+  }
+  return f;
+}
+
+/** What a cell costs a photo for its faces (0 without faces): cuts, and a little for zooming out. */
+function cellFaceCost(format: PhotoBookFormat, layout: BookLayout, c: BookCell, p: BookPhoto): number {
+  if (!p.faces?.length) return 0;
+  return faceCost(framingOf(p, cellAspect(format, layout, c), !layout.fullBleed));
+}
+
+/** What a layout costs its photos (in cell order) for their faces, on average. */
+export function pageFaceCost(format: PhotoBookFormat, layout: BookLayout, photos: BookPhoto[]): number {
+  if (!photos.length) return 0;
+  let cost = 0;
+  photos.forEach((p, i) => {
+    const c = layout.cells[i];
+    if (c) cost += cellFaceCost(format, layout, c, p);
+  });
+  return cost / photos.length;
+}
+
 function permutations<T>(list: T[]): T[][] {
   if (list.length <= 1) return [list];
   const out: T[][] = [];
@@ -640,7 +685,10 @@ export function rankLayouts(format: PhotoBookFormat, photos: BookPhoto[], avoid?
     let best: LayoutChoice | null = null;
     for (const order of permutations(photos)) {
       let loss = 0;
-      order.forEach((p, i) => { loss += cropLoss(photoAspect(p), cellAspect(format, layout, layout.cells[i])); });
+      order.forEach((p, i) => {
+        const c = layout.cells[i];
+        loss += cropLoss(photoAspect(p), cellAspect(format, layout, c)) + cellFaceCost(format, layout, c, p);
+      });
       let cost = loss / order.length;
       if (sizesDiffer && order[big].id !== bestPhoto.id) cost += 0.08;
       if (avoid && layout.id === avoid) cost += 0.05;
@@ -668,7 +716,13 @@ const GROUP_BIAS: Record<number, number> = { 2: 0.04, 3: 0, 4: 0.03 };
 function singlePage(format: PhotoBookFormat, p: BookPhoto): PageDraft {
   const f = PHOTO_BOOK_FORMATS[format];
   const loss = cropLoss(photoAspect(p), f.width / f.height);
-  return { kind: "photos", layout: loss <= FULL_BLEED_MAX_LOSS ? "full" : "single", photoIds: [p.id] };
+  let full = loss <= FULL_BLEED_MAX_LOSS;
+  // Full bleed cannot zoom out: when it would cut a face that the framed page keeps, the frame wins.
+  if (full && p.faces?.length) {
+    const [bleed, framed] = bookLayouts("photos", 1);
+    full = cellFaceCost(format, bleed, bleed.cells[0], p) <= cellFaceCost(format, framed, framed.cells[0], p) + 1e-9;
+  }
+  return { kind: "photos", layout: full ? "full" : "single", photoIds: [p.id] };
 }
 
 /** The rule-based pages of one chapter: an opener, then pages of one to four photos. */
@@ -861,7 +915,7 @@ export function sharpestArrangement<T extends BookPhoto>(
   for (const layout of bookLayouts(kind, photos.length)) {
     for (const order of permutations(photos)) {
       const low = lowDpiSlots(format, layout, order, captioned);
-      let cost = pageCropLoss(format, layout, order);
+      let cost = pageCropLoss(format, layout, order) + pageFaceCost(format, layout, order);
       if (layout.id !== current.id) cost += 0.02;
       order.forEach((p, i) => { if (p.id !== photos[i].id) cost += 0.005; });
       if (!best || low < best.low || (low === best.low && cost < best.cost - 1e-9)) best = { layout, photos: order, low, cost };

@@ -169,6 +169,44 @@ then shows a notice with "Seiten anpassen" (`POST /photo-books/:id/fit-edits`),
 which lays those pages out again; a page whose layout the user chose keeps it
 and is only marked.
 
+## Faces in their cells
+
+A cell covers its photo, so the photo loses a strip on one axis. Where that
+strip goes is decided by the faces on the photo (`photo/photo-book-faces.ts`),
+in this order:
+
+1. The window moves along the cut axis until every face is whole, with a
+   little room around the faces when there is enough.
+2. When the faces are spread wider than the window, the photo is zoomed out:
+   it shows more along the cut axis and leaves a strip of paper in its cell on
+   the other one, never below 80 % of the cell (`MIN_ZOOM`). Only on framed
+   cells, never on a full-bleed page or the cover, where the strip would sit
+   at the trim.
+3. When even that does not hold every face, the window goes where it cuts the
+   least: a face may lose up to a quarter (`MAX_FACE_CUT`); one that would
+   lose more is left out rather than cut through. Such a photo is marked in
+   the editor.
+
+Faces are the face scan's boxes (`faces.bbox`) without the ones the owner
+ignored, mapped through the owner's edit. A face narrower than 35 % of the
+largest one on the photo is somebody in the background and does not steer.
+The placement is stored as a centre and a zoom, not as a rectangle, so it
+carries over to the bleed of a full-bleed page and is computed again from
+the faces whenever a page's layout changes.
+
+The layout rule weighs the faces too: a layout or cell order that would cut a
+face costs more (`pageFaceCost`), and a single photo whose faces only a
+framed page keeps does not go full bleed.
+
+New books, and books laid out anew ("Neu verteilen"), have
+`settings.face_framing`. A book made before keeps its look until
+"Gesichter einpassen" (`POST /photo-books/:id/fit-faces`): that switches the
+setting on and arranges every page whose layout the rule or the model chose
+anew when another layout or cell order keeps faces clearly better and prints
+no photo under 200 dpi. A layout the user chose stays; its photos only move
+within their cells, and the result says how many such pages would fit faces
+better. Titles, captions and the photos of each page stay.
+
 ## Open questions
 
 - Whether print shops want the first inside page alone on the right
