@@ -20,7 +20,7 @@ import * as fs from "fs";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
 import { useFont } from "../lib/pdf-fonts";
-import { coverCrop } from "./recap-export.service";
+import { placePhoto, type PhotoPlacement, type ShareRect } from "./photo-book-faces";
 import {
   PHOTO_BOOK_FORMATS,
   CAPTION_LINE_HEIGHT,
@@ -48,6 +48,8 @@ const COVER_GROUND = "#1f2933";
 export interface RenderSlot {
   photoId: number;
   focal: { x: number; y: number } | null;
+  /** Where the faces put the photo in its cell; null sits it around `focal`. */
+  placement?: PhotoPlacement | null;
   caption?: string | null;
 }
 
@@ -76,25 +78,37 @@ export interface RenderBook {
 export type ImageLoader = (photoId: number) => Promise<string | Buffer | null>;
 export type ProgressFn = (done: number, total: number) => void;
 
-/** A photo cut to `wMm × hMm` around its focal point, as JPEG; null when it cannot be read. */
+/**
+ * A photo cut for a cell of `wMm × hMm` — around its faces when `placement`
+ * says where, else around its focal point — as JPEG, with the part of the
+ * cell it is drawn in (all of it unless zoomed out); null when it cannot be read.
+ */
 export async function prepareImage(
   input: string | Buffer,
   focal: { x: number; y: number } | null,
   wMm: number,
   hMm: number,
-): Promise<Buffer | null> {
+  placement: PhotoPlacement | null = null,
+): Promise<{ jpeg: Buffer; inset: ShareRect } | null> {
   try {
     const { data, info } = await sharp(input).rotate().removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
-    const crop = coverCrop(info.width, info.height, wMm / hMm, focal);
-    crop.width = Math.max(1, Math.min(crop.width, info.width - crop.left));
-    crop.height = Math.max(1, Math.min(crop.height, info.height - crop.top));
-    const maxW = Math.max(1, Math.round((wMm / 25.4) * RENDER_DPI));
-    const maxH = Math.max(1, Math.round((hMm / 25.4) * RENDER_DPI));
-    return await sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
+    const { window, inset } = placePhoto(info.width / info.height, wMm / hMm, placement, focal);
+    const left = Math.max(0, Math.min(info.width - 1, Math.round(window.x * info.width)));
+    const top = Math.max(0, Math.min(info.height - 1, Math.round(window.y * info.height)));
+    const crop = {
+      left,
+      top,
+      width: Math.max(1, Math.min(Math.round(window.w * info.width), info.width - left)),
+      height: Math.max(1, Math.min(Math.round(window.h * info.height), info.height - top)),
+    };
+    const maxW = Math.max(1, Math.round(((wMm * inset.w) / 25.4) * RENDER_DPI));
+    const maxH = Math.max(1, Math.round(((hMm * inset.h) / 25.4) * RENDER_DPI));
+    const jpeg = await sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
       .extract(crop)
       .resize(maxW, maxH, { fit: "fill", withoutEnlargement: crop.width <= maxW })
       .jpeg({ quality: 90 })
       .toBuffer();
+    return { jpeg, inset };
   } catch (err) {
     console.warn("[photo-book-pdf] could not prepare image:", (err as Error).message);
     return null;
@@ -126,9 +140,12 @@ class Renderer {
 
   async image(doc: PDFKit.PDFDocument, slot: RenderSlot, rect: RectMm): Promise<void> {
     const input = await this.load(slot.photoId);
-    const jpeg = input ? await prepareImage(input, slot.focal, rect.w, rect.h) : null;
-    if (jpeg) {
-      doc.image(jpeg, pt(rect.x), pt(rect.y), { width: pt(rect.w), height: pt(rect.h) });
+    const prepared = input ? await prepareImage(input, slot.focal, rect.w, rect.h, slot.placement ?? null) : null;
+    if (prepared) {
+      const { jpeg, inset } = prepared;
+      const x = rect.x + inset.x * rect.w;
+      const y = rect.y + inset.y * rect.h;
+      doc.image(jpeg, pt(x), pt(y), { width: pt(inset.w * rect.w), height: pt(inset.h * rect.h) });
     } else {
       // A gap is better than a missing page: the print shows where a photo was.
       doc.save().rect(pt(rect.x), pt(rect.y), pt(rect.w), pt(rect.h)).fill("#dddddd").restore();

@@ -34,11 +34,13 @@ import {
   createPhotoBook,
   deletePhotoBook,
   fitPhotoBookToEdits,
+  fitPhotoBookToFaces,
   fixPhotoBookLowDpi,
   movePhotoToOwnPage,
   replacePhotoInBook,
   suggestPhotoBookReplacements,
   type PhotoBookReplacement,
+  type FaceFit,
   type LowDpiFix,
   getPhotoBookView,
   listPhotoBooks,
@@ -171,6 +173,21 @@ export const fitPhotoBookToEditsApi = api(
     const userId = viewer();
     await fitPhotoBookToEdits(userId, id);
     return getPhotoBookView(userId, id);
+  },
+);
+
+/**
+ * "Gesichter einpassen": photos sit so their faces stay whole from now on
+ * (moved in their cell, zoomed out on framed pages, at most a quarter of a
+ * face cut), and pages the rule or the model laid out are arranged anew where
+ * that keeps faces clearly better. Layouts the user chose stay.
+ */
+export const fitPhotoBookToFacesApi = api(
+  { expose: true, method: "POST", path: "/photo-books/:id/fit-faces", auth: true },
+  async ({ id }: { id: number }): Promise<{ book: PhotoBookView; fit: FaceFit }> => {
+    const userId = viewer();
+    const fit = await fitPhotoBookToFaces(userId, id);
+    return { book: await getPhotoBookView(userId, id), fit };
   },
 );
 

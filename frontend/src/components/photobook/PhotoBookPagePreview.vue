@@ -3,6 +3,10 @@
  * One page of a photo book as the PDF lays it out: the server sends every
  * cell and caption as a share of the page, so this only places them. A cell
  * is a button; what it does is the parent's (`slot-click`).
+ *
+ * The photo in a cell is drawn as the PDF cuts it: `window` is the part of
+ * the photo shown, `inset` the part of the cell it fills (less than all of it
+ * when the photo is zoomed out so its faces stay whole).
  */
 import { computed } from 'vue'
 import { photoBookImageUrl, type PageRect, type PhotoBookPage, type PhotoBookSlot } from '../../api/photoBooks'
@@ -36,9 +40,15 @@ function box(r: PageRect) {
   }
 }
 
-function focal(s: PhotoBookSlot): string {
-  const f = s.focal ?? s.auto_crop
-  return f ? `${f.x * 100}% ${f.y * 100}%` : '50% 50%'
+/** The photo scaled and moved so only its `window` shows in the frame. */
+function imageStyle(s: PhotoBookSlot) {
+  const w = s.window
+  return {
+    width: `${100 / w.w}%`,
+    height: `${100 / w.h}%`,
+    left: `${(-w.x / w.w) * 100}%`,
+    top: `${(-w.y / w.h) * 100}%`,
+  }
 }
 
 // The caption as the PDF sets it (`fitCaptionSize` in photo-book-layout.ts):
@@ -70,8 +80,11 @@ function captionStyle(s: PhotoBookSlot) {
 }
 
 function slotLabel(s: PhotoBookSlot): string {
-  const base = `Foto ${s.slot + 1} der Seite`
-  return s.low_dpi ? `${base}, nur ${s.dpi} dpi` : base
+  const notes = [
+    s.low_dpi ? `nur ${s.dpi} dpi` : null,
+    s.face_cut ? 'ein Gesicht ist angeschnitten' : null,
+  ].filter(Boolean)
+  return [`Foto ${s.slot + 1} der Seite`, ...notes].join(', ')
 }
 </script>
 
@@ -95,8 +108,13 @@ function slotLabel(s: PhotoBookSlot): string {
       :aria-label="slotLabel(s)"
       @click="emit('slot-click', s, $event)"
     >
-      <img :src="imageUrl(s)" alt="" loading="lazy" :style="{ objectPosition: focal(s) }" />
-      <span v-if="s.low_dpi" class="pbp-warn" aria-hidden="true"><i class="pi pi-exclamation-triangle" /></span>
+      <span class="pbp-frame" :style="box(s.inset)">
+        <img :src="imageUrl(s)" alt="" loading="lazy" :style="imageStyle(s)" />
+      </span>
+      <span v-if="s.low_dpi || s.face_cut" class="pbp-warn" aria-hidden="true">
+        <i v-if="s.low_dpi" class="pi pi-exclamation-triangle" />
+        <i v-if="s.face_cut" class="pi pi-user" />
+      </span>
     </button>
     <template v-for="s in page.slots" :key="`c${s.slot}`">
       <span
@@ -146,20 +164,25 @@ function slotLabel(s: PhotoBookSlot): string {
   position: absolute;
   padding: 0;
   border: 0;
-  background: rgba(0, 0, 0, 0.08);
+  background: transparent;
   cursor: pointer;
   overflow: hidden;
+}
+/* What the photo fills of its cell; the rest is paper, as in the PDF. */
+.pbp-frame {
+  position: absolute;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.08);
 }
 /* The page clips, and a full-bleed cell fills it: the ring goes inside. */
 .pbp-slot:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset-inset);
 }
-.pbp-slot img {
+.pbp-frame img {
+  position: absolute;
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: none;
 }
 /* The strip is as high as its lines; descenders of the last one hang below
    it, so the strip does not clip and the text clips only below them. */
@@ -191,6 +214,7 @@ function slotLabel(s: PhotoBookSlot): string {
   top: 4px;
   right: 4px;
   display: flex;
+  gap: 4px;
   padding: 2px 4px;
   border-radius: 4px;
   background: var(--p-tag-warn-background);

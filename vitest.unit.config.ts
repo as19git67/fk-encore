@@ -27,6 +27,7 @@ export default defineConfig({
       "web/static-cache.test.ts",
       "web/app-site-association-doc.test.ts",
       "push/apns-payload.test.ts",
+      "photo/photo-book-faces.test.ts",
     ],
     exclude: ["node_modules/**", "encore.gen/**", "frontend/**"],
     fileParallelism: false,

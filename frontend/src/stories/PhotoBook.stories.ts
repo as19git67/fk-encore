@@ -14,6 +14,18 @@ import type { PageRect, PhotoBook, PhotoBookPage, PhotoBookSlot } from '../api/p
 const FILES = ['castle.jpg', 'fish.jpg', 'museum.jpg', 'seagull.jpg', 'steak.jpg']
 let nextPhoto = 1
 
+/** What a cell of `rect` shows of a 3:2 photo it covers, centred, as the server sends it. */
+function coverWindow(rect: PageRect): PageRect {
+  const cell = (rect.w * 297) / (rect.h * 210)
+  const photo = 3 / 2
+  if (photo > cell) {
+    const w = cell / photo
+    return { x: (1 - w) / 2, y: 0, w, h: 1 }
+  }
+  const h = photo / cell
+  return { x: 0, y: (1 - h) / 2, w: 1, h }
+}
+
 function slot(i: number, rect: PageRect, lowDpi = false): PhotoBookSlot {
   const id = nextPhoto++
   return {
@@ -24,6 +36,9 @@ function slot(i: number, rect: PageRect, lowDpi = false): PhotoBookSlot {
     focal: null,
     edited_at: null,
     rect,
+    window: coverWindow(rect),
+    inset: { x: 0, y: 0, w: 1, h: 1 },
+    face_cut: false,
     dpi: lowDpi ? 140 : 320,
     low_dpi: lowDpi,
     caption: null,
@@ -89,13 +104,16 @@ const MOCK_BOOK: PhotoBook = {
   cover_auto_crop: null,
   cover_focal: null,
   cover_edited_at: null,
-  settings: { bleed_mm: 3, crop_marks: false, spreads: true, paper_mm: 0.12, captions: false },
+  cover_window: { x: 0.03, y: 0, w: 0.94, h: 1 },
+  settings: { bleed_mm: 3, crop_marks: false, spreads: true, paper_mm: 0.12, captions: false, face_framing: true },
   source: { kind: 'photos', photo_ids: [1, 2, 3, 4, 5, 6, 7, 8], quality_min: null, aesthetic_min: null, without_recognisable_faces: false, max_photos: null },
   page_count: 5,
   photo_count: 9,
   spine_mm: 0.4,
   low_dpi_count: 1,
   edit_misfit_count: 0,
+  face_cut_count: 0,
+  face_fit: { photos: 0, pages: 0 },
   chapters: [
     { id: 1, position: 0, title: 'Samstag, 1. Juni 2024', subtitle: '09:00–18:00 Uhr · Musterstadt', starts_at: '2024-06-01 09:00:00', ends_at: '2024-06-01 18:00:00', title_source: 'rule', title_suggestion: 'Rund um den Alten Turm' },
     { id: 2, position: 1, title: 'Sonntag, 2. Juni 2024', subtitle: '09:00–18:00 Uhr', starts_at: '2024-06-02 09:00:00', ends_at: '2024-06-02 18:00:00', title_source: 'user', title_suggestion: 'Ein Tag am Beispielsee' },
@@ -186,6 +204,43 @@ export const BuchBearbeitet: StoryObj<typeof PhotoBookDetailView> = {
         http.get('/api/photo-books/:id/export', () => HttpResponse.json({ status: 'none', progress: 0, files: [] })),
         http.get('/api/photo-books/:id/ai', () => HttpResponse.json({ status: 'none', job: null })),
         http.get('/api/photo-books/:id', () => HttpResponse.json(EDITED_BOOK)),
+        ...handlers,
+      ],
+    },
+  },
+}
+
+/**
+ * A book made before photos were placed by their faces: one photo cuts a face
+ * (marked), "Gesichter einpassen" is offered; one shows how a zoomed-out photo
+ * leaves paper at the sides of its cell.
+ */
+const FACES_BOOK: PhotoBook = {
+  ...MOCK_BOOK,
+  settings: { ...MOCK_BOOK.settings, face_framing: false },
+  face_cut_count: 1,
+  face_fit: { photos: 3, pages: 1 },
+  pages: MOCK_BOOK.pages.map((p) => {
+    if (p.id === 3) return { ...p, slots: p.slots.map((s, i) => (i === 1 ? { ...s, face_cut: true } : s)) }
+    if (p.id === 1) {
+      const s = p.slots[0]!
+      // Zoomed out to 85 %: more of the photo's height, a strip of paper left and right.
+      return { ...p, slots: [{ ...s, window: { x: 0, y: 0.031, w: 1, h: 0.938 }, inset: { x: 0.075, y: 0, w: 0.85, h: 1 } }] }
+    }
+    return p
+  }),
+}
+
+export const BuchGesichter: StoryObj<typeof PhotoBookDetailView> = {
+  name: 'Fotobuch (Gesichter einpassen)',
+  render: () => ({ components: { PhotoBookDetailView }, template: '<PhotoBookDetailView />' }),
+  decorators: [at('/fotos/fotobuecher/1')],
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/photo-books/:id/export', () => HttpResponse.json({ status: 'none', progress: 0, files: [] })),
+        http.get('/api/photo-books/:id/ai', () => HttpResponse.json({ status: 'none', job: null })),
+        http.get('/api/photo-books/:id', () => HttpResponse.json(FACES_BOOK)),
         ...handlers,
       ],
     },

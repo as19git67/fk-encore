@@ -5378,6 +5378,11 @@ export interface PhotoBookSettings {
   paper_mm?: number;
   /** Captions under the photos (stage 2); a page may override it. */
   captions?: boolean;
+  /**
+   * Photos sit in their cells so their faces stay whole (photo-book-faces.ts).
+   * New books start with it; older ones get it from "Gesichter einpassen".
+   */
+  face_framing?: boolean;
 }
 
 /** Weight of a subject when the book picks its photos (stage 4): -1 (fewer) .. 1 (more). */

@@ -554,7 +554,16 @@ async function writeChapterTitles(userId: number, loaded: LoadedBook, job: Photo
 }
 
 function toBookPhoto(s: LoadedPage["photos"][number]): BookPhoto {
-  return { id: s.photo_id, takenAt: s.taken_at, width: s.width, height: s.height, score: photoScore(s.aesthetic, s.quality), city: s.city };
+  return {
+    id: s.photo_id,
+    takenAt: s.taken_at,
+    width: s.width,
+    height: s.height,
+    score: photoScore(s.aesthetic, s.quality),
+    city: s.city,
+    // In a book that places photos by their faces, the candidates weigh them too.
+    ...(s.layout_faces?.length ? { faces: s.layout_faces } : {}),
+  };
 }
 
 async function pickLayouts(loaded: LoadedBook, job: PhotoBookAiJob, deps: PhotoBookAiDeps): Promise<void> {

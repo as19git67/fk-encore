@@ -18,6 +18,7 @@ import {
   albumShares,
   albums,
   collectionMembers,
+  faces as facesTable,
   photoBook,
   photoBookCaption,
   photoBookChapter,
@@ -26,6 +27,7 @@ import {
   photoCuration,
   photoTransforms,
   photos,
+  userFaceAssignments,
   type PhotoBookSettings,
   type PhotoBookSource,
   type PhotoBookTextSource,
@@ -33,7 +35,18 @@ import {
 } from "../db/schema";
 import { loadReadableCollection } from "../documents/collection-access";
 import { accessiblePhotoCondition, accessiblePhotoConditionFor } from "./photo-file-access";
-import { editedPoint, editedSize, type PhotoEdit } from "./photo-edit-geometry";
+import { editedPoint, editedRect, editedSize, type PhotoEdit } from "./photo-edit-geometry";
+import {
+  MAX_FACE_CUT,
+  faceCut,
+  frameFaces,
+  placePhoto,
+  relevantFaces,
+  windowsDiffer,
+  type FaceRect,
+  type PhotoPlacement,
+  type ShareRect,
+} from "./photo-book-faces";
 import { aestheticScoreSql } from "./photo.filters";
 import {
   MIN_PRINT_DPI,
@@ -48,6 +61,9 @@ import {
   isPhotoBookFormat,
   limitPhotos,
   lowDpiSlots,
+  pageCropLoss,
+  pageFaceCost,
+  rankLayouts,
   photoScore,
   sharpSinglePage,
   sharpestArrangement,
@@ -85,6 +101,7 @@ export const DEFAULT_BOOK_SETTINGS: Required<PhotoBookSettings> = {
   spreads: true,
   paper_mm: 0.12,
   captions: false,
+  face_framing: false,
 };
 
 export function bookSettings(s: PhotoBookSettings | null | undefined): Required<PhotoBookSettings> {
@@ -94,6 +111,7 @@ export function bookSettings(s: PhotoBookSettings | null | undefined): Required<
   if (s?.spreads != null) out.spreads = !!s.spreads;
   if (s?.paper_mm != null && Number.isFinite(s.paper_mm)) out.paper_mm = Math.min(1, Math.max(0.03, s.paper_mm));
   if (s?.captions != null) out.captions = !!s.captions;
+  if (s?.face_framing != null) out.face_framing = !!s.face_framing;
   return out;
 }
 
@@ -119,6 +137,12 @@ export interface PhotoBookSlotView {
   edited_at: string | null;
   /** Where the photo goes (without its caption strip). */
   rect: PageRect;
+  /** The part of the photo the cell shows, as shares of the photo. */
+  window: ShareRect;
+  /** Where in `rect` the photo is drawn (shares of `rect`): all of it, unless it is zoomed out for its faces. */
+  inset: ShareRect;
+  /** A face on the photo loses more than a quarter here. */
+  face_cut: boolean;
   /** The dpi it prints at; null while the photo's size is unknown. */
   dpi: number | null;
   low_dpi: boolean;
@@ -186,6 +210,8 @@ export interface PhotoBookSettingsView {
   spreads: boolean;
   paper_mm: number;
   captions: boolean;
+  /** Photos sit so their faces stay whole. */
+  face_framing: boolean;
 }
 
 export interface PhotoBookView {
@@ -200,6 +226,8 @@ export interface PhotoBookView {
   cover_auto_crop: { x: number; y: number } | null;
   cover_focal: { x: number; y: number } | null;
   cover_edited_at: string | null;
+  /** The part of the cover photo the front shows. */
+  cover_window: ShareRect | null;
   settings: PhotoBookSettingsView;
   source: PhotoBookSource;
   page_count: number;
@@ -208,6 +236,10 @@ export interface PhotoBookView {
   low_dpi_count: number;
   /** Pages "Seiten anpassen" would lay out again for edited photos. */
   edit_misfit_count: number;
+  /** Photos on which a face loses more than a quarter. */
+  face_cut_count: number;
+  /** What "Gesichter einpassen" would change: photos it moves, pages it arranges anew. */
+  face_fit: { photos: number; pages: number };
   chapters: PhotoBookChapterView[];
   pages: PhotoBookPageView[];
   created_at: string;
@@ -318,7 +350,7 @@ async function collectionMemberPhotoIds(userId: number, collectionId: number): P
  * chronological order. Subject weights move the scores the narrowing keeps
  * the best by; a series of near-duplicates gives only its pick.
  */
-export async function selectBookPhotos(userId: number, source: PhotoBookSource): Promise<BookPhoto[]> {
+export async function selectBookPhotos(userId: number, source: PhotoBookSource, withFaces = false): Promise<BookPhoto[]> {
   const conds: SQL[] = [
     accessiblePhotoCondition(userId),
     sql`${photos.mime_type} LIKE 'image/%'`,
@@ -374,7 +406,14 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource):
     list = await dropSimilarPhotos(list);
   }
   const max = source.max_photos && source.max_photos > 0 ? Math.min(source.max_photos, MAX_BOOK_PHOTOS) : MAX_BOOK_PHOTOS;
-  return limitPhotos(list, max);
+  const kept = limitPhotos(list, max);
+  if (!withFaces || !kept.length) return kept;
+  // The rule weighs the faces when it picks layouts; the book is laid out on the originals, so are they.
+  const faceRects = await loadFaceRects(userId, kept.map((p) => p.id));
+  return kept.map((p) => {
+    const f = faceRects.get(p.id);
+    return f?.length ? { ...p, faces: f } : p;
+  });
 }
 
 // ── building ────────────────────────────────────────────────────────────
@@ -473,7 +512,7 @@ export async function createPhotoBook(userId: number, input: CreatePhotoBookInpu
         : { photo_ids: [...new Set(photoIds)] }),
     ...narrowingSource(input),
   };
-  const list = await selectBookPhotos(userId, source);
+  const list = await selectBookPhotos(userId, source, true);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");
 
   const row = await dbInsertReturning<{ id: number }>(
@@ -484,6 +523,8 @@ export async function createPhotoBook(userId: number, input: CreatePhotoBookInpu
       format,
       cover_photo_id: bestCover(list),
       source,
+      // New books keep faces whole from the start.
+      settings: { face_framing: true },
     }).returning({ id: photoBook.id }),
   );
   await writeBookContent(row!.id, format, list);
@@ -513,7 +554,8 @@ async function touch(bookId: number): Promise<void> {
 export async function rebuildPhotoBook(userId: number, bookId: number, narrowing?: PhotoBookNarrowing): Promise<void> {
   const book = await ownedBook(userId, bookId);
   const source: PhotoBookSource = narrowing ? { ...book.source, ...narrowingSource(narrowing) } : book.source;
-  const list = await selectBookPhotos(userId, source);
+  // A book laid out anew is laid out like a new one: by its faces too.
+  const list = await selectBookPhotos(userId, source, true);
   if (!list.length) throw APIError.failedPrecondition("no photos left after narrowing");
   const format = isPhotoBookFormat(book.format) ? book.format : "a4-landscape";
   await writeBookContent(bookId, format, list);
@@ -521,6 +563,7 @@ export async function rebuildPhotoBook(userId: number, bookId: number, narrowing
   await dbExec(db.update(photoBook).set({
     cover_photo_id: keepCover ? book.cover_photo_id : bestCover(list),
     ...(narrowing ? { source } : {}),
+    settings: bookSettings({ ...book.settings, face_framing: true }),
     updated_at: sql`now()`,
   })
     .where(eq(photoBook.id, bookId)));
@@ -547,6 +590,10 @@ export interface SlotPhotoRow {
   quality: number | null;
   aesthetic: number | null;
   city: string | null;
+  /** The faces on the photo as edited (shares of the edited photo). */
+  faces: FaceRect[];
+  /** `faces` when the book places photos by their faces, so the layout rule weighs them; else none. */
+  layout_faces?: FaceRect[];
 }
 
 function toBookPhoto(r: SlotPhotoRow): EditedBookPhoto {
@@ -559,7 +606,67 @@ function toBookPhoto(r: SlotPhotoRow): EditedBookPhoto {
     originalHeight: r.original_height,
     score: photoScore(r.aesthetic, r.quality),
     city: r.city,
+    ...(r.layout_faces?.length ? { faces: r.layout_faces } : {}),
   };
+}
+
+/**
+ * The faces on each photo as the face scan found them (shares of the
+ * original), without the ones `userId` marked as ignored — the same faces
+ * the focal point (`auto_crop`) is made from.
+ */
+export async function loadFaceRects(userId: number, photoIds: number[]): Promise<Map<number, FaceRect[]>> {
+  const out = new Map<number, FaceRect[]>();
+  if (!photoIds.length) return out;
+  const rows = await dbAll<{ photo_id: number; bbox: string }>(
+    db.select({ photo_id: facesTable.photo_id, bbox: facesTable.bbox })
+      .from(facesTable)
+      .leftJoin(userFaceAssignments, and(eq(userFaceAssignments.face_id, facesTable.id), eq(userFaceAssignments.user_id, userId)))
+      .where(and(inArray(facesTable.photo_id, [...new Set(photoIds)]), sql`COALESCE(${userFaceAssignments.ignored}, false) = false`)),
+  );
+  for (const r of rows) {
+    let b: { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
+    try {
+      b = JSON.parse(r.bbox);
+    } catch {
+      continue;
+    }
+    const [x, y, w, h] = [b.x, b.y, b.width, b.height].map(Number);
+    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) continue;
+    const list = out.get(r.photo_id) ?? [];
+    list.push({ x, y, w, h });
+    out.set(r.photo_id, list);
+  }
+  return out;
+}
+
+export interface SlotPlacement {
+  window: ShareRect;
+  inset: ShareRect;
+  /** Where the faces put the photo; null when it sits by its focal point. */
+  placement: PhotoPlacement | null;
+  /** A face loses more than a quarter. */
+  faceCut: boolean;
+}
+
+/**
+ * Where a photo sits in a cell of `rect`: by its faces when the book does
+ * that (`face_framing`), else around its focal point as before. `canZoom`
+ * is false where the photo reaches the edge of the sheet. Whether a face is
+ * cut is judged on what the cell shows, with or without face framing.
+ */
+export function slotPlacement(row: Pick<SlotPhotoRow, "width" | "height" | "faces" | "focal" | "auto_crop">, rect: RectMm, canZoom: boolean, framing: boolean): SlotPlacement {
+  const aspect = row.width && row.height ? row.width / row.height : 3 / 2;
+  const cellAspect = rect.w / rect.h;
+  const placement = framing ? frameFaces(aspect, cellAspect, row.faces, canZoom).placement : null;
+  const placed = placePhoto(aspect, cellAspect, placement, row.focal ?? row.auto_crop);
+  const cut = relevantFaces(row.faces).reduce((m, f) => Math.max(m, faceCut(f, placed.window)), 0);
+  return { ...placed, placement, faceCut: cut > MAX_FACE_CUT + 1e-6 };
+}
+
+/** The rectangle the photo is drawn in: `rect` narrowed to `inset`. */
+export function insetRect(rect: RectMm, inset: ShareRect): RectMm {
+  return { x: rect.x + inset.x * rect.w, y: rect.y + inset.y * rect.h, w: inset.w * rect.w, h: inset.h * rect.h };
 }
 
 function share(rect: RectMm, format: PhotoBookFormat): PageRect {
@@ -573,7 +680,7 @@ function share(rect: RectMm, format: PhotoBookFormat): PageRect {
  * point of the edit: the PDF prints the edit, so the layout, the dpi and the
  * preview go by it too.
  */
-async function loadSlots(userId: number, bookId: number): Promise<SlotPhotoRow[]> {
+async function loadSlots(userId: number, bookId: number, faceFraming = false): Promise<SlotPhotoRow[]> {
   const rows = await dbAll<{
     page_id: number;
     slot: number;
@@ -615,9 +722,11 @@ async function loadSlots(userId: number, bookId: number): Promise<SlotPhotoRow[]
       .where(and(eq(photoBookPage.book_id, bookId), accessiblePhotoCondition(userId)))
       .orderBy(asc(photoBookSlot.page_id), asc(photoBookSlot.slot)),
   );
+  const faceRects = await loadFaceRects(userId, rows.map((r) => r.photo_id));
   return rows.map(({ edit_id, edit_crop, edit_rotation, ...r }) => {
     const edit: PhotoEdit | null = edit_id != null ? { crop: edit_crop ?? null, rotation: edit_rotation ?? 0 } : null;
     const size = editedSize(r.width, r.height, edit);
+    const faces = (faceRects.get(r.photo_id) ?? []).map((f) => editedRect(f, edit)).filter((f): f is FaceRect => f != null);
     return {
       ...r,
       width: size?.width ?? null,
@@ -626,6 +735,8 @@ async function loadSlots(userId: number, bookId: number): Promise<SlotPhotoRow[]
       original_height: r.height,
       focal: editedPoint(r.auto_crop, edit),
       edited_at: edit ? r.edited_at : null,
+      faces,
+      ...(faceFraming ? { layout_faces: faces } : {}),
     };
   });
 }
@@ -727,7 +838,7 @@ export async function loadPhotoBook(userId: number, bookId: number): Promise<Loa
         layout_reason: photoBookPage.layout_reason,
       }).from(photoBookPage).where(eq(photoBookPage.book_id, bookId)).orderBy(asc(photoBookPage.position), asc(photoBookPage.id)),
     );
-    const slots = await loadSlots(userId, bookId);
+    const slots = await loadSlots(userId, bookId, bookSettings(book.settings).face_framing);
     const byPage = new Map<number, SlotPhotoRow[]>();
     for (const s of slots) {
       const list = byPage.get(s.page_id) ?? [];
@@ -788,13 +899,99 @@ export async function fitPhotoBookToEdits(userId: number, bookId: number): Promi
   return changed;
 }
 
+/** Below this the faces do not justify arranging a page anew. */
+const FACE_REARRANGE_MARGIN = 0.02;
+
+/**
+ * Another layout or cell order of the same photos that keeps their faces
+ * clearly better, for a page whose layout the rule or the model chose; null
+ * when the page is as good as it gets, holds no face, or the change would
+ * print a photo under `MIN_PRINT_DPI`. Faces count here even in a book that
+ * does not place photos by them yet, so the editor can say what the action
+ * would do.
+ */
+function faceRearrangement(loaded: LoadedBook, page: LoadedPage): { layout: BookLayout; photoIds: number[] } | null {
+  if (page.kind !== "photos" || !page.photos.some((r) => r.faces.length)) return null;
+  const { format } = loaded;
+  const list = page.photos.map((r) => toBookPhoto({ ...r, layout_faces: r.faces }));
+  const draft = list.length === 1 ? relayoutPage(format, page.kind, list) : null;
+  const choice = draft
+    ? { layout: findBookLayout(page.kind, 1, draft.layout)!, photos: list }
+    : rankLayouts(format, list)[0];
+  if (!choice) return null;
+  const sameOrder = choice.layout.id === page.layout.id && choice.photos.every((p, i) => p.id === list[i]!.id);
+  if (sameOrder) return null;
+  const faceNow = pageFaceCost(format, page.layout, list);
+  const faceNext = pageFaceCost(format, choice.layout, choice.photos);
+  const costNow = pageCropLoss(format, page.layout, list) + faceNow;
+  const costNext = pageCropLoss(format, choice.layout, choice.photos) + faceNext;
+  if (faceNext >= faceNow - 1e-6 || costNext >= costNow - FACE_REARRANGE_MARGIN) return null;
+  const captioned = pageCaptioned(loaded, page);
+  if (lowDpiSlots(format, choice.layout, choice.photos, captioned) > lowDpiSlots(format, page.layout, list, captioned)) return null;
+  return { layout: choice.layout, photoIds: choice.photos.map((p) => p.id) };
+}
+
+export interface FaceFit {
+  /** Photos that now sit elsewhere in their cell, or zoomed out. */
+  moved: number;
+  /** Pages laid out anew (another layout or order) so faces fit. */
+  rearranged: number;
+  /** Pages that would fit faces better in another layout, but keep the one the user chose. */
+  own_layout: number;
+  /** Photos on which a face still loses more than a quarter. */
+  still_cut: number;
+}
+
+/**
+ * "Gesichter einpassen": the book places its photos by their faces from now
+ * on (`face_framing`), and every page whose layout the rule or the model
+ * chose is arranged anew when another layout or cell order of its photos
+ * keeps faces clearly better. A layout the user chose stays; the photos in it
+ * only move within their cells. Nothing the user wrote changes.
+ */
+export async function fitPhotoBookToFaces(userId: number, bookId: number): Promise<FaceFit> {
+  const before = await getPhotoBookView(userId, bookId);
+  const book = await ownedBook(userId, bookId);
+  if (!bookSettings(book.settings).face_framing) {
+    await dbExec(db.update(photoBook).set({ settings: bookSettings({ ...book.settings, face_framing: true }) }).where(eq(photoBook.id, bookId)));
+  }
+  const loaded = await loadPhotoBook(userId, bookId);
+  const fit: FaceFit = { moved: 0, rearranged: 0, own_layout: 0, still_cut: 0 };
+  for (const page of loaded.pages) {
+    const next = faceRearrangement(loaded, page);
+    if (!next) continue;
+    if (page.layout_source === "user") {
+      fit.own_layout += 1;
+      continue;
+    }
+    await writeArrangement(page, next.layout, next.photoIds);
+    fit.rearranged += 1;
+  }
+  const after = await getPhotoBookView(userId, bookId);
+  // By photo: a page arranged anew keeps its photos, but not their cells.
+  const shown = new Map<number, { window: ShareRect; inset: ShareRect }>();
+  for (const p of before.pages) for (const sl of p.slots) shown.set(sl.photo_id, sl);
+  for (const p of after.pages) {
+    for (const sl of p.slots) {
+      const was = shown.get(sl.photo_id);
+      if (was && (windowsDiffer(was.window, sl.window) || windowsDiffer(was.inset, sl.inset))) fit.moved += 1;
+    }
+  }
+  fit.still_cut = after.face_cut_count;
+  await touch(bookId);
+  return fit;
+}
+
 export async function getPhotoBookView(userId: number, bookId: number): Promise<PhotoBookView> {
   const loaded = await loadPhotoBook(userId, bookId);
   const { book, format } = loaded;
   const f = PHOTO_BOOK_FORMATS[format];
   const settings = bookSettings(book.settings);
+  const framing = settings.face_framing;
   let lowDpi = 0;
   let misfits = 0;
+  let faceCuts = 0;
+  const faceFit = { photos: 0, pages: 0 };
   const photoIds = new Set<number>();
   const pages: PhotoBookPageView[] = loaded.pages.map((p) => {
     const tr = textRect(format, p.layout);
@@ -802,6 +999,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
     if (misfit === "relayout") misfits += 1;
     const captioned = pageCaptioned(loaded, p);
     const repeats = repeatedCaptions(p.photos.map((s) => loaded.captions.get(s.photo_id)?.text));
+    if (faceRearrangement(loaded, p) && p.layout_source !== "user") faceFit.pages += 1;
     return {
       id: p.id,
       position: p.position,
@@ -820,7 +1018,14 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
         const geo = slotGeometry(format, p.layout, p.layout.cells[i], captioned);
         const repeated = repeats[i]!;
         const rect = geo.image;
-        const dpi = slotDpi(s.width, s.height, rect);
+        const placed = slotPlacement(s, rect, !p.layout.fullBleed, framing);
+        if (placed.faceCut) faceCuts += 1;
+        if (!framing && s.faces.length) {
+          const framed = slotPlacement(s, rect, !p.layout.fullBleed, true);
+          if (windowsDiffer(framed.window, placed.window) || windowsDiffer(framed.inset, placed.inset)) faceFit.photos += 1;
+        }
+        // A photo zoomed out for its faces prints smaller, so sharper.
+        const dpi = slotDpi(s.width, s.height, insetRect(rect, placed.inset));
         const caption = loaded.captions.get(s.photo_id) ?? null;
         const low = dpi != null && dpi < MIN_PRINT_DPI;
         if (low) lowDpi += 1;
@@ -833,6 +1038,9 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
           focal: s.focal,
           edited_at: s.edited_at,
           rect: share(rect, format),
+          window: placed.window,
+          inset: placed.inset,
+          face_cut: placed.faceCut,
           dpi: dpi == null ? null : Math.round(dpi),
           low_dpi: low,
           caption: caption?.text ?? null,
@@ -844,6 +1052,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
       }),
     };
   });
+  const cover = loaded.cover ? slotPlacement(loaded.cover, { x: 0, y: 0, w: f.width, h: f.height }, false, framing) : null;
   return {
     id: book.id,
     title: book.title,
@@ -856,6 +1065,7 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
     cover_auto_crop: loaded.cover?.auto_crop ?? null,
     cover_focal: loaded.cover?.focal ?? null,
     cover_edited_at: loaded.cover?.edited_at ?? null,
+    cover_window: cover?.window ?? null,
     settings,
     source: book.source,
     page_count: pages.length,
@@ -863,6 +1073,8 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
     spine_mm: spineWidthMm(pages.length + (pages.length % 2), settings.paper_mm),
     low_dpi_count: lowDpi,
     edit_misfit_count: misfits,
+    face_cut_count: faceCuts,
+    face_fit: faceFit,
     chapters: loaded.chapters,
     pages,
     created_at: book.created_at,
