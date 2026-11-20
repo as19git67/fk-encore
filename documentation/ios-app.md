@@ -126,11 +126,41 @@ decision, not a side effect of a merge.
 - **Signing** is automatic signing with an App Store Connect API key
   (`-allowProvisioningUpdates`, cloud-managed distribution certificate). The
   key (Admin role) lives in the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
-  `ASC_KEY_P8`; no certificate or profile is in the repository. Archiving on
-  a fresh runner creates an Apple Development certificate; the run revokes
-  it again at the end (`ios/scripts/dev-certs.rb`), because Apple allows
-  only a few per account and the archive fails once they are used up
-  (November 2026).
+  `ASC_KEY_P8`; no certificate or profile is in the repository. Archiving
+  still signs for development, and that needs an Apple Development
+  certificate with its private key in the keychain. Development
+  certificates are not cloud-managed and a runner starts with an empty
+  keychain, so the run imports a fixed one from the secrets
+  `IOS_DEV_CERT_P12` (the `.p12`, base64) and `IOS_DEV_CERT_P12_PASSWORD`
+  into a keychain of its own and deletes it at the end. Until November
+  2026 Xcode made a new certificate per run and the run revoked it again,
+  which cost a mail from Apple each time. `ios/scripts/dev-certs.rb` stays
+  as a guard: should Xcode make a certificate anyway (the one in the
+  secret expired or was revoked), the run revokes it and warns. The run
+  warns 30 days before the certificate expires and stops once it has.
+- **Making the `.p12`** (once, and again each year, because a development
+  certificate runs for one year):
+  1. On the Mac, in Xcode › Settings › Accounts, pick the team and
+     "Manage Certificates…". An existing "Apple Development" certificate
+     of this Mac can be used as it is; otherwise "+" › "Apple
+     Development". Using the existing one avoids yet another certificate.
+  2. Export it with its private key: right-click it in "Manage
+     Certificates…" › "Export Certificate…", or in Keychain Access ›
+     "My Certificates" the entry "Apple Development: …" (with the key
+     triangle) › "Export…", format "Personal Information Exchange
+     (.p12)". Choose a strong password.
+  3. Encode it: `base64 -i Zertifikat.p12 | pbcopy` (now on the
+     clipboard).
+  4. In the repository › Settings › Secrets and variables › Actions, add
+     `IOS_DEV_CERT_P12` (paste the clipboard) and
+     `IOS_DEV_CERT_P12_PASSWORD` (the export password). With the GitHub
+     CLI instead: `base64 -i Zertifikat.p12 | gh secret set
+     IOS_DEV_CERT_P12` and `gh secret set IOS_DEV_CERT_P12_PASSWORD`.
+  5. Delete the `.p12` file and empty the clipboard; it holds the private
+     key. Never commit it.
+  6. After a year (the run warns from 30 days ahead), make a new
+     certificate as in step 1 and replace both secrets. Revoke the old
+     one in the developer portal only after the new one has worked.
 - **Build number** is 2500 plus the workflow's run number, passed to
   `xcodebuild` for all three targets and not committed. The run number
   rises with every run on any branch, so every upload is higher than the

@@ -1,10 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Keeps the TestFlight workflow from piling up Apple Development
-# certificates. Automatic signing on a fresh runner creates a new one for
-# every archive, and Apple allows only a few per account; once the limit is
-# reached, the archive fails.
+# Guard for the TestFlight workflow against piling up Apple Development
+# certificates. The workflow imports a fixed one from the secrets; should
+# Xcode make a new one anyway (certificate missing, expired or revoked),
+# Apple's limit of a few per account would fill up and archives fail.
 #
 #   dev-certs.rb list   FILE   writes the IDs of the account's development
 #                              certificates to FILE (one per line)
@@ -78,6 +78,11 @@ when 'revoke'
   made.each do |c|
     request(Net::HTTP::Delete, "#{API}/certificates/#{c['id']}")
     puts "Revoked #{c.dig('attributes', 'name')} (#{c['id']}), made by this run."
+  end
+  unless made.empty?
+    puts '::warning::Xcode made a new development certificate instead of using IOS_DEV_CERT_P12 ' \
+         '(it was revoked again). Check that the certificate in the secret is still valid in the ' \
+         'developer account (documentation/ios-app.md › TestFlight builds).'
   end
   puts 'No development certificate was made by this run.' if made.empty?
 end
