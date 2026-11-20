@@ -28,6 +28,7 @@ import { cancelTurn, followTurn, isKnownTurn, openTurn, TURN_ID_RE, turnSignal, 
 import {
   discardProposal,
   executeProposal,
+  undoProposal,
   ProposalError,
   readProposal,
   refreshProposalBlocks,
@@ -756,6 +757,22 @@ export const discardAssistantProposal = api(
     const auth = assistantUser();
     const ctx = { user: { userID: auth.userID, permissions: auth.permissions }, today: today() };
     return discardProposal(id, ctx).catch(proposalError);
+  },
+);
+
+/**
+ * Takes back a write that ran at once (a note, a line added to one). It
+ * refuses when the note was changed since, so nothing is overwritten unseen;
+ * the card then says why.
+ */
+export const undoAssistantProposal = api(
+  { expose: true, method: "POST", path: "/assistant/proposals/:id/undo", auth: true },
+  async ({ id }: { id: number }): Promise<ProposalRow> => {
+    const auth = assistantUser();
+    const ctx = { user: { userID: auth.userID, permissions: auth.permissions }, today: today() };
+    const row = await undoProposal(id, ctx, WRITE_TOOLS_BY_NAME).catch(proposalError);
+    log.info("assistant action undone", { proposal_id: id, tool: row.tool, status: row.status, failed: row.error !== null });
+    return row;
   },
 );
 

@@ -4975,7 +4975,7 @@ export const assistantProposal = pgTable(
     tool: text("tool").notNull(),
     arguments: jsonb("arguments").$type<Record<string, unknown>>().notNull(),
     summary: text("summary").notNull(),
-    status: text("status").$type<"pending" | "executing" | "executed" | "discarded">().notNull().default("pending"),
+    status: text("status").$type<"pending" | "executing" | "executed" | "discarded" | "undone">().notNull().default("pending"),
     result: jsonb("result").$type<Record<string, unknown>>(),
     /** What the assistant does once the card ran: the rest of the question that needs its result. */
     continuation: text("continuation"),

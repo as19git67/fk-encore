@@ -227,6 +227,12 @@ public final class ConversationStore {
         try await api.discardProposal(proposal.proposal_id)
     }
 
+    public func undo(_ proposal: Proposal) async throws -> Proposal {
+        let next = try await api.undoProposal(proposal.proposal_id)
+        if next.isUndone { onProposalExecuted?(next.tool) }
+        return next
+    }
+
     /// Asks the question now, or once the running answer has ended.
     private func continueWith(_ question: String) {
         if isAnswering {

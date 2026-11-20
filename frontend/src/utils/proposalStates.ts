@@ -19,8 +19,14 @@ export function rememberProposal(p: Proposal): void {
 /** The proposal as this session last saw it decided, else as given. */
 export function latestProposal(p: Proposal): Proposal {
   const known = decided.get(p.proposal_id)
-  if (!known || p.status !== 'pending' && p.status !== 'executing') return p
+  if (!known || !isOlder(p, known)) return p
   return { ...known, count: known.count ?? p.count }
+}
+
+/** Whether `p` shows a state the card left behind since: undecided, or done and taken back later. */
+export function isOlder(p: Proposal, known: Proposal): boolean {
+  if (p.status === 'pending' || p.status === 'executing') return true
+  return p.status === 'executed' && known.status === 'undone'
 }
 
 /** The decided state of one proposal, reactive. */

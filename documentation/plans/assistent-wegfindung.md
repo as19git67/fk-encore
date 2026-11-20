@@ -318,7 +318,9 @@ these parameters as given.
   estimated tokens) past it, so a turn with every area in play went to
   `describe_tools` first; only such turns send the full catalog. The
   person filters of the photo tools (`without_person_ids`, `person_match`)
-  took it to about 11,000, so the budget rose again to 11500.
+  took it to about 11,000, so the budget rose again to 11500. The note
+  tools (`append_to_text_document`, `rewrite_text_document`) took it to
+  about 12,000 (52 tools), and the budget to 12500.
 
 ### Stage 4 (implemented)
 

@@ -36,3 +36,34 @@ export function validateTextDocument(input: TextDocumentInput): TextDocumentInpu
 export function textDocumentFilename(title: string): string {
   return `${slugifyName(title) || "textdokument"}.pdf`;
 }
+
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/;
+
+/**
+ * The Markdown with `addition` below it; what stood there stays byte for
+ * byte. A list item after a list item continues the list, anything else is
+ * a paragraph of its own. With `followList`, a plain line said to a note
+ * that ends in a list becomes its next item ("Milch" on a shopping list).
+ * An addition that is only blank is refused.
+ */
+export function appendedMarkdown(markdown: string, addition: string, followList = false): string {
+  let text = (addition ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!text) throw APIError.invalidArgument("there is nothing to add");
+  const before = markdown.replace(/\s+$/, "");
+  if (!before) return `${text}\n`;
+  const endsInList = LIST_ITEM.test(before.slice(before.lastIndexOf("\n") + 1));
+  if (endsInList && followList && !LIST_ITEM.test(text) && !text.includes("\n")) text = `- ${text}`;
+  const joint = endsInList && LIST_ITEM.test(text) ? "\n" : "\n\n";
+  return `${before}${joint}${text}\n`;
+}
+
+const EXCERPT_MAX = 120;
+
+/** The first line with words in it, without Markdown marks, for a picker row. */
+export function excerptOf(markdown: string): string {
+  const line = markdown
+    .split("\n")
+    .map((l) => l.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|>\s*)/, "").replace(/[*_`~]/g, "").trim())
+    .find((l) => l.length > 0) ?? "";
+  return line.length > EXCERPT_MAX ? `${line.slice(0, EXCERPT_MAX - 1).trimEnd()}…` : line;
+}

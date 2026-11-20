@@ -171,7 +171,7 @@ export interface Proposal {
   tool: string
   summary: string
   count: number | null
-  status: 'pending' | 'executing' | 'executed' | 'discarded'
+  status: 'pending' | 'executing' | 'executed' | 'discarded' | 'undone'
   result_summary: string | null
   result_route: string | null
   /** An API path to download the result from, e.g. a report's PDF. */
@@ -185,6 +185,10 @@ export interface Proposal {
   collage?: CollagePreview | null
   /** What the assistant goes on with once the card ran; the page asks it to right after "Ausführen". */
   continuation?: string | null
+  /** It ran at once, without "Ausführen" (a note, a line added to one). */
+  immediate?: boolean
+  /** "Rückgängig" is offered. */
+  undoable?: boolean
 }
 
 export type CollageTextPosition =
@@ -276,6 +280,11 @@ export function getProposal(id: number): Promise<Proposal> {
 
 export function discardProposal(id: number): Promise<Proposal> {
   return apiFetch(`/assistant/proposals/${id}/discard`, { method: 'POST' })
+}
+
+/** Takes back a write that ran at once; refused (with `error` set) when the note was changed since. */
+export function undoProposal(id: number): Promise<Proposal> {
+  return apiFetch(`/assistant/proposals/${id}/undo`, { method: 'POST' })
 }
 
 /** Several model rounds and tool calls; give it longer than a list load. */

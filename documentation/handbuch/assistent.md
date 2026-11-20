@@ -141,6 +141,29 @@ stehen Vorschläge für erste Fragen.
   ausführen“ versucht es noch einmal; „Verwerfen“ ist endgültig.
 - **Test:** –
 
+### ASS-CHT-11 Notiz anlegen, ergänzen, rückgängig machen
+
+- **Wo:** im Chat („Notiere: …“, „Schreib Milch und Eier auf meine
+  Einkaufsliste“, „Streich die Eier aus der Einkaufsliste“); Karte
+  „Erledigt“ mit „Ansehen“ und „Rückgängig“
+- **Recht:** `documents.upload` zum Anlegen, `documents.edit` zum Ergänzen
+  und Umschreiben, `documents.delete` zum Rückgängigmachen einer neuen
+  Notiz
+- **Vorbedingung:** zum Ergänzen eine Notiz (Textdokument) mit dem Titel
+- **Schritte:**
+  1. Frage stellen.
+  2. Bei Bedarf „Rückgängig“ auf der Karte.
+- **Ergebnis:** Anlegen und Ergänzen laufen sofort, ohne „Ausführen“; die
+  Karte „Erledigt“ verlinkt die Notiz. Ergänzt wird nur am Ende, eine Liste
+  geht weiter. „Rückgängig“ löscht die neue Notiz bzw. stellt den Text von
+  vorher wieder her (Zustand „Rückgängig gemacht“). Umschreiben, Kürzen oder
+  Streichen ist ein Vorschlag mit dem neuen Text und „Ausführen“.
+- **Fehler und Grenzfälle:** Passt der Titel auf keine oder mehrere
+  Notizen, nennt der Assistent die vorhandenen und fragt nach, statt zu
+  raten. Wurde die Notiz seitdem geändert, verweigert „Rückgängig“ und die
+  Karte sagt warum.
+- **Test:** –
+
 ### ASS-CHT-08 Collage aus dem Vorschlag
 
 - **Wo:** Karte „Collage“ mit Layout-Vorschau, Textposition,
@@ -198,4 +221,5 @@ stehen Vorschläge für erste Fragen.
 | ASS-CHT-07 | Vorschlag ausführen oder verwerfen | Recht der Aktion | – |
 | ASS-CHT-08 | Collage aus dem Vorschlag | photos.view | – |
 | ASS-CHT-09 | Arbeitskontext verwalten | module.assistant | – |
+| ASS-CHT-11 | Notiz anlegen, ergänzen, rückgängig | documents.upload / documents.edit | – |
 | ASS-CHT-10 | Unterhaltung wechseln oder löschen | module.assistant | – |

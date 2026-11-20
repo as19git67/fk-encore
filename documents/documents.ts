@@ -111,7 +111,7 @@ import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { decryptPdfWithPassword } from "./text-extract";
 import { renderMarkdownPdf } from "./markdown-pdf";
-import { textDocumentFilename, validateTextDocument } from "./text-documents";
+import { appendedMarkdown, excerptOf, textDocumentFilename, validateTextDocument } from "./text-documents";
 import { todayIsoDate } from "./follow-ups";
 import { searchDocuments, type SearchMode } from "./search";
 import { documentTextPreview } from "./text-preview";
@@ -804,44 +804,148 @@ export const updateTextDocument = api(
     const authData = getAuthData()!;
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
-    const row = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
+    const admin = isDataAdmin(authData);
+    const row = await loadVisibleDocument(userId, req.id, admin);
     if (row.markdown_source == null) {
       throw APIError.failedPrecondition("only text documents written in the app can be edited as text");
     }
     const { title, markdown } = validateTextDocument(req);
+    await saveTextVersion(row, title, markdown, req.base_revision);
+    return await loadDetail(userId, req.id, admin);
+  },
+);
 
-    const buffer = await renderMarkdownPdf({ title, markdown, author: row.sender, date: row.doc_date });
-    if (buffer.length > DOCUMENTS_MAX_BYTES) throw APIError.invalidArgument("the document is too large");
-    const digest = crypto.createHash("sha256").update(buffer).digest("hex");
+/**
+ * Writes a new version of a text document: renders the PDF again, writes it
+ * over the stored file and runs the pipeline once more, so text, thumbnail
+ * and classification follow the content. `baseRevision` refuses the save
+ * when the stored version moved on since it was read.
+ */
+async function saveTextVersion(
+  row: { id: number; sender: string | null; doc_date: string | null },
+  title: string,
+  markdown: string,
+  baseRevision: string | undefined,
+): Promise<void> {
+  const buffer = await renderMarkdownPdf({ title, markdown, author: row.sender, date: row.doc_date });
+  if (buffer.length > DOCUMENTS_MAX_BYTES) throw APIError.invalidArgument("the document is too large");
+  const digest = crypto.createHash("sha256").update(buffer).digest("hex");
 
-    await withDocumentLock(req.id, async () => {
-      const current = await dbFirst<{ sha256: string }>(
-        db.select({ sha256: documents.sha256 }).from(documents).where(eq(documents.id, req.id)),
-      );
-      if (!current) throw APIError.notFound("document not found");
-      if (req.base_revision && req.base_revision !== current.sha256) {
-        throw APIError.aborted("the document was changed in the meantime");
-      }
-      const diskPath = await freshDocumentDiskPath(req.id);
-      await ensureDir(path.dirname(diskPath));
-      await fs.promises.writeFile(diskPath, buffer);
-      await db.update(documents).set({
-        sha256: digest,
-        size_bytes: buffer.length,
-        original_filename: textDocumentFilename(title),
-        title,
-        markdown_source: markdown,
-        status: "pending",
-        last_error: null,
-      }).where(eq(documents.id, req.id));
+  await withDocumentLock(row.id, async () => {
+    const current = await dbFirst<{ sha256: string }>(
+      db.select({ sha256: documents.sha256 }).from(documents).where(eq(documents.id, row.id)),
+    );
+    if (!current) throw APIError.notFound("document not found");
+    if (baseRevision && baseRevision !== current.sha256) {
+      throw APIError.aborted("the document was changed in the meantime");
+    }
+    const diskPath = await freshDocumentDiskPath(row.id);
+    await ensureDir(path.dirname(diskPath));
+    await fs.promises.writeFile(diskPath, buffer);
+    await db.update(documents).set({
+      sha256: digest,
+      size_bytes: buffer.length,
+      original_filename: textDocumentFilename(title),
+      title,
+      markdown_source: markdown,
+      status: "pending",
+      last_error: null,
+    }).where(eq(documents.id, row.id));
+  });
+
+  // Like a replaced file: the cached preview and sidecar show the old text.
+  await removeOcrPdf(row.id);
+  await removeThumbnail(row.id);
+  await requeueDocument(row.id);
+  triggerWorkers();
+}
+
+export interface AppendToTextDocumentRequest {
+  id: number;
+  /** Markdown added below the text, as a paragraph of its own. */
+  text: string;
+  /** `content_revision` the caller read; a newer stored version refuses the append. */
+  base_revision?: string;
+  /** A plain line to a note that ends in a list becomes its next item (Siri's "Milch"). */
+  follow_list?: boolean;
+}
+
+/**
+ * Adds text at the end of a text document, as a paragraph of its own. What
+ * stood there stays as it was: this is the one write the assistant and Siri
+ * do without asking first, because it cannot lose anything.
+ */
+export const appendToTextDocument = api(
+  { expose: true, method: "POST", path: "/documents/:id/text/append", auth: true },
+  async (req: AppendToTextDocumentRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+    const admin = isDataAdmin(authData);
+    const row = await loadVisibleDocument(userId, req.id, admin);
+    if (row.markdown_source == null) {
+      throw APIError.failedPrecondition("only text documents written in the app can be added to");
+    }
+    const { title, markdown } = validateTextDocument({
+      title: row.title ?? "",
+      markdown: appendedMarkdown(row.markdown_source, req.text, req.follow_list === true),
     });
+    await saveTextVersion(row, title, markdown, req.base_revision ?? row.sha256);
+    return await loadDetail(userId, req.id, admin);
+  },
+);
 
-    // Like a replaced file: the cached preview and sidecar show the old text.
-    await removeOcrPdf(req.id);
-    await removeThumbnail(req.id);
-    await requeueDocument(req.id);
-    triggerWorkers();
-    return await loadDetail(userId, req.id, isDataAdmin(authData));
+export interface TextDocumentListItem {
+  id: number;
+  title: string;
+  /** The first line of the text, for a picker. */
+  excerpt: string;
+  uploaded_at: string | null;
+}
+
+export interface ListTextDocumentsRequest {
+  /** Part of the title, any case. */
+  q?: Query<string>;
+  limit?: Query<number>;
+}
+
+const TEXT_DOCUMENT_LIST_MAX = 100;
+
+/**
+ * The text documents the caller can see, newest first — the notes a quick
+ * "add to …" (the assistant, Siri) picks from.
+ */
+export const listTextDocuments = api(
+  { expose: true, method: "GET", path: "/documents/text-documents", auth: true },
+  async (req: ListTextDocumentsRequest): Promise<{ documents: TextDocumentListItem[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+    const groupIds = await loadUserGroupIds(userId);
+    const limit = Math.min(Math.max(Math.trunc(Number(req.limit) || 50), 1), TEXT_DOCUMENT_LIST_MAX);
+    const q = req.q?.trim();
+    const rows = await dbAll<{ id: number; title: string | null; markdown_source: string | null; uploaded_at: string | null }>(
+      db
+        .select({ id: documents.id, title: documents.title, markdown_source: documents.markdown_source, uploaded_at: documents.uploaded_at })
+        .from(documents)
+        .where(and(
+          sql`${documents.markdown_source} IS NOT NULL`,
+          visibleDocumentsWhere(userId, groupIds),
+          ...(q ? [ilike(documents.title, `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)] : []),
+        ))
+        .orderBy(desc(documents.uploaded_at), desc(documents.id))
+        .limit(limit),
+    );
+    return {
+      documents: rows.map((r) => ({
+        id: r.id,
+        title: r.title ?? "",
+        excerpt: excerptOf(r.markdown_source ?? ""),
+        uploaded_at: r.uploaded_at,
+      })),
+    };
   },
 );
 

@@ -219,7 +219,7 @@ export function catalogFor(user: AssistantUser, tools: ToolSpec[] = allTools()):
 
 /** The catalog as the system prompt lists it: one line per tool. */
 export function catalogLines(tools: ToolSpec[]): string {
-  return tools.map((t) => `- ${t.name}${t.kind === "write" ? " (proposal)" : ""}: ${t.summary}`).join("\n");
+  return tools.map((t) => `- ${t.name}${t.kind !== "write" ? "" : t.immediate ? " (runs at once)" : " (proposal)"}: ${t.summary}`).join("\n");
 }
 
 /** A tool definition in the shape llm-service's /chat takes. */

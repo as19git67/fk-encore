@@ -37,6 +37,29 @@ final class ProposalTests: XCTestCase {
         XCTAssertNil(card.count)
     }
 
+    func testANoteThatRanAtOnceOffersUndo() throws {
+        let json = #"{"proposal_id":21,"tool":"create_text_document","summary":"Notiz „Gas ablesen“ anlegen","count":null,"status":"executed","result_summary":"Notiz „Gas ablesen“ angelegt","result_route":"/dokumente/42","result_download":null,"error":null,"letter":null,"text_document":{"title":"Gas ablesen","markdown":"Zählerstand ablesen."},"collage":null,"immediate":true,"undoable":true,"continuation":null}"#
+        let card = try JSONDecoder().decode(Proposal.self, from: Data(json.utf8))
+        XCTAssertTrue(card.ranAtOnce)
+        XCTAssertTrue(card.canUndo)
+        XCTAssertEqual(card.statusLabel, "Erledigt")
+    }
+
+    func testAnUndoneNoteOffersNothingMore() throws {
+        let json = #"{"proposal_id":21,"tool":"create_text_document","summary":"Notiz anlegen","count":null,"status":"undone","result_summary":"Notiz wieder gelöscht","result_route":null,"result_download":null,"error":null,"letter":null,"text_document":null,"collage":null,"immediate":true,"undoable":false,"continuation":null}"#
+        let card = try JSONDecoder().decode(Proposal.self, from: Data(json.utf8))
+        XCTAssertTrue(card.isUndone)
+        XCTAssertFalse(card.canUndo)
+        XCTAssertEqual(card.statusLabel, "Rückgängig gemacht")
+    }
+
+    func testARowFromBeforeUndoStillReads() throws {
+        // Stored answers from before carry neither field.
+        let card = try JSONDecoder().decode(Proposal.self, from: Data(#"{"proposal_id":1,"tool":"create_album","summary":"Album","count":null,"status":"executed","result_summary":null,"result_route":null,"result_download":null,"error":null,"letter":null,"text_document":null,"collage":null,"continuation":null}"#.utf8))
+        XCTAssertFalse(card.ranAtOnce)
+        XCTAssertFalse(card.canUndo)
+    }
+
     func testALetterWithGapsHoldsExecution() throws {
         let json = #"{"proposal_id":3,"tool":"render_letter","summary":"Brief entwerfen","count":null,"status":"pending","result_summary":null,"result_route":null,"result_download":null,"error":null,"letter":{"sender":"Max Beispiel, Beispielstraße 1, 12345 Musterstadt","recipient":"Beispiel GmbH","subject":"Kündigung Vertrag [[Vertragsnummer]]","body":"Hiermit kündige ich zum [[Datum]].\nVertrag [[Vertragsnummer]].","attachments":[],"photos":[],"destinations":["document"],"gaps":["Vertragsnummer","Datum"]},"text_document":null,"collage":null,"continuation":null}"#
         let card = try JSONDecoder().decode(Proposal.self, from: Data(json.utf8))

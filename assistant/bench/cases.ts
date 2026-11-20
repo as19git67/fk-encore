@@ -146,6 +146,8 @@ const OLDER_BOOKINGS_HISTORY: ChatMessage[] = [
 ];
 
 const PROPOSAL = (summary: string) => ({ proposal: { id: 1, summary, status: "pending — the user confirms on the card" } });
+/** A write that ran at once (a note): done, with "Rückgängig" on its card. */
+const DONE = (summary: string) => ({ done: { id: 1, summary, status: "executed at once — the card offers Rückgängig" } });
 
 const MAHNUNG_TEXT = "Beispiel Versand GmbH · Beispielstraße 1 · 12345 Musterstadt\n\nMahnung\n\nZu unserer Rechnung BV-77-0042 vom 01.09.2026 über 59,90 € konnten wir noch keinen Zahlungseingang feststellen. Bitte überweisen Sie den Betrag bis zum 30.10.2026.";
 
@@ -1056,6 +1058,29 @@ export const BENCH_CASES: BenchCase[] = [
       args: { title: { $present: true }, markdown: { $contains: "3.412" } },
     }],
     results: { create_text_document: PROPOSAL("Textdokument „Stromverbrauch 2025“ ablegen") },
+  },
+
+  {
+    id: "note-quick",
+    title: "Schnell etwas notieren",
+    question: "Notiere: Filter der Lüftungsanlage im März tauschen.",
+    firstTools: ["create_text_document"],
+    expect: [{
+      tool: "create_text_document",
+      args: { title: { $present: true }, markdown: { $contains: "filter" } },
+    }],
+    results: { create_text_document: DONE("Notiz „Filter Lüftungsanlage“ angelegt") },
+  },
+  {
+    id: "note-append",
+    title: "An eine bestehende Notiz anhängen",
+    question: "Schreib Haferflocken und Zitronen auf meine Einkaufsliste.",
+    firstTools: ["append_to_text_document"],
+    expect: [{
+      tool: "append_to_text_document",
+      args: { note: { $contains: "einkauf" }, markdown: { $contains: "haferflocken" } },
+    }],
+    results: { append_to_text_document: DONE("An Notiz „Einkaufsliste“ angehängt") },
   },
 
   // ── photo books (fotobuch.md, stage 5) ──────────────────────────────────

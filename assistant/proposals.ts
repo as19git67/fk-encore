@@ -8,6 +8,12 @@
  * `POST /assistant/proposals/:id/execute` runs it, as the user who asked,
  * through the services' own endpoints, so their permission checks apply a
  * second time. A proposal runs at most once and only for its own user.
+ *
+ * A few writes run at once (`immediate`): they only add something the user
+ * can take back, such as a note or a line at the end of one. They are stored
+ * like a proposal that was executed, so the chat shows the same card with
+ * the result, later turns read it the same way, and "Rückgängig" on the card
+ * runs the tool's `undo`.
  */
 
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -53,6 +59,13 @@ export interface WriteToolDefinition {
   preview?(args: Record<string, unknown>): TextDocumentPreview;
   /** The collage the card previews and lets the user change; `result` once it ran. */
   collage?(args: Record<string, unknown>, result: Record<string, unknown> | null): CollagePreview;
+  /**
+   * Runs at once instead of waiting for "Ausführen". Only for a write that
+   * adds something and has an `undo`: nothing the user had is lost.
+   */
+  immediate?: boolean;
+  /** Takes the executed action back; returns the line the card shows. Throws when it cannot. */
+  undo?(args: Record<string, unknown>, result: ActionResult, ctx: ToolContext): Promise<string>;
 }
 
 /** A photo of a collage, as the card draws it. */
@@ -130,7 +143,7 @@ export interface ProposalEdits {
   collage?: CollageEdits;
 }
 
-export type ProposalStatus = "pending" | "executing" | "executed" | "discarded";
+export type ProposalStatus = "pending" | "executing" | "executed" | "discarded" | "undone";
 
 /**
  * One row of a `proposal` block, as the client renders the card. No index
@@ -153,6 +166,10 @@ export interface ProposalRow {
   text_document: TextDocumentPreview | null;
   /** Set for a collage: what will be rendered, and afterwards the photo it became. */
   collage: CollagePreview | null;
+  /** The action ran without a card's "Ausführen" (a note, a line added to one). */
+  immediate: boolean;
+  /** "Rückgängig" is offered: it ran and its tool can take it back. */
+  undoable: boolean;
   /**
    * What the assistant goes on with once the card ran — the rest of the
    * question that needs its result. The app asks it to continue right after
@@ -176,6 +193,10 @@ function textDocumentOf(tool: string, args: Record<string, unknown>): TextDocume
   const preview = previewers.get(tool);
   return preview ? preview(args) : null;
 }
+
+/** Per tool, whether it runs at once and whether it can be taken back. */
+const immediateTools = new Set<string>();
+const undoableTools = new Set<string>();
 
 /** Per tool, the collage its stored arguments describe. */
 const collagers = new Map<string, (args: Record<string, unknown>, result: Record<string, unknown> | null) => CollagePreview>();
@@ -216,6 +237,9 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
   if (def.draft) drafters.set(def.name, def.draft.bind(def));
   if (def.preview) previewers.set(def.name, def.preview.bind(def));
   if (def.collage) collagers.set(def.name, def.collage.bind(def));
+  if (def.immediate && !def.undo) throw new Error(`${def.name} runs at once and needs an undo`);
+  if (def.immediate) immediateTools.add(def.name);
+  if (def.undo) undoableTools.add(def.name);
   return {
     name: def.name,
     kind: "write",
@@ -225,10 +249,12 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
     // write tool and the system prompt names it once.
     parameters: def.parameters,
     source: "hand",
+    ...(def.immediate ? { immediate: true } : {}),
     async run(rawArgs, ctx): Promise<ToolOutcome> {
       const { [AFTER_EXECUTE]: after, ...args } = rawArgs;
       const continuation = cleanContinuation(after);
       const prepared = await def.prepare(args, ctx);
+      if (def.immediate) return runAtOnce(def, prepared, ctx);
       const twin = await sameProposal(ctx, def.name, prepared.arguments);
       if (twin) throw new Error(twinRefusal(twin));
       const [stored] = await db
@@ -255,6 +281,8 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
         letter: letterOf(def.name, prepared.arguments),
         text_document: textDocumentOf(def.name, prepared.arguments),
         collage: collageOf(def.name, prepared.arguments),
+        immediate: false,
+        undoable: false,
         continuation,
       };
       return {
@@ -271,6 +299,39 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
         block: proposalBlock(row),
       };
     },
+  };
+}
+
+/**
+ * An immediate write: runs now, as the user, and is stored as an executed
+ * proposal. A failure stores nothing and reaches the model as the tool's
+ * error, so it can say what went wrong.
+ */
+async function runAtOnce(def: WriteToolDefinition, prepared: PreparedAction, ctx: ToolContext): Promise<ToolOutcome> {
+  const result = await def.execute(prepared.arguments, ctx);
+  const [stored] = await db
+    .insert(assistantProposal)
+    .values({
+      conversation_id: ctx.conversationId ?? null,
+      user_id: Number(ctx.user.userID),
+      tool: def.name,
+      arguments: prepared.arguments,
+      summary: prepared.summary,
+      status: "executed",
+      result: { ...result },
+      decided_at: sql`now()`,
+    })
+    .returning();
+  const row = toRow(stored);
+  return {
+    text: [
+      `Done #${stored.id}: ${result.summary}.`,
+      ...(prepared.note ? [prepared.note] : []),
+      "This ran at once, without a card to confirm: tell the user it is done. The card under your answer has \"Rückgängig\" if they did not want it.",
+    ].join("\n"),
+    digest: `[earlier proposal #${stored.id}: ${prepared.summary}]`,
+    rowCount: 1,
+    block: proposalBlock({ ...row, count: prepared.count ?? null }),
   };
 }
 
@@ -372,6 +433,62 @@ export async function discardProposal(id: number, ctx: ToolContext): Promise<Pro
   return toRow(row);
 }
 
+/**
+ * Takes an executed action back, once: the status moves from `executed` to
+ * `executing` in one UPDATE while the tool's `undo` runs, then to `undone`.
+ * When the undo fails (the note was changed since), the action stays
+ * executed and the card says why.
+ */
+export async function undoProposal(
+  id: number,
+  ctx: ToolContext,
+  tools: Map<string, WriteToolDefinition>,
+): Promise<ProposalRow> {
+  const userId = Number(ctx.user.userID);
+  const [claimed] = await db
+    .update(assistantProposal)
+    .set({ status: "executing" })
+    .where(and(
+      eq(assistantProposal.id, id),
+      eq(assistantProposal.user_id, userId),
+      eq(assistantProposal.status, "executed"),
+      inArray(assistantProposal.tool, [...undoableTools]),
+    ))
+    .returning();
+  if (!claimed) {
+    const [row] = await db
+      .select()
+      .from(assistantProposal)
+      .where(and(eq(assistantProposal.id, id), eq(assistantProposal.user_id, userId)))
+      .limit(1);
+    if (row?.status === "undone") return toRow(row);
+    if (row && row.status === "executed") throw new ProposalError("decided", "Das lässt sich nicht rückgängig machen.");
+    throw refusal(row?.status ?? null);
+  }
+  const def = tools.get(claimed.tool);
+  const done = (claimed.result ?? {}) as unknown as ActionResult & { undo_error?: string };
+  try {
+    if (!def?.undo) throw new Error("Das lässt sich nicht rückgängig machen.");
+    const { undo_error: _, ...result } = done;
+    const summary = await def.undo(claimed.arguments, result, { ...ctx, conversationId: claimed.conversation_id ?? undefined });
+    const [row] = await db
+      .update(assistantProposal)
+      .set({ status: "undone", decided_at: sql`now()`, result: { ...result, undo_summary: summary } })
+      .where(eq(assistantProposal.id, id))
+      .returning();
+    return toRow(row);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const { undo_error: _, ...result } = done;
+    const [row] = await db
+      .update(assistantProposal)
+      .set({ status: "executed", result: { ...result, undo_error: message } })
+      .where(eq(assistantProposal.id, id))
+      .returning();
+    return toRow(row);
+  }
+}
+
 /** The proposal as it stands now, for a card that waits on one being executed. */
 export async function readProposal(id: number, userId: number): Promise<ProposalRow> {
   const [row] = await db
@@ -387,6 +504,7 @@ const DECIDED: Record<Exclude<ProposalStatus, "pending">, string> = {
   executed: "Dieser Vorschlag ist schon ausgeführt.",
   executing: "Dieser Vorschlag wird gerade ausgeführt.",
   discarded: "Dieser Vorschlag ist schon verworfen.",
+  undone: "Das ist schon rückgängig gemacht.",
 };
 
 /** Why a proposal cannot be taken; someone else's reads as missing, not as "decided". */
@@ -396,21 +514,23 @@ function refusal(status: ProposalStatus | null): ProposalError {
 }
 
 export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {
-  const result = (row.result ?? {}) as { summary?: string; route?: string; download?: string; error?: string };
+  const result = (row.result ?? {}) as { summary?: string; route?: string; download?: string; error?: string; undo_error?: string; undo_summary?: string };
   return {
     proposal_id: row.id,
     tool: row.tool,
     summary: row.summary,
     count: null,
     status: row.status,
-    result_summary: row.status === "executed" ? result.summary ?? null : null,
+    result_summary: row.status === "executed" ? result.summary ?? null : row.status === "undone" ? result.undo_summary ?? null : null,
     result_route: row.status === "executed" ? result.route ?? null : null,
     result_download: row.status === "executed" ? result.download ?? null : null,
-    error: row.status === "pending" ? result.error ?? null : null,
+    error: row.status === "pending" ? result.error ?? null : row.status === "executed" ? result.undo_error ?? null : null,
     letter: letterOf(row.tool, row.arguments),
     text_document: textDocumentOf(row.tool, row.arguments),
     collage: collageOf(row.tool, row.arguments, row.status === "executed" ? (row.result as Record<string, unknown> | null) : null),
-    continuation: row.status === "discarded" ? null : row.continuation ?? null,
+    immediate: immediateTools.has(row.tool),
+    undoable: row.status === "executed" && undoableTools.has(row.tool),
+    continuation: row.status === "discarded" || row.status === "undone" ? null : row.continuation ?? null,
   };
 }
 
@@ -490,6 +610,8 @@ export function proposalStateText(id: number, state: ProposalState): string {
     }
     case "discarded":
       return `Proposal #${id} (${state.summary}) was DISCARDED by the user; nothing was changed.`;
+    case "undone":
+      return `Proposal #${id} (${state.summary}) was executed and then UNDONE by the user ("Rückgängig"); it no longer holds. Do not do it again unless asked.`;
     case "executing":
       return `Proposal #${id} (${state.summary}) is being executed right now.`;
     default:

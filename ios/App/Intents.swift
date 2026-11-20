@@ -230,6 +230,110 @@ struct RememberHereIntent: AppIntent {
     }
 }
 
+// MARK: - Notizen
+
+/// A note as Siri and Shortcuts see it: a text document of the documents
+/// module, picked by its title.
+struct NoteEntity: AppEntity {
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Notiz")
+    static let defaultQuery = NoteEntityQuery()
+
+    let id: Int
+    let title: String
+    let excerpt: String
+
+    var displayRepresentation: DisplayRepresentation {
+        excerpt.isEmpty
+            ? DisplayRepresentation(title: "\(title)")
+            : DisplayRepresentation(title: "\(title)", subtitle: "\(excerpt)")
+    }
+
+    init(_ note: IntentActions.NoteRef) {
+        id = note.id
+        title = note.title
+        excerpt = note.excerpt
+    }
+}
+
+struct NoteEntityQuery: EntityStringQuery {
+    func entities(for identifiers: [Int]) async throws -> [NoteEntity] {
+        let wanted = Set(identifiers)
+        return try await IntentActions.notes().map(NoteEntity.init).filter { wanted.contains($0.id) }
+    }
+
+    /// Siri's spoken title, matched loosely: „Einkauf" finds „Einkaufsliste".
+    func entities(matching string: String) async throws -> [NoteEntity] {
+        let needle = string.folded
+        return try await IntentActions.notes().map(NoteEntity.init).filter { $0.title.folded.contains(needle) }
+    }
+
+    func suggestedEntities() async throws -> [NoteEntity] {
+        Array(try await IntentActions.notes().map(NoteEntity.init).prefix(10))
+    }
+}
+
+/// „Notiz in F4mil Photos": Siri asks what to note and files it as a new
+/// text document, without opening the app. The first words name it.
+struct CreateNoteIntent: AppIntent {
+    static let title: LocalizedStringResource = "Notiz anlegen"
+    static let description = IntentDescription(
+        "Legt eine neue Notiz in den Dokumenten an, mit dem Text, den du sagst.",
+    )
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Text", requestValueDialog: "Was soll ich notieren?")
+    var text: String
+
+    @Parameter(title: "Titel", description: "Ohne Titel benennen die ersten Wörter die Notiz.")
+    var noteTitle: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Notiere \(\.$text)") {
+            \.$noteTitle
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw $text.needsValueError("Was soll ich notieren?")
+        }
+        let said = await IntentActions.createNote(text: trimmed, title: noteTitle)
+        return .result(dialog: "\(said)")
+    }
+}
+
+/// „An Notiz anhängen in F4mil Photos": Siri asks which note and what to
+/// add, and adds it at the end — on a list as its next item.
+struct AppendToNoteIntent: AppIntent {
+    static let title: LocalizedStringResource = "An Notiz anhängen"
+    static let description = IntentDescription(
+        "Fügt Text am Ende einer Notiz hinzu. Endet die Notiz mit einer Liste, wird er der nächste Punkt.",
+    )
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Notiz", requestValueDialog: "An welche Notiz?")
+    var note: NoteEntity
+
+    @Parameter(title: "Text", requestValueDialog: "Was soll ich hinzufügen?")
+    var text: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Füge \(\.$text) zu \(\.$note) hinzu")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw $text.needsValueError("Was soll ich hinzufügen?")
+        }
+        let said = await IntentActions.appendToNote(id: note.id, title: note.title, text: trimmed)
+        return .result(dialog: "\(said)")
+    }
+}
+
 // MARK: - App Shortcuts
 
 /// The app's shortcuts for the Shortcuts app, Siri, Spotlight and the Action
@@ -281,6 +385,27 @@ struct FKPhotosShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Rückblick zeigen",
             systemImageName: "sparkles"
+        )
+        AppShortcut(
+            intent: CreateNoteIntent(),
+            // The text is asked for after the phrase: a free-text parameter
+            // cannot be part of it.
+            phrases: [
+                "Notiz in \(.applicationName)",
+                "Notiere in \(.applicationName)",
+                "Neue Notiz in \(.applicationName)",
+            ],
+            shortTitle: "Notiz anlegen",
+            systemImageName: "note.text.badge.plus"
+        )
+        AppShortcut(
+            intent: AppendToNoteIntent(),
+            phrases: [
+                "An Notiz anhängen in \(.applicationName)",
+                "Zur Notiz hinzufügen in \(.applicationName)",
+            ],
+            shortTitle: "An Notiz anhängen",
+            systemImageName: "text.append"
         )
         AppShortcut(
             intent: OpenReviewQueueIntent(),

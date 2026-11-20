@@ -5,15 +5,16 @@
  * buttons use; "Verwerfen" drops it. Afterwards the card says what became of
  * it and links to the result. A letter (#1534) stays editable on the card
  * until it runs; while a gap is left, the foot says why "Ausführen" waits
- * and leads to the gap.
+ * and leads to the gap. A write that ran at once (a note) arrives done and
+ * offers "Rückgängig" instead.
  */
 import { computed, inject, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import { discardProposal, downloadResult, executeProposal, getProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
+import { discardProposal, downloadResult, executeProposal, getProposal, undoProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
 import { letterGaps } from '../../utils/letterGaps'
 import { CONTINUE_AFTER_PROPOSAL, continuationQuestion, refreshAfterProposal } from '../../utils/proposalEffects'
-import { decidedProposal, latestProposal, rememberProposal } from '../../utils/proposalStates'
+import { decidedProposal, isOlder, latestProposal, rememberProposal } from '../../utils/proposalStates'
 import LetterEditor, { type LetterForm } from './LetterEditor.vue'
 import CollageProposal, { type CollageForm } from './CollageProposal.vue'
 import MarkdownView from '../documents/MarkdownView.vue'
@@ -25,7 +26,7 @@ const props = defineProps<{ proposal: Proposal }>()
 const current = ref<Proposal>({ ...latestProposal(props.proposal) })
 watch(() => props.proposal, (p) => { current.value = { ...latestProposal(p) } })
 watch(() => decidedProposal(current.value.proposal_id), (d) => {
-  if (d && (current.value.status === 'pending' || current.value.status === 'executing')) {
+  if (d && isOlder(current.value, d)) {
     current.value = { ...d, count: d.count ?? current.value.count }
   }
 })
@@ -86,7 +87,7 @@ const mailto = computed(() => {
   return `mailto:?subject=${encodeURIComponent(f.subject)}&body=${encodeURIComponent(f.body)}`
 })
 
-const busy = ref<'execute' | 'discard' | null>(null)
+const busy = ref<'execute' | 'discard' | 'undo' | null>(null)
 const continueConversation = inject(CONTINUE_AFTER_PROPOSAL, null)
 const requestError = ref<string | null>(null)
 
@@ -95,9 +96,14 @@ const STATUS: Record<Proposal['status'], { label: string; severity: 'info' | 'su
   executing: { label: 'Läuft', severity: 'warn' },
   executed: { label: 'Ausgeführt', severity: 'success' },
   discarded: { label: 'Verworfen', severity: 'secondary' },
+  undone: { label: 'Rückgängig gemacht', severity: 'secondary' },
 }
 
-const status = computed(() => STATUS[current.value.status])
+const status = computed(() =>
+  current.value.immediate && current.value.status === 'executed'
+    ? { label: 'Erledigt', severity: 'success' as const }
+    : STATUS[current.value.status],
+)
 const downloading = ref(false)
 
 async function download() {
@@ -141,6 +147,23 @@ function afterExecuted(next: Proposal) {
   }
 }
 
+/** Takes back a write that ran at once; a refusal (the note changed since) comes back as `error`. */
+async function undo() {
+  if (busy.value) return
+  busy.value = 'undo'
+  requestError.value = null
+  try {
+    const next = await settled(await undoProposal(current.value.proposal_id))
+    show(next)
+    rememberProposal(next)
+    if (next.status === 'undone') refreshAfterProposal(next.tool)
+  } catch (e) {
+    requestError.value = e instanceof Error ? e.message : 'Das ließ sich nicht rückgängig machen.'
+  } finally {
+    busy.value = null
+  }
+}
+
 async function decide(action: 'execute' | 'discard') {
   if (busy.value) return
   busy.value = action
@@ -173,18 +196,18 @@ async function decide(action: 'execute' | 'discard') {
 </script>
 
 <template>
-  <section class="proposal" :class="`proposal--${current.status}`" aria-label="Vorschlag">
+  <section class="proposal" :class="`proposal--${current.status}`" :aria-label="current.immediate ? 'Aktion' : 'Vorschlag'">
     <header class="proposal-head">
       <span class="proposal-title">
-        <i class="pi pi-bolt" aria-hidden="true" />
-        Vorschlag
+        <i :class="current.immediate ? 'pi pi-check-circle' : 'pi pi-bolt'" aria-hidden="true" />
+        {{ current.immediate ? 'Erledigt' : 'Vorschlag' }}
       </span>
       <Tag :value="status.label" :severity="status.severity" />
     </header>
 
     <div class="proposal-body">
       <!-- Once it ran, the result says what became of it; the proposal's own line may name gaps that are filled by now. -->
-      <p v-if="!(current.status === 'executed' && current.result_summary)" class="proposal-summary">{{ current.summary }}</p>
+      <p v-if="!((current.status === 'executed' || current.status === 'undone') && current.result_summary)" class="proposal-summary">{{ current.summary }}</p>
       <LetterEditor
         ref="letterEditor"
         v-if="letterForm && current.letter && current.status === 'pending'"
@@ -205,7 +228,7 @@ async function decide(action: 'execute' | 'discard') {
         <i class="pi pi-arrow-right" aria-hidden="true" />
         <span>Nach dem Ausführen mache ich weiter: {{ current.continuation }}</span>
       </p>
-      <p v-if="current.status === 'executed' && current.result_summary" class="proposal-result">
+      <p v-if="(current.status === 'executed' || current.status === 'undone') && current.result_summary" class="proposal-result">
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
       </p>
@@ -219,7 +242,7 @@ async function decide(action: 'execute' | 'discard') {
       />
       <!-- One row, one look: links stay links (navigation, mailto), the download stays a button. -->
       <div
-        v-if="current.status === 'executed' && (current.result_route || current.result_download)"
+        v-if="current.status === 'executed' && (current.result_route || current.result_download || current.undoable)"
         class="proposal-actions"
       >
         <Button
@@ -243,6 +266,17 @@ async function decide(action: 'execute' | 'discard') {
           @click="download"
         />
         <Button
+          v-if="current.undoable"
+          label="Rückgängig"
+          icon="pi pi-undo"
+          severity="secondary"
+          text
+          class="proposal-action"
+          :loading="busy === 'undo'"
+          :disabled="busy !== null"
+          @click="undo"
+        />
+        <Button
           v-if="mailto"
           as="a"
           :href="mailto"
@@ -253,9 +287,9 @@ async function decide(action: 'execute' | 'discard') {
           class="proposal-action"
         />
       </div>
-      <p v-if="requestError && current.status === 'executed'" class="proposal-error" role="alert">
+      <p v-if="error && current.status === 'executed'" class="proposal-error" role="alert">
         <i class="pi pi-exclamation-circle" aria-hidden="true" />
-        {{ requestError }}
+        {{ error }}
       </p>
       <p v-if="error && current.status !== 'executed'" class="proposal-error" role="alert">
         <i class="pi pi-exclamation-circle" aria-hidden="true" />
@@ -323,7 +357,8 @@ async function decide(action: 'execute' | 'discard') {
 }
 
 .proposal--executed,
-.proposal--discarded {
+.proposal--discarded,
+.proposal--undone {
   border-color: var(--p-content-border-color);
 }
 
@@ -376,7 +411,8 @@ async function decide(action: 'execute' | 'discard') {
   margin: 0;
 }
 
-.proposal--discarded .proposal-summary {
+.proposal--discarded .proposal-summary,
+.proposal--undone .proposal-result {
   color: var(--p-text-muted-color);
   text-decoration: line-through;
 }
