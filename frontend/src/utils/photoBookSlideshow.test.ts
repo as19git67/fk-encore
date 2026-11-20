@@ -14,7 +14,7 @@ function page(position: number, kind: PhotoBookPage['kind'], chapter: number, sl
 
 function book(pages: PhotoBookPage[]): PhotoBook {
   const chapter = (id: number, title: string) => ({ id, position: id, title, subtitle: id === 1 ? 'Juni' : null, starts_at: null, ends_at: null, title_source: 'rule' as const, title_suggestion: null })
-  return { id: 1, title: 'Sommer', subtitle: null, format: 'a4-landscape', width_mm: 297, height_mm: 210, cover_photo_id: null, cover_filename: null, cover_auto_crop: null, cover_focal: null, cover_edited_at: null, cover_window: null, settings: { bleed_mm: 3, crop_marks: true, spreads: true, paper_mm: 0.1, captions: true, face_framing: true }, source: { kind: 'photos' }, page_count: pages.length, photo_count: 0, spine_mm: 6, low_dpi_count: 0, edit_misfit_count: 0, face_cut_count: 0, face_fit: { photos: 0, pages: 0 }, chapters: [chapter(1, 'Am Beispielsee'), chapter(2, 'Musterstadt')], pages, created_at: '2024-06-01T00:00:00Z', updated_at: '2024-06-01T00:00:00Z' }
+  return { id: 1, title: 'Sommer', subtitle: null, format: 'a4-landscape', width_mm: 297, height_mm: 210, cover_photo_id: null, cover_filename: null, cover_auto_crop: null, cover_focal: null, cover_edited_at: null, cover_window: null, settings: { bleed_mm: 3, crop_marks: true, spreads: true, paper_mm: 0.1, captions: true, face_framing: true }, source: { kind: 'photos' }, page_count: pages.length, photo_count: 0, spine_mm: 6, low_dpi_count: 0, edit_misfit_count: 0, face_cut_count: 0, face_fit: { photos: 0, pages: 0 }, excluded: [], chapters: [chapter(1, 'Am Beispielsee'), chapter(2, 'Musterstadt')], pages, created_at: '2024-06-01T00:00:00Z', updated_at: '2024-06-01T00:00:00Z' }
 }
 
 describe('photo book slideshow', () => {

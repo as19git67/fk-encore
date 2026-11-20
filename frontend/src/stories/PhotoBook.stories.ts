@@ -114,6 +114,7 @@ const MOCK_BOOK: PhotoBook = {
   edit_misfit_count: 0,
   face_cut_count: 0,
   face_fit: { photos: 0, pages: 0 },
+  excluded: [],
   chapters: [
     { id: 1, position: 0, title: 'Samstag, 1. Juni 2024', subtitle: '09:00–18:00 Uhr · Musterstadt', starts_at: '2024-06-01 09:00:00', ends_at: '2024-06-01 18:00:00', title_source: 'rule', title_suggestion: 'Rund um den Alten Turm' },
     { id: 2, position: 1, title: 'Sonntag, 2. Juni 2024', subtitle: '09:00–18:00 Uhr', starts_at: '2024-06-02 09:00:00', ends_at: '2024-06-02 18:00:00', title_source: 'user', title_suggestion: 'Ein Tag am Beispielsee' },
