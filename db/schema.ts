@@ -5408,6 +5408,8 @@ export interface PhotoBookSource {
   weights?: PhotoBookWeights | null;
   /** Near-duplicate groups contribute only their pick (stage 4). */
   group_picks_only?: boolean;
+  /** Photos the user took out of the book for good: no rebuild or narrowing brings them back. */
+  excluded_photo_ids?: number[];
 }
 
 export const photoBook = pgTable(

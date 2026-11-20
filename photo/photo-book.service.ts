@@ -35,7 +35,8 @@ import {
 } from "../db/schema";
 import { loadReadableCollection } from "../documents/collection-access";
 import { accessiblePhotoCondition, accessiblePhotoConditionFor } from "./photo-file-access";
-import { editedPoint, editedRect, editedSize, type PhotoEdit } from "./photo-edit-geometry";
+import { editedPoint, editedRect, editedSize, quarterTurns, type PhotoEdit } from "./photo-edit-geometry";
+import { upsertOwnTransformLogic } from "./photo-transforms-crud.service";
 import {
   MAX_FACE_CUT,
   faceCut,
@@ -240,10 +241,18 @@ export interface PhotoBookView {
   face_cut_count: number;
   /** What "Gesichter einpassen" would change: photos it moves, pages it arranges anew. */
   face_fit: { photos: number; pages: number };
+  /** Photos taken out of the book for good, that the owner can still see. */
+  excluded: PhotoBookExcludedPhoto[];
   chapters: PhotoBookChapterView[];
   pages: PhotoBookPageView[];
   created_at: string;
   updated_at: string;
+}
+
+export interface PhotoBookExcludedPhoto {
+  photo_id: number;
+  filename: string;
+  edited_at: string | null;
 }
 
 export interface PhotoBookSummary {
@@ -375,6 +384,8 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource, 
   const a = percent(source.aesthetic_min);
   if (a != null) conds.push(sql`${aestheticScoreSql} >= ${a / 100}`);
   if (source.without_recognisable_faces) conds.push(sql`NOT ${recognisableFaceSql}`);
+  const excluded = excludedIds(source);
+  if (excluded.length) conds.push(sql`NOT ${inArray(photos.id, excluded)}`);
 
   const rows = await dbAll<PhotoRow>(
     db.select({
@@ -414,6 +425,11 @@ export async function selectBookPhotos(userId: number, source: PhotoBookSource, 
     const f = faceRects.get(p.id);
     return f?.length ? { ...p, faces: f } : p;
   });
+}
+
+/** The photos the user took out of a book for good. */
+export function excludedIds(source: PhotoBookSource): number[] {
+  return [...new Set(source.excluded_photo_ids ?? [])].filter((n) => Number.isInteger(n) && n > 0);
 }
 
 // ── building ────────────────────────────────────────────────────────────
@@ -1075,11 +1091,28 @@ export async function getPhotoBookView(userId: number, bookId: number): Promise<
     edit_misfit_count: misfits,
     face_cut_count: faceCuts,
     face_fit: faceFit,
+    excluded: await loadExcluded(userId, book.source),
     chapters: loaded.chapters,
     pages,
     created_at: book.created_at,
     updated_at: book.updated_at,
   };
+}
+
+/** The excluded photos the owner can still see, with what a thumbnail needs. */
+async function loadExcluded(userId: number, source: PhotoBookSource): Promise<PhotoBookExcludedPhoto[]> {
+  const ids = excludedIds(source);
+  if (!ids.length) return [];
+  const rows = await dbAll<{ id: number; filename: string; edit_id: number | null; edited_at: string | null }>(
+    db.select({ id: photos.id, filename: photos.filename, edit_id: photoTransforms.id, edited_at: photoTransforms.updated_at })
+      .from(photos)
+      .leftJoin(photoTransforms, and(eq(photoTransforms.photo_id, photos.id), eq(photoTransforms.user_id, userId)))
+      .where(and(inArray(photos.id, ids), accessiblePhotoCondition(userId))),
+  );
+  const order = new Map(ids.map((id, i) => [id, i]));
+  return rows
+    .sort((a, b) => order.get(a.id)! - order.get(b.id)!)
+    .map((r) => ({ photo_id: r.id, filename: r.filename, edited_at: r.edit_id != null ? r.edited_at : null }));
 }
 
 export async function listPhotoBooks(userId: number): Promise<PhotoBookSummary[]> {
@@ -1253,6 +1286,77 @@ export async function removePhotoFromBookPage(userId: number, bookId: number, pa
   await touch(bookId);
 }
 
+/**
+ * Take a photo out of the book for good: off every page it is on (each laid
+ * out again for the rest), its caption goes, and the book's source remembers
+ * it, so neither "Neu verteilen" nor a new narrowing brings it back.
+ */
+export async function excludePhotoFromBook(userId: number, bookId: number, photoId: number): Promise<void> {
+  const loaded = await loadPhotoBook(userId, bookId);
+  const pages = loaded.pages.filter((p) => p.photos.some((s) => s.photo_id === photoId));
+  if (!pages.length) throw APIError.notFound("photo not in this book");
+  for (const page of pages) {
+    await writePage(page.id, page.kind, loaded.format, page.photos.filter((s) => s.photo_id !== photoId).map(toBookPhoto));
+  }
+  await dbExec(db.delete(photoBookCaption).where(and(eq(photoBookCaption.book_id, bookId), eq(photoBookCaption.photo_id, photoId))));
+  const source: PhotoBookSource = { ...loaded.book.source, excluded_photo_ids: [...excludedIds(loaded.book.source).filter((id) => id !== photoId), photoId] };
+  await dbExec(db.update(photoBook).set({
+    source,
+    ...(loaded.book.cover_photo_id === photoId ? { cover_photo_id: null } : {}),
+    updated_at: sql`now()`,
+  }).where(eq(photoBook.id, bookId)));
+}
+
+/** Let an excluded photo back: the next "Neu verteilen" may take it again. The pages stay as they are. */
+export async function includePhotoInBook(userId: number, bookId: number, photoId: number): Promise<void> {
+  const book = await ownedBook(userId, bookId);
+  const ids = excludedIds(book.source);
+  if (!ids.includes(photoId)) throw APIError.notFound("photo is not excluded from this book");
+  const source: PhotoBookSource = { ...book.source, excluded_photo_ids: ids.filter((id) => id !== photoId) };
+  await dbExec(db.update(photoBook).set({ source, updated_at: sql`now()` }).where(eq(photoBook.id, bookId)));
+}
+
+/**
+ * Turn a photo of the book a quarter to the right (`turns` 1) or left (-1).
+ * That is the owner's edit of the photo, as in the editor, so the gallery
+ * shows it turned too. A page the rule or the model laid out, and that the
+ * turned photo no longer fits, is laid out again at once; a layout the user
+ * chose stays and only gets the hint.
+ */
+export async function rotatePhotoInBook(userId: number, bookId: number, pageId: number, photoId: number, turns: 1 | -1): Promise<void> {
+  const { page } = await ownedPage(userId, bookId, pageId);
+  if (!page.photos.some((p) => p.photo_id === photoId)) throw APIError.notFound("photo not on this page");
+  if (turns !== 1 && turns !== -1) throw APIError.invalidArgument("turns must be 1 or -1");
+  const edit = await dbFirst<{ rotation: number }>(
+    db.select({ rotation: photoTransforms.rotation }).from(photoTransforms)
+      .where(and(eq(photoTransforms.photo_id, photoId), eq(photoTransforms.user_id, userId))),
+  );
+  await upsertOwnTransformLogic(userId, photoId, { rotation: quarterTurns((edit?.rotation ?? 0) + turns * 90) });
+  const loaded = await loadPhotoBook(userId, bookId);
+  const after = loaded.pages.find((p) => p.id === pageId);
+  if (after && pageEditMisfit(loaded.format, after) === "relayout") {
+    await writePage(after.id, after.kind, loaded.format, after.photos.map(toBookPhoto));
+  }
+  await touch(bookId);
+}
+
+/**
+ * Two photos of a page change places; the layout stays. The arrangement is
+ * the user's from then on, so "Seiten anpassen" and "Gesichter einpassen"
+ * leave the page as it is.
+ */
+export async function swapPhotosOnPage(userId: number, bookId: number, pageId: number, photoId: number, otherPhotoId: number): Promise<void> {
+  if (photoId === otherPhotoId) throw APIError.invalidArgument("a photo cannot change places with itself");
+  const { page } = await ownedPage(userId, bookId, pageId);
+  const a = page.photos.find((p) => p.photo_id === photoId);
+  const b = page.photos.find((p) => p.photo_id === otherPhotoId);
+  if (!a || !b) throw APIError.notFound("photo not on this page");
+  await dbExec(db.update(photoBookSlot).set({ photo_id: otherPhotoId }).where(and(eq(photoBookSlot.page_id, pageId), eq(photoBookSlot.slot, a.slot))));
+  await dbExec(db.update(photoBookSlot).set({ photo_id: photoId }).where(and(eq(photoBookSlot.page_id, pageId), eq(photoBookSlot.slot, b.slot))));
+  await dbExec(db.update(photoBookPage).set({ layout_source: "user" }).where(eq(photoBookPage.id, pageId)));
+  await touch(bookId);
+}
+
 // ── print resolution ────────────────────────────────────────────────────
 
 export interface LowDpiFix {
@@ -1409,7 +1513,8 @@ export async function suggestPhotoBookReplacements(
   photoId: number,
 ): Promise<PhotoBookReplacement[]> {
   const { loaded, slot, rect } = await slotOf(userId, bookId, pageId, photoId);
-  const inBook = new Set(loaded.pages.flatMap((p) => p.photos.map((s) => s.photo_id)));
+  // A photo taken out for good is not offered back either.
+  const inBook = new Set([...loaded.pages.flatMap((p) => p.photos.map((s) => s.photo_id)), ...excludedIds(loaded.book.source)]);
   const mates = new Set((await seriesMates(photoId)).filter((id) => !inBook.has(id)));
 
   const near: SQL[] = [];

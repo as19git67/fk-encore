@@ -207,6 +207,25 @@ no photo under 200 dpi. A layout the user chose stays; its photos only move
 within their cells, and the result says how many such pages would fit faces
 better. Titles, captions and the photos of each page stay.
 
+## Excluding, turning and swapping photos
+
+- **Exclude for good** (`POST /photo-books/:id/photos/:photoId/exclude`):
+  the photo leaves every page and its caption goes; the book's source keeps
+  it in `excluded_photo_ids`, which `selectBookPhotos` leaves out, so neither
+  "Neu verteilen" nor a new narrowing brings it back, and the replacement
+  offers skip it. "Aus dem Buch nehmen" stays the lighter step that only lasts
+  until the next rebuild. The view lists the excluded photos (`excluded`);
+  `DELETE /photo-books/:id/excluded/:photoId` lets one back for the next
+  rebuild, without touching the pages.
+- **Turn** (`POST …/pages/:pageId/photos/:photoId/rotate`, `turns` 1 or -1):
+  a quarter turn written as the owner's edit of the photo, exactly as the
+  editor does, so the book, the PDF and the gallery agree. A page the rule or
+  the model laid out that the turned photo no longer fits is laid out again at
+  once; a layout the user chose stays and gets the misfit hint.
+- **Swap** (`POST …/pages/:pageId/swap`): two photos of one page change
+  cells, the layout stays. The page's `layout_source` becomes `user`, so
+  "Seiten anpassen" and "Gesichter einpassen" keep the arrangement.
+
 ## Open questions
 
 - Whether print shops want the first inside page alone on the right

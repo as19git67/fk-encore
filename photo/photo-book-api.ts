@@ -11,6 +11,10 @@
  * PATCH  /photo-books/:id/chapters/:chapterId  chapter title and subtitle
  * PUT    /photo-books/:id/pages/:pageId/layout another layout for the page
  * DELETE /photo-books/:id/pages/:pageId/photos/:photoId
+ * POST   /photo-books/:id/pages/:pageId/photos/:photoId/rotate  a quarter turn, right or left
+ * POST   /photo-books/:id/pages/:pageId/swap   two photos of the page change places
+ * POST   /photo-books/:id/photos/:photoId/exclude  out of the book for good
+ * DELETE /photo-books/:id/excluded/:photoId    let an excluded photo back
  * PUT    /photo-books/:id/pages/:pageId/captions captions on the page: on, off or as the book
  * PUT    /photo-books/:id/captions/:photoId    the user's caption for a photo
  * POST   /photo-books/:id/chapters/:chapterId/accept-suggestion  take the model's title
@@ -33,6 +37,10 @@ import {
   acceptPhotoBookChapterSuggestion,
   createPhotoBook,
   deletePhotoBook,
+  excludePhotoFromBook,
+  includePhotoInBook,
+  rotatePhotoInBook,
+  swapPhotosOnPage,
   fitPhotoBookToEdits,
   fitPhotoBookToFaces,
   fixPhotoBookLowDpi,
@@ -263,6 +271,47 @@ export const removePhotoFromBookPageApi = api(
   async ({ id, pageId, photoId }: { id: number; pageId: number; photoId: number }): Promise<PhotoBookView> => {
     const userId = viewer();
     await removePhotoFromBookPage(userId, id, pageId, photoId);
+    return getPhotoBookView(userId, id);
+  },
+);
+
+/** A quarter turn of a photo on a page: `turns` 1 to the right, -1 to the left. */
+export const rotatePhotoInBookApi = api(
+  { expose: true, method: "POST", path: "/photo-books/:id/pages/:pageId/photos/:photoId/rotate", auth: true },
+  async ({ id, pageId, photoId, turns }: { id: number; pageId: number; photoId: number; turns: number }): Promise<PhotoBookView> => {
+    const userId = viewer();
+    if (turns !== 1 && turns !== -1) throw APIError.invalidArgument("turns must be 1 or -1");
+    await rotatePhotoInBook(userId, id, pageId, photoId, turns as 1 | -1);
+    return getPhotoBookView(userId, id);
+  },
+);
+
+/** Two photos of a page change places. */
+export const swapPhotosOnPageApi = api(
+  { expose: true, method: "POST", path: "/photo-books/:id/pages/:pageId/swap", auth: true },
+  async ({ id, pageId, photoId, otherPhotoId }: { id: number; pageId: number; photoId: number; otherPhotoId: number }): Promise<PhotoBookView> => {
+    const userId = viewer();
+    await swapPhotosOnPage(userId, id, pageId, photoId, otherPhotoId);
+    return getPhotoBookView(userId, id);
+  },
+);
+
+/** A photo out of the book for good: no rebuild brings it back. */
+export const excludePhotoFromBookApi = api(
+  { expose: true, method: "POST", path: "/photo-books/:id/photos/:photoId/exclude", auth: true },
+  async ({ id, photoId }: { id: number; photoId: number }): Promise<PhotoBookView> => {
+    const userId = viewer();
+    await excludePhotoFromBook(userId, id, photoId);
+    return getPhotoBookView(userId, id);
+  },
+);
+
+/** An excluded photo may come back with the next rebuild. */
+export const includePhotoInBookApi = api(
+  { expose: true, method: "DELETE", path: "/photo-books/:id/excluded/:photoId", auth: true },
+  async ({ id, photoId }: { id: number; photoId: number }): Promise<PhotoBookView> => {
+    const userId = viewer();
+    await includePhotoInBook(userId, id, photoId);
     return getPhotoBookView(userId, id);
   },
 );

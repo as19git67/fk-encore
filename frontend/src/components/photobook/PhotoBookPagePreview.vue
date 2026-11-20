@@ -18,6 +18,8 @@ const props = defineProps<{
   heightMm: number
   chapterTitle?: string | null
   chapterSubtitle?: string | null
+  /** A photo marked as picked, e.g. waiting for the one it changes places with. */
+  selectedPhotoId?: number | null
 }>()
 
 const emit = defineEmits<{ (e: 'slot-click', slot: PhotoBookSlot, event: MouseEvent): void }>()
@@ -104,8 +106,10 @@ function slotLabel(s: PhotoBookSlot): string {
       :key="s.slot"
       type="button"
       class="pbp-slot"
+      :class="{ 'pbp-slot--selected': s.photo_id === selectedPhotoId }"
       :style="box(s.rect)"
       :aria-label="slotLabel(s)"
+      :aria-pressed="selectedPhotoId != null ? s.photo_id === selectedPhotoId : undefined"
       @click="emit('slot-click', s, $event)"
     >
       <span class="pbp-frame" :style="box(s.inset)">
@@ -175,6 +179,13 @@ function slotLabel(s: PhotoBookSlot): string {
   background: rgba(0, 0, 0, 0.08);
 }
 /* The page clips, and a full-bleed cell fills it: the ring goes inside. */
+.pbp-slot--selected::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 3px var(--p-primary-color);
+  pointer-events: none;
+}
 .pbp-slot:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset-inset);

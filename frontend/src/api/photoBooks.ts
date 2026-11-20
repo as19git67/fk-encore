@@ -114,6 +114,7 @@ export interface PhotoBookSource {
   aesthetic_min?: number | null
   without_recognisable_faces?: boolean
   max_photos?: number | null
+  excluded_photo_ids?: number[]
 }
 
 export interface PhotoBook {
@@ -142,10 +143,18 @@ export interface PhotoBook {
   face_cut_count: number
   /** What "Gesichter einpassen" would change: photos it moves, pages it arranges anew. */
   face_fit: { photos: number; pages: number }
+  /** Photos taken out of the book for good. */
+  excluded: PhotoBookExcludedPhoto[]
   chapters: PhotoBookChapter[]
   pages: PhotoBookPage[]
   created_at: string
   updated_at: string
+}
+
+export interface PhotoBookExcludedPhoto {
+  photo_id: number
+  filename: string
+  edited_at: string | null
 }
 
 export interface PhotoBookSummary {
@@ -304,6 +313,23 @@ export function setPhotoBookPageLayout(id: number, pageId: number, layout: strin
 
 export function removePhotoFromBookPage(id: number, pageId: number, photoId: number) {
   return apiFetch<PhotoBook>(`/photo-books/${id}/pages/${pageId}/photos/${photoId}`, { method: 'DELETE' })
+}
+
+/** A quarter turn: 1 to the right, -1 to the left. It is the photo's own edit, as in the editor. */
+export function rotatePhotoInBook(id: number, pageId: number, photoId: number, turns: 1 | -1) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/pages/${pageId}/photos/${photoId}/rotate`, { method: 'POST', body: JSON.stringify({ turns }) })
+}
+
+export function swapPhotosOnPage(id: number, pageId: number, photoId: number, otherPhotoId: number) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/pages/${pageId}/swap`, { method: 'POST', body: JSON.stringify({ photoId, otherPhotoId }) })
+}
+
+export function excludePhotoFromBook(id: number, photoId: number) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/photos/${photoId}/exclude`, { method: 'POST' })
+}
+
+export function includePhotoInBook(id: number, photoId: number) {
+  return apiFetch<PhotoBook>(`/photo-books/${id}/excluded/${photoId}`, { method: 'DELETE' })
 }
 
 export function setPhotoBookPageCaptions(id: number, pageId: number, captions: boolean | null) {

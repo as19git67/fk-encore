@@ -37,6 +37,10 @@ import {
 import {
   createPhotoBook,
   deletePhotoBook,
+  excludePhotoFromBook,
+  includePhotoInBook,
+  rotatePhotoInBook,
+  swapPhotosOnPage,
   fitPhotoBookToEdits,
   fitPhotoBookToFaces,
   fixPhotoBookLowDpi,
@@ -475,6 +479,81 @@ describe("photo book service", () => {
     expect(rebuilt.photo_count).toBe(4);
     await deletePhotoBook(user.id, id);
     await expect(getPhotoBookView(user.id, id)).rejects.toThrow(/not found/);
+  });
+
+  it("excludes a photo for good, so neither a rebuild nor a new narrowing brings it back", async () => {
+    const list = [];
+    for (let i = 0; i < 6; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id) });
+    const gone = list[2].id;
+    await updatePhotoBook(user.id, id, { coverPhotoId: gone });
+
+    await excludePhotoFromBook(user.id, id, gone);
+    let view = await getPhotoBookView(user.id, id);
+    const inBook = () => view.pages.flatMap((p) => p.slots.map((s) => s.photo_id));
+    expect(inBook()).not.toContain(gone);
+    expect(view.photo_count).toBe(5);
+    expect(view.cover_photo_id).toBeNull();
+    expect(view.excluded.map((e) => e.photo_id)).toEqual([gone]);
+    await expect(excludePhotoFromBook(user.id, id, gone)).rejects.toThrow(/not in this book/);
+
+    await rebuildPhotoBook(user.id, id);
+    await rebuildPhotoBook(user.id, id, { groupPicksOnly: false });
+    view = await getPhotoBookView(user.id, id);
+    expect(inBook()).not.toContain(gone);
+    expect(view.photo_count).toBe(5);
+
+    // Let back, it returns with the next rebuild.
+    await includePhotoInBook(user.id, id, gone);
+    view = await getPhotoBookView(user.id, id);
+    expect(view.excluded).toEqual([]);
+    expect(inBook()).not.toContain(gone);
+    await rebuildPhotoBook(user.id, id);
+    view = await getPhotoBookView(user.id, id);
+    expect(inBook()).toContain(gone);
+    await expect(includePhotoInBook(user.id, id, gone)).rejects.toThrow(/not excluded/);
+  });
+
+  it("turns a photo a quarter as the owner's edit and lays a rule-made page out again", async () => {
+    const list = [];
+    for (let i = 0; i < 6; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id) });
+    let view = await getPhotoBookView(user.id, id);
+    const page = view.pages.find((p) => p.kind === "photos")!;
+    const photoId = page.slots[0].photo_id;
+
+    await rotatePhotoInBook(user.id, id, page.id, photoId, 1);
+    const turned = async () => (await db.select().from(photoTransforms).where(eq(photoTransforms.photo_id, photoId)))[0]?.rotation;
+    expect(await turned()).toBe(90);
+    await rotatePhotoInBook(user.id, id, page.id, photoId, -1);
+    await rotatePhotoInBook(user.id, id, page.id, photoId, -1);
+    expect(await turned()).toBe(270);
+    view = await getPhotoBookView(user.id, id);
+    expect(view.pages.flatMap((p) => p.slots).find((s) => s.photo_id === photoId)!.edited_at).not.toBeNull();
+    // Turning leaves no page the turned photo no longer fits but a layout the user chose.
+    expect(view.pages.filter((p) => p.edit_misfit === "relayout")).toEqual([]);
+    await expect(rotatePhotoInBook(other.id, id, page.id, photoId, 1)).rejects.toThrow(/not found/);
+  });
+
+  it("lets two photos of a page change places and keeps that arrangement", async () => {
+    const list = [];
+    for (let i = 0; i < 8; i++) list.push(await upload(user.id, `2024-06-01 1${i}:00:00`));
+    const id = await createPhotoBook(user.id, { title: "Buch", photoIds: list.map((p) => p.id) });
+    let view = await getPhotoBookView(user.id, id);
+    const page = view.pages.find((p) => p.slots.length > 1)!;
+    const [a, b] = [page.slots[0].photo_id, page.slots[1].photo_id];
+
+    await swapPhotosOnPage(user.id, id, page.id, a, b);
+    view = await getPhotoBookView(user.id, id);
+    const after = view.pages.find((p) => p.id === page.id)!;
+    expect(after.layout).toBe(page.layout);
+    expect(after.layout_source).toBe("user");
+    expect(after.slots[0].photo_id).toBe(b);
+    expect(after.slots[1].photo_id).toBe(a);
+
+    const elsewhere = view.pages.find((p) => p.id !== page.id && p.slots.length)!.slots[0].photo_id;
+    await expect(swapPhotosOnPage(user.id, id, page.id, a, elsewhere)).rejects.toThrow(/not on this page/);
+    await expect(swapPhotosOnPage(user.id, id, page.id, a, a)).rejects.toThrow(/itself/);
   });
 
   it("counts pages and photos in the list of books", async () => {

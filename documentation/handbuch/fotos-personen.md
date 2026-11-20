@@ -414,6 +414,55 @@ und PDF.
   gewählt hat, bleibt unverändert und zeigt nur das Hinweis-Symbol.
 - **Test:** –
 
+### FOT-FBD-12 Foto für immer ausschließen
+
+- **Wo:** Menü am Foto „Für immer ausschließen“; Mehr-Menü
+  „Ausgeschlossene Fotos (n)“
+- **Recht:** Besitzer
+- **Vorbedingung:** keine
+- **Schritte:**
+  1. „Für immer ausschließen“ am Foto.
+  2. Zum Zurückholen: „Ausgeschlossene Fotos“, „Wieder zulassen“.
+- **Ergebnis:** Das Foto verschwindet von jeder Seite des Buchs, seine
+  Bildunterschrift geht. „Neu verteilen“ und eine geänderte Auswahl nehmen
+  es nicht wieder auf. Ein wieder zugelassenes Foto kommt erst mit dem
+  nächsten „Neu verteilen“ zurück.
+- **Fehler und Grenzfälle:** Anders als „Aus dem Buch nehmen“, das nur bis
+  zum nächsten „Neu verteilen“ gilt. „Durch größeres Foto ersetzen“ bietet
+  ein ausgeschlossenes Foto nicht an.
+- **Test:** –
+
+### FOT-FBD-13 Foto drehen
+
+- **Wo:** Menü am Foto „Nach rechts drehen“, „Nach links drehen“
+- **Recht:** Besitzer
+- **Vorbedingung:** keine
+- **Schritte:**
+  1. Eintrag wählen.
+- **Ergebnis:** Das Foto dreht sich um eine Vierteldrehung. Das ist die
+  eigene Bearbeitung des Fotos wie im Editor, das Foto ist also auch in der
+  Galerie gedreht. Eine Seite, deren Layout die App gewählt hat, ordnet sich
+  sofort neu, wenn das gedrehte Foto nicht mehr passt.
+- **Fehler und Grenzfälle:** Eine Seite mit selbst gewähltem Layout bleibt
+  und zeigt den Hinweis aus FOT-FBD-11.
+- **Test:** –
+
+### FOT-FBD-14 Zwei Fotos einer Seite tauschen
+
+- **Wo:** Menü am Foto „Mit dem anderen Foto tauschen“ (zwei Fotos auf der
+  Seite) bzw. „Platz tauschen …“ (mehr)
+- **Recht:** Besitzer
+- **Vorbedingung:** mindestens zwei Fotos auf der Seite
+- **Schritte:**
+  1. Eintrag wählen.
+  2. Bei mehr als zwei Fotos: auf das andere Foto derselben Seite tippen
+     (Esc oder „Abbrechen“ bricht ab).
+- **Ergebnis:** Die beiden Fotos tauschen ihren Platz, das Layout bleibt.
+  Die Anordnung gilt danach als selbst gewählt: „Seiten anpassen“ und
+  „Gesichter einpassen“ lassen die Seite stehen.
+- **Fehler und Grenzfälle:** Ein Foto einer anderen Seite wird abgelehnt.
+- **Test:** –
+
 ---
 
 ## Abdeckung
@@ -446,3 +495,6 @@ und PDF.
 | FOT-FBD-09 | Diashow | view | – |
 | FOT-FBD-10 | Neu verteilen und löschen | Besitzer | – |
 | FOT-FBD-11 | Seiten an bearbeitete Fotos anpassen | Besitzer | – |
+| FOT-FBD-12 | Foto für immer ausschließen | Besitzer | – |
+| FOT-FBD-13 | Foto drehen | Besitzer | – |
+| FOT-FBD-14 | Zwei Fotos einer Seite tauschen | Besitzer | – |

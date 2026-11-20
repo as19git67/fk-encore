@@ -31,8 +31,14 @@
  * layout or order, else a page of its own). What is too small even alone
  * stays marked; its menu offers a larger photo of the same scene in its
  * place (its series, or alike and taken within a few hours) or to take it out.
+ *
+ * A photo's menu also turns it a quarter (that is the photo's own edit, as in
+ * the editor; a rule-made page follows at once), lets it change places with
+ * another photo of its page (with two photos at once, else the next tap picks
+ * the other one), and excludes it for good: "Neu verteilen" and a new
+ * narrowing leave it out until it is let back from "Ausgeschlossene Fotos".
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { saveModuleListAnchor } from '../utils/listAnchor'
 import { useShareLink } from '../composables/useShareLink'
@@ -63,6 +69,10 @@ import {
   PHOTO_BOOK_FORMATS,
   acceptPhotoBookChapterSuggestion,
   deletePhotoBook,
+  excludePhotoFromBook,
+  includePhotoInBook,
+  rotatePhotoInBook,
+  swapPhotosOnPage,
   fitPhotoBookToEdits,
   fitPhotoBookToFaces,
   fixPhotoBookLowDpi,
@@ -79,6 +89,7 @@ import {
   updatePhotoBook,
   updatePhotoBookChapter,
   type PhotoBook,
+  type PhotoBookExcludedPhoto,
   type PhotoBookFaceFit,
   type PhotoBookFormat,
   type PhotoBookLowDpiFix,
@@ -433,6 +444,23 @@ const slotMenuItems = computed<MenuItem[]>(() => {
       disabled: book.value?.cover_photo_id === t.slot.photo_id,
       command: (): void => { void apply(() => updatePhotoBook(bookId.value, { coverPhotoId: t.slot.photo_id })) },
     },
+    {
+      label: 'Nach rechts drehen',
+      icon: 'pi pi-redo',
+      command: (): void => { void apply(() => rotatePhotoInBook(bookId.value, t.page.id, t.slot.photo_id, 1)) },
+    },
+    {
+      label: 'Nach links drehen',
+      icon: 'pi pi-undo',
+      command: (): void => { void apply(() => rotatePhotoInBook(bookId.value, t.page.id, t.slot.photo_id, -1)) },
+    },
+    ...(t.page.slots.length > 1
+      ? [{
+          label: t.page.slots.length === 2 ? 'Mit dem anderen Foto tauschen' : 'Platz tauschen …',
+          icon: 'pi pi-arrow-right-arrow-left',
+          command: (): void => startSwap(t.page, t.slot),
+        }]
+      : []),
     ...(t.slot.low_dpi
       ? [{
           label: 'Durch größeres Foto ersetzen …',
@@ -452,12 +480,67 @@ const slotMenuItems = computed<MenuItem[]>(() => {
       icon: 'pi pi-times',
       command: (): void => { void apply(() => removePhotoFromBookPage(bookId.value, t.page.id, t.slot.photo_id)) },
     },
+    {
+      label: 'Für immer ausschließen',
+      icon: 'pi pi-ban',
+      command: (): void => { void apply(() => excludePhotoFromBook(bookId.value, t.slot.photo_id)) },
+    },
   ]
 })
 
 function openSlotMenu(page: PhotoBookPage, slot: PhotoBookSlot, event: MouseEvent) {
+  const from = swapFrom.value
+  if (from) {
+    if (from.page.id !== page.id) {
+      actionError.value = 'Tauschen geht nur mit einem Foto derselben Seite.'
+      return
+    }
+    swapFrom.value = null
+    if (from.slot.photo_id !== slot.photo_id) {
+      void apply(() => swapPhotosOnPage(bookId.value, page.id, from.slot.photo_id, slot.photo_id))
+    }
+    return
+  }
   menuTarget.value = { page, slot }
   slotMenu.value?.toggle(event)
+}
+
+// ── changing places ─────────────────────────────────────────────────────
+
+/** The photo waiting for the one it changes places with. */
+const swapFrom = ref<{ page: PhotoBookPage; slot: PhotoBookSlot } | null>(null)
+
+/** Two photos on the page change places at once; with more, the next tap on the page picks the other one. */
+function startSwap(page: PhotoBookPage, slot: PhotoBookSlot) {
+  const others = page.slots.filter((s) => s.photo_id !== slot.photo_id)
+  if (others.length === 1) {
+    void apply(() => swapPhotosOnPage(bookId.value, page.id, slot.photo_id, others[0]!.photo_id))
+    return
+  }
+  actionError.value = ''
+  swapFrom.value = { page, slot }
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && swapFrom.value) swapFrom.value = null
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
+// ── photos excluded for good ────────────────────────────────────────────
+
+const excludedOpen = ref(false)
+
+function excludedUrl(p: PhotoBookExcludedPhoto): string {
+  return photoBookImageUrl({ photoId: p.photo_id, filename: p.filename, editedAt: p.edited_at }, auth.user?.id, 320)
+}
+
+function letBack(p: PhotoBookExcludedPhoto) {
+  void apply(async () => {
+    const next = await includePhotoInBook(bookId.value, p.photo_id)
+    if (!next.excluded.length) excludedOpen.value = false
+    return next
+  })
 }
 
 // ── book settings ───────────────────────────────────────────────────────
@@ -491,7 +574,7 @@ async function saveSettings() {
 function confirmRebuild() {
   confirm.require({
     header: 'Neu verteilen?',
-    message: 'Kapitel und Seiten werden aus der Quelle neu gebildet. Geänderte Kapiteltitel, Layouts und herausgenommene Fotos gehen dabei verloren; Bildunterschriften bleiben.',
+    message: 'Kapitel und Seiten werden aus der Quelle neu gebildet. Geänderte Kapiteltitel und Layouts gehen dabei verloren, aus einer Seite genommene Fotos kommen wieder; für immer ausgeschlossene Fotos bleiben draußen, Bildunterschriften bleiben.',
     icon: 'pi pi-refresh',
     rejectProps: { label: 'Abbrechen', severity: 'secondary', text: true },
     acceptProps: { label: 'Neu verteilen' },
@@ -526,6 +609,14 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
   { key: 'settings', label: 'Buch', title: 'Titel, Format und Bildunterschriften', icon: 'pi pi-pencil', disabled: !book.value || busy.value, command: openSettings },
   { key: 'narrowing', label: 'Auswahl', title: 'Auswahl ändern: Qualität, Ästhetik, Gesichter, Höchstzahl, Gewichte', icon: 'pi pi-filter', disabled: !book.value || busy.value, command: () => (narrowingOpen.value = true) },
   shareLinkItem({ name: 'fotos-photo-book', params: { id: bookId.value } }, book.value?.title),
+  {
+    key: 'excluded',
+    title: `Ausgeschlossene Fotos (${book.value?.excluded.length ?? 0})`,
+    icon: 'pi pi-ban',
+    disabled: !book.value?.excluded.length,
+    menuOnly: true,
+    command: () => (excludedOpen.value = true),
+  },
   { key: 'faces', title: 'Gesichter einpassen', icon: 'pi pi-user', disabled: !book.value || busy.value, menuOnly: true, command: fitToFaces },
   { key: 'rebuild', title: 'Neu verteilen', icon: 'pi pi-refresh', disabled: !book.value || busy.value, menuOnly: true, command: confirmRebuild },
   { key: 'delete', title: 'Fotobuch löschen', icon: 'pi pi-trash', severity: 'danger', disabled: !book.value, menuOnly: true, command: confirmDelete },
@@ -543,6 +634,12 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     <template #notice>
       <ErrorBanner v-if="loadError" :message="loadError" @retry="load" />
       <ErrorBanner v-if="actionError" :message="actionError" :retryable="false" closable @close="actionError = ''" />
+      <Message v-if="swapFrom" severity="info" :closable="false">
+        <div class="pbd-misfit">
+          <span>Tippe auf das Foto derselben Seite, mit dem es den Platz tauschen soll.</span>
+          <Button label="Abbrechen" size="small" severity="secondary" text @click="swapFrom = null" />
+        </div>
+      </Message>
     </template>
 
     <PageSkeleton v-if="loading && !book" variant="grid" :count="6" />
@@ -637,6 +734,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
               :height-mm="book.height_mm"
               :chapter-title="page.kind === 'opener' ? ch.title : null"
               :chapter-subtitle="page.kind === 'opener' ? ch.subtitle : null"
+              :selected-photo-id="swapFrom?.page.id === page.id ? swapFrom.slot.photo_id : null"
               @slot-click="(slot, ev) => openSlotMenu(page, slot, ev)"
             />
             <div class="pbd-page-foot">
@@ -722,6 +820,23 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
       </ul>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" text @click="replaceOpen = false" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="excludedOpen" class="dialog-md" modal header="Ausgeschlossene Fotos">
+      <p class="pbd-hint">
+        Diese Fotos bleiben draußen, auch wenn du das Buch neu verteilst oder die Auswahl änderst. Ein wieder zugelassenes Foto kommt beim nächsten „Neu verteilen“ zurück ins Buch.
+      </p>
+      <ul class="pbd-replacements">
+        <li v-for="p in book?.excluded ?? []" :key="p.photo_id">
+          <div class="pbd-replacement pbd-excluded">
+            <img :src="excludedUrl(p)" alt="" loading="lazy" />
+            <Button label="Wieder zulassen" icon="pi pi-undo" size="small" text :disabled="busy" @click="letBack(p)" />
+          </div>
+        </li>
+      </ul>
+      <template #footer>
+        <Button label="Schließen" severity="secondary" text @click="excludedOpen = false" />
       </template>
     </Dialog>
 
@@ -877,7 +992,10 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
   cursor: pointer;
   overflow: hidden;
 }
-.pbd-replacement:hover {
+.pbd-excluded {
+  cursor: default;
+}
+.pbd-replacement:not(.pbd-excluded):hover {
   background: var(--p-content-hover-background);
 }
 .pbd-replacement:focus-visible {
