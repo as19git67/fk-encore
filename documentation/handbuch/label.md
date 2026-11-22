@@ -3,7 +3,9 @@
 Druckt Etiketten auf einem Etikettendrucker: freier Text oder Vorlagen
 mit Platzhaltern (Datum, Nutzer), Schriftgröße, Fett, Ausrichtung. Dazu
 kommen Scanner-Etiketten: A4-Bögen mit fortlaufenden Nummern `#0001` …
-als PDF für einen normalen Drucker.
+als PDF für einen normalen Drucker, und Ordneretiketten: A4-Bögen mit
+vier Rückenschildern zu 192 × 61 mm, Text in Markdown, unter einem Namen
+gespeichert.
 
 **Modulrecht:** `module.label`; die Seite braucht `label.view`.
 
@@ -13,6 +15,7 @@ als PDF für einen normalen Drucker.
 |---|---|---|---|
 | `DRK` | Label drucken | `/label` | `label.view` |
 | `SCN` | Scanner-Etiketten | `/label/scanner` | `label.view` |
+| `ORD` | Ordneretiketten | `/label/ordner` | `label.view` |
 
 ---
 
@@ -157,6 +160,92 @@ jedem Download aus erster Nummer und Seitenzahl neu erzeugt.
 
 ---
 
+## ORD: Ordneretiketten (`/label/ordner`)
+
+Ein A4-Bogen mit vier breiten Rückenschildern zu 192 × 61 mm (REX, Avery
+Zweckform L4761), als PDF für einen normalen Drucker. Jedes Etikett hat ein
+Feld mit Markdown; die Vorschau zeigt die Seite so, wie das PDF sie druckt.
+Die geöffnete Seite steht in der Adresse (`?seite=<id>`).
+
+### LAB-ORD-01 Etiketten ausfüllen
+
+- **Wo:** Karten „Etikett 1“ bis „Etikett 4“, Vorschau daneben
+- **Recht:** `label.view`
+- **Vorbedingung:** keine
+- **Schritte:**
+  1. Text eingeben: `#`/`##`/`###` für Überschriften, `**fett**`,
+     `*kursiv*`, `- Aufzählung`, `---` für eine Linie; die Knöpfe H1, H2,
+     B, I und • setzen das Zeichen ein, Strg/Cmd+B und +I ebenso.
+  2. Schreibrichtung wählen: „Quer“ (am stehenden Ordner lesbar) oder
+     „Längs“ (entlang des Rückens); Ausrichtung „Zentriert“ oder „Links“.
+- **Ergebnis:** Die Vorschau zeigt die Seite („Seite“) oder die Etiketten
+  stehend („Am Ordner“). Ein Tipp auf ein Etikett in der Vorschau springt
+  in sein Feld. Jede Zeile bleibt eine Zeile; ein Wort, das nicht in die
+  Breite passt, wird kleiner gesetzt (bis 8 pt).
+- **Fehler und Grenzfälle:** Zu viel Text wird unten abgeschnitten; Feld und
+  Vorschau warnen. Ein leeres Feld lässt das Etikett leer (schon
+  verbrauchte Etiketten auf einem angebrochenen Bogen). Höchstens 2000
+  Zeichen je Etikett.
+- **Test:** –
+
+### LAB-ORD-02 Seite speichern
+
+- **Wo:** Karte „Seite“, Feld „Name“, „Speichern“ bzw. „Als neue Seite“
+- **Recht:** `label.view`
+- **Vorbedingung:** keine
+- **Schritte:**
+  1. Namen eingeben, „Speichern“ (Strg/Cmd+S in einem Etikett).
+- **Ergebnis:** Die Seite steht in „Gespeicherte Seite“. Eine geöffnete
+  Seite überschreibt „Speichern“, auch mit neuem Namen; „Als neue Seite“
+  legt eine Kopie unter dem Namen im Feld an.
+- **Fehler und Grenzfälle:** Ohne Namen wird nicht gespeichert. Ein Name,
+  den es schon gibt (ohne Rücksicht auf Groß- und Kleinschreibung), wird
+  abgewiesen. Höchstens 500 Seiten je Nutzer.
+- **Test:** –
+
+### LAB-ORD-03 Gespeicherte Seite öffnen
+
+- **Wo:** Karte „Seite“, Auswahl „Gespeicherte Seite“ (mit Suche), „Neue
+  Seite“
+- **Recht:** `label.view`
+- **Vorbedingung:** eine gespeicherte Seite
+- **Schritte:**
+  1. Seite wählen, ändern, speichern.
+- **Ergebnis:** Etiketten, Schreibrichtung und Ausrichtung der Seite sind
+  geladen. Ungespeicherte Änderungen fragen vorher nach, auch beim
+  Verlassen der Seite.
+- **Fehler und Grenzfälle:** keine
+- **Test:** –
+
+### LAB-ORD-04 Gespeicherte Seite löschen
+
+- **Wo:** Papierkorb „Gespeicherte Seite löschen“ neben „Speichern“
+- **Recht:** `label.view`
+- **Vorbedingung:** eine geöffnete gespeicherte Seite
+- **Schritte:**
+  1. Bestätigen.
+- **Ergebnis:** Die Seite ist aus der Liste weg; die Etiketten bleiben zum
+  Weiterbearbeiten offen.
+- **Fehler und Grenzfälle:** keine
+- **Test:** –
+
+### LAB-ORD-05 PDF drucken
+
+- **Wo:** unter der Vorschau, „PDF herunterladen“ und „Probedruck mit
+  Umrissen“
+- **Recht:** `label.print`
+- **Vorbedingung:** keine (auch ungespeichert)
+- **Schritte:**
+  1. PDF herunterladen, in Originalgröße (100 %) drucken.
+- **Ergebnis:** `Ordneretiketten <Name>.pdf` mit dem, was die Seite gerade
+  zeigt. Der Probedruck zeichnet zusätzlich die Umrisse der Etiketten, zum
+  Prüfen auf normalem Papier gegen das Licht.
+- **Fehler und Grenzfälle:** Bei „Quer“ kommt das linke Ende eines
+  Etiketts auf dem Bogen am Ordner nach oben.
+- **Test:** –
+
+---
+
 ## Abdeckung
 
 | ID | Aktion | Recht | Test |
@@ -170,3 +259,8 @@ jedem Download aus erster Nummer und Seitenzahl neu erzeugt.
 | LAB-SCN-03 | Blatt aus der Liste entfernen | label.print | – |
 | LAB-SCN-04 | Nächste Nummer setzen | label.print | – |
 | LAB-SCN-05 | Druckversatz einstellen | label.view / label.print | – |
+| LAB-ORD-01 | Etiketten ausfüllen | label.view | – |
+| LAB-ORD-02 | Seite speichern | label.view | – |
+| LAB-ORD-03 | Gespeicherte Seite öffnen | label.view | – |
+| LAB-ORD-04 | Gespeicherte Seite löschen | label.view | – |
+| LAB-ORD-05 | PDF drucken | label.print | – |

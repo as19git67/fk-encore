@@ -21,6 +21,7 @@
     "e2e:codegen": "playwright codegen http://localhost:5173/app/"
   },
   "dependencies": {
+    "@fontsource/roboto": "^5.3.0",
     "@primeuix/styles": "2.0.3",
     "@primeuix/themes": "^2.0.3",
     "@simplewebauthn/browser": "^13.3.0",
