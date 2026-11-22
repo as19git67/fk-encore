@@ -5856,3 +5856,24 @@ export const labelScannerSheets = pgTable(
   },
   (table) => [index("label_scanner_sheet_user_idx").on(table.user_id, table.created_at)],
 );
+
+// A filled page of binder labels (label/binder-sheet.ts, migration 0321),
+// saved under a name to be opened, changed and printed again. The PDF is
+// rendered from these values on every download.
+export const labelBinderPages = pgTable(
+  "label_binder_page",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Markdown per label, top to bottom. */
+    labels: jsonb("labels").$type<string[]>().notNull(),
+    direction: text("direction").notNull().default("across"),
+    align: text("align").notNull().default("center"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("label_binder_page_user_name_idx").on(table.user_id, sql`lower(${table.name})`)],
+);
