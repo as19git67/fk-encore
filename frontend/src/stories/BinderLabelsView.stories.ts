@@ -15,7 +15,7 @@ const PAGE: BinderPage = {
     '# Steuer\n## 2025\nBelege und Bescheide',
     '## Versicherungen\n**Haus** und *Auto*\n\n---\n- Hausrat\n- Kfz',
     '',
-    '# Strom\nZählerstände ab 2020',
+    '# Versicherungsunterlagen\n\n\nStrom und Gas\nZählerstände ab 2020',
   ],
   direction: 'across',
   align: 'center',

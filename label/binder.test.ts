@@ -96,9 +96,11 @@ describe("binder sheet layout", () => {
     expect(blocks[1]!.runs.map((r) => r.text).join("")).toBe("zweite Zeile mit fett und kursiv");
     expect(blocks[1]!.runs.find((r) => r.text === "fett")?.bold).toBe(true);
     expect(blocks[1]!.runs.find((r) => r.text === "kursiv")?.italic).toBe(true);
-    expect(blocks[2]).toMatchObject({ marker: "•", runs: [{ text: "eins" }] });
-    expect(blocks[3]).toMatchObject({ marker: "•", runs: [{ text: "zwei" }] });
-    expect(blocks[4]?.rule).toBe(true);
+    expect(blocks[2]).toMatchObject({ blank: 1 });
+    expect(blocks[3]).toMatchObject({ marker: "•", runs: [{ text: "eins" }] });
+    expect(blocks[4]).toMatchObject({ marker: "•", runs: [{ text: "zwei" }] });
+    expect(blocks[5]).toMatchObject({ blank: 1 });
+    expect(blocks[6]?.rule).toBe(true);
     // A single line break inside a paragraph stays a line break.
     expect(binderBlocks("eins\nzwei")[0]!.runs.map((r) => r.text)).toEqual(["eins", "\n", "zwei"]);
     expect(binderBlocks("   \n\n")).toEqual([]);
@@ -129,12 +131,33 @@ describe("binder sheet layout", () => {
     for (const p of words) expect(p.x + p.width).toBeLessThanOrEqual(frame.width + 0.01);
   });
 
-  it("sets a paragraph smaller when one word is wider than the label", () => {
+  it("never changes the font size: a long word wraps, a too wide one is hyphenated", () => {
     const frame = contentFrame("across");
-    const [word] = layoutLabelPdf("# Versicherungsunterlagen", "across", "center").pieces;
-    expect(word!.size).toBeLessThan(30);
-    expect(word!.size).toBeGreaterThanOrEqual(8);
-    expect(word!.width).toBeLessThanOrEqual(frame.width + 0.01);
+    const wrapped = layoutLabelPdf("### Haus Versicherungen", "across", "center").pieces;
+    expect(wrapped.map((p) => p.text)).toEqual(["Haus", "Versicherungen"]);
+    expect(wrapped.every((p) => p.size === 17)).toBe(true);
+
+    const pieces = layoutLabelPdf("# Versicherungsunterlagen", "across", "center").pieces;
+    expect(pieces.every((p) => p.size === 30)).toBe(true);
+    expect(pieces.length).toBeGreaterThan(1);
+    // Broken at German hyphenation points, each line ends in a hyphen.
+    expect(pieces.slice(0, -1).every((p) => p.text.endsWith("-"))).toBe(true);
+    expect(pieces.map((p) => p.text.replace(/-$/, "")).join("")).toBe("Versicherungsunterlagen");
+    expect(["Ver-", "Versi-", "Versiche-", "Versicherungs-"]).toContain(pieces[0]!.text);
+    for (const p of pieces) expect(p.width).toBeLessThanOrEqual(frame.width + 0.01);
+  });
+
+  it("keeps empty lines", () => {
+    const line = 14 * 1.25;
+    const tight = layoutLabelPdf("Eins\nZwei", "across", "left").pieces;
+    const loose = layoutLabelPdf("Eins\n\nZwei", "across", "left").pieces;
+    const looser = layoutLabelPdf("Eins\n\n\n\nZwei", "across", "left").pieces;
+    expect(tight[1]!.baseline - tight[0]!.baseline).toBeCloseTo(line, 5);
+    expect(loose[1]!.baseline - loose[0]!.baseline).toBeCloseTo(2 * line, 5);
+    expect(looser[1]!.baseline - looser[0]!.baseline).toBeCloseTo(4 * line, 5);
+    // Empty lines at the top push the text down.
+    const top = layoutLabelPdf("\n\nEins", "across", "left").pieces[0]!;
+    expect(top.baseline - layoutLabelPdf("Eins", "across", "left").pieces[0]!.baseline).toBeCloseTo(2 * line, 5);
   });
 
   it("centres a lying label vertically and starts a standing one at the top", () => {

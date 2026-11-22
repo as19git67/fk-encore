@@ -180,8 +180,10 @@ Die geöffnete Seite steht in der Adresse (`?seite=<id>`).
      „Längs“ (entlang des Rückens); Ausrichtung „Zentriert“ oder „Links“.
 - **Ergebnis:** Die Vorschau zeigt die Seite („Seite“) oder die Etiketten
   stehend („Am Ordner“). Ein Tipp auf ein Etikett in der Vorschau springt
-  in sein Feld. Jede Zeile bleibt eine Zeile; ein Wort, das nicht in die
-  Breite passt, wird kleiner gesetzt (bis 8 pt).
+  in sein Feld. Jede Zeile und jede Leerzeile bleibt, wie sie ist. Die
+  Schriftgröße ändert sich nie: ein Wort, das nicht mehr in die Zeile passt,
+  kommt in die nächste; ein Wort, das breiter ist als das Etikett, wird
+  nach deutschen Trennregeln getrennt.
 - **Fehler und Grenzfälle:** Zu viel Text wird unten abgeschnitten; Feld und
   Vorschau warnen. Ein leeres Feld lässt das Etikett leer (schon
   verbrauchte Etiketten auf einem angebrochenen Bogen). Höchstens 2000

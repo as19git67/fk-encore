@@ -15,9 +15,12 @@
  *
  * A label holds a little Markdown: headings (`#`, `##`, `###`) for the big
  * words on the spine, paragraphs with **bold**, *italic* and ~~strike~~,
- * lists and rules (`---`). A single line break is a line break: on a label
- * every line is meant where it is. A word wider than the label sets its
- * whole paragraph smaller instead of being cut, down to `MIN_SIZE`.
+ * lists and rules (`---`). A single line break is a line break and an empty
+ * line is an empty line: on a label every line is meant where it is. The
+ * font size never changes to make text fit: a word that does not fit on
+ * the line goes to the next one, and a word wider than the whole label is
+ * hyphenated by the German rules (the `hyphen` patterns, the same on both
+ * sides), as a last resort cut by letters.
  *
  * Two directions:
  *   - `across`: readable while the file stands on the shelf. The text runs
@@ -29,6 +32,7 @@
  */
 
 import { Lexer, type Token, type Tokens } from "marked";
+import de from "hyphen/de";
 
 export const BINDER_SHEET = {
   name: "Ordneretiketten 192 × 61 mm",
@@ -47,8 +51,6 @@ export const BINDER_SHEET = {
 export const BINDER_TEXT = {
   body: 14,
   headings: [30, 22, 17, 14, 14, 14] as const,
-  /** Smallest size a paragraph shrinks to for a long word. */
-  minSize: 8,
   /** Line height as a multiple of the font size. */
   lineHeight: 1.25,
   /** Space after a block, as a share of its font size. */
@@ -125,6 +127,8 @@ export interface Block {
   marker?: string;
   /** A horizontal rule instead of text. */
   rule?: boolean;
+  /** This many empty lines instead of text. */
+  blank?: number;
 }
 
 function decodeEntities(text: string): string {
@@ -178,7 +182,14 @@ export function binderBlocks(markdown: string): Block[] {
   const walk = (tokens: readonly Token[]) => {
     for (const token of tokens) {
       switch (token.type) {
-        case "space":
+        case "space": {
+          // "A\n\nB" is one empty line between A and B; at the very top
+          // every newline is an empty line.
+          const newlines = (token.raw.match(/\n/g) ?? []).length;
+          const blank = out.length ? newlines - 1 : newlines;
+          if (blank > 0) out.push({ runs: [], size: BINDER_TEXT.body, blank });
+          break;
+        }
         case "def":
           break;
         case "heading": {
@@ -210,6 +221,7 @@ export function binderBlocks(markdown: string): Block[] {
               if (runs.length) runs.push({ text: "\n" });
               runs.push(...(c.tokens?.length ? inlineRuns(c.tokens) : [{ text: decodeEntities(c.text) }]));
             }
+            if (list.loose && i > 0) out.push({ runs: [], size: BINDER_TEXT.body, blank: 1 });
             out.push({ runs, size: BINDER_TEXT.body, marker });
           });
           break;
@@ -236,9 +248,11 @@ export function binderBlocks(markdown: string): Block[] {
     }
   };
   walk(new Lexer({ gfm: true, breaks: true }).lex(markdown));
-  return out
+  const blocks = out
     .map((b) => ({ ...b, runs: b.runs.filter((r) => r.text.length > 0) }))
-    .filter((b) => b.rule || b.runs.length > 0);
+    .filter((b) => b.rule || b.blank || b.runs.length > 0);
+  // Nothing but empty lines is an empty label.
+  return blocks.every((b) => b.blank) ? [] : blocks;
 }
 
 // ---------- Blocks → lines ----------
@@ -290,29 +304,55 @@ function sameStyle(a: TextStyle & { strike?: boolean }, b: TextStyle & { strike?
   return !!a.bold === !!b.bold && !!a.italic === !!b.italic && !!a.strike === !!b.strike;
 }
 
-/** The block's size, made smaller until its widest word fits. */
-function fittedSize(atoms: Atom[], size: number, width: number, measure: MeasureText): number {
-  let widest = 0;
-  for (const a of atoms) if (a.kind === "word") widest = Math.max(widest, measure(a.text, a, size));
-  if (widest <= width || widest === 0) return size;
-  const fitted = Math.floor(((size * width) / widest) * 2) / 2;
-  return Math.max(BINDER_TEXT.minSize, Math.min(size, fitted));
+const hyphenated = new Map<string, string>();
+
+/**
+ * Where a word may be broken, with or without a hyphen to add: the German
+ * hyphenation points, and after a hyphen the word already has.
+ */
+function breakPoints(word: string): { at: number; hyphen: boolean }[] {
+  let marked = hyphenated.get(word);
+  if (marked === undefined) {
+    marked = de.hyphenateSync(word, { hyphenChar: "\u00ad" });
+    hyphenated.set(word, marked);
+  }
+  const points: { at: number; hyphen: boolean }[] = [];
+  let at = 0;
+  for (const char of marked) {
+    if (char === "\u00ad") {
+      points.push({ at, hyphen: true });
+      continue;
+    }
+    at += char.length;
+    if (char === "-" && at < word.length) points.push({ at, hyphen: false });
+  }
+  return points.filter((p) => p.at > 0 && p.at < word.length);
 }
 
-/** Splits a word that is wider than the line even at the smallest size. */
-function splitWord(atom: Atom, size: number, width: number, measure: MeasureText): Atom[] {
-  const parts: Atom[] = [];
-  let current = "";
-  for (const char of Array.from(atom.text)) {
-    if (current && measure(current + char, atom, size) > width) {
-      parts.push({ ...atom, text: current });
-      current = char;
-    } else {
-      current += char;
-    }
+/**
+ * The longest start of `word` that fits in `room`, hyphen included, and
+ * the rest; null when not even the first syllable fits.
+ */
+function hyphenate(word: string, style: TextStyle, size: number, room: number, measure: MeasureText): { head: string; tail: string } | null {
+  const points = breakPoints(word);
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i]!;
+    const head = word.slice(0, p.at) + (p.hyphen ? "-" : "");
+    if (measure(head, style, size) <= room) return { head, tail: word.slice(p.at) };
   }
-  if (current) parts.push({ ...atom, text: current });
-  return parts;
+  return null;
+}
+
+/** Cuts a word with no hyphenation point that fits, letter by letter. */
+function cutLetters(word: string, style: TextStyle, size: number, room: number, measure: MeasureText): { head: string; tail: string } {
+  const chars = Array.from(word);
+  let head = chars[0] ?? "";
+  for (let i = 1; i < chars.length; i++) {
+    const next = head + chars[i];
+    if (measure(next, style, size) > room) break;
+    head = next;
+  }
+  return { head, tail: word.slice(head.length) };
 }
 
 interface LineItem extends TextStyle {
@@ -321,55 +361,85 @@ interface LineItem extends TextStyle {
   strike?: boolean;
 }
 
-/** Breaks the atoms into lines of at most `width`. */
+/**
+ * Breaks the atoms into lines of at most `width`. A word that does not fit
+ * goes to the next line; only a word wider than a whole line is hyphenated.
+ */
 function breakLines(atoms: Atom[], size: number, width: number, measure: MeasureText): LineItem[][] {
   const lines: LineItem[][] = [[]];
   let lineWidth = 0;
   let space: Atom | null = null;
-  const words: Atom[] = [];
-  for (const a of atoms) {
-    if (a.kind === "word" && measure(a.text, a, size) > width) words.push(...splitWord(a, size, width, measure));
-    else words.push(a);
-  }
-  for (const a of words) {
+
+  const newLine = () => {
+    lines.push([]);
+    lineWidth = 0;
+    space = null;
+  };
+  const place = (text: string, style: Atom) => {
     const line = lines[lines.length - 1]!;
-    if (a.kind === "break") {
-      lines.push([]);
-      lineWidth = 0;
-      space = null;
-      continue;
-    }
-    if (a.kind === "space") {
-      if (line.length) space = a;
-      continue;
-    }
-    const w = measure(a.text, a, size);
-    const spaceWidth = space && line.length ? measure(" ", space, size) : 0;
-    if (line.length && lineWidth + spaceWidth + w > width) {
-      lines.push([{ text: a.text, width: w, bold: a.bold, italic: a.italic, strike: a.strike }]);
-      lineWidth = w;
-      space = null;
-      continue;
-    }
-    if (spaceWidth) {
+    if (space && line.length) {
+      const spaceWidth = measure(" ", space, size);
       const last = line[line.length - 1]!;
-      if (sameStyle(last, space!)) {
+      if (sameStyle(last, space)) {
         last.text += " ";
         last.width += spaceWidth;
       } else {
-        line.push({ text: " ", width: spaceWidth, bold: space!.bold, italic: space!.italic, strike: space!.strike });
+        line.push({ text: " ", width: spaceWidth, bold: space.bold, italic: space.italic, strike: space.strike });
       }
       lineWidth += spaceWidth;
     }
+    space = null;
+    const w = measure(text, style, size);
     const last = line[line.length - 1];
-    if (last && sameStyle(last, a)) {
-      last.text += a.text;
+    if (last && sameStyle(last, style)) {
+      last.text += text;
       last.width += w;
     } else {
-      line.push({ text: a.text, width: w, bold: a.bold, italic: a.italic, strike: a.strike });
+      line.push({ text, width: w, bold: style.bold, italic: style.italic, strike: style.strike });
     }
     lineWidth += w;
-    space = null;
+  };
+
+  for (const a of atoms) {
+    if (a.kind === "break") {
+      newLine();
+      continue;
+    }
+    if (a.kind === "space") {
+      if (lines[lines.length - 1]!.length) space = a;
+      continue;
+    }
+    let rest = a.text;
+    while (rest) {
+      const line = lines[lines.length - 1]!;
+      const spaceWidth = space && line.length ? measure(" ", space, size) : 0;
+      const w = measure(rest, a, size);
+      if (lineWidth + spaceWidth + w <= width) {
+        place(rest, a);
+        break;
+      }
+      if (line.length && w <= width) {
+        newLine();
+        continue;
+      }
+      // Wider than a whole line: hyphenate, filling this line first.
+      const room = width - lineWidth - spaceWidth;
+      const cut = hyphenate(rest, a, size, room, measure);
+      if (cut) {
+        place(cut.head, a);
+        newLine();
+        rest = cut.tail;
+        continue;
+      }
+      if (line.length) {
+        newLine();
+        continue;
+      }
+      const hard = cutLetters(rest, a, size, width, measure);
+      place(hard.head, a);
+      rest = hard.tail;
+      if (rest) newLine();
+    }
   }
   return lines;
 }
@@ -398,16 +468,22 @@ export function layoutLabel(
   let y = 0;
   blocks.forEach((block, bi) => {
     const last = bi === blocks.length - 1;
+    // Empty lines stand for themselves: no extra gap around them.
+    const gapAfter = !last && !blocks[bi + 1]!.blank;
+    if (block.blank) {
+      y += block.blank * block.size * BINDER_TEXT.lineHeight;
+      return;
+    }
     if (block.rule) {
       y += block.size * 0.4;
       rules.push({ y });
-      y += block.size * 0.4 + (last ? 0 : block.size * BINDER_TEXT.blockGap);
+      y += block.size * 0.4 + (gapAfter ? block.size * BINDER_TEXT.blockGap : 0);
       return;
     }
     const indent = block.marker ? BINDER_TEXT.listIndent : 0;
     const width = frame.width - indent;
     const atoms = atomsOf(block.runs);
-    const size = fittedSize(atoms, block.size, width, measure);
+    const size = block.size;
     const lineHeight = size * BINDER_TEXT.lineHeight;
     if (block.marker) {
       pieces.push({ text: block.marker, x: 0, width: measure(block.marker, {}, size), baseline: baselineOf(y, size), size });
@@ -421,7 +497,7 @@ export function layoutLabel(
       }
       y += lineHeight;
     }
-    if (!last) y += size * BINDER_TEXT.blockGap;
+    if (gapAfter) y += size * BINDER_TEXT.blockGap;
   });
   const height = y;
   // A lying label centres its text; a standing one starts at the top.

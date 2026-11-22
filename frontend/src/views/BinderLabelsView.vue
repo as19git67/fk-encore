@@ -490,8 +490,9 @@ const title = computed(() => (pageId.value ? name.value.trim() || 'Ordneretikett
         </section>
         <p class="muted">
           Markdown: <code># Groß</code>, <code>## Mittel</code>, <code>### Klein</code>, <code>**fett**</code>,
-          <code>*kursiv*</code>, <code>- Aufzählung</code>, <code>---</code> für eine Linie. Jede Zeile bleibt eine Zeile;
-          ein Wort, das nicht in die Breite passt, wird kleiner gesetzt.
+          <code>*kursiv*</code>, <code>- Aufzählung</code>, <code>---</code> für eine Linie. Jede Zeile und jede
+          Leerzeile bleibt, wie sie ist. Die Schriftgröße bleibt: ein Wort, das nicht mehr in die Zeile passt, kommt in die
+          nächste, ein Wort breiter als das Etikett wird nach deutschen Regeln getrennt.
         </p>
       </div>
 
