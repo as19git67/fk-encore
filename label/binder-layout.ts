@@ -32,7 +32,7 @@
  */
 
 import { Lexer, type Token, type Tokens } from "marked";
-import de from "hyphen/de";
+import de from "hyphen/de/index.js";
 
 export const BINDER_SHEET = {
   name: "Ordneretiketten 192 × 61 mm",
@@ -347,8 +347,8 @@ function hyphenate(word: string, style: TextStyle, size: number, room: number, m
 function cutLetters(word: string, style: TextStyle, size: number, room: number, measure: MeasureText): { head: string; tail: string } {
   const chars = Array.from(word);
   let head = chars[0] ?? "";
-  for (let i = 1; i < chars.length; i++) {
-    const next = head + chars[i];
+  for (const char of chars.slice(1)) {
+    const next = head + char;
     if (measure(next, style, size) > room) break;
     head = next;
   }
