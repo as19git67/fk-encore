@@ -601,10 +601,17 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/ScannerLabelsView.vue'),
         meta: { permission: 'label.view' },
       },
+      {
+        path: 'ordner',
+        name: 'label-binder',
+        component: () => import('../views/BinderLabelsView.vue'),
+        meta: { permission: 'label.view' },
+      },
     ],
     menuItems: [
       { label: 'Drucken', icon: 'pi pi-print', routeName: 'label-print', permission: 'label.view' },
       { label: 'Scanner-Etiketten', icon: 'pi pi-hashtag', routeName: 'label-scanner', permission: 'label.view' },
+      { label: 'Ordneretiketten', icon: 'pi pi-book', routeName: 'label-binder', permission: 'label.view' },
     ],
   },
   {

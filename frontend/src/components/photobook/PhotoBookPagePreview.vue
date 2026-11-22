@@ -8,9 +8,10 @@
  * the photo shown, `inset` the part of the cell it fills (less than all of it
  * when the photo is zoomed out so its faces stay whole).
  */
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
 import { photoBookImageUrl, type PageRect, type PhotoBookPage, type PhotoBookSlot } from '../../api/photoBooks'
 import { useAuthStore } from '../../stores/auth'
+import { slotImageBox } from '../../utils/photoBookImage'
 
 const props = defineProps<{
   page: PhotoBookPage
@@ -42,15 +43,25 @@ function box(r: PageRect) {
   }
 }
 
-/** The photo scaled and moved so only its `window` shows in the frame. */
+/**
+ * The photo's own aspect (width / height), read from the image once it has
+ * loaded. The server places the photo by the size it has on record; when the
+ * file it sends is shaped differently (a size never measured, an orientation
+ * the record missed), stretching the image to the server's window would
+ * distort it. So the preview keeps the image's own shape.
+ */
+const naturalAspect = reactive(new Map<number, number>())
+
+function onImageLoad(s: PhotoBookSlot, event: Event) {
+  const img = event.target as HTMLImageElement
+  if (img.naturalWidth > 0 && img.naturalHeight > 0) naturalAspect.set(s.photo_id, img.naturalWidth / img.naturalHeight)
+}
+
+/** The photo scaled and moved so its `window` shows in the frame, never stretched. */
 function imageStyle(s: PhotoBookSlot) {
-  const w = s.window
-  return {
-    width: `${100 / w.w}%`,
-    height: `${100 / w.h}%`,
-    left: `${(-w.x / w.w) * 100}%`,
-    top: `${(-w.y / w.h) * 100}%`,
-  }
+  const frame = (s.inset.w * s.rect.w * props.widthMm) / Math.max(1e-9, s.inset.h * s.rect.h * props.heightMm)
+  const r = slotImageBox(s.window, frame, naturalAspect.get(s.photo_id) ?? null)
+  return { width: `${r.w * 100}%`, height: `${r.h * 100}%`, left: `${r.x * 100}%`, top: `${r.y * 100}%` }
 }
 
 // The caption as the PDF sets it (`fitCaptionSize` in photo-book-layout.ts):
@@ -113,7 +124,7 @@ function slotLabel(s: PhotoBookSlot): string {
       @click="emit('slot-click', s, $event)"
     >
       <span class="pbp-frame" :style="box(s.inset)">
-        <img :src="imageUrl(s)" alt="" loading="lazy" :style="imageStyle(s)" />
+        <img :src="imageUrl(s)" alt="" loading="lazy" :style="imageStyle(s)" @load="onImageLoad(s, $event)" />
       </span>
       <span v-if="s.low_dpi || s.face_cut" class="pbp-warn" aria-hidden="true">
         <i v-if="s.low_dpi" class="pi pi-exclamation-triangle" />

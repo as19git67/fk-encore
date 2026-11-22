@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { API_BASE_URL, apiFetch } from './client'
 
 export interface LabelPrinter {
   name: string
@@ -120,3 +120,83 @@ export function deleteScannerSheet(id: number) {
 
 export const scannerSheetPdfPath = (id: number) => `/label/scanner/sheets/${id}/pdf`
 export const SCANNER_TEST_PDF_PATH = '/label/scanner/test-pdf'
+
+// ---------- Binder labels (A4 sheet, four spine labels of 192 × 61 mm) ----------
+
+export type BinderDirection = 'across' | 'along'
+export type BinderAlign = 'left' | 'center'
+
+export interface BinderPageSummary {
+  id: number
+  name: string
+  /** The first line of text on the page, without Markdown. */
+  excerpt: string
+  updatedAt: string
+}
+
+export interface BinderPageInput {
+  name: string
+  /** Markdown per label, top to bottom; always four. */
+  labels: string[]
+  direction: BinderDirection
+  align: BinderAlign
+}
+
+export interface BinderPage extends BinderPageInput {
+  id: number
+  createdAt: string
+  updatedAt: string
+}
+
+export function listBinderPages() {
+  return apiFetch<{ pages: BinderPageSummary[] }>('/label/binder/pages')
+}
+
+export function getBinderPage(id: number) {
+  return apiFetch<BinderPage>(`/label/binder/pages/${id}`)
+}
+
+export function createBinderPage(page: BinderPageInput) {
+  return apiFetch<BinderPage>('/label/binder/pages', { method: 'POST', body: JSON.stringify(page) })
+}
+
+export function updateBinderPage(id: number, page: BinderPageInput) {
+  return apiFetch<BinderPage>(`/label/binder/pages/${id}`, { method: 'PUT', body: JSON.stringify(page) })
+}
+
+export function deleteBinderPage(id: number) {
+  return apiFetch<{ deleted: boolean }>(`/label/binder/pages/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * Renders the page as it stands, saved or not, and hands the PDF to the
+ * browser as a download. `outlines` draws the label edges for a test print.
+ */
+export async function downloadBinderPdf(page: Partial<BinderPageInput> & { labels: string[]; outlines?: boolean }) {
+  const token = localStorage.getItem('auth_token')
+  const resp = await fetch(`${API_BASE_URL}/label/binder/pdf`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(page),
+    cache: 'no-store',
+  })
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new Error(text || `PDF fehlgeschlagen (${resp.status})`)
+  }
+  const blob = await resp.blob()
+  const disposition = resp.headers.get('Content-Disposition') ?? ''
+  const encoded = /filename\*=UTF-8''([^;]+)/.exec(disposition)?.[1]
+  const plain = /filename="([^"]+)"/.exec(disposition)?.[1]
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = encoded ? decodeURIComponent(encoded) : plain ?? 'Ordneretiketten.pdf'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
