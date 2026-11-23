@@ -9,6 +9,7 @@ import {
   isPersonName,
   isUsableSettlement,
   looksLikePeriodicReport,
+  looksLikeTaxSummary,
   parseGermanNumber,
   paperTypeOf,
   parseSettlement,
@@ -531,6 +532,37 @@ Die Gutschrift erfolgt mit Valuta 05.06.2026 auf Konto EUR mit der IBAN DE00 000
     const s = inspectSettlement(TAX.replace("abgeführte Steuern EUR -6,91\n", ""))!;
     expect(s.tax).toBe(6.91);
     expect(s.labels.tax).toBe("vor − nach Steuern");
+  });
+
+  it("is not taken for a year's tax certificate because its footer says it is none", () => {
+    // A tax statement with nothing taxed (the allowance covered it) and the
+    // footer "KEINE STEUERBESCHEINIGUNG" on a line of its own, twice.
+    const footer = `Beispielbank AG
+Steuerliche Behandlung: Ausländische Dividende vom 03.06.2026
+Stk. 40 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern: EUR 31,50
+Steuerbemessungsgrundlage vor Verlustverrechnung EUR 37,00
+in Anspruch genommener Freistellungsauftrag EUR 37,00
+Kapitalertragsteuer EUR 0,00
+abgeführte Steuern EUR 0,00
+Zu Ihren Gunsten nach Steuern: EUR 31,50
+Die Gutschrift erfolgt mit Valuta 05.06.2026 auf Konto EUR mit der IBAN DE00 0000 0000 0000 0000 00
+KEINE STEUERBESCHEINIGUNG ...
+Verrechnungssalden in EUR
+Diese Abrechnung ist maschinell erstellt und wird nicht unterschrieben.
+KEINE STEUERBESCHEINIGUNG`;
+    expect(looksLikeTaxSummary(footer)).toBe(false);
+    const s = inspectSettlement(footer)!;
+    expect(s.taxSummary).toBe(false);
+    expect(s.taxStatement).toBe(true);
+    expect(s.kind).toBe("dividend");
+    expect(s.quantity).toBe(40);
+    expect(s.tax).toBe(0);
+    expect(s.net).toBe(31.5);
+    expect(s.executedAt).toBe("2026-06-03");
+    expect(isUsableSettlement(parseSettlement(footer))).toBe(true);
+    // A year's certificate is still one.
+    expect(looksLikeTaxSummary("Beispielbank AG\nJahressteuerbescheinigung 2025\nDividende ISIN DE000000AAA1")).toBe(true);
   });
 
   it("does not take a settlement with its tax statement appended for a tax statement", () => {

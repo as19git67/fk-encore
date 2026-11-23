@@ -289,13 +289,22 @@ const TAX_SUMMARY_RE =
   /ertr(?:ä|a|ae)gnis(?:aufstellung|übersicht|uebersicht)|ertragsaufstellung|steuerbescheinigung|verlustbescheinigung/i;
 
 /**
+ * The footer a single paper prints to say it is not one ("KEINE
+ * STEUERBESCHEINIGUNG" under a broker's tax statement for one dividend):
+ * a short line naming the certificate, but the opposite of its title.
+ */
+const NOT_A_TAX_CERTIFICATE_RE = /\bkeine\s+(?:jahres)?steuerbescheinigung/gi;
+
+/**
  * True when the text's title names a year's tax summary — a short line,
  * not a settlement's footer prose ("die Jahressteuerbescheinigung erhalten
  * Sie gesondert") — and that title comes before any settlement heading.
  */
 export function looksLikeTaxSummary(text: string): boolean {
   const lines = text.split("\n");
-  const title = lines.findIndex((l) => TAX_SUMMARY_RE.test(l) && l.trim().length <= 80);
+  const title = lines.findIndex(
+    (l) => TAX_SUMMARY_RE.test(l.replace(NOT_A_TAX_CERTIFICATE_RE, "")) && l.trim().length <= 80,
+  );
   if (title < 0) return false;
   const heading = lines.findIndex((l) => STRONG_RE.test(l) && l.trim().length <= 60 && !/\d/.test(l));
   return heading < 0 || title < heading;
