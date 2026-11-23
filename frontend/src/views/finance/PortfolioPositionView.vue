@@ -37,6 +37,7 @@ import {
   formatIsoDate,
   formatPercent,
   formatQuantity,
+  formatSplitRatio,
   formatSignedCurrency,
   formatSignedPercent,
   gainSign,
@@ -708,6 +709,10 @@ function transactionCash(tx: PortfolioTransaction): string {
         <template v-if="data.holding_gaps.length > 0">
           <p class="pp-muted">
             Zwischen diesen Depotständen hat sich die Stückzahl geändert, ohne dass eine Transaktion das erklärt — etwa ein Depotübertrag, ein Split oder eine fehlende Abrechnung.
+            Der Zeitraum reicht von einem Depotstand zum nächsten, in dem sich die Stückzahl geändert hat; „Erklärt“ ist, was die Transaktionen dazwischen bewegen.
+            <template v-if="data.holding_gaps.some((g) => g.split_ratio !== null)">
+              Passt ein üblicher Split genau, steht er dabei — als Transaktion „Split“ mit der offenen Stückzahl eingetragen, ist die Lücke geschlossen.
+            </template>
             Stammt ein Stand aus einem alten Auszug, den du nicht mehr betrachten willst: Portfolio › ⋮ › „Betrachten ab …“.
           </p>
           <ScrollX>
@@ -739,7 +744,10 @@ function transactionCash(tx: PortfolioTransaction): string {
                   <td>{{ accountLabelById.get(g.account_id) ?? `#${g.account_id}` }}</td>
                   <td class="pp-col-num">{{ formatQuantity(g.amount_before) }} → {{ formatQuantity(g.amount_after) }}</td>
                   <td class="pp-col-num">{{ formatQuantity(g.explained) }}</td>
-                  <td class="pp-col-num pp-strong">{{ Number(g.unexplained) > 0 ? '+' : '' }}{{ formatQuantity(g.unexplained) }} Stk</td>
+                  <td class="pp-col-num pp-strong">
+                    {{ Number(g.unexplained) > 0 ? '+' : '' }}{{ formatQuantity(g.unexplained) }} Stk
+                    <span v-if="g.split_ratio !== null" class="pp-split">vermutlich Split {{ formatSplitRatio(g.split_ratio) }}</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1032,6 +1040,12 @@ function transactionCash(tx: PortfolioTransaction): string {
 }
 .pp-strong {
   font-weight: 600;
+}
+.pp-split {
+  display: block;
+  font-weight: normal;
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
 }
 .pp-date {
   font-variant-numeric: tabular-nums;

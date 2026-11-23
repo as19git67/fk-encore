@@ -23,8 +23,23 @@
  *
  * A change the pooled transactions cannot be checked against — one of
  * them carries no quantity (a giro-derived row without its settlement),
- * or a split / corporate action is among them — is counted as
- * unverifiable, not reported as a gap.
+ * or a split without a quantity / a corporate action is among them — is
+ * counted as unverifiable, not reported as a gap. A split booked with a
+ * quantity moves the share count by that (signed) quantity, as in the
+ * performance calculation.
+ *
+ * A stock split nobody booked multiplies the shares held before it, and
+ * trades before it are in the old count, trades after it in the new one.
+ * Summing them cannot explain the change, and worse: the lookahead, which
+ * only takes trades that make a change add up exactly, then leaves a trade
+ * dated just after the snapshot to the next pair, which shows it as a
+ * second, opposite gap. So when the sum does not explain a change, the
+ * walk tries the usual split ratios (SPLIT_RATIOS, both ways) with every
+ * point the split could fall between the pooled trades (and the ones the
+ * lookahead may take). A ratio that makes the change add up exactly is
+ * reported as the gap's `split_ratio` — still a gap, since no transaction
+ * records it, but named, and the trades it needs are taken here, not
+ * handed on.
  *
  * A position missing from a statement that still names it in its holdings
  * (a row OCR garbled) was not read that day, not sold: the day is left out
@@ -51,6 +66,8 @@ import { dedupeSnapshotRows, securityIdentity } from "./security-identity";
 const QUANTITY_EPSILON = 1e-6;
 /** How far after a snapshot a transaction's date may lie and still explain it (value date after a weekend). */
 export const LOOKAHEAD_DAYS = 5;
+/** Shares per old share a split usually gives; the reverse ratios (1/n) are tried too. */
+export const SPLIT_RATIOS = [2, 3, 4, 5, 6, 7, 8, 10, 15, 20, 25, 50, 100];
 
 function daysAfter(from: string, to: string): number {
   return (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
@@ -89,6 +106,12 @@ export interface HoldingGap {
   /** delta − explained: the shares no transaction accounts for. */
   unexplained: string;
   transaction_count: number;
+  /**
+   * New shares per old share of a split nobody booked, when one makes the
+   * change add up exactly (4 = one share became four, 0.25 = four became
+   * one); null otherwise. `unexplained` is then the split's effect.
+   */
+  split_ratio: number | null;
 }
 
 export interface PositionReconciliation {
@@ -107,6 +130,8 @@ function quantityEffect(tx: ReconTx): number | null | "unknown" {
     case "out":
       return tx.amount === null ? "unknown" : -Math.abs(tx.amount);
     case "split":
+      // A split booked with a quantity: the change in the share count.
+      return tx.amount === null ? "unknown" : tx.amount;
     case "corp_action":
       return "unknown";
     default:
@@ -117,6 +142,44 @@ function quantityEffect(tx: ReconTx): number | null | "unknown" {
 
 function fmt(n: number): string {
   return (Math.abs(n) < QUANTITY_EPSILON ? 0 : n).toFixed(8);
+}
+
+/**
+ * A split that makes `before` → `after` add up with the given trades: the
+ * trades are in date order (`pooled`, then the ones dated just after the
+ * snapshot, `ahead`, of which only a leading run may be taken). The split
+ * falls between two trades; the shares held up to it are multiplied by the
+ * ratio. Fewest trades taken from `ahead` first, then the latest split
+ * point, then the smaller ratio.
+ */
+export function findSplit(
+  before: number,
+  after: number,
+  pooled: number[],
+  ahead: number[] = [],
+): { ratio: number; ahead: number } | null {
+  if (before <= QUANTITY_EPSILON || after <= QUANTITY_EPSILON) return null;
+  const ratios = SPLIT_RATIOS.flatMap((n) => [n, 1 / n]);
+  for (let m = 0; m <= ahead.length; m++) {
+    const trades = [...pooled, ...ahead.slice(0, m)];
+    const total = trades.reduce((a, b) => a + b, 0);
+    let held = before + total; // shares before the split when it falls after every trade
+    let later = 0; // trades after the split point
+    for (let cut = trades.length; cut >= 0; cut--) {
+      if (cut < trades.length) {
+        held -= trades[cut]!;
+        later += trades[cut]!;
+      }
+      if (held <= QUANTITY_EPSILON) continue;
+      for (const ratio of ratios) {
+        // Whole new shares per old one: compare with a tolerance that scales with the holding.
+        if (Math.abs(held * ratio + later - after) < Math.max(QUANTITY_EPSILON, after * 1e-9)) {
+          return { ratio, ahead: m };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -154,10 +217,14 @@ export function reconcilePosition(
 
     let explained = 0;
     let unknown = false;
+    const movedShares: number[] = [];
     for (const tx of pending) {
       const effect = quantityEffect(tx);
       if (effect === "unknown") unknown = true;
-      else if (effect !== null) explained += effect;
+      else if (effect !== null) {
+        explained += effect;
+        movedShares.push(effect);
+      }
     }
     let count = pending.length;
     pending.length = 0;
@@ -167,18 +234,31 @@ export function reconcilePosition(
       continue;
     }
     // Dated after the snapshot (a value date), but what makes it add up.
+    const ahead: number[] = [];
     if (Math.abs(delta - explained) >= QUANTITY_EPSILON) {
       let extra = 0;
       for (let k = next; k < pool.length && daysAfter(after.as_of, pool[k]!.executed_at) <= LOOKAHEAD_DAYS; k++) {
         const effect = quantityEffect(pool[k]!);
         if (effect === "unknown") break;
+        ahead.push(effect ?? 0);
         if (effect !== null) extra += effect;
         if (Math.abs(delta - explained - extra) < QUANTITY_EPSILON) {
           explained += extra;
           count += k + 1 - next;
           next = k + 1;
+          ahead.length = 0;
           break;
         }
+      }
+    }
+    let splitRatio: number | null = null;
+    if (Math.abs(delta - explained) >= QUANTITY_EPSILON) {
+      const split = findSplit(before.amount, after.amount, movedShares, ahead);
+      if (split) {
+        splitRatio = split.ratio;
+        for (let k = 0; k < split.ahead; k++) explained += ahead[k]!;
+        count += split.ahead;
+        next += split.ahead;
       }
     }
     const unexplained = delta - explained;
@@ -196,6 +276,7 @@ export function reconcilePosition(
       explained: fmt(explained),
       unexplained: fmt(unexplained),
       transaction_count: count,
+      split_ratio: splitRatio,
     });
   }
   return out;

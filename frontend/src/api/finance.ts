@@ -1038,6 +1038,8 @@ export interface HoldingGap {
   /** Shares no transaction accounts for (signed). */
   unexplained: string
   transaction_count: number
+  /** New shares per old one of a split nobody booked that makes the change add up; null otherwise. */
+  split_ratio: number | null
 }
 
 export interface PortfolioReviewHoldingGap extends HoldingGap {

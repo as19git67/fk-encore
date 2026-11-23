@@ -22,6 +22,7 @@ import {
   depotKindLabel,
   formatIsoDate,
   formatQuantity,
+  formatSplitRatio,
   formatSignedCurrency,
 } from '../../utils/financeFormat'
 
@@ -421,7 +422,10 @@ function signClass(val: string | null): string {
                 <td>{{ g.account_label }}</td>
                 <td class="pr-num">{{ formatQuantity(g.amount_before) }} → {{ formatQuantity(g.amount_after) }}</td>
                 <td class="pr-num">{{ formatQuantity(g.explained) }}</td>
-                <td class="pr-num pr-strong">{{ Number(g.unexplained) > 0 ? '+' : '' }}{{ formatQuantity(g.unexplained) }} Stk</td>
+                <td class="pr-num pr-strong">
+                  {{ Number(g.unexplained) > 0 ? '+' : '' }}{{ formatQuantity(g.unexplained) }} Stk
+                  <span v-if="g.split_ratio !== null" class="pr-split">vermutlich Split {{ formatSplitRatio(g.split_ratio) }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -744,6 +748,12 @@ function signClass(val: string | null): string {
 }
 .pr-strong {
   font-weight: 600;
+}
+.pr-split {
+  display: block;
+  font-weight: normal;
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
 }
 .pr-date {
   color: var(--p-text-muted-color);
