@@ -577,7 +577,7 @@ function confirmDeleteNote(note: HomeNote) {
     <Dialog v-model:visible="guideOpen" class="dialog-lg" modal :header="guideEditing ? 'Anleitung bearbeiten' : 'Neue Anleitung'">
       <div class="hs-form">
         <label for="hs-guide-title">Titel</label>
-        <InputText id="hs-guide-title" v-model="guideTitle" autofocus placeholder="z. B. Filter wechseln" />
+        <InputText id="hs-guide-title" v-model="guideTitle" autofocus placeholder="z. B. Kartusche tauschen" />
         <p class="hs-meta">
           Nummerierte Schritte mit „1.“, Warnungen mit „&gt; [!WARNING]“, Hinweise mit „&gt; [!NOTE]“.
         </p>
