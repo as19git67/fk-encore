@@ -6,7 +6,7 @@
  */
 import { computed, h, type VNodeChild } from 'vue'
 import type { Token, Tokens } from 'marked'
-import { decodeEntities, markdownTokens, safeHref } from '../../utils/markdown'
+import { calloutOf, decodeEntities, markdownTokens, safeHref } from '../../utils/markdown'
 
 const props = defineProps<{ source: string }>()
 
@@ -69,8 +69,21 @@ function block(t: Token): VNodeChild {
       const text = t as Tokens.Text
       return text.tokens?.length ? inline(text.tokens) : decodeEntities(text.text)
     }
-    case 'blockquote':
-      return h('blockquote', blocks((t as Tokens.Blockquote).tokens))
+    case 'blockquote': {
+      const quote = t as Tokens.Blockquote
+      const callout = calloutOf(quote.text)
+      if (!callout) return h('blockquote', blocks(quote.tokens))
+      // `> [!WARNING]` — a handbook's "turn off the water first" has to stand
+      // out from the steps around it.
+      const warning = callout.kind === 'warning'
+      return h('div', { class: ['md-callout', `md-callout--${callout.kind}`], role: 'note' }, [
+        h('p', { class: 'md-callout-title' }, [
+          h('i', { class: warning ? 'pi pi-exclamation-triangle' : 'pi pi-info-circle', 'aria-hidden': 'true' }),
+          warning ? ' Achtung' : ' Hinweis',
+        ]),
+        ...blocks(markdownTokens(callout.body)),
+      ])
+    }
     case 'code':
       return h('pre', h('code', (t as Tokens.Code).text))
     case 'hr':
@@ -223,6 +236,30 @@ const Body = () => blocks(tokens.value)
 .md-view th {
   background: var(--p-content-hover-background);
   text-align: left;
+}
+.md-view .md-callout {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 4px solid var(--p-text-muted-color);
+  border-radius: 6px;
+  background: var(--p-content-hover-background);
+}
+.md-view .md-callout--warning {
+  border-left-color: var(--p-orange-500);
+  background: color-mix(in srgb, var(--p-orange-500) 12%, transparent);
+}
+.md-view .md-callout > :last-child {
+  margin-bottom: 0;
+}
+.md-view .md-callout-title {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+.md-view .md-callout--warning .md-callout-title i {
+  color: var(--p-orange-500);
+}
+.md-view .md-callout--note .md-callout-title i {
+  color: var(--p-primary-color);
 }
 .md-view .md-image {
   color: var(--p-text-muted-color);

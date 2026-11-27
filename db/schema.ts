@@ -5877,3 +5877,116 @@ export const labelBinderPages = pgTable(
   },
   (table) => [uniqueIndex("label_binder_page_user_name_idx").on(table.user_id, sql`lower(${table.name})`)],
 );
+
+// ========== Home systems (Haus › Anlagen, documentation/plans/haus-anlagen.md) ==========
+
+export type HomeSystemCategory =
+  | "heating"
+  | "water"
+  | "ventilation"
+  | "sanitary"
+  | "electrical"
+  | "garden"
+  | "building"
+  | "other";
+
+/** One key/value pair of an item in place ("Gewinde": "M24"). */
+export type HomeItemAttribute = { key: string; value: string };
+
+// A technical system of the house (migration 0322). Visibility as for
+// meters: the owner plus every member of `group_id`.
+export const homeSystems = pgTable(
+  "home_systems",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    category: text("category").$type<HomeSystemCategory>().notNull(),
+    location: text("location"),
+    manufacturer: text("manufacturer"),
+    model: text("model"),
+    installed_on: date("installed_on", { mode: "string" }),
+    /** Markdown. */
+    description: text("description"),
+    owner_user_id: integer("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    group_id: integer("group_id").references(() => groups.id, { onDelete: "set null" }),
+    archived_at: timestamp("archived_at", { mode: "string", withTimezone: true }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("home_systems_owner_idx").on(table.owner_user_id),
+    index("home_systems_group_idx").on(table.group_id),
+  ],
+);
+
+// Instructions for a system, Markdown with warning callouts.
+export const homeSystemGuides = pgTable(
+  "home_system_guides",
+  {
+    id: serial("id").primaryKey(),
+    system_id: integer("system_id")
+      .notNull()
+      .references(() => homeSystems.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    sort: integer("sort").notNull().default(0),
+    updated_by: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("home_system_guides_system_idx").on(table.system_id, table.sort)],
+);
+
+// The state of a guide before each change, so an edit can be undone.
+export const homeSystemGuideRevisions = pgTable(
+  "home_system_guide_revisions",
+  {
+    id: serial("id").primaryKey(),
+    guide_id: integer("guide_id")
+      .notNull()
+      .references(() => homeSystemGuides.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    /** Who wrote this version (the guide's `updated_by` at the time). */
+    edited_by: integer("edited_by").references(() => users.id, { onDelete: "set null" }),
+    /** When this version was written (the guide's `updated_at` at the time). */
+    edited_at: timestamp("edited_at", { mode: "string", withTimezone: true }).notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("home_system_guide_revisions_guide_idx").on(table.guide_id, table.created_at)],
+);
+
+// Identical units of a system at different places (aerators per tap).
+export const homeSystemItems = pgTable(
+  "home_system_items",
+  {
+    id: serial("id").primaryKey(),
+    system_id: integer("system_id")
+      .notNull()
+      .references(() => homeSystems.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    location: text("location"),
+    attributes: jsonb("attributes").$type<HomeItemAttribute[]>().notNull().default([]),
+    sort: integer("sort").notNull().default(0),
+  },
+  (table) => [index("home_system_items_system_idx").on(table.system_id, table.sort)],
+);
+
+// Dated entries, the history of a system.
+export const homeSystemNotes = pgTable(
+  "home_system_notes",
+  {
+    id: serial("id").primaryKey(),
+    system_id: integer("system_id")
+      .notNull()
+      .references(() => homeSystems.id, { onDelete: "cascade" }),
+    noted_on: date("noted_on", { mode: "string" }).notNull(),
+    body: text("body").notNull(),
+    author_id: integer("author_id").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("home_system_notes_system_idx").on(table.system_id, table.noted_on)],
+);
