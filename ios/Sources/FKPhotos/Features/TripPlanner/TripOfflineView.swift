@@ -74,7 +74,8 @@ struct TripOfflineView: View {
             } footer: {
                 Text("Eine Reise, die in den nächsten \(TripOfflineAutoLoad.daysAhead) Tagen beginnt "
                      + "oder gerade läuft, lädt die App im WLAN von selbst für unterwegs, wenn "
-                     + "genug Platz ist. Löschst du sie hier vom Gerät, bleibt sie gelöscht, "
+                     + "genug Platz ist. Eine laufende Reise ohne Kopie kommt auch über "
+                     + "Mobilfunk, dann ohne Bilder. Löschst du sie hier vom Gerät, bleibt sie gelöscht, "
                      + "bis du sie wieder lädst.")
             }
 

@@ -61,7 +61,7 @@ final class TripRunningPlan {
             // away at the one moment the plan is needed offline (§3.9).
             // A real "no" from the server — a 404, a 403 — still clears
             // it, because that is an answer.
-            if !TripOfflineReach.meansUnreachable(error) {
+            if TripOfflineReach.meansGone(error) {
                 plan = nil
             } else if plan == nil {
                 // Started in the tunnel, with no answer from breakfast

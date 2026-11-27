@@ -76,18 +76,54 @@ enum TripOfflineReach {
             switch urlError.code {
             case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
                  .cannotFindHost, .timedOut, .dnsLookupFailed, .dataNotAllowed,
-                 .internationalRoamingOff, .callIsActive, .resourceUnavailable:
+                 .internationalRoamingOff, .callIsActive, .resourceUnavailable,
+                 // A ship's or a hotel's Wi-Fi before the login page: it
+                 // answers in place of the server, with its own
+                 // certificate, a redirect or a page that is not ours.
+                 .secureConnectionFailed, .serverCertificateUntrusted,
+                 .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+                 .serverCertificateNotYetValid, .clientCertificateRejected,
+                 .clientCertificateRequired, .appTransportSecurityRequiresSecureConnection,
+                 .badServerResponse, .cannotParseResponse, .zeroByteResource,
+                 .cannotDecodeRawData, .cannotDecodeContentData,
+                 .httpTooManyRedirects, .redirectToNonExistentLocation,
+                 .cannotLoadFromNetwork, .backgroundSessionWasDisconnected:
                 return true
             default:
                 return false
             }
         }
-        if let apiError = error as? APIError, case .httpError(let code, _) = apiError {
-            // A gateway that cannot reach the app is, from here, the
-            // same situation as no network: nobody is going to answer.
-            return code == 502 || code == 503 || code == 504
+        // A login page that came back with 200: not JSON, and not the
+        // server saying anything about the trip.
+        if error is DecodingError { return true }
+        if let apiError = error as? APIError {
+            switch apiError {
+            case .invalidResponse:
+                return true
+            case .httpError(let code, _):
+                // A gateway that cannot reach the app is, from here, the
+                // same situation as no network: nobody is going to
+                // answer. 407 and 511 are a proxy or a captive portal
+                // asking for a login before anything gets through.
+                return code == 502 || code == 503 || code == 504 || code == 407 || code == 511
+            default:
+                return false
+            }
         }
         return false
+    }
+
+    /// Whether the server said the trip is gone for this traveller —
+    /// deleted, or no longer shared with them. Only this lets the phone
+    /// throw away its copy (the Live Activity, the fences, the offline
+    /// plan). Everything else — no network, a captive portal, a server
+    /// error, a sign-in that has to be renewed — leaves the copy alone:
+    /// it is the one thing that still works when the rest does not.
+    static func meansGone(_ error: Error) -> Bool {
+        guard let apiError = error as? APIError, case .httpError(let code, _) = apiError else {
+            return false
+        }
+        return code == 403 || code == 404 || code == 410
     }
 }
 
@@ -391,7 +427,8 @@ enum TripOfflineDocuments {
 
 /// Trips that load themselves for the road (§3.9, Anton 16.11.): one
 /// that starts within a week or is running now, on Wi-Fi and with room
-/// on the phone. A trip whose bundle somebody deleted by hand stays
+/// on the phone — a running trip without any copy also over a metered
+/// network. A trip whose bundle somebody deleted by hand stays
 /// deleted; the switch in "Unterwegs ohne Netz" turns it all off.
 enum TripOfflineAutoLoad {
     static let settingKey = "tripPlanner.offline.autoLoad"
@@ -461,14 +498,33 @@ enum TripOfflineAutoLoad {
         let due = plans.filter {
             wants($0, today: today, storedAt: store.storedAt(planId: $0.id), declined: isDeclined($0.id))
         }
-        guard !due.isEmpty, await onUnmeteredNetwork(), hasRoom() else { return }
+        guard !due.isEmpty, hasRoom() else { return }
+        let network = await currentNetwork()
         for plan in due {
+            // Over Wi-Fi everything comes along. Over a metered network
+            // only a running trip with no copy at all, and only the plan
+            // and its papers: on the first day abroad, on roaming, a plan
+            // of a few hundred kilobytes beats none (Anton, 27.11.).
+            let urgent = !store.has(planId: plan.id)
+                && plan.schedule(on: today).isRunning
+            guard network == .unmetered || (network == .metered && urgent) else { continue }
             guard let bundle = try? await TripPlannerViewModel.fetchBundle(planId: plan.id),
                   (try? store.save(bundle, planId: plan.id)) != nil
             else { continue }
-            await TripOfflineThumbnails.prefetch(bundle, into: store)
+            if network == .unmetered {
+                await TripOfflineThumbnails.prefetch(bundle, into: store)
+            }
             await TripOfflineDocuments.fetch(bundle, planId: plan.id, into: store)
         }
+    }
+
+    /// A bundle fetched for another reason — the running day on the Lock
+    /// Screen — kept as the copy for the road, when that is wanted. The
+    /// pictures follow with the next run over Wi-Fi.
+    static func keep(_ bundle: TripOfflineBundle, planId: Int,
+                     store: TripOfflineStore = .shared) {
+        guard isOn, !isDeclined(planId) else { return }
+        try? store.save(bundle, planId: planId)
     }
 
     private static func hasRoom() -> Bool {
@@ -478,10 +534,13 @@ enum TripOfflineAutoLoad {
         return free > minimumFreeBytes
     }
 
+    enum Connection { case unmetered, metered, none }
+
     /// Wi-Fi or another network that is neither metered nor in Low
     /// Data Mode — a whole trip with its pictures is not something to
-    /// pull over roaming.
-    private static func onUnmeteredNetwork() async -> Bool {
+    /// pull over roaming. Low Data Mode counts as no network: somebody
+    /// who turned it on said so.
+    private static func currentNetwork() async -> Connection {
         await withCheckedContinuation { continuation in
             let monitor = NWPathMonitor()
             // The handler may be called again before the cancel lands;
@@ -491,8 +550,13 @@ enum TripOfflineAutoLoad {
                 guard !answered.done else { return }
                 answered.done = true
                 monitor.cancel()
-                continuation.resume(returning: path.status == .satisfied
-                                    && !path.isExpensive && !path.isConstrained)
+                let network: Connection
+                if path.status != .satisfied || path.isConstrained {
+                    network = .none
+                } else {
+                    network = path.isExpensive ? .metered : .unmetered
+                }
+                continuation.resume(returning: network)
             }
             monitor.start(queue: DispatchQueue(label: "trip-offline-autoload"))
         }

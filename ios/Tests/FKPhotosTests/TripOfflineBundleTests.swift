@@ -399,6 +399,30 @@ final class TripOfflineBundleTests: XCTestCase {
         XCTAssertFalse(TripOfflineReach.meansUnreachable(APIError.httpError(500, nil)))
     }
 
+    func testALoginPageInsteadOfTheServerCounts() {
+        // The ship's Wi-Fi before the internet package: its own
+        // certificate, a page that is not JSON, or "log in first".
+        XCTAssertTrue(TripOfflineReach.meansUnreachable(URLError(.serverCertificateUntrusted)))
+        XCTAssertTrue(TripOfflineReach.meansUnreachable(URLError(.secureConnectionFailed)))
+        XCTAssertTrue(TripOfflineReach.meansUnreachable(APIError.httpError(511, nil)))
+        XCTAssertTrue(TripOfflineReach.meansUnreachable(APIError.invalidResponse))
+        let notJSON = DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "<html>"))
+        XCTAssertTrue(TripOfflineReach.meansUnreachable(notJSON))
+    }
+
+    func testOnlyAServerSayingTheTripIsGoneThrowsTheCopyAway() {
+        XCTAssertTrue(TripOfflineReach.meansGone(APIError.httpError(404, nil)))
+        XCTAssertTrue(TripOfflineReach.meansGone(APIError.httpError(403, nil)))
+        // These used to delete the running trip's offline plan from a
+        // wake in the background — and then there was none at sea.
+        XCTAssertFalse(TripOfflineReach.meansGone(APIError.httpError(401, nil)))
+        XCTAssertFalse(TripOfflineReach.meansGone(APIError.httpError(500, nil)))
+        XCTAssertFalse(TripOfflineReach.meansGone(URLError(.serverCertificateUntrusted)))
+        XCTAssertFalse(TripOfflineReach.meansGone(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(TripOfflineReach.meansGone(
+            DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "<html>"))))
+    }
+
     func testAGatewayThatCannotReachTheAppCounts() {
         // From the phone this is the same situation as no network:
         // nobody is going to answer.
