@@ -58,6 +58,16 @@ export function formatQuantity(val: string | number | null | undefined): string 
   }).format(n)
 }
 
+/**
+ * A split ratio (new shares per old one) as banks print it: 4 → "4:1",
+ * 0.1 → "1:10" (a reverse split); null for none.
+ */
+export function formatSplitRatio(ratio: number | null | undefined): string | null {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio) || ratio <= 0) return null
+  if (ratio >= 1) return `${formatQuantity(ratio)}:1`
+  return `1:${formatQuantity(Math.round((1 / ratio) * 10000) / 10000)}`
+}
+
 export type GainSign = 'pos' | 'neg' | 'flat'
 
 export function gainSign(val: string | number | null | undefined): GainSign {

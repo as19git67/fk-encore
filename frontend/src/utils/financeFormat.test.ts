@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatQuoteTime, priceOriginLabel } from './financeFormat'
+import { formatQuoteTime, formatSplitRatio, priceOriginLabel } from './financeFormat'
 
 describe('priceOriginLabel', () => {
   it('names the time of a quote and the day of a bank price', () => {
@@ -13,5 +13,14 @@ describe('priceOriginLabel', () => {
   it('shows a dash for a missing or broken timestamp', () => {
     expect(formatQuoteTime(null)).toBe('–')
     expect(formatQuoteTime('kein Datum')).toBe('–')
+  })
+})
+
+describe('formatSplitRatio', () => {
+  it('prints new shares per old one, reverse splits the other way round', () => {
+    expect(formatSplitRatio(4)).toBe('4:1')
+    expect(formatSplitRatio(0.1)).toBe('1:10')
+    expect(formatSplitRatio(1 / 3)).toBe('1:3')
+    expect(formatSplitRatio(null)).toBeNull()
   })
 })

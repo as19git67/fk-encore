@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcilePosition, type SnapshotPoint } from "./depot-holding-reconciliation";
+import { findSplit, reconcilePosition, type SnapshotPoint } from "./depot-holding-reconciliation";
 
 const p = (as_of: string, amount: number): SnapshotPoint => ({ as_of, amount });
 
@@ -91,5 +91,67 @@ describe("reconcilePosition", () => {
     );
     // The second +5 has no transaction.
     expect(r.gaps.map((g) => [g.to, g.unexplained])).toEqual([["2026-03-10", "5.00000000"]]);
+  });
+
+  it("names a split nobody booked and keeps the trade right after it out of the next pair", () => {
+    // 30 held, 10 sold, then a 1:3 split: 60. A buy of 6 the next snapshot
+    // already shows carries its value date two days later. Later 12 more.
+    const r = reconcilePosition(
+      1,
+      "K",
+      [p("2026-01-01", 30), p("2026-03-01", 66), p("2026-06-30", 78)],
+      [
+        { executed_at: "2026-02-01", kind: "sell", amount: 10 },
+        { executed_at: "2026-03-03", kind: "buy", amount: 6 },
+        { executed_at: "2026-04-15", kind: "buy", amount: 12 },
+      ],
+    );
+    expect(r.gaps).toHaveLength(1);
+    expect(r.gaps[0]).toMatchObject({
+      from: "2026-01-01",
+      to: "2026-03-01",
+      explained: "-4.00000000",
+      unexplained: "40.00000000",
+      transaction_count: 2,
+      split_ratio: 3,
+    });
+    expect(r.unverifiable).toBe(0);
+  });
+
+  it("names a reverse split", () => {
+    const r = reconcilePosition(1, "K", [p("2026-01-01", 100), p("2026-03-01", 10)], []);
+    expect(r.gaps[0]).toMatchObject({ unexplained: "-90.00000000", split_ratio: 0.1 });
+  });
+
+  it("names no split where no usual ratio adds up", () => {
+    const r = reconcilePosition(1, "K", [p("2026-01-01", 30), p("2026-03-01", 47)], [
+      { executed_at: "2026-02-01", kind: "buy", amount: 5 },
+    ]);
+    expect(r.gaps[0]).toMatchObject({ unexplained: "12.00000000", split_ratio: null });
+  });
+
+  it("counts a booked split by its quantity", () => {
+    const r = reconcilePosition(1, "K", [p("2026-01-01", 30), p("2026-03-01", 66), p("2026-06-30", 78)], [
+      { executed_at: "2026-02-01", kind: "sell", amount: 10 },
+      { executed_at: "2026-02-20", kind: "split", amount: 40 },
+      { executed_at: "2026-03-03", kind: "buy", amount: 6 },
+      { executed_at: "2026-04-15", kind: "buy", amount: 12 },
+    ]);
+    expect(r).toEqual({ gaps: [], unverifiable: 0 });
+  });
+});
+
+describe("findSplit", () => {
+  it("puts the split between the trades where the ratio adds up", () => {
+    // 20 held, 5 bought before a 1:2 split, 4 sold after it: 46.
+    expect(findSplit(20, 46, [5, -4])).toEqual({ ratio: 2, ahead: 0 });
+    // Only with the trade dated after the snapshot.
+    expect(findSplit(20, 52, [5], [2])).toEqual({ ratio: 2, ahead: 1 });
+  });
+
+  it("finds none for an empty holding or a change no ratio explains", () => {
+    expect(findSplit(0, 40, [])).toBeNull();
+    expect(findSplit(20, 0, [])).toBeNull();
+    expect(findSplit(20, 33, [])).toBeNull();
   });
 });
