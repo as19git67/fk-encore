@@ -210,6 +210,10 @@ describe("extractWkn", () => {
     expect(
       extractWkn("ERTRAEGNISGUTSCHRIFT VOM 01.02.26 DEPOTBESTAND: 10,000 SONNENOBST AG INH O.N. SNN001 EUR 0,25"),
     ).toBe("SNN001");
+    // The quantity broken by the bank's line wrap ("1 0,000" for 10,000).
+    expect(
+      extractWkn("ERTRAEGNISGUTSCHRIFT VOM 01.02.26 DEPOTBESTAND: 1 0,000 SONNENOBST INC. SNN001 USD 0,25"),
+    ).toBe("SNN001");
   });
 
   it("does not take a word of the name for the WKN of a quoted holding", () => {

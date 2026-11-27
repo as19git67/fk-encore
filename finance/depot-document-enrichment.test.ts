@@ -1078,6 +1078,20 @@ Zu Ihren Gunsten nach Steuern: EUR 45,49`;
     expect((await depotRows(depot))[0]!.tax).toBe("7.00");
   });
 
+  it("joins the giro booking's row when nothing was taxed and the footer says 'KEINE STEUERBESCHEINIGUNG'", async () => {
+    const { depot } = await setup();
+    // Derived from the giro booking: no quantity, the net it booked.
+    const rowId = await dividendRow(depot, null);
+    const untaxed = TAX_STATEMENT.replace(/EUR -\d+,\d+/g, "EUR 0,00").replace("EUR 45,49", "EUR 52,40") +
+      "\nKEINE STEUERBESCHEINIGUNG";
+    await db.update(financeDepotTransaction).set({ net_amount: "52.40" }).where(eq(financeDepotTransaction.id, rowId));
+    const docId = await insertDocument(untaxed);
+    const r = await enrichDocument(docId);
+    expect(r).toMatchObject({ tax_statement: true, depot_transaction_id: rowId });
+    expect(["linked", "enriched"]).toContain(r.outcome);
+    expect(await depotRows(depot)).toHaveLength(1);
+  });
+
   it("is not thrown out because the model says it is no settlement", async () => {
     const { depot } = await setup();
     await dividendRow(depot, "40");
