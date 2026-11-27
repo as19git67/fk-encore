@@ -198,19 +198,24 @@ struct TripRunningDay {
         let bundle: TripOfflineBundle
         do {
             bundle = try await fetch(planId: planId)
+            // The running trip's whole plan just came in: it is the copy
+            // for the road. Kept, unless somebody turned that off or
+            // deleted this trip's copy by hand.
+            TripOfflineAutoLoad.keep(bundle, planId: planId)
         } catch {
             // Offline, the snapshot stands in (§3.9). A real "no" from
             // the server — deleted, no longer shared with us — is an
             // answer: the day is over, and the snapshot goes, or it
             // would keep the Lock Screen on a trip that no longer is.
-            guard TripOfflineReach.meansUnreachable(error),
-                  let snapshot = TripOfflineStore.shared.load(planId: planId)
-            else {
-                if !TripOfflineReach.meansUnreachable(error) {
-                    await TripPlanGone.forget(planId: planId)
-                }
+            // Only that answer: a wake in the background on the ship's
+            // Wi-Fi, a sign-in that could not be renewed while the phone
+            // was locked or a server error used to throw the offline
+            // plan away too, and the trip had none when the network went.
+            if TripOfflineReach.meansGone(error) {
+                await TripPlanGone.forget(planId: planId)
                 return nil
             }
+            guard let snapshot = TripOfflineStore.shared.load(planId: planId) else { return nil }
             bundle = snapshot.bundle
         }
         guard let position = bundle.plan.position(on: now) else { return nil }
