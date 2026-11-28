@@ -364,6 +364,22 @@ clients come after the in-app assistant can already take dictation.
    that pass `mediaUrl`.
 3. **Spare parts.** `home_parts`, `home_system_parts`, parts page with
    search, storage location and stock, low-stock filter, link from items.
+   *Implemented:* migration 0324 adds `home_parts`, `home_system_parts`
+   and `home_system_items.part_id`; a part's photos sit in `home_media`
+   with `target_kind = 'part'` and no `system_id` (visibility comes from
+   the part, files under `part-<id>/`). Rules in `home/parts.service.ts`:
+   visibility as for systems, everybody who sees a part edits it and its
+   stock, sharing and deleting stay with its owner and the owners of its
+   group. Stock moves in one step through `POST /home/parts/:id/stock`
+   (`delta`, never below 0, refused while the stock is not counted); the
+   "low-stock" filter is "none left" (`empty`), there is no minimum.
+   `PUT /home/systems/:id/parts` sets the links among the parts the caller
+   sees and leaves the others; an item that names a part fits it to the
+   system. The system search also finds a system by its parts. Pages
+   Haus › Ersatzteile (`HomePartsView.vue`) and the part page
+   (`HomePartDetailView.vue`, "1 entnommen"); the system page lists its
+   parts with storage location and stock, "Zuordnen" picks them, and the
+   item dialog chooses the part.
 4. **Readings and links.** Level meters in the meters module (`kind`,
    `target_min/max`, type `other`; validation skips monotony for `level`;
    the shared `consumptionMetersWhere` in every consumption query and the

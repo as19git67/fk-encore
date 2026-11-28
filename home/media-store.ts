@@ -1,8 +1,10 @@
 /**
  * Photo files of the house handbook (documentation/plans/haus-anlagen.md,
- * stage 2) — rows in `home_media` and the files they name, without access
- * checks. The checks live in `media.service.ts`; the system service uses the
- * removal helpers here when a guide, item, note or system goes.
+ * stages 2 and 3) — rows in `home_media` and the files they name, without
+ * access checks. The checks live in `media.service.ts`; the system and part
+ * services use the removal helpers here when a guide, item, note, system or
+ * part goes. A system's photos sit in `<systemId>/`, a part's in
+ * `part-<partId>/`.
  *
  * The files sit on a volume directory like the meter photos (no Encore
  * bucket: the self-hosted stack has no object storage). Each upload is
@@ -21,7 +23,7 @@ import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { homeMedia, type HomeMediaTargetKind } from "../db/schema";
 
-export const HOME_MEDIA_TARGET_KINDS: readonly HomeMediaTargetKind[] = ["system", "guide", "item", "note"];
+export const HOME_MEDIA_TARGET_KINDS: readonly HomeMediaTargetKind[] = ["system", "guide", "item", "note", "part"];
 
 /** Long side of the stored photo and of its small copy. */
 export const FULL_SIZE = 2048;
@@ -75,7 +77,8 @@ export async function processImage(input: Buffer): Promise<ProcessedImage> {
 }
 
 export interface StoreInput {
-  systemId: number;
+  /** null exactly for a part's photo. */
+  systemId: number | null;
   targetKind: HomeMediaTargetKind;
   targetId: number;
   caption: string | null;
@@ -115,10 +118,35 @@ export async function listSystemMedia(systemId: number): Promise<HomeMedia[]> {
   return rows.map(toHomeMedia);
 }
 
+/** Every photo of a part, in upload order. */
+export async function listPartMedia(partId: number): Promise<HomeMedia[]> {
+  const rows = await dbAll<MediaRow>(
+    db
+      .select()
+      .from(homeMedia)
+      .where(and(eq(homeMedia.target_kind, "part"), eq(homeMedia.target_id, partId)))
+      .orderBy(asc(homeMedia.id)),
+  );
+  return rows.map(toHomeMedia);
+}
+
+/** The first photo of each part, for the list. */
+export async function partCovers(partIds: number[]): Promise<Map<number, number>> {
+  if (partIds.length === 0) return new Map();
+  const rows = await dbAll<{ target_id: number; id: number }>(
+    db
+      .select({ target_id: homeMedia.target_id, id: sql<number>`min(${homeMedia.id})::int` })
+      .from(homeMedia)
+      .where(and(eq(homeMedia.target_kind, "part"), inArray(homeMedia.target_id, partIds)))
+      .groupBy(homeMedia.target_id),
+  );
+  return new Map(rows.map((r) => [r.target_id, Number(r.id)]));
+}
 
 /** Write both files, then the row; a failed insert takes the files back. */
 export async function storeMedia(input: StoreInput): Promise<MediaRow> {
-  const objectKey = `${input.systemId}/${Date.now()}-${randomBytes(6).toString("hex")}`;
+  const folder = input.systemId === null ? `part-${input.targetId}` : String(input.systemId);
+  const objectKey = `${folder}/${Date.now()}-${randomBytes(6).toString("hex")}`;
   const fullPath = mediaFilePath(objectKey, "full");
   await fs.mkdir(path.dirname(fullPath), { recursive: true });
   await fs.writeFile(fullPath, input.image.full);
@@ -160,7 +188,7 @@ async function deleteRows(where: SQL): Promise<void> {
   await removeFiles(rows.map((r) => r.object_key));
 }
 
-/** The photos of one guide, item or note, with their files. */
+/** The photos of one guide, item, note or part, with their files. */
 export async function removeMediaOfTarget(kind: HomeMediaTargetKind, targetId: number): Promise<void> {
   await deleteRows(and(eq(homeMedia.target_kind, kind), eq(homeMedia.target_id, targetId))!);
 }
@@ -179,8 +207,8 @@ export interface SweepResult {
 const SWEEP_FILE_MIN_AGE_MS = 60 * 60 * 1000;
 
 /**
- * The nightly clean-up: rows whose guide, item or note no longer exists (a
- * delete that failed half-way), then files that no row names.
+ * The nightly clean-up: rows whose guide, item, note or part no longer
+ * exists (a delete that failed half-way), then files that no row names.
  */
 export async function sweepHomeMedia(now: Date = new Date()): Promise<SweepResult> {
   const orphanRows = await dbAll<{ id: number; object_key: string }>(
@@ -193,7 +221,9 @@ export async function sweepHomeMedia(now: Date = new Date()): Promise<SweepResul
          OR (${homeMedia.target_kind} = 'item' AND NOT EXISTS (
                SELECT 1 FROM home_system_items i WHERE i.id = ${homeMedia.target_id} AND i.system_id = ${homeMedia.system_id}))
          OR (${homeMedia.target_kind} = 'note' AND NOT EXISTS (
-               SELECT 1 FROM home_system_notes n WHERE n.id = ${homeMedia.target_id} AND n.system_id = ${homeMedia.system_id}))`,
+               SELECT 1 FROM home_system_notes n WHERE n.id = ${homeMedia.target_id} AND n.system_id = ${homeMedia.system_id}))
+         OR (${homeMedia.target_kind} = 'part' AND NOT EXISTS (
+               SELECT 1 FROM home_parts p WHERE p.id = ${homeMedia.target_id}))`,
       ),
   );
   if (orphanRows.length > 0) {

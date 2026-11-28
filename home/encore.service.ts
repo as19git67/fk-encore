@@ -6,6 +6,7 @@ import "../lib/scheduled-jobs-hooks";
 
 // Expose API endpoints.
 import "./systems";
+import "./parts";
 // Photo upload and delivery; side-effect: registers the nightly media sweep.
 import "./media";
 
@@ -13,7 +14,7 @@ import "./media";
 startLocalCron();
 
 // The house module (Haus): a handbook of the house's technical systems —
-// guides, items in place, notes and their photos
+// guides, items in place, notes, spare parts and their photos
 // (documentation/plans/haus-anlagen.md). The meters stay their own module
 // (meter/) and are linked from here.
 export default new Service("home");

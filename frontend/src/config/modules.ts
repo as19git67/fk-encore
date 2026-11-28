@@ -695,9 +695,22 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/HomeSystemDetailView.vue'),
         meta: { permission: 'home.view' },
       },
+      {
+        path: 'ersatzteile',
+        name: 'haus-ersatzteile',
+        component: () => import('../views/HomePartsView.vue'),
+        meta: { permission: 'home.view' },
+      },
+      {
+        path: 'ersatzteile/:id',
+        name: 'haus-ersatzteil',
+        component: () => import('../views/HomePartDetailView.vue'),
+        meta: { permission: 'home.view' },
+      },
     ],
     menuItems: [
       { label: 'Anlagen', icon: 'pi pi-wrench', routeName: 'haus-anlagen', permission: 'home.view' },
+      { label: 'Ersatzteile', icon: 'pi pi-box', routeName: 'haus-ersatzteile', permission: 'home.view' },
     ],
   },
   {

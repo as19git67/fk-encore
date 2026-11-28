@@ -17,7 +17,8 @@
  *   POST   /home/systems/:id/notes             dated note                        home.manage
  *   PATCH  /home/systems/:id/notes/:noteId / DELETE                              home.manage
  *
- * Who may change what is decided in systems.service.ts.
+ * The spare parts (stage 3) are in parts.ts. Who may change what is decided
+ * in systems.service.ts.
  */
 
 import { api, APIError, type Query } from "encore.dev/api";
@@ -219,6 +220,8 @@ interface CreateItemRequest {
   label: string;
   location?: string | null;
   attributes?: HomeItemAttribute[];
+  /** The part this unit takes; it is fitted to the system as well. */
+  partId?: number | null;
 }
 
 export const createHomeItem = api(
@@ -235,6 +238,7 @@ interface UpdateItemRequest {
   label?: string;
   location?: string | null;
   attributes?: HomeItemAttribute[];
+  partId?: number | null;
   sort?: number;
 }
 

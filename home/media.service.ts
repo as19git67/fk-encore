@@ -1,9 +1,10 @@
 /**
  * Photos of the house handbook with their access rules (stage 2 of
  * documentation/plans/haus-anlagen.md). A photo belongs to a system, or to
- * one of its guides, items or notes, and is seen by whoever sees the system.
- * Like guides, items and notes, photos are added, captioned and removed by
- * everybody who sees the system (the endpoints also require `home.manage`).
+ * one of its guides, items or notes, and is seen by whoever sees the system;
+ * or it belongs to a spare part (stage 3) and is seen by whoever sees the
+ * part. Like the things they show, photos are added, captioned and removed
+ * by everybody who sees them (the endpoints also require `home.manage`).
  */
 
 import fs from "node:fs/promises";
@@ -30,6 +31,7 @@ import {
   type MediaRow,
   type MediaSize,
 } from "./media-store";
+import { loadVisiblePart } from "./parts.service";
 import { loadVisibleSystem } from "./systems.service";
 
 const MAX_CAPTION = 500;
@@ -54,7 +56,8 @@ async function assertTarget(systemId: number, kind: HomeMediaTargetKind, targetI
     if (targetId !== systemId) throw APIError.invalidArgument("a system photo targets the system itself");
     return;
   }
-  const table = { guide: homeSystemGuides, item: homeSystemItems, note: homeSystemNotes }[kind];
+  if (kind === "part") throw APIError.invalidArgument("a part's photo is uploaded on the part");
+  const table = { guide: homeSystemGuides, item: homeSystemItems, note: homeSystemNotes }[kind as "guide" | "item" | "note"];
   const row = await dbFirst<{ id: number }>(
     db
       .select({ id: table.id })
@@ -74,6 +77,20 @@ export interface UploadInput {
 export async function uploadMedia(userId: number, systemId: number, input: UploadInput): Promise<HomeMedia> {
   await loadVisibleSystem(userId, systemId);
   await assertTarget(systemId, input.targetKind, input.targetId);
+  return await store(userId, systemId, input);
+}
+
+/** A photo of a spare part (no system: visibility comes from the part). */
+export async function uploadPartMedia(
+  userId: number,
+  partId: number,
+  input: { caption?: string | null; bytes: Buffer },
+): Promise<HomeMedia> {
+  await loadVisiblePart(userId, partId);
+  return await store(userId, null, { targetKind: "part", targetId: partId, ...input });
+}
+
+async function store(userId: number, systemId: number | null, input: UploadInput): Promise<HomeMedia> {
   if (input.bytes.length === 0) throw APIError.invalidArgument("empty file");
   let image;
   try {
@@ -95,12 +112,13 @@ export async function uploadMedia(userId: number, systemId: number, input: Uploa
   return toHomeMedia(row);
 }
 
-/** A photo whose system the caller sees, else `not_found`. */
+/** A photo whose system (or part) the caller sees, else `not_found`. */
 async function loadVisibleMedia(userId: number, mediaId: number): Promise<MediaRow> {
   const row = await dbFirst<MediaRow>(db.select().from(homeMedia).where(eq(homeMedia.id, mediaId)));
   if (!row) throw APIError.notFound("photo not found");
   try {
-    await loadVisibleSystem(userId, row.system_id);
+    if (row.system_id === null) await loadVisiblePart(userId, row.target_id);
+    else await loadVisibleSystem(userId, row.system_id);
   } catch {
     throw APIError.notFound("photo not found");
   }
