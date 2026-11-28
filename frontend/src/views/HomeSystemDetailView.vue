@@ -2,8 +2,9 @@
 /**
  * One system of the house: what it is, how it is maintained (guides), its
  * units at different places (items) and what happened to it (notes), each
- * with photos; a guide shows its photos inline as `![…](media:<id>)`
- * — documentation/plans/haus-anlagen.md, stages 1 and 2.
+ * with photos; a guide shows its photos inline as `![…](media:<id>)`; the
+ * spare parts that fit it, with where they lie and how many are left
+ * — documentation/plans/haus-anlagen.md, stages 1 to 3.
  *
  * Everybody who sees the system and has `home.manage` writes guides, items
  * and notes; the system's own data, sharing, archiving and deleting stay
@@ -17,6 +18,9 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
 import Message from 'primevue/message'
+import MultiSelect from 'primevue/multiselect'
+import Select from 'primevue/select'
+import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import { useConfirm } from 'primevue/useconfirm'
 import type { MenuItem } from 'primevue/menuitem'
@@ -28,6 +32,7 @@ import MarkdownView from '../components/documents/MarkdownView.vue'
 import MarkdownEditor from '../components/documents/MarkdownEditor.vue'
 import HomeSystemDialog from '../components/home/HomeSystemDialog.vue'
 import HomePhotos from '../components/home/HomePhotos.vue'
+import HomePartDialog from '../components/home/HomePartDialog.vue'
 import { useModuleBack } from '../composables/useModuleBack'
 import { useAuthStore } from '../stores/auth'
 import { parseLocalDate, toLocalIsoDate } from '../utils/dateFormat'
@@ -45,6 +50,9 @@ import {
   getHomeSystem,
   homeMediaUrl,
   listHomeGuideRevisions,
+  listHomeParts,
+  setHomeSystemParts,
+  stockLabel,
   restoreHomeGuideRevision,
   updateHomeGuide,
   updateHomeItem,
@@ -58,6 +66,7 @@ import {
   type HomeMedia,
   type HomeMediaTargetKind,
   type HomeNote,
+  type HomePartListItem,
   type HomeSystemDetail,
 } from '../api/home'
 
@@ -333,6 +342,7 @@ const itemEditing = ref<HomeItem | null>(null)
 const itemLabel = ref('')
 const itemLocation = ref('')
 const itemAttributes = ref<HomeItemAttribute[]>([])
+const itemPartId = ref<number | null>(null)
 const itemSaving = ref(false)
 
 /** The keys used on this system's other items, offered first for a new one. */
@@ -348,6 +358,8 @@ function openItem(item: HomeItem | null) {
   itemEditing.value = item
   itemLabel.value = item?.label ?? ''
   itemLocation.value = item?.location ?? ''
+  itemPartId.value = item?.partId ?? null
+  void loadAllParts()
   itemAttributes.value = item
     ? item.attributes.map((a) => ({ ...a }))
     : knownKeys.value.length
@@ -371,6 +383,8 @@ async function saveItem() {
     label: itemLabel.value,
     location: itemLocation.value.trim() || null,
     attributes: itemAttributes.value.filter((a) => a.key.trim() || a.value.trim()),
+    // Sent only when changed: a part the caller cannot see stays on the item.
+    ...(itemPartId.value !== (itemEditing.value?.partId ?? null) ? { partId: itemPartId.value } : {}),
   }
   const editing = itemEditing.value
   const ok = await run(
@@ -398,8 +412,62 @@ function confirmDeleteItem(item: HomeItem) {
 /** Columns of the item table: every key any item has, in first-seen order. */
 const attributeColumns = computed(() => knownKeys.value)
 
+const itemsHaveParts = computed(() => (system.value?.items ?? []).some((i) => i.partId !== null))
+
 function attributeOf(item: HomeItem, key: string): string {
   return item.attributes.find((a) => a.key === key)?.value ?? ''
+}
+
+// ── Spare parts ─────────────────────────────────────────────────────────────
+
+/** Every part the caller sees, for the choices; loaded when needed. */
+const allParts = ref<HomePartListItem[]>([])
+const allPartsLoaded = ref(false)
+
+async function loadAllParts(force = false) {
+  if (allPartsLoaded.value && !force) return
+  try {
+    allParts.value = (await listHomeParts()).parts
+    allPartsLoaded.value = true
+  } catch (err: any) {
+    error.value = err?.message ?? 'Ersatzteile konnten nicht geladen werden.'
+  }
+}
+
+const partOptions = computed(() =>
+  allParts.value.map((p) => ({
+    label: [p.name, p.partNumber].filter(Boolean).join(' · '),
+    value: p.id,
+  })),
+)
+
+const partsOpen = ref(false)
+const partsChoice = ref<number[]>([])
+const partsSaving = ref(false)
+const newPartOpen = ref(false)
+
+async function openParts() {
+  partsChoice.value = (system.value?.parts ?? []).map((p) => p.id)
+  partsOpen.value = true
+  await loadAllParts(true)
+}
+
+async function saveParts() {
+  if (partsSaving.value) return
+  partsSaving.value = true
+  const ok = await run(
+    () => setHomeSystemParts(systemId.value, partsChoice.value),
+    'Die Ersatzteile konnten nicht zugeordnet werden.',
+  )
+  partsSaving.value = false
+  if (ok) partsOpen.value = false
+}
+
+/** A part made from the choice dialog is chosen right away. */
+async function onPartCreated(id: number) {
+  newPartOpen.value = false
+  await loadAllParts(true)
+  if (!partsChoice.value.includes(id)) partsChoice.value = [...partsChoice.value, id]
 }
 
 // ── Notes ───────────────────────────────────────────────────────────────────
@@ -584,6 +652,7 @@ function confirmDeleteNote(note: HomeNote) {
                 <th scope="col">Teil</th>
                 <th scope="col">Ort</th>
                 <th v-for="key in attributeColumns" :key="key" scope="col">{{ key }}</th>
+                <th v-if="itemsHaveParts" scope="col">Ersatzteil</th>
                 <th scope="col">Fotos</th>
                 <th v-if="canWrite" scope="col" aria-label="Aktionen" />
               </tr>
@@ -593,6 +662,11 @@ function confirmDeleteNote(note: HomeNote) {
                 <td>{{ item.label }}</td>
                 <td>{{ item.location ?? '' }}</td>
                 <td v-for="key in attributeColumns" :key="key">{{ attributeOf(item, key) }}</td>
+                <td v-if="itemsHaveParts">
+                  <RouterLink v-if="item.partId" :to="{ name: 'haus-ersatzteil', params: { id: item.partId } }">
+                    {{ item.partName }}
+                  </RouterLink>
+                </td>
                 <td>
                   <HomePhotos
                     :system-id="system.id"
@@ -612,6 +686,29 @@ function confirmDeleteNote(note: HomeNote) {
             </tbody>
           </table>
         </ScrollX>
+      </section>
+
+      <section class="hs-card" aria-labelledby="hs-parts">
+        <div class="hs-section-head">
+          <h2 id="hs-parts" class="hs-heading">Ersatzteile</h2>
+          <Button v-if="canWrite" label="Zuordnen" icon="pi pi-link" size="small" text @click="openParts" />
+        </div>
+        <p v-if="system.parts.length === 0" class="hs-empty">
+          Welche Dichtungen, Filter oder Kartuschen passen, wo sie liegen und wie viele noch da sind.
+        </p>
+        <ul v-else class="hs-parts">
+          <li v-for="p in system.parts" :key="p.id" class="hs-part">
+            <RouterLink :to="{ name: 'haus-ersatzteil', params: { id: p.id } }" class="hs-part-name">{{ p.name }}</RouterLink>
+            <span v-if="p.specification || p.partNumber" class="hs-meta">
+              {{ [p.partNumber, p.specification].filter(Boolean).join(' · ') }}
+            </span>
+            <span class="hs-part-where">
+              <span v-if="p.storageLocation"><i class="pi pi-map-marker" aria-hidden="true" /> {{ p.storageLocation }}</span>
+              <Tag v-if="p.stock === 0" severity="warn" icon="pi pi-exclamation-circle" :value="stockLabel(p.stock)" />
+              <span v-else-if="p.stock !== null" class="hs-meta">{{ stockLabel(p.stock) }}</span>
+            </span>
+          </li>
+        </ul>
       </section>
 
       <section class="hs-card" aria-labelledby="hs-notes">
@@ -744,12 +841,55 @@ function confirmDeleteNote(note: HomeNote) {
           <Button icon="pi pi-times" text rounded severity="secondary" :aria-label="`Eigenschaft ${i + 1} entfernen`" @click="removeAttribute(i)" />
         </div>
         <Button label="Eigenschaft" icon="pi pi-plus" text size="small" class="hs-add-attr" @click="addAttribute" />
+        <label for="hs-item-part">Ersatzteil</label>
+        <Select
+          input-id="hs-item-part"
+          v-model="itemPartId"
+          :options="partOptions"
+          option-label="label"
+          option-value="value"
+          filter
+          show-clear
+          placeholder="Keins"
+          empty-message="Noch kein Ersatzteil angelegt"
+        />
       </form>
       <template #footer>
         <Button label="Abbrechen" text severity="secondary" @click="itemOpen = false" />
         <Button label="Speichern" icon="pi pi-check" :disabled="!itemLabel.trim()" :loading="itemSaving" @click="saveItem" />
       </template>
     </Dialog>
+
+    <Dialog v-model:visible="partsOpen" class="dialog-md" modal header="Ersatzteile zuordnen">
+      <div class="hs-form">
+        <label for="hs-parts-choice">Passende Ersatzteile</label>
+        <MultiSelect
+          input-id="hs-parts-choice"
+          v-model="partsChoice"
+          :options="partOptions"
+          option-label="label"
+          option-value="value"
+          filter
+          display="chip"
+          placeholder="Ersatzteile wählen"
+          empty-message="Noch kein Ersatzteil angelegt"
+        />
+        <Button
+          label="Neues Ersatzteil"
+          icon="pi pi-plus"
+          text
+          size="small"
+          class="hs-add-attr"
+          @click="newPartOpen = true"
+        />
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text severity="secondary" @click="partsOpen = false" />
+        <Button label="Speichern" icon="pi pi-check" :loading="partsSaving" @click="saveParts" />
+      </template>
+    </Dialog>
+
+    <HomePartDialog v-if="newPartOpen" v-model:visible="newPartOpen" @saved="onPartCreated" />
 
     <Dialog v-model:visible="noteEditOpen" class="dialog-md" modal header="Notiz bearbeiten">
       <div class="hs-form">
@@ -886,6 +1026,33 @@ function confirmDeleteNote(note: HomeNote) {
 }
 .hs-row-actions {
   justify-content: flex-end;
+}
+.hs-parts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.hs-part {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--p-content-border-color);
+  padding: var(--space-2) 0;
+}
+.hs-part:first-child {
+  border-top: 0;
+}
+.hs-part-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.hs-part-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
 }
 .hs-note-form {
   display: flex;

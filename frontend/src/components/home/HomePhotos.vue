@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * The photos of one thing in the house handbook — a system, an item or a
- * note (documentation/plans/haus-anlagen.md, stage 2): small pictures in a
+ * The photos of one thing in the house handbook — a system, an item, a
+ * note (documentation/plans/haus-anlagen.md, stage 2) or a spare part
+ * (stage 3): small pictures in a
  * row, a tap opens the photo with its caption, "Foto" adds one or several.
  * On a phone the file picker offers the camera directly.
  */
@@ -21,7 +22,8 @@ import {
 } from '../../api/home'
 
 const props = defineProps<{
-  systemId: number
+  /** null for a spare part, whose photos belong to no system. */
+  systemId: number | null
   target: { kind: HomeMediaTargetKind; id: number }
   photos: HomeMedia[]
   canWrite: boolean

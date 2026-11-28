@@ -7,6 +7,8 @@
  * different places (`home_system_items`) and dated notes
  * (`home_system_notes`). Photos of all four (`home_media`, stage 2) live in
  * media-store.ts; deleting a guide, item, note or system removes its photos.
+ * The spare parts that fit a system (`home_system_parts`, stage 3) are kept
+ * in parts.service.ts; an item may name the part it takes.
  *
  * Visibility follows the meters (lib/household.ts): the owner sees a system,
  * and so does every member of its group; a new system without a choice goes
@@ -15,7 +17,7 @@
  * Who may change what:
  * - the system itself (name, data, sharing, archive, delete): its owner and
  *   the owners of its group;
- * - guides, items and notes: everybody who sees the system — a handbook is
+ * - guides, items, notes and the linked parts: everybody who sees the system — a handbook is
  *   shared knowledge. The endpoints additionally require `home.manage`.
  */
 
@@ -26,10 +28,12 @@ import { dbAll, dbFirst } from "../db/adapter";
 import {
   groups,
   homeMedia,
+  homeParts,
   homeSystemGuideRevisions,
   homeSystemGuides,
   homeSystemItems,
   homeSystemNotes,
+  homeSystemParts,
   homeSystems,
   users,
   type HomeItemAttribute,
@@ -47,6 +51,17 @@ import {
   mayManageShared,
   resolveShareGroup,
 } from "../lib/household";
+import { likePattern, MAX_TEXT, optionalText, requiredText } from "./input";
+import {
+  linkPart,
+  loadVisiblePart,
+  partsOfSystem,
+  setSystemPartLinks,
+  visiblePartNames,
+  visiblePartsSql,
+  visiblePartsWhere,
+  type HomeSystemPart,
+} from "./parts.service";
 
 export const HOME_SYSTEM_CATEGORIES: readonly HomeSystemCategory[] = [
   "heating",
@@ -61,7 +76,6 @@ export const HOME_SYSTEM_CATEGORIES: readonly HomeSystemCategory[] = [
 
 /** A guide body is a handbook page, not a book. */
 export const MAX_GUIDE_LENGTH = 100_000;
-const MAX_TEXT = 10_000;
 const MAX_ATTRIBUTES = 20;
 
 type SystemRow = typeof homeSystems.$inferSelect;
@@ -107,20 +121,6 @@ async function touchSystem(systemId: number): Promise<void> {
 }
 
 // ── Normalising input ───────────────────────────────────────────────────────
-
-function requiredText(value: string | undefined | null, field: string, max = 200): string {
-  const trimmed = (value ?? "").trim();
-  if (!trimmed) throw APIError.invalidArgument(`${field} must not be empty`);
-  if (trimmed.length > max) throw APIError.invalidArgument(`${field} is too long (max ${max})`);
-  return trimmed;
-}
-
-function optionalText(value: string | undefined | null, field: string, max = MAX_TEXT): string | null {
-  const trimmed = (value ?? "").trim();
-  if (!trimmed) return null;
-  if (trimmed.length > max) throw APIError.invalidArgument(`${field} is too long (max ${max})`);
-  return trimmed;
-}
 
 function normalizeCategory(category: string): HomeSystemCategory {
   if (!HOME_SYSTEM_CATEGORIES.includes(category as HomeSystemCategory)) {
@@ -246,11 +246,6 @@ function sharingOf(userId: number, row: SystemWithSharing, ownedGroupIds: number
   };
 }
 
-/** `%term%` for ILIKE, with the wildcards of the term itself escaped. */
-function likePattern(term: string): string {
-  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-}
-
 export async function listSystems(
   userId: number,
   opts: ListSystemsOptions = {},
@@ -280,6 +275,10 @@ export async function listSystems(
                    OR i.attributes::text ILIKE ${pattern}))`,
         sql`EXISTS (SELECT 1 FROM home_system_notes n WHERE n.system_id = ${homeSystems.id}
               AND n.body ILIKE ${pattern})`,
+        sql`EXISTS (SELECT 1 FROM home_system_parts sp JOIN home_parts p ON p.id = sp.part_id
+              WHERE sp.system_id = ${homeSystems.id} AND ${visiblePartsSql("p", userId, groupIds)}
+              AND (p.name ILIKE ${pattern} OR p.part_number ILIKE ${pattern}
+                   OR p.manufacturer ILIKE ${pattern} OR p.specification ILIKE ${pattern}))`,
       )!,
     );
   }
@@ -313,7 +312,7 @@ export async function listSystems(
   ]);
   const notesBySystem = new Map(noteStats.map((n) => [n.system_id, n]));
   const covers = await coversOf(ids);
-  const matches = pattern ? await matchesOf(ids, pattern) : new Map<number, string[]>();
+  const matches = pattern ? await matchesOf(userId, groupIds, ids, pattern) : new Map<number, string[]>();
 
   return rows.map((row) => ({
     id: row.id,
@@ -378,7 +377,12 @@ async function countBy(
 }
 
 /** Which guides and items of each system hold the term — shown under the row. */
-async function matchesOf(ids: number[], pattern: string): Promise<Map<number, string[]>> {
+async function matchesOf(
+  userId: number,
+  groupIds: number[],
+  ids: number[],
+  pattern: string,
+): Promise<Map<number, string[]>> {
   const result = new Map<number, string[]>();
   const add = (systemId: number, label: string) => {
     const list = result.get(systemId) ?? [];
@@ -422,6 +426,26 @@ async function matchesOf(ids: number[], pattern: string): Promise<Map<number, st
       .where(and(inArray(homeSystemNotes.system_id, ids), ilike(homeSystemNotes.body, pattern))),
   );
   for (const n of notes) add(n.system_id, "Notizen");
+  const parts = await dbAll<{ system_id: number; name: string }>(
+    db
+      .select({ system_id: homeSystemParts.system_id, name: homeParts.name })
+      .from(homeSystemParts)
+      .innerJoin(homeParts, eq(homeParts.id, homeSystemParts.part_id))
+      .where(
+        and(
+          inArray(homeSystemParts.system_id, ids),
+          visiblePartsWhere(userId, groupIds),
+          or(
+            ilike(homeParts.name, pattern),
+            ilike(homeParts.part_number, pattern),
+            ilike(homeParts.manufacturer, pattern),
+            ilike(homeParts.specification, pattern),
+          ),
+        ),
+      )
+      .orderBy(asc(homeParts.name), asc(homeParts.id)),
+  );
+  for (const part of parts) add(part.system_id, `Ersatzteil „${part.name}“`);
   return result;
 }
 
@@ -440,6 +464,9 @@ export interface HomeItem {
   label: string;
   location: string | null;
   attributes: HomeItemAttribute[];
+  /** The part this unit takes, when the caller sees it. */
+  partId: number | null;
+  partName: string | null;
   sort: number;
 }
 
@@ -471,6 +498,8 @@ export interface HomeSystemDetail extends Sharing {
   notes: HomeNote[];
   /** Photos of the system and of its guides, items and notes, oldest first. */
   media: HomeMedia[];
+  /** Spare parts that fit, among the parts the caller sees. */
+  parts: HomeSystemPart[];
 }
 
 export async function getSystemDetail(userId: number, systemId: number): Promise<HomeSystemDetail> {
@@ -486,7 +515,7 @@ export async function getSystemDetail(userId: number, systemId: number): Promise
   if (!row) throw APIError.notFound("system not found");
   const ownedGroupIds = await loadOwnedGroupIds(userId);
 
-  const [guides, items, notes, media] = await Promise.all([
+  const [guides, items, notes, media, parts] = await Promise.all([
     dbAll<{
       id: number;
       title: string;
@@ -537,7 +566,12 @@ export async function getSystemDetail(userId: number, systemId: number): Promise
         .orderBy(desc(homeSystemNotes.noted_on), desc(homeSystemNotes.id)),
     ),
     listSystemMedia(systemId),
+    partsOfSystem(userId, systemId),
   ]);
+  const partNames = await visiblePartNames(
+    userId,
+    items.map((i) => i.part_id).filter((id): id is number => id !== null),
+  );
 
   return {
     id: row.id,
@@ -566,6 +600,8 @@ export async function getSystemDetail(userId: number, systemId: number): Promise
       label: i.label,
       location: i.location,
       attributes: i.attributes ?? [],
+      partId: i.part_id !== null && partNames.has(i.part_id) ? i.part_id : null,
+      partName: i.part_id !== null ? (partNames.get(i.part_id) ?? null) : null,
       sort: i.sort,
     })),
     notes: notes.map((n) => ({
@@ -578,6 +614,7 @@ export async function getSystemDetail(userId: number, systemId: number): Promise
       updatedAt: n.updated_at,
     })),
     media,
+    parts,
   };
 }
 
@@ -818,6 +855,16 @@ export interface ItemInput {
   label: string;
   location?: string | null;
   attributes?: HomeItemAttribute[];
+  /** The part this unit takes; it is fitted to the system as well. */
+  partId?: number | null;
+}
+
+/** A part for an item: one the caller sees, then fitted to the system. */
+async function itemPart(userId: number, systemId: number, partId: number | null | undefined) {
+  if (partId === undefined || partId === null) return null;
+  await loadVisiblePart(userId, partId);
+  await linkPart(systemId, partId);
+  return partId;
 }
 
 async function loadItem(userId: number, systemId: number, itemId: number) {
@@ -851,6 +898,7 @@ export async function createItem(
       label: requiredText(input.label, "label"),
       location: optionalText(input.location, "location", 500),
       attributes: normalizeAttributes(input.attributes),
+      part_id: await itemPart(userId, systemId, input.partId),
       sort: Number(next),
     })
     .returning({ id: homeSystemItems.id });
@@ -869,6 +917,7 @@ export async function updateItem(
   if (patch.label !== undefined) set.label = requiredText(patch.label, "label");
   if (patch.location !== undefined) set.location = optionalText(patch.location, "location", 500);
   if (patch.attributes !== undefined) set.attributes = normalizeAttributes(patch.attributes);
+  if (patch.partId !== undefined) set.part_id = await itemPart(userId, systemId, patch.partId);
   if (patch.sort !== undefined) set.sort = Math.trunc(patch.sort);
   if (Object.keys(set).length === 0) return;
   await db.update(homeSystemItems).set(set).where(eq(homeSystemItems.id, item.id));
@@ -944,4 +993,13 @@ export async function deleteNote(userId: number, systemId: number, noteId: numbe
   const note = await loadNote(userId, systemId, noteId);
   await db.delete(homeSystemNotes).where(eq(homeSystemNotes.id, note.id));
   await removeMediaOfTarget("note", note.id);
+}
+
+// ── Spare parts ─────────────────────────────────────────────────────────────
+
+/** Set which parts fit the system (only parts the caller sees change). */
+export async function setSystemParts(userId: number, systemId: number, partIds: number[]): Promise<void> {
+  await loadVisibleSystem(userId, systemId);
+  await setSystemPartLinks(userId, systemId, partIds);
+  await touchSystem(systemId);
 }

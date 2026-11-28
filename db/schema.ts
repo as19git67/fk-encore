@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type { DocumentReferenceNumber } from "../documents/reference-numbers";
 import type { CollectionKind, CollectionRule } from "../documents/dossiers";
 import type { CollectionSortKey } from "../documents/collection-sort";
@@ -5969,6 +5969,8 @@ export const homeSystemItems = pgTable(
     label: text("label").notNull(),
     location: text("location"),
     attributes: jsonb("attributes").$type<HomeItemAttribute[]>().notNull().default([]),
+    /** The spare part this unit takes (migration 0324). */
+    part_id: integer("part_id").references((): AnyPgColumn => homeParts.id, { onDelete: "set null" }),
     sort: integer("sort").notNull().default(0),
   },
   (table) => [index("home_system_items_system_idx").on(table.system_id, table.sort)],
@@ -5991,20 +5993,66 @@ export const homeSystemNotes = pgTable(
   (table) => [index("home_system_notes_system_idx").on(table.system_id, table.noted_on)],
 );
 
+// A spare part or consumable of the household (migration 0324, stage 3).
+// Visibility as for the systems: the owner plus every member of `group_id`.
+export const homeParts = pgTable(
+  "home_parts",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    manufacturer: text("manufacturer"),
+    part_number: text("part_number"),
+    ean: text("ean"),
+    specification: text("specification"),
+    supplier_url: text("supplier_url"),
+    storage_location: text("storage_location"),
+    /** null = not counted. */
+    stock: integer("stock"),
+    notes: text("notes"),
+    owner_user_id: integer("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    group_id: integer("group_id").references(() => groups.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("home_parts_owner_idx").on(table.owner_user_id),
+    index("home_parts_group_idx").on(table.group_id),
+  ],
+);
+
+// Which parts fit which system (n:m).
+export const homeSystemParts = pgTable(
+  "home_system_parts",
+  {
+    system_id: integer("system_id")
+      .notNull()
+      .references(() => homeSystems.id, { onDelete: "cascade" }),
+    part_id: integer("part_id")
+      .notNull()
+      .references(() => homeParts.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.system_id, table.part_id] }),
+    index("home_system_parts_part_idx").on(table.part_id),
+  ],
+);
+
 /** What a photo of the house handbook belongs to (`home_media.target_kind`). */
-export type HomeMediaTargetKind = "system" | "guide" | "item" | "note";
+export type HomeMediaTargetKind = "system" | "guide" | "item" | "note" | "part";
 
 /**
- * A photo of a home system, guide, item or note (stage 2). The file lives
- * under HOME_MEDIA_DIR at `object_key`; `system_id` carries visibility.
+ * A photo of a home system, guide, item, note (stage 2) or spare part
+ * (stage 3). The file lives under HOME_MEDIA_DIR at `object_key`;
+ * `system_id` carries visibility and is empty exactly for a part's photo,
+ * whose visibility comes from the part.
  */
 export const homeMedia = pgTable(
   "home_media",
   {
     id: serial("id").primaryKey(),
-    system_id: integer("system_id")
-      .notNull()
-      .references(() => homeSystems.id, { onDelete: "cascade" }),
+    system_id: integer("system_id").references(() => homeSystems.id, { onDelete: "cascade" }),
     target_kind: text("target_kind").$type<HomeMediaTargetKind>().notNull(),
     target_id: integer("target_id").notNull(),
     object_key: text("object_key").notNull().unique(),

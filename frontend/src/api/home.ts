@@ -83,6 +83,9 @@ export interface HomeItem {
   label: string
   location: string | null
   attributes: HomeItemAttribute[]
+  /** The part this unit takes, when the caller sees it. */
+  partId: number | null
+  partName: string | null
   sort: number
 }
 
@@ -96,7 +99,7 @@ export interface HomeNote {
   updatedAt: string
 }
 
-export type HomeMediaTargetKind = 'system' | 'guide' | 'item' | 'note'
+export type HomeMediaTargetKind = 'system' | 'guide' | 'item' | 'note' | 'part'
 
 export interface HomeMedia {
   id: number
@@ -125,6 +128,20 @@ export interface HomeSystemDetail extends Sharing {
   notes: HomeNote[]
   /** Photos of the system and of its guides, items and notes, oldest first. */
   media: HomeMedia[]
+  /** Spare parts that fit, among the parts the caller sees. */
+  parts: HomeSystemPart[]
+}
+
+/** A part as the system page lists it. */
+export interface HomeSystemPart {
+  id: number
+  name: string
+  manufacturer: string | null
+  partNumber: string | null
+  specification: string | null
+  storageLocation: string | null
+  /** null = not counted. */
+  stock: number | null
 }
 
 export interface GuideRevision {
@@ -219,6 +236,8 @@ export interface HomeItemFields {
   label: string
   location?: string | null
   attributes?: HomeItemAttribute[]
+  /** The part this unit takes; it is fitted to the system as well. */
+  partId?: number | null
 }
 
 export function createHomeItem(systemId: number, item: HomeItemFields) {
@@ -265,12 +284,14 @@ export function deleteHomeNote(systemId: number, noteId: number) {
  * field (the camera's location included).
  */
 export function uploadHomeMedia(
-  systemId: number,
+  systemId: number | null,
   target: { kind: HomeMediaTargetKind; id: number },
   file: Blob,
 ) {
   const q = new URLSearchParams({ target: target.kind, targetId: String(target.id) })
-  return apiFetch<HomeMedia>(`/home/systems/${systemId}/media?${q}`, {
+  // A part's photo belongs to the part, not to a system.
+  const path = target.kind === 'part' ? `/home/parts/${target.id}/media` : `/home/systems/${systemId}/media?${q}`
+  return apiFetch<HomeMedia>(path, {
     method: 'POST',
     body: file,
     headers: { 'Content-Type': file.type || 'application/octet-stream' },
@@ -288,4 +309,100 @@ export function updateHomeMediaCaption(mediaId: number, caption: string | null) 
 
 export function deleteHomeMedia(mediaId: number) {
   return apiFetch<void>(`/home/media/${mediaId}`, { method: 'DELETE' })
+}
+
+// ── Spare parts (stage 3) ───────────────────────────────────────────────────
+
+export interface HomePartSystemRef {
+  id: number
+  name: string
+}
+
+export interface HomePartListItem extends Omit<Sharing, 'canManage'> {
+  id: number
+  name: string
+  manufacturer: string | null
+  partNumber: string | null
+  specification: string | null
+  storageLocation: string | null
+  /** null = not counted. */
+  stock: number | null
+  systems: HomePartSystemRef[]
+  coverMediaId: number | null
+  updatedAt: string
+  /** The caller may share or delete the part. */
+  canManage: boolean
+}
+
+export interface HomePartItemRef {
+  systemId: number
+  systemName: string
+  itemId: number
+  label: string
+  location: string | null
+}
+
+export interface HomePartDetail extends HomePartListItem {
+  ean: string | null
+  supplierUrl: string | null
+  notes: string | null
+  createdAt: string
+  items: HomePartItemRef[]
+  media: HomeMedia[]
+}
+
+export interface HomePartFields {
+  name: string
+  manufacturer?: string | null
+  partNumber?: string | null
+  ean?: string | null
+  specification?: string | null
+  supplierUrl?: string | null
+  storageLocation?: string | null
+  stock?: number | null
+  notes?: string | null
+  /** Omitted: the household; null: private. */
+  groupId?: number | null
+}
+
+export function listHomeParts(params: { q?: string; empty?: boolean; systemId?: number } = {}) {
+  const q = new URLSearchParams()
+  if (params.q) q.set('q', params.q)
+  if (params.empty) q.set('empty', 'true')
+  if (params.systemId !== undefined) q.set('systemId', String(params.systemId))
+  const suffix = q.toString() ? `?${q}` : ''
+  return apiFetch<{ parts: HomePartListItem[] }>(`/home/parts${suffix}`)
+}
+
+export function createHomePart(fields: HomePartFields) {
+  return apiFetch<{ id: number }>('/home/parts', { method: 'POST', body: JSON.stringify(fields) })
+}
+
+export function getHomePart(id: number) {
+  return apiFetch<HomePartDetail>(`/home/parts/${id}`)
+}
+
+export function updateHomePart(id: number, patch: Partial<HomePartFields>) {
+  return apiFetch<HomePartDetail>(`/home/parts/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+/** -1 = one taken out, +1 = one put back. Returns the new stock. */
+export function adjustHomePartStock(id: number, delta: number) {
+  return apiFetch<{ stock: number }>(`/home/parts/${id}/stock`, { method: 'POST', body: JSON.stringify({ delta }) })
+}
+
+export function deleteHomePart(id: number) {
+  return apiFetch<void>(`/home/parts/${id}`, { method: 'DELETE' })
+}
+
+/** Which parts fit a system (parts the caller cannot see stay linked). */
+export function setHomeSystemParts(systemId: number, partIds: number[]) {
+  return apiFetch<void>(`/home/systems/${systemId}/parts`, { method: 'PUT', body: JSON.stringify({ partIds }) })
+}
+
+/** "4 Stück", "keins mehr da", or "nicht gezählt" when nobody counts. */
+export function stockLabel(stock: number | null): string {
+  if (stock === null) return 'nicht gezählt'
+  if (stock === 0) return 'keins mehr da'
+  return `${stock} Stück`
 }

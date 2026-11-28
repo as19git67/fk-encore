@@ -58,9 +58,9 @@ const SYSTEM: HomeSystemDetail = {
     },
   ],
   items: [
-    { id: 21, label: 'Küche', location: 'Spüle', attributes: [{ key: 'Gewinde', value: 'M24×1 außen' }, { key: 'Schlüssel', value: 'Typ A' }], sort: 0 },
-    { id: 22, label: 'Bad oben', location: 'Waschtisch', attributes: [{ key: 'Gewinde', value: 'M22×1 innen' }, { key: 'Schlüssel', value: 'Typ B' }], sort: 1 },
-    { id: 23, label: 'Gäste-WC', location: 'Handwaschbecken', attributes: [{ key: 'Gewinde', value: 'M18×1 versteckt' }, { key: 'Schlüssel', value: 'Typ C' }], sort: 2 },
+    { id: 21, label: 'Küche', location: 'Spüle', attributes: [{ key: 'Gewinde', value: 'M24×1 außen' }, { key: 'Schlüssel', value: 'Typ A' }], partId: 61, partName: 'Perlator M24×1', sort: 0 },
+    { id: 22, label: 'Bad oben', location: 'Waschtisch', attributes: [{ key: 'Gewinde', value: 'M22×1 innen' }, { key: 'Schlüssel', value: 'Typ B' }], partId: null, partName: null, sort: 1 },
+    { id: 23, label: 'Gäste-WC', location: 'Handwaschbecken', attributes: [{ key: 'Gewinde', value: 'M18×1 versteckt' }, { key: 'Schlüssel', value: 'Typ C' }], partId: null, partName: null, sort: 2 },
   ],
   notes: [
     { id: 31, notedOn: '2026-11-15', body: 'Alle entkalkt, Küche neue Dichtung.', authorId: 1, authorName: 'Admin', createdAt: '2026-11-15T18:00:00Z', updatedAt: '2026-11-15T18:00:00Z' },
@@ -72,6 +72,10 @@ const SYSTEM: HomeSystemDetail = {
     { id: 43, targetKind: 'guide', targetId: 11, caption: null, width: 2048, height: 1365, createdAt: '2026-11-01T10:00:00Z' },
     { id: 44, targetKind: 'item', targetId: 21, caption: null, width: 2048, height: 1365, createdAt: '2026-11-01T10:00:00Z' },
     { id: 45, targetKind: 'note', targetId: 31, caption: 'Neue Dichtung', width: 2048, height: 1365, createdAt: '2026-11-15T18:00:00Z' },
+  ],
+  parts: [
+    { id: 62, name: 'Dichtung für Perlator', manufacturer: null, partNumber: null, specification: 'Gummi, 20 × 15 mm', storageLocation: 'Teileschrank, Schublade 2', stock: 6 },
+    { id: 61, name: 'Perlator M24×1', manufacturer: 'Beispielwerk', partNumber: 'PL-24', specification: null, storageLocation: 'Teileschrank, Schublade 2', stock: 0 },
   ],
 }
 
@@ -98,6 +102,7 @@ const handlers = [
       ],
     }),
   ),
+  http.get('/api/home/parts', () => HttpResponse.json({ parts: [] })),
   http.get('/api/home/share-groups', () => HttpResponse.json({ householdId: 7, groups: [{ id: 7, name: 'Familie', household: true }] })),
   ...defaultHandlers,
 ]
