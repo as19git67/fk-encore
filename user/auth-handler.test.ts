@@ -94,6 +94,7 @@ describe("requirePermission — media scope", () => {
     // whole thing, so pin the contents rather than only the behaviour.
     expect([...MEDIA_SCOPE_PERMISSIONS].sort()).toEqual([
       "documents.view",
+      "home.view",
       "module.documents",
       "module.photos",
       "photos.view",

@@ -3,12 +3,21 @@
  * Shows the Markdown of a text document formatted (editor preview and detail
  * page). Built as a tree from the tokens in `utils/markdown.ts`, never through
  * v-html: what a document contains is shown, not executed or loaded.
+ *
+ * Images stay a placeholder, with one exception: a page that passes
+ * `mediaUrl` (the house handbook) shows `![…](media:123)` as that photo,
+ * loaded through the app's own authenticated endpoint. Any other image source
+ * — a web address above all — is never loaded.
  */
 import { computed, h, type VNodeChild } from 'vue'
 import type { Token, Tokens } from 'marked'
-import { calloutOf, decodeEntities, markdownTokens, safeHref } from '../../utils/markdown'
+import { calloutOf, decodeEntities, markdownTokens, mediaIdOf, safeHref } from '../../utils/markdown'
 
-const props = defineProps<{ source: string }>()
+const props = defineProps<{
+  source: string
+  /** Where the photo `media:<id>` is loaded from; without it images stay a placeholder. */
+  mediaUrl?: (id: number) => string
+}>()
 
 const tokens = computed(() => markdownTokens(props.source))
 
@@ -36,8 +45,18 @@ function inlineToken(t: Token): VNodeChild {
         ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, children)
         : h('span', children)
     }
-    case 'image':
-      return h('em', { class: 'md-image' }, `[Bild: ${(t as Tokens.Image).text || 'ohne Beschreibung'}]`)
+    case 'image': {
+      const image = t as Tokens.Image
+      const mediaId = props.mediaUrl ? mediaIdOf(image.href) : null
+      if (mediaId !== null && props.mediaUrl) {
+        const alt = decodeEntities(image.text)
+        return h('figure', { class: 'md-figure' }, [
+          h('img', { src: props.mediaUrl(mediaId), alt, loading: 'lazy', class: 'md-photo' }),
+          alt ? h('figcaption', alt) : null,
+        ])
+      }
+      return h('em', { class: 'md-image' }, `[Bild: ${image.text || 'ohne Beschreibung'}]`)
+    }
     case 'text': {
       const text = t as Tokens.Text
       return text.tokens?.length ? inline(text.tokens) : decodeEntities(text.text)
@@ -263,5 +282,20 @@ const Body = () => blocks(tokens.value)
 }
 .md-view .md-image {
   color: var(--p-text-muted-color);
+}
+.md-view .md-figure {
+  margin: var(--space-2) 0;
+}
+.md-view .md-photo {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  height: auto;
+  border-radius: 6px;
+}
+.md-view .md-figure figcaption {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+  margin-top: var(--space-1);
 }
 </style>

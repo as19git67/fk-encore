@@ -42,12 +42,13 @@ interface AuthData {
 
 /**
  * What a `?token=` credential may still do. Deliberately just enough for
- * the four endpoints that need a token in the URL:
+ * the endpoints that need a token in the URL:
  *
  *   GET /photos/file/*        module.photos + photos.view
  *   GET /photos/:id/render    module.photos + photos.view
  *   GET /photos/:id/export    module.photos + photos.view
  *   GET /documents/:id/file   module.documents + documents.view
+ *   GET /home/media/:id/file  home.view
  *
  * The realtime WebSocket also authenticates this way, but its channel
  * filter reads `permissions` directly rather than going through
@@ -58,6 +59,7 @@ export const MEDIA_SCOPE_PERMISSIONS: ReadonlySet<string> = new Set([
   "photos.view",
   "module.documents",
   "documents.view",
+  "home.view",
 ]);
 
 /**

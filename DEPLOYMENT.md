@@ -54,6 +54,14 @@ Point its `device` at the tree, or leave the default
 directory has to exist before `docker compose up`, like every other bind
 mount; it may stay empty.
 
+The photos of the house handbook (Haus › Anlagen) are the `home_media`
+volume, mounted at `/mnt/data/home-media` in `app` (`HOME_MEDIA_DIR`).
+A deployment that keeps its own copy of `docker-compose.volumes.yml`
+adds the entry from the repository's copy and creates
+`${DEPLOY_DATA_ROOT}/home-media` once before the next `docker compose up`;
+without the entry compose stops with `volume "home_media" is undefined`,
+without the directory the mount fails.
+
 Extra photo libraries need two entries, both in that file: a volume bound
 to the host path, and a mount on `app` under `/mnt/libraries/`. The
 multi-file merge **appends** those to the mounts `docker-compose.yml`

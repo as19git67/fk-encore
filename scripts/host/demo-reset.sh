@@ -101,7 +101,7 @@ fi
 
 # The directories under DEPLOY_DATA_ROOT that hold users' rows and files
 # (docker-compose.volumes.yml).
-EMPTY=(pgdata photos thumbnails backup documents documents-inbox documents-source finance-export taxonomy-out)
+EMPTY=(pgdata photos thumbnails backup documents documents-inbox documents-source finance-export taxonomy-out home-media)
 
 if [[ $DRY -eq 1 ]]; then
   echo "would stop the stack of $ENV_FILE, empty these directories and start it again:"

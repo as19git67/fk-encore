@@ -13,7 +13,12 @@ import { useAtLeast } from '../../composables/useBreakpoint'
 import { insertBlock, insertParagraphs, prefixLines, wrapSelection, type InsertPlace, type TextEdit } from '../../utils/markdown'
 
 const model = defineModel<string>({ required: true })
-const props = defineProps<{ placeholder?: string; ariaLabel?: string }>()
+const props = defineProps<{
+  placeholder?: string
+  ariaLabel?: string
+  /** Passed to the preview: where `media:<id>` photos are loaded from. */
+  mediaUrl?: (id: number) => string
+}>()
 const emit = defineEmits<{ save: [] }>()
 
 const wide = useAtLeast('md')
@@ -148,7 +153,7 @@ function onKeydown(ev: KeyboardEvent) {
         class="md-editor__preview"
         aria-label="Vorschau"
       >
-        <MarkdownView v-if="model.trim()" :source="model" />
+        <MarkdownView v-if="model.trim()" :source="model" :media-url="props.mediaUrl" />
         <p v-else class="md-editor__empty">Die Vorschau erscheint, sobald du schreibst.</p>
       </section>
     </div>

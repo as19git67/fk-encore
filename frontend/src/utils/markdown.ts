@@ -24,6 +24,23 @@ export interface Callout {
 }
 
 /**
+ * The photo id of an image source `media:123` (a photo of the house
+ * handbook), else null. Only the bare form counts — no path, no query.
+ */
+export function mediaIdOf(href: string | null | undefined): number | null {
+  const m = /^media:(\d{1,10})$/.exec((href ?? '').trim())
+  if (!m) return null
+  const id = Number(m[1])
+  return id > 0 ? id : null
+}
+
+/** The Markdown that shows the photo `id`, with its caption as alt text. */
+export function mediaImageMarkdown(id: number, caption?: string | null): string {
+  const alt = (caption ?? '').replace(/[[\]\n]/g, ' ').trim()
+  return `![${alt}](media:${id})`
+}
+
+/**
  * A quote that starts with `[!WARNING]` or `[!NOTE]` is a callout — the
  * syntax GitHub and most editors know. A handbook says "turn off the water
  * first" this way, and it must stand out from the steps around it

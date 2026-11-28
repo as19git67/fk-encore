@@ -5,7 +5,8 @@
  * A system (`home_systems`) carries its guides (Markdown, with an undo
  * history in `home_system_guide_revisions`), the identical units it has at
  * different places (`home_system_items`) and dated notes
- * (`home_system_notes`).
+ * (`home_system_notes`). Photos of all four (`home_media`, stage 2) live in
+ * media-store.ts; deleting a guide, item, note or system removes its photos.
  *
  * Visibility follows the meters (lib/household.ts): the owner sees a system,
  * and so does every member of its group; a new system without a choice goes
@@ -24,6 +25,7 @@ import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
   groups,
+  homeMedia,
   homeSystemGuideRevisions,
   homeSystemGuides,
   homeSystemItems,
@@ -33,6 +35,12 @@ import {
   type HomeItemAttribute,
   type HomeSystemCategory,
 } from "../db/schema";
+import {
+  listSystemMedia,
+  removeMediaOfSystem,
+  removeMediaOfTarget,
+  type HomeMedia,
+} from "./media-store";
 import {
   loadOwnedGroupIds,
   loadUserGroupIds,
@@ -203,6 +211,8 @@ export interface HomeSystemListItem extends Sharing {
   lastNoteOn: string | null;
   /** Where the search term was found besides the system's own fields. */
   matches: string[];
+  /** The first photo of the system itself, shown on its card. */
+  coverMediaId: number | null;
   updatedAt: string;
 }
 
@@ -302,6 +312,7 @@ export async function listSystems(
     ),
   ]);
   const notesBySystem = new Map(noteStats.map((n) => [n.system_id, n]));
+  const covers = await coversOf(ids);
   const matches = pattern ? await matchesOf(ids, pattern) : new Map<number, string[]>();
 
   return rows.map((row) => ({
@@ -317,6 +328,7 @@ export async function listSystems(
     noteCount: Number(notesBySystem.get(row.id)?.count ?? 0),
     lastNoteOn: notesBySystem.get(row.id)?.last ?? null,
     matches: matches.get(row.id) ?? [],
+    coverMediaId: covers.get(row.id) ?? null,
     updatedAt: row.updated_at,
     ...sharingOf(userId, row, ownedGroupIds),
   }));
@@ -337,6 +349,18 @@ const homeSystemColumns = {
   created_at: homeSystems.created_at,
   updated_at: homeSystems.updated_at,
 };
+
+/** The first photo of each system itself (not of a guide, item or note). */
+async function coversOf(ids: number[]): Promise<Map<number, number>> {
+  const rows = await dbAll<{ system_id: number; id: number }>(
+    db
+      .select({ system_id: homeMedia.system_id, id: sql<number>`min(${homeMedia.id})::int` })
+      .from(homeMedia)
+      .where(and(inArray(homeMedia.system_id, ids), eq(homeMedia.target_kind, "system")))
+      .groupBy(homeMedia.system_id),
+  );
+  return new Map(rows.map((r) => [r.system_id, Number(r.id)]));
+}
 
 async function countBy(
   table: typeof homeSystemGuides | typeof homeSystemItems,
@@ -445,6 +469,8 @@ export interface HomeSystemDetail extends Sharing {
   items: HomeItem[];
   /** Newest first. */
   notes: HomeNote[];
+  /** Photos of the system and of its guides, items and notes, oldest first. */
+  media: HomeMedia[];
 }
 
 export async function getSystemDetail(userId: number, systemId: number): Promise<HomeSystemDetail> {
@@ -460,7 +486,7 @@ export async function getSystemDetail(userId: number, systemId: number): Promise
   if (!row) throw APIError.notFound("system not found");
   const ownedGroupIds = await loadOwnedGroupIds(userId);
 
-  const [guides, items, notes] = await Promise.all([
+  const [guides, items, notes, media] = await Promise.all([
     dbAll<{
       id: number;
       title: string;
@@ -510,6 +536,7 @@ export async function getSystemDetail(userId: number, systemId: number): Promise
         .where(eq(homeSystemNotes.system_id, systemId))
         .orderBy(desc(homeSystemNotes.noted_on), desc(homeSystemNotes.id)),
     ),
+    listSystemMedia(systemId),
   ]);
 
   return {
@@ -550,6 +577,7 @@ export async function getSystemDetail(userId: number, systemId: number): Promise
       createdAt: n.created_at,
       updatedAt: n.updated_at,
     })),
+    media,
   };
 }
 
@@ -609,6 +637,8 @@ export async function updateSystem(
 
 export async function deleteSystem(userId: number, systemId: number): Promise<void> {
   await loadManageableSystem(userId, systemId);
+  // The photo files first: their rows would go with the system, the files not.
+  await removeMediaOfSystem(systemId);
   // Guides (with revisions), items and notes go with it (ON DELETE CASCADE).
   await db.delete(homeSystems).where(eq(homeSystems.id, systemId));
 }
@@ -708,6 +738,7 @@ export async function updateGuide(
 export async function deleteGuide(userId: number, systemId: number, guideId: number): Promise<void> {
   const guide = await loadGuide(userId, systemId, guideId);
   await db.delete(homeSystemGuides).where(eq(homeSystemGuides.id, guide.id));
+  await removeMediaOfTarget("guide", guide.id);
   await touchSystem(systemId);
 }
 
@@ -847,6 +878,7 @@ export async function updateItem(
 export async function deleteItem(userId: number, systemId: number, itemId: number): Promise<void> {
   const item = await loadItem(userId, systemId, itemId);
   await db.delete(homeSystemItems).where(eq(homeSystemItems.id, item.id));
+  await removeMediaOfTarget("item", item.id);
   await touchSystem(systemId);
 }
 
@@ -911,4 +943,5 @@ export async function updateNote(
 export async function deleteNote(userId: number, systemId: number, noteId: number): Promise<void> {
   const note = await loadNote(userId, systemId, noteId);
   await db.delete(homeSystemNotes).where(eq(homeSystemNotes.id, note.id));
+  await removeMediaOfTarget("note", note.id);
 }

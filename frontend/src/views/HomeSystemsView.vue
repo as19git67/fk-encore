@@ -22,6 +22,7 @@ import { anchorKey, saveListAnchor } from '../utils/listAnchor'
 import {
   HOME_CATEGORY_ICONS,
   HOME_CATEGORY_LABELS,
+  homeMediaUrl,
   listHomeSystems,
   type HomeSystemCategory,
   type HomeSystemListItem,
@@ -234,6 +235,13 @@ onMounted(load)
             <span class="system-name">{{ s.name }}</span>
             <span class="system-sub">{{ subtitle(s) }}</span>
           </div>
+          <img
+            v-if="s.coverMediaId"
+            :src="homeMediaUrl(s.coverMediaId, 'small')"
+            alt=""
+            loading="lazy"
+            class="system-cover"
+          />
         </div>
         <span v-if="deviceLine(s)" class="system-device">{{ deviceLine(s) }}</span>
         <span class="system-contents">
@@ -279,6 +287,15 @@ onMounted(load)
 .system-card:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+.system-cover {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--p-content-hover-background);
 }
 .system-head {
   display: flex;
