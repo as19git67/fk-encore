@@ -10,8 +10,9 @@
  * So the app also hands the server the Activity's push token, and a
  * timer here recomputes the same content (`live-activity-content.ts`)
  * and pushes it whenever it changed — which, for the blocks, is at
- * their boundaries. When the day's last block is over the Activity is
- * ended and the row forgotten.
+ * their boundaries. When the day's last block is over, or every spot of
+ * the day is ticked off or skipped, the Activity is ended and the row
+ * forgotten.
  *
  * The phone's own updates keep coming on every wake and are more
  * precise (a geofence knows which stop they are at, the clock only
@@ -39,6 +40,7 @@ import { runningDayAt } from "./running-day";
 import { loadPlan, type StoredPlan } from "./plan-store";
 import {
   buildActivityContent,
+  isDayDone,
   isTimeZone,
   staleDate,
   zonedClock,
@@ -150,6 +152,8 @@ export async function contentFor(
   const running = runningDayAt(plan.legs, local.date, local.minutes);
   if (running && running.day.detailed) {
     const { leg, day } = running;
+    // Every spot ticked off: the day is over, whatever the clock says.
+    if (isDayDone(day.blocks)) return { state: null, afterDay: true };
     const horizon = await storedHorizon(day.anchor ?? leg.anchor);
     const light = lightOfDay(leg, day, local.offsetMinutes, horizon);
     const state = buildActivityContent(day.blocks, local.minutes, light.spots);

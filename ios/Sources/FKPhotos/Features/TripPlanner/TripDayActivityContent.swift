@@ -84,12 +84,16 @@ enum TripDayActivityContent {
         guard let position = TripDayTimeline.position(in: day, at: minutes) else { return nil }
         let block = position.block
 
-        let currentStopName = confirmedStopName ?? position.stop?.displayName
-        let nextStopName = position.stopIndex
-            .map { $0 + 1 }
-            .flatMap { index in
-                index < block.stops.count ? block.stops[index].displayName : nil
-            }
+        // A spot already ticked off or skipped is neither where they are
+        // nor where they go next (Anton, 28.11.: the Lock Screen said
+        // "weiter zu" a spot done an hour ago). The clock's guess only
+        // counts while its spot is still open; a geofence wins as before.
+        let confirmedIndex = confirmedStopName.flatMap { name in
+            block.stops.firstIndex { $0.displayName == name }
+        }
+        let clockStop = position.stop.flatMap { $0.stopStatus == .planned ? $0 : nil }
+        let currentStopName = confirmedStopName ?? clockStop?.displayName
+        let nextStopName = nextOpenStop(in: block.stops, after: confirmedIndex ?? position.stopIndex)?.displayName
 
         let hintStop = position.stop ?? block.stops.first { $0.dwellMinutes > 0 }
         let lightHintText = hintStop.flatMap { lightHint?.hint(for: $0.osmRef)?.best }
@@ -108,6 +112,26 @@ enum TripDayActivityContent {
             nextStopName: nextStopName,
             lightHintText: lightHintText
         )
+    }
+
+    /// The first spot still open after `index`, in the block's order —
+    /// done and skipped ones are passed over. Nil without a position.
+    /// `nextOpenStop` in `live-activity-content.ts` is the same rule.
+    static func nextOpenStop(in stops: [TripStop], after index: Int?) -> TripStop? {
+        guard let index else { return nil }
+        return stops.indices.first { $0 > index && stops[$0].stopStatus == .planned }.map { stops[$0] }
+    }
+
+    /// Every spot on the day is ticked off or skipped: the Lock Screen
+    /// and the Dynamic Island have nothing left to say, and the Activity
+    /// ends (Anton, 28.11.). Only what lies on the day counts — the open
+    /// spots of the stay are not the day's. A day without a spot is not
+    /// done: there was nothing to finish, and its blocks still say which
+    /// part of the day it is. `isDayDone` in `live-activity-content.ts`
+    /// is the same rule, so the server ends it while the phone sleeps.
+    static func isDayDone(_ day: TripDay) -> Bool {
+        let stops = day.blocks.flatMap(\.stops)
+        return !stops.isEmpty && stops.allSatisfy { $0.stopStatus != .planned }
     }
 
     /// When the content stops being true: the end of the block it
