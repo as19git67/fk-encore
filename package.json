@@ -53,7 +53,7 @@
     "hyphen": "^1.14.1",
     "jszip": "^3.10.2",
     "lib-fints": "^1.5.3",
-    "marked": "^18.2.1",
+    "marked": "^18.3.0",
     "node-tesseract-ocr": "^2.2.1",
     "nodemailer": "^10.1.0",
     "pdf-lib": "^1.17.1",
