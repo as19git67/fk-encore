@@ -673,6 +673,34 @@ export const modules: ModuleConfig[] = [
     ],
   },
   {
+    id: 'haus',
+    label: 'Haus',
+    icon: 'pi pi-home',
+    basePath: '/haus',
+    permission: 'module.home',
+    routes: [
+      {
+        path: '',
+        redirect: { name: 'haus-anlagen' },
+      },
+      {
+        path: 'anlagen',
+        name: 'haus-anlagen',
+        component: () => import('../views/HomeSystemsView.vue'),
+        meta: { permission: 'home.view' },
+      },
+      {
+        path: 'anlagen/:id',
+        name: 'haus-anlage',
+        component: () => import('../views/HomeSystemDetailView.vue'),
+        meta: { permission: 'home.view' },
+      },
+    ],
+    menuItems: [
+      { label: 'Anlagen', icon: 'pi pi-wrench', routeName: 'haus-anlagen', permission: 'home.view' },
+    ],
+  },
+  {
     id: 'reise',
     label: 'Reise',
     icon: 'pi pi-compass',

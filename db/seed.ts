@@ -39,6 +39,27 @@ async function grantAssistantToModuleUsers(db: any): Promise<void> {
   }
 }
 
+const HOME_ROLE = "Haus User";
+
+/**
+ * The house handbook grew out of the meters (documentation/plans/haus-anlagen.md):
+ * whoever reads the meters of a household gets the handbook of the same house
+ * once, when the role appears.
+ */
+async function grantHomeToMeterUsers(db: any): Promise<void> {
+  const homeRoleId = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, HOME_ROLE)))[0]?.id as number | undefined;
+  const meterRoleId = (await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, "Zähler User")))[0]?.id as number | undefined;
+  if (!homeRoleId || !meterRoleId) return;
+  const holders = await db
+    .selectDistinct({ user_id: schema.userRoles.user_id })
+    .from(schema.userRoles)
+    .where(eq(schema.userRoles.role_id, meterRoleId)) as { user_id: number }[];
+  for (const { user_id } of holders) {
+    await db.insert(schema.userRoles).values({ user_id, role_id: homeRoleId }).onConflictDoNothing();
+    console.log(`[seed] Granted "${HOME_ROLE}" to user_id=${user_id} (holds "Zähler User")`);
+  }
+}
+
 export async function seed(db: any): Promise<void> {
   const isTest = process.env.NODE_ENV === "test" || !!process.env.VITEST;
   if (isTest) return;
@@ -110,6 +131,13 @@ export async function seed(db: any): Promise<void> {
   //      every later start an admin's withdrawal stands.
   if (createdRoles.has(ASSISTANT_ROLE)) {
     await grantAssistantToModuleUsers(db);
+  }
+
+  // --- 3c. Backfill: the house module starts with everybody who has the
+  //      meters role — once, in the start that creates "Haus User"; after
+  //      that an admin's withdrawal stands.
+  if (createdRoles.has(HOME_ROLE)) {
+    await grantHomeToMeterUsers(db);
   }
 
   // --- 4. Enforce role -> permission assignments.

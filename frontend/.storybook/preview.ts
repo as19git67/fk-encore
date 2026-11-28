@@ -86,6 +86,8 @@ const router = createRouter({
     { path: '/zaehler/schnellerfassung/konfiguration', name: 'zaehler-schnellerfassung-config', component: { template: '<div />' } },
     { path: '/zaehler', name: 'zaehler-list', component: { template: '<div />' } },
     { path: '/reise/hotelpreise', name: 'reise-hotelpreise', component: { template: '<div />' } },
+    { path: '/haus/anlagen', name: 'haus-anlagen', component: { template: '<div />' } },
+    { path: '/haus/anlagen/:id', name: 'haus-anlage', component: { template: '<div />' } },
     { path: '/assistent', name: 'assistent', component: { template: '<div />' } },
     { path: '/finanzen/lastschriften', name: 'finance-direct-debits', component: { template: '<div />' } },
     { path: '/zaehler/:id', name: 'zaehler-detail', component: { template: '<div />' } },

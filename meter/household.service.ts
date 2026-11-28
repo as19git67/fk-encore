@@ -22,6 +22,12 @@ import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import {
+  loadHouseholdGroup,
+  resolveSettingsScope,
+  type HouseholdGroup,
+  type SettingsScope,
+} from "../lib/household";
+import {
   groupMembers,
   groups,
   meterElectricityTariffs,
@@ -29,40 +35,10 @@ import {
   meters,
 } from "../db/schema";
 
-export type SettingsScope =
-  | { kind: "personal"; userId: number }
-  | { kind: "household"; groupId: number; groupName: string };
-
-export interface HouseholdGroup {
-  id: number;
-  name: string;
-  myRole: "owner" | "member";
-}
-
-/** The household group the user belongs to, if any (lowest id wins). */
-export async function loadHouseholdGroup(userId: number): Promise<HouseholdGroup | null> {
-  const row = await dbFirst<HouseholdGroup>(
-    db
-      .select({ id: groups.id, name: groups.name, myRole: groupMembers.role })
-      .from(groups)
-      .innerJoin(
-        groupMembers,
-        and(eq(groupMembers.group_id, groups.id), eq(groupMembers.user_id, userId)),
-      )
-      .where(eq(groups.household, true))
-      .orderBy(asc(groups.id))
-      .limit(1),
-  );
-  return row ?? null;
-}
-
-/** Whose settings apply when `userId` looks at costs and reports. */
-export async function resolveSettingsScope(userId: number): Promise<SettingsScope> {
-  const household = await loadHouseholdGroup(userId);
-  return household
-    ? { kind: "household", groupId: household.id, groupName: household.name }
-    : { kind: "personal", userId };
-}
+// The household itself is shared with the home systems (home/), so the
+// helpers that answer "which household, whose settings" live in lib/.
+export { loadHouseholdGroup, resolveSettingsScope } from "../lib/household";
+export type { HouseholdGroup, SettingsScope } from "../lib/household";
 
 /** WHERE fragment for the tariff rows of a scope. */
 export function tariffScopeWhere(scope: SettingsScope): SQL {

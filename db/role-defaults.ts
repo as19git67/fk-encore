@@ -14,6 +14,7 @@ export const defaultRoles = [
   { name: "Zähler User", description: "Access to the utility meters module" },
   { name: "Assistent User", description: "Access to the assistant chat" },
   { name: "Reise User", description: "Access to the travel module (hotel price watches)" },
+  { name: "Haus User", description: "Access to the house module (home systems handbook)" },
 ];
 
 export const allPermissions = [
@@ -71,6 +72,10 @@ export const allPermissions = [
   { key: "module.travel", description: "Enable travel module" },
   { key: "travel.view", description: "View own hotel price watches and their history" },
   { key: "travel.manage", description: "Create, edit, delete and check own hotel price watches" },
+  // --- House module (documentation/plans/haus-anlagen.md, #1926) ---
+  { key: "module.home", description: "Enable house module" },
+  { key: "home.view", description: "View the home systems shared with the user (guides, items, notes)" },
+  { key: "home.manage", description: "Create and edit home systems, guides, items and notes" },
 ];
 
 // Permissions that are NEVER auto-assigned to the Admin role.
@@ -124,5 +129,10 @@ export const rolePermissionsMap: Record<string, string[]> = {
     "module.travel",
     "travel.view",
     "travel.manage",
+  ],
+  "Haus User": [
+    "module.home",
+    "home.view",
+    "home.manage",
   ],
 };

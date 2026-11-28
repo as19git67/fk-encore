@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { draftTitleOf, insertBlock, insertParagraphs, prefixLines, safeHref, wrapSelection } from './markdown'
+import { calloutOf, draftTitleOf, markdownTokens, insertBlock, insertParagraphs, prefixLines, safeHref, wrapSelection } from './markdown'
 
 describe('safeHref', () => {
   it('lets web and mail links through', () => {
@@ -81,5 +81,29 @@ describe('draftTitleOf', () => {
     expect(draftTitleOf('Vorab\n\n## Stromverbrauch 2025\n\nText', '21.10.2026')).toBe('Stromverbrauch 2025')
     expect(draftTitleOf('**Der Zähler** zeigt 3.412 kWh.', '21.10.2026')).toBe('Der Zähler zeigt 3.412 kWh.')
     expect(draftTitleOf('   ', '21.10.2026')).toBe('Notiz vom 21.10.2026')
+  })
+})
+
+describe('calloutOf', () => {
+  /** The text marked hands the view for the first quote of `source`. */
+  function quoteText(source: string): string {
+    const quote = markdownTokens(source).find((t) => t.type === 'blockquote') as { text: string }
+    return quote.text
+  }
+
+  it('reads a warning and a note', () => {
+    expect(calloutOf(quoteText('> [!WARNING]\n> Erst das Wasser abdrehen.'))).toEqual({
+      kind: 'warning',
+      body: 'Erst das Wasser abdrehen.',
+    })
+    expect(calloutOf(quoteText('> [!note]\n> Passt auch für M22.'))?.kind).toBe('note')
+    expect(calloutOf(quoteText('> [!CAUTION]\n> Heiß.'))?.kind).toBe('warning')
+    expect(calloutOf(quoteText('> [!TIP]\n> Mit Essig entkalken.'))?.kind).toBe('note')
+  })
+
+  it('leaves a plain quote alone', () => {
+    expect(calloutOf(quoteText('> Ein Zitat'))).toBeNull()
+    expect(calloutOf(quoteText('> Siehe [!WARNING] oben'))).toBeNull()
+    expect(calloutOf(quoteText('> [!SOMETHING]\n> x'))).toBeNull()
   })
 })

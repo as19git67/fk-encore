@@ -15,6 +15,31 @@ export function markdownTokens(source: string): Token[] {
   return new Lexer({ gfm: true, breaks: false }).lex(source)
 }
 
+export type CalloutKind = 'note' | 'warning'
+
+export interface Callout {
+  kind: CalloutKind
+  /** The quote's Markdown without the `[!…]` marker. */
+  body: string
+}
+
+/**
+ * A quote that starts with `[!WARNING]` or `[!NOTE]` is a callout — the
+ * syntax GitHub and most editors know. A handbook says "turn off the water
+ * first" this way, and it must stand out from the steps around it
+ * (documentation/plans/haus-anlagen.md). CAUTION and IMPORTANT read as a
+ * warning, TIP as a note; anything else stays a plain quote.
+ */
+export function calloutOf(quoteText: string): Callout | null {
+  const match = /^\s*\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\][ \t]*(?:\n|$)/i.exec(quoteText)
+  if (!match) return null
+  const marker = match[1]!.toUpperCase()
+  return {
+    kind: marker === 'NOTE' || marker === 'TIP' ? 'note' : 'warning',
+    body: quoteText.slice(match[0].length),
+  }
+}
+
 /** The target of a link a reader may follow, or null for anything else (`javascript:`, relative paths). */
 export function safeHref(href: string): string | null {
   const h = href.trim()

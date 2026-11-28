@@ -30,7 +30,7 @@ import {
   type MeterRole,
   type MeterType,
 } from "../db/schema";
-import { loadHouseholdGroup } from "./household.service";
+import { loadHouseholdGroup, loadOwnedGroupIds, loadUserGroupIds, mayManageShared } from "../lib/household";
 
 export const METER_TYPES: readonly MeterType[] = [
   "electricity",
@@ -141,27 +141,8 @@ export async function loadDeviceOffsets(
   return { devices, offsets: buildDeviceOffsets(devices, latest) };
 }
 
-/** Every group id the user belongs to (visibility scope). */
-export async function loadUserGroupIds(userId: number): Promise<number[]> {
-  const rows = await dbAll<{ group_id: number }>(
-    db
-      .select({ group_id: groupMembers.group_id })
-      .from(groupMembers)
-      .where(eq(groupMembers.user_id, userId)),
-  );
-  return rows.map((r) => r.group_id);
-}
-
-/** Groups in which the user has the `owner` role — they may manage its meters. */
-export async function loadOwnedGroupIds(userId: number): Promise<number[]> {
-  const rows = await dbAll<{ group_id: number }>(
-    db
-      .select({ group_id: groupMembers.group_id })
-      .from(groupMembers)
-      .where(and(eq(groupMembers.user_id, userId), eq(groupMembers.role, "owner"))),
-  );
-  return rows.map((r) => r.group_id);
-}
+// Group membership is the household's question, shared with home/.
+export { loadOwnedGroupIds, loadUserGroupIds } from "../lib/household";
 
 /**
  * May `userId` change the meter itself — master data, sharing, devices, API
@@ -173,8 +154,7 @@ export function mayManageMeter(
   meter: { owner_user_id: number; group_id: number | null },
   ownedGroupIds: number[],
 ): boolean {
-  if (meter.owner_user_id === userId) return true;
-  return meter.group_id !== null && ownedGroupIds.includes(meter.group_id);
+  return mayManageShared(userId, meter, ownedGroupIds);
 }
 
 /** Drizzle WHERE fragment selecting every meter visible to `userId`. */
