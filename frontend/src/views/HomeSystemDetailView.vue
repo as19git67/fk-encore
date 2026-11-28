@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * One system of the house: what it is, how it is maintained (guides), its
- * units at different places (items) and what happened to it (notes)
- * — documentation/plans/haus-anlagen.md, stage 1.
+ * units at different places (items) and what happened to it (notes), each
+ * with photos; a guide shows its photos inline as `![…](media:<id>)`
+ * — documentation/plans/haus-anlagen.md, stages 1 and 2.
  *
  * Everybody who sees the system and has `home.manage` writes guides, items
  * and notes; the system's own data, sharing, archiving and deleting stay
@@ -26,9 +27,11 @@ import ScrollX from '../components/layout/ScrollX.vue'
 import MarkdownView from '../components/documents/MarkdownView.vue'
 import MarkdownEditor from '../components/documents/MarkdownEditor.vue'
 import HomeSystemDialog from '../components/home/HomeSystemDialog.vue'
+import HomePhotos from '../components/home/HomePhotos.vue'
 import { useModuleBack } from '../composables/useModuleBack'
 import { useAuthStore } from '../stores/auth'
 import { parseLocalDate, toLocalIsoDate } from '../utils/dateFormat'
+import { mediaImageMarkdown } from '../utils/markdown'
 import {
   HOME_CATEGORY_ICONS,
   HOME_CATEGORY_LABELS,
@@ -40,16 +43,20 @@ import {
   deleteHomeNote,
   deleteHomeSystem,
   getHomeSystem,
+  homeMediaUrl,
   listHomeGuideRevisions,
   restoreHomeGuideRevision,
   updateHomeGuide,
   updateHomeItem,
   updateHomeNote,
   updateHomeSystem,
+  uploadHomeMedia,
   type GuideRevision,
   type HomeGuide,
   type HomeItem,
   type HomeItemAttribute,
+  type HomeMedia,
+  type HomeMediaTargetKind,
   type HomeNote,
   type HomeSystemDetail,
 } from '../api/home'
@@ -99,6 +106,14 @@ async function run(action: () => Promise<unknown>, failure: string): Promise<boo
     return false
   }
 }
+
+/** The photos of the system itself or of one of its guides, items or notes. */
+function photosOf(kind: HomeMediaTargetKind, id: number): HomeMedia[] {
+  return (system.value?.media ?? []).filter((m) => m.targetKind === kind && m.targetId === id)
+}
+
+/** Where a guide's `media:<id>` image is loaded from. */
+const mediaUrl = (id: number) => homeMediaUrl(id, 'full')
 
 function fmtDate(iso: string | null): string {
   if (!iso) return '–'
@@ -167,7 +182,7 @@ function confirmDeleteSystem() {
   if (!s) return
   confirm.require({
     header: 'Anlage löschen',
-    message: `„${s.name}“ mit ${s.guides.length} Anleitung(en), ${s.items.length} Einzelteil(en) und ${s.notes.length} Notiz(en) löschen? Das lässt sich nicht rückgängig machen. Archivieren behält alles.`,
+    message: `„${s.name}“ mit ${s.guides.length} Anleitung(en), ${s.items.length} Einzelteil(en), ${s.notes.length} Notiz(en) und ${s.media.length} Foto(s) löschen? Das lässt sich nicht rückgängig machen. Archivieren behält alles.`,
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: 'Abbrechen',
     acceptLabel: 'Endgültig löschen',
@@ -193,7 +208,13 @@ const guideTitle = ref('')
 const guideBody = ref('')
 const guideSaving = ref(false)
 
+const guideError = ref('')
+const guideEditor = ref<InstanceType<typeof MarkdownEditor> | null>(null)
+const guidePhotoInput = ref<HTMLInputElement | null>(null)
+const guidePhotoUploading = ref(false)
+
 function openGuide(guide: HomeGuide | null) {
+  guideError.value = ''
   guideEditing.value = guide
   guideTitle.value = guide?.title ?? ''
   guideBody.value = guide?.body ?? GUIDE_TEMPLATE
@@ -212,6 +233,38 @@ async function saveGuide() {
   )
   guideSaving.value = false
   if (ok) guideOpen.value = false
+}
+
+/**
+ * "Foto einfügen": the photo belongs to the guide, so a new guide is saved
+ * first; the image line goes where the cursor is.
+ */
+async function onGuidePhoto(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  guideError.value = ''
+  if (!guideTitle.value.trim()) {
+    guideError.value = 'Gib der Anleitung zuerst einen Titel, dann lässt sich ein Foto einfügen.'
+    return
+  }
+  guidePhotoUploading.value = true
+  try {
+    let guideId = guideEditing.value?.id
+    if (guideId === undefined) {
+      guideId = (await createHomeGuide(systemId.value, { title: guideTitle.value, body: guideBody.value })).id
+      await load()
+      guideEditing.value = system.value?.guides.find((g) => g.id === guideId) ?? null
+    }
+    const media = await uploadHomeMedia(systemId.value, { kind: 'guide', id: guideId }, file)
+    guideEditor.value?.insertText(mediaImageMarkdown(media.id), 'cursor')
+    void load()
+  } catch (err: any) {
+    guideError.value = err?.message ?? 'Das Foto konnte nicht eingefügt werden.'
+  } finally {
+    guidePhotoUploading.value = false
+  }
 }
 
 function confirmDeleteGuide(guide: HomeGuide) {
@@ -466,6 +519,15 @@ function confirmDeleteNote(note: HomeNote) {
           </template>
         </dl>
         <MarkdownView v-if="system.description" :source="system.description" class="hs-description" />
+        <HomePhotos
+          :system-id="system.id"
+          :target="{ kind: 'system', id: system.id }"
+          :photos="photosOf('system', system.id)"
+          :can-write="canWrite"
+          subject="der Anlage"
+          class="hs-photos"
+          @changed="load"
+        />
       </section>
 
       <section class="hs-card" aria-labelledby="hs-guides">
@@ -480,7 +542,7 @@ function confirmDeleteNote(note: HomeNote) {
           <summary class="hs-guide-summary">
             <span class="hs-guide-title">{{ g.title }}</span>
           </summary>
-          <MarkdownView v-if="g.body.trim()" :source="g.body" />
+          <MarkdownView v-if="g.body.trim()" :source="g.body" :media-url="mediaUrl" />
           <p v-else class="hs-empty">Noch kein Text.</p>
           <div class="hs-guide-foot">
             <span class="hs-meta">
@@ -522,6 +584,7 @@ function confirmDeleteNote(note: HomeNote) {
                 <th scope="col">Teil</th>
                 <th scope="col">Ort</th>
                 <th v-for="key in attributeColumns" :key="key" scope="col">{{ key }}</th>
+                <th scope="col">Fotos</th>
                 <th v-if="canWrite" scope="col" aria-label="Aktionen" />
               </tr>
             </thead>
@@ -530,6 +593,17 @@ function confirmDeleteNote(note: HomeNote) {
                 <td>{{ item.label }}</td>
                 <td>{{ item.location ?? '' }}</td>
                 <td v-for="key in attributeColumns" :key="key">{{ attributeOf(item, key) }}</td>
+                <td>
+                  <HomePhotos
+                    :system-id="system.id"
+                    :target="{ kind: 'item', id: item.id }"
+                    :photos="photosOf('item', item.id)"
+                    :can-write="canWrite"
+                    :subject="`von ${item.label}`"
+                    compact
+                    @changed="load"
+                  />
+                </td>
                 <td v-if="canWrite" class="hs-row-actions">
                   <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" :aria-label="`${item.label} bearbeiten`" @click="openItem(item)" />
                   <Button icon="pi pi-trash" text rounded size="small" severity="danger" :aria-label="`${item.label} löschen`" @click="confirmDeleteItem(item)" />
@@ -567,6 +641,15 @@ function confirmDeleteNote(note: HomeNote) {
               </span>
             </div>
             <p class="hs-note-body">{{ n.body }}</p>
+            <HomePhotos
+              v-if="canWrite || photosOf('note', n.id).length"
+              :system-id="system.id"
+              :target="{ kind: 'note', id: n.id }"
+              :photos="photosOf('note', n.id)"
+              :can-write="canWrite"
+              :subject="`der Notiz vom ${fmtDate(n.notedOn)}`"
+              @changed="load"
+            />
           </li>
         </ol>
       </section>
@@ -578,10 +661,36 @@ function confirmDeleteNote(note: HomeNote) {
       <div class="hs-form">
         <label for="hs-guide-title">Titel</label>
         <InputText id="hs-guide-title" v-model="guideTitle" autofocus placeholder="z. B. Kartusche tauschen" />
-        <p class="hs-meta">
-          Nummerierte Schritte mit „1.“, Warnungen mit „&gt; [!WARNING]“, Hinweise mit „&gt; [!NOTE]“.
-        </p>
-        <MarkdownEditor v-model="guideBody" aria-label="Text der Anleitung" @save="saveGuide" />
+        <Message v-if="guideError" severity="error" closable @close="guideError = ''">{{ guideError }}</Message>
+        <div class="hs-guide-hint">
+          <p class="hs-meta">
+            Nummerierte Schritte mit „1.“, Warnungen mit „&gt; [!WARNING]“, Hinweise mit „&gt; [!NOTE]“.
+          </p>
+          <input
+            ref="guidePhotoInput"
+            type="file"
+            accept="image/*"
+            class="hs-file-input"
+            tabindex="-1"
+            aria-hidden="true"
+            @change="onGuidePhoto"
+          />
+          <Button
+            label="Foto einfügen"
+            icon="pi pi-image"
+            severity="secondary"
+            size="small"
+            :loading="guidePhotoUploading"
+            @click="guidePhotoInput?.click()"
+          />
+        </div>
+        <MarkdownEditor
+          ref="guideEditor"
+          v-model="guideBody"
+          aria-label="Text der Anleitung"
+          :media-url="mediaUrl"
+          @save="saveGuide"
+        />
       </div>
       <template #footer>
         <Button label="Abbrechen" text severity="secondary" @click="guideOpen = false" />
@@ -607,7 +716,7 @@ function confirmDeleteNote(note: HomeNote) {
         </ul>
         <div v-if="shownRevision" class="hs-revision-body">
           <h3 class="hs-revision-title">{{ shownRevision.title }}</h3>
-          <MarkdownView v-if="shownRevision.body.trim()" :source="shownRevision.body" />
+          <MarkdownView v-if="shownRevision.body.trim()" :source="shownRevision.body" :media-url="mediaUrl" />
           <p v-else class="hs-empty">Leer.</p>
         </div>
       </div>
@@ -699,6 +808,22 @@ function confirmDeleteNote(note: HomeNote) {
 }
 .hs-description {
   margin-top: var(--space-2);
+}
+.hs-photos {
+  margin-top: var(--space-2);
+}
+.hs-guide-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.hs-guide-hint .hs-meta {
+  margin: 0;
+}
+.hs-file-input {
+  display: none;
 }
 .hs-empty,
 .hs-meta {

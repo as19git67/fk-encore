@@ -5990,3 +5990,32 @@ export const homeSystemNotes = pgTable(
   },
   (table) => [index("home_system_notes_system_idx").on(table.system_id, table.noted_on)],
 );
+
+/** What a photo of the house handbook belongs to (`home_media.target_kind`). */
+export type HomeMediaTargetKind = "system" | "guide" | "item" | "note";
+
+/**
+ * A photo of a home system, guide, item or note (stage 2). The file lives
+ * under HOME_MEDIA_DIR at `object_key`; `system_id` carries visibility.
+ */
+export const homeMedia = pgTable(
+  "home_media",
+  {
+    id: serial("id").primaryKey(),
+    system_id: integer("system_id")
+      .notNull()
+      .references(() => homeSystems.id, { onDelete: "cascade" }),
+    target_kind: text("target_kind").$type<HomeMediaTargetKind>().notNull(),
+    target_id: integer("target_id").notNull(),
+    object_key: text("object_key").notNull().unique(),
+    caption: text("caption"),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    uploaded_by: integer("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("home_media_system_idx").on(table.system_id, table.id),
+    index("home_media_target_idx").on(table.target_kind, table.target_id),
+  ],
+);

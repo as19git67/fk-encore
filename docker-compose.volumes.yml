@@ -113,6 +113,14 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/recap-music
+  # Photos of the house handbook (Haus › Anlagen): systems, guides, items
+  # and notes. Create the directory once before the first start with it.
+  home_media:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/home-media
   taxonomy_out:
     driver: local
     driver_opts:

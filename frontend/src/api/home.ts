@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { API_BASE_URL, apiFetch, withAuthTokenParam } from './client'
 
 // Haus › Anlagen (documentation/plans/haus-anlagen.md).
 
@@ -63,6 +63,8 @@ export interface HomeSystemListItem extends Sharing {
   lastNoteOn: string | null
   /** Where the search term was found besides the system's own fields. */
   matches: string[]
+  /** The first photo of the system itself, shown on its card. */
+  coverMediaId: number | null
   updatedAt: string
 }
 
@@ -94,6 +96,18 @@ export interface HomeNote {
   updatedAt: string
 }
 
+export type HomeMediaTargetKind = 'system' | 'guide' | 'item' | 'note'
+
+export interface HomeMedia {
+  id: number
+  targetKind: HomeMediaTargetKind
+  targetId: number
+  caption: string | null
+  width: number
+  height: number
+  createdAt: string
+}
+
 export interface HomeSystemDetail extends Sharing {
   id: number
   name: string
@@ -109,6 +123,8 @@ export interface HomeSystemDetail extends Sharing {
   guides: HomeGuide[]
   items: HomeItem[]
   notes: HomeNote[]
+  /** Photos of the system and of its guides, items and notes, oldest first. */
+  media: HomeMedia[]
 }
 
 export interface GuideRevision {
@@ -239,4 +255,37 @@ export function updateHomeNote(systemId: number, noteId: number, patch: { body?:
 
 export function deleteHomeNote(systemId: number, noteId: number) {
   return apiFetch<void>(`/home/systems/${systemId}/notes/${noteId}`, { method: 'DELETE' })
+}
+
+// ── Photos (stage 2) ────────────────────────────────────────────────────────
+
+/**
+ * Upload a photo for the system itself or one of its guides, items or
+ * notes. The server turns it upright, shrinks it and drops every metadata
+ * field (the camera's location included).
+ */
+export function uploadHomeMedia(
+  systemId: number,
+  target: { kind: HomeMediaTargetKind; id: number },
+  file: Blob,
+) {
+  const q = new URLSearchParams({ target: target.kind, targetId: String(target.id) })
+  return apiFetch<HomeMedia>(`/home/systems/${systemId}/media?${q}`, {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+  })
+}
+
+/** For an `<img src>`: the photo with the access token in the URL. */
+export function homeMediaUrl(mediaId: number, size: 'small' | 'full' = 'full'): string {
+  return withAuthTokenParam(`${API_BASE_URL}/home/media/${mediaId}/file?size=${size}`)
+}
+
+export function updateHomeMediaCaption(mediaId: number, caption: string | null) {
+  return apiFetch<HomeMedia>(`/home/media/${mediaId}`, { method: 'PATCH', body: JSON.stringify({ caption }) })
+}
+
+export function deleteHomeMedia(mediaId: number) {
+  return apiFetch<void>(`/home/media/${mediaId}`, { method: 'DELETE' })
 }

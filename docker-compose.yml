@@ -64,7 +64,7 @@ services:
     # runs as 568:568, but a host that wants its own group to reach the
     # data as well sets DEPLOY_DATA_GID to that group — the files stay
     # writable for uid 568 either way, because it owns them.
-    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-export /mnt/backup /mnt/geo /mnt/routing /mnt/taxonomy-out /mnt/recap-music"]
+    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-export /mnt/backup /mnt/geo /mnt/routing /mnt/taxonomy-out /mnt/recap-music /mnt/home-media"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
@@ -77,6 +77,7 @@ services:
       - routing_data:/mnt/routing
       - taxonomy_out:/mnt/taxonomy-out
       - recap-music:/mnt/recap-music
+      - home_media:/mnt/home-media
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
@@ -287,6 +288,8 @@ services:
       FINANCE_FINTS_PRODUCT_ID: ${FINANCE_FINTS_PRODUCT_ID:-dev-placeholder}
       FINANCE_FINTS_PRODUCT_VERSION: ${FINANCE_FINTS_PRODUCT_VERSION:-0.1.0}
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
+      # Photos of the house handbook (Haus › Anlagen, home/media-store.ts).
+      HOME_MEDIA_DIR: /mnt/data/home-media
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
       # Quotes and news of the held securities (documentation/plans/kurse.md).
       # Quotes come from Onvista; news from EODHD (with a token) and from
@@ -311,6 +314,7 @@ services:
       # Read-only: the backfill under Dokumente › Verarbeitung only reads it.
       - documents_source:/mnt/data/documents-source:ro
       - finance_export:/mnt/data/finance-export
+      - home_media:/mnt/data/home-media
       - backup:/mnt/backup
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────

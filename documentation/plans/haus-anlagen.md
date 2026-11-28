@@ -350,6 +350,18 @@ clients come after the in-app assistant can already take dictation.
 2. **Media.** Volume directory, upload with resize and EXIF stripping,
    `media:` images in `MarkdownView`, photos on systems, items and notes,
    media removed with their target plus the nightly sweep.
+   *Implemented:* `home_media` (migration 0323) carries `system_id` next
+   to the target, so visibility and the cascade come from the system;
+   `home/media-store.ts` stores each photo as an upright JPEG without
+   metadata at 2048 px plus a 480 px copy under `HOME_MEDIA_DIR` (volume
+   `home_media` at `/mnt/data/home-media`), `home/media.ts` has the
+   upload (`POST /home/systems/:id/media?target=…&targetId=…`), the file
+   (`GET /home/media/:id/file?size=small|full`, also with `?token=`, so
+   `home.view` is in the media scope), caption and delete, and the nightly
+   job `home-media-sweep`. The cover is the first photo of the system
+   itself (no `cover_media_id` column). A guide inserts its photo as
+   `![…](media:<id>)` at the cursor; `MarkdownView` loads it only on pages
+   that pass `mediaUrl`.
 3. **Spare parts.** `home_parts`, `home_system_parts`, parts page with
    search, storage location and stock, low-stock filter, link from items.
 4. **Readings and links.** Level meters in the meters module (`kind`,

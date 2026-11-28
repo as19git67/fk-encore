@@ -17,6 +17,7 @@ const base: Omit<HomeSystemListItem, 'id' | 'name' | 'category'> = {
   noteCount: 0,
   lastNoteOn: null,
   matches: [],
+  coverMediaId: null,
   updatedAt: '2026-11-20T10:00:00Z',
   groupId: 7,
   groupName: 'Familie',
@@ -27,7 +28,7 @@ const base: Omit<HomeSystemListItem, 'id' | 'name' | 'category'> = {
 }
 
 export const HOME_SYSTEMS: HomeSystemListItem[] = [
-  { ...base, id: 1, name: 'Enthärtungsanlage', category: 'water', location: 'Hauswirtschaftsraum', manufacturer: 'Beispielwerk', model: 'Soft 300', guideCount: 2, noteCount: 4, lastNoteOn: '2026-11-15' },
+  { ...base, id: 1, name: 'Enthärtungsanlage', category: 'water', location: 'Hauswirtschaftsraum', manufacturer: 'Beispielwerk', model: 'Soft 300', guideCount: 2, noteCount: 4, lastNoteOn: '2026-11-15', coverMediaId: 51 },
   { ...base, id: 2, name: 'Lüftungsanlage', category: 'ventilation', location: 'Dachboden', manufacturer: 'Musterluft', model: 'KWL 250', guideCount: 1, noteCount: 1, lastNoteOn: '2026-09-02' },
   { ...base, id: 3, name: 'Perlatoren', category: 'sanitary', location: 'Alle Armaturen', itemCount: 5, guideCount: 1 },
   { ...base, id: 4, name: 'Gartenpumpe', category: 'garden', location: 'Gartenhaus', groupId: null, groupName: null, household: false },
@@ -44,6 +45,13 @@ const handlers = (systems: HomeSystemListItem[]) => [
     })
   }),
   http.get('/api/home/share-groups', () => HttpResponse.json({ householdId: 7, groups: [{ id: 7, name: 'Familie', household: true }] })),
+  // A drawn stand-in for the cover photo.
+  http.get('/api/home/media/:id/file', () =>
+    new HttpResponse(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="480" height="270" fill="hsl(200 30% 80%)"/><rect x="180" y="40" width="120" height="190" rx="12" fill="hsl(200 15% 55%)"/></svg>',
+      { headers: { 'Content-Type': 'image/svg+xml' } },
+    ),
+  ),
   ...defaultHandlers,
 ]
 

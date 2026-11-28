@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calloutOf, draftTitleOf, markdownTokens, insertBlock, insertParagraphs, prefixLines, safeHref, wrapSelection } from './markdown'
+import { calloutOf, draftTitleOf, markdownTokens, mediaIdOf, mediaImageMarkdown, insertBlock, insertParagraphs, prefixLines, safeHref, wrapSelection } from './markdown'
 
 describe('safeHref', () => {
   it('lets web and mail links through', () => {
@@ -105,5 +105,24 @@ describe('calloutOf', () => {
     expect(calloutOf(quoteText('> Ein Zitat'))).toBeNull()
     expect(calloutOf(quoteText('> Siehe [!WARNING] oben'))).toBeNull()
     expect(calloutOf(quoteText('> [!SOMETHING]\n> x'))).toBeNull()
+  })
+})
+
+describe('mediaIdOf', () => {
+  it('reads the photo id of a handbook image', () => {
+    expect(mediaIdOf('media:12')).toBe(12)
+    const [paragraph] = markdownTokens('![Filter](media:7)') as Array<{ tokens: Array<{ type: string; href: string }> }>
+    expect(paragraph.tokens[0]).toMatchObject({ type: 'image', href: 'media:7' })
+  })
+
+  it('leaves every other source alone', () => {
+    for (const href of ['https://example.test/a.jpg', 'media:', 'media:0', 'media:12/x', 'media:12?x', 'xmedia:1', null]) {
+      expect(mediaIdOf(href)).toBeNull()
+    }
+  })
+
+  it('writes an image whose caption cannot break the syntax', () => {
+    expect(mediaImageMarkdown(5, 'Filter [alt]\nneu')).toBe('![Filter  alt  neu](media:5)')
+    expect(mediaImageMarkdown(5)).toBe('![](media:5)')
   })
 })
