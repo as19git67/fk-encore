@@ -10,6 +10,8 @@ import {
   buildActivityContent,
   clock,
   displayName,
+  isDayDone,
+  nextOpenStop,
   staleDate,
   zonedClock,
   type ActivityBlock,
@@ -105,5 +107,54 @@ describe("the local clock", () => {
     expect(staleDate(750, now, "Europe/Rome")?.toISOString()).toBe("2026-09-05T10:30:00.000Z");
     expect(staleDate(610, now, "Europe/Rome")?.getTime()).toBe(now.getTime() + 60_000);
     expect(staleDate(null, now, "Europe/Rome")).toBeNull();
+  });
+});
+
+describe("a day whose spots are all done", () => {
+  const withStatus = (status: string[]) => [
+    block("morning", 540, 210, [{ ...stop("node:1", "Museum", 90), status: status[0] }, { ...stop("node:2", "Turm", 60), status: status[1] }]),
+    block("afternoon", 840, 210, [{ ...stop("node:3", "Café", 45), status: status[2] }]),
+  ];
+
+  it("is done when every spot is done or skipped", () => {
+    expect(isDayDone(withStatus(["done", "skipped", "done"]))).toBe(true);
+  });
+
+  it("is not done while one spot is still planned", () => {
+    expect(isDayDone(withStatus(["done", "planned", "done"]))).toBe(false);
+    expect(isDayDone(day)).toBe(false); // no status: planned
+  });
+
+  it("is not done without any spot", () => {
+    expect(isDayDone([block("morning", 540, 210)])).toBe(false);
+  });
+});
+
+describe("spots already done on the Lock Screen", () => {
+  const morning = (status: (string | undefined)[]) => [
+    block("morning", 540, 210, [
+      { ...stop("node:1", "Museum", 90), status: status[0] },
+      { ...stop("node:2", "Turm", 30), status: status[1] },
+      { ...stop("node:3", "Brunnen", 30), status: status[2] },
+    ]),
+  ];
+
+  it("never says 'weiter zu' a spot already done or skipped", () => {
+    // The clock has them at the museum; the tower is ticked off already.
+    const state = buildActivityContent(morning([undefined, "done", undefined]), 570);
+    expect(state?.currentStopName).toBe("Museum");
+    expect(state?.nextStopName).toBe("Brunnen");
+  });
+
+  it("does not show a done spot as where they are, and points at the next open one", () => {
+    const state = buildActivityContent(morning(["done", undefined, undefined]), 570);
+    expect(state?.currentStopName).toBeNull();
+    expect(state?.nextStopName).toBe("Turm");
+  });
+
+  it("passes over every settled spot, and finds none when all ahead are settled", () => {
+    const stops = morning([undefined, "skipped", "done"])[0].stops;
+    expect(nextOpenStop(stops, 0)).toBeNull();
+    expect(nextOpenStop(morning([undefined, "skipped", undefined])[0].stops, 0)?.name).toBe("Brunnen");
   });
 });

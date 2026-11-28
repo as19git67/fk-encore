@@ -30,6 +30,9 @@ final class TripDayActivityManager {
     /// The Activity's current push token, hex, once iOS handed one out.
     private var pushToken: String?
     private var tokenTask: Task<Void, Never>?
+    /// The light of the last day refreshed, so a refresh from a plan in
+    /// hand (which carries none) keeps the hint.
+    private var lastLight: TripDayLight?
 
     private init() {}
 
@@ -52,6 +55,15 @@ final class TripDayActivityManager {
         let planId = running.plan.id
         let day = running.day
         let now = Date()
+        if running.light != nil { lastLight = running.light }
+
+        // Every spot of the day ticked off: nothing is left to follow.
+        // Ended, not marked stale — and not started again: the rule
+        // holds on every later wake until a spot is reopened or added.
+        if TripDayActivityContent.isDayDone(day) {
+            await end()
+            return
+        }
 
         let confirmedName = TripVisitMonitor.shared.openStopOsmRef.flatMap { osmRef in
             day.blocks.flatMap(\.stops).first { $0.osmRef == osmRef }?.displayName
@@ -96,6 +108,20 @@ final class TripDayActivityManager {
             ?? (try? Activity.request(attributes: attributes, content: initial))
         activePlanId = activity != nil ? planId : nil
         if let activity { watchPushToken(of: activity, planId: planId) }
+    }
+
+    /// After a change in the trip's own screen — a spot ticked off,
+    /// skipped, moved off the day: the Activity follows the plan in hand
+    /// at once instead of at the next minute's refresh, which a phone
+    /// locked right after the change never gets (Anton, 28.11.: the
+    /// Lock Screen still said "weiter zu" a spot taken off the day).
+    /// Works from the plan in hand, so a tick queued in a tunnel counts
+    /// too. Only for the trip whose Activity is running: a plan opened
+    /// on the side never takes the Lock Screen over.
+    func refresh(from plan: TripPlan, now: Date = Date()) async {
+        guard activity != nil, activePlanId == plan.id,
+              let running = TripRunningDay.of(plan: plan, light: lastLight, now: now) else { return }
+        await refresh(running)
     }
 
     /// iOS hands the token out asynchronously and may rotate it; each

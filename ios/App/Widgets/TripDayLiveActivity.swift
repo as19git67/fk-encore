@@ -80,8 +80,10 @@ private struct TripDayStopLine: View {
     var body: some View {
         HStack(spacing: 4) {
             if let current = state.currentStopName {
-                Image(systemName: state.stopConfirmed ? "checkmark.circle.fill" : "mappin.circle")
-                    .foregroundStyle(state.stopConfirmed ? .green : .secondary)
+                // "Hier" from a geofence, not a tick: a green check read
+                // as "erledigt" (Anton, 28.11.), which it never meant.
+                Image(systemName: state.stopConfirmed ? "location.circle.fill" : "mappin.circle")
+                    .foregroundStyle(state.stopConfirmed ? Color.accentColor : .secondary)
                 Text(current).font(.subheadline).lineLimit(1)
             } else {
                 Text("Unterwegs").font(.subheadline).foregroundStyle(.secondary)

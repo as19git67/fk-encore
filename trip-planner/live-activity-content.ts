@@ -25,6 +25,8 @@ export interface ActivityStop {
   category: string;
   dwellMinutes: number;
   travelFromPrevious: { minutes: number };
+  /** planned | done | skipped. Missing counts as planned. */
+  status?: string;
 }
 
 export interface ActivityBlock {
@@ -127,6 +129,33 @@ function stopAt(block: ActivityBlock, minutes: number): number | null {
   return block.stops.length - 1;
 }
 
+function isOpen(stop: ActivityStop): boolean {
+  return (stop.status ?? "planned") === "planned";
+}
+
+/**
+ * `TripDayActivityContent.nextOpenStop`: the first open spot after
+ * `index` in the block's order — done and skipped ones are passed over.
+ * Null without a position.
+ */
+export function nextOpenStop(stops: readonly ActivityStop[], index: number | null): ActivityStop | null {
+  if (index === null) return null;
+  return stops.find((s, i) => i > index && isOpen(s)) ?? null;
+}
+
+/**
+ * `TripDayActivityContent.isDayDone`: every spot on the day is ticked
+ * off or skipped, so the Lock Screen has nothing left to say and the
+ * Activity ends (Anton, 28.11.). Only what lies on the day counts —
+ * the open spots of the stay are not the day's. A day without a spot
+ * is not done: there was nothing to finish, and its blocks still say
+ * which part of the day it is.
+ */
+export function isDayDone(blocks: readonly ActivityBlock[]): boolean {
+  const stops = blocks.flatMap((b) => b.stops);
+  return stops.length > 0 && stops.every((s) => !isOpen(s));
+}
+
 /**
  * The state for `minutes` past midnight, or null when the day has
  * nothing to say then: before its first block, after its last, or a
@@ -142,7 +171,11 @@ export function buildActivityContent(
 
   const index = stopAt(block, minutes);
   const stop = index === null ? null : block.stops[index];
-  const next = index === null ? null : block.stops[index + 1] ?? null;
+  // A spot already ticked off or skipped is neither where they are nor
+  // where they go next (Anton, 28.11.). The clock's guess counts only
+  // while its spot is open.
+  const current = stop && isOpen(stop) ? stop : null;
+  const next = nextOpenStop(block.stops, index);
 
   const hintStop = stop ?? block.stops.find((s) => s.dwellMinutes > 0) ?? null;
   const window = hintStop ? light.find((l) => l.osmRef === hintStop.osmRef)?.best ?? null : null;
@@ -156,7 +189,7 @@ export function buildActivityContent(
     blockKind: block.kind,
     blockEndMinutes: block.startMinutes === null ? null : block.startMinutes + block.budgetMinutes,
     overrunMinutes: Math.max(0, startsLate + block.usedMinutes - block.budgetMinutes),
-    currentStopName: stop ? displayName(stop) : null,
+    currentStopName: current ? displayName(current) : null,
     stopConfirmed: false,
     nextStopName: next ? displayName(next) : null,
     lightHintText,

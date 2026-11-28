@@ -5,9 +5,10 @@
  * Coordinates sit near a river town in Bavaria; every place is invented.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
-import { osmRegionImports, tripLiveActivities, tripPlans, users } from "../db/schema";
+import { osmRegionImports, tripLiveActivities, tripPlanStops, tripPlans, users } from "../db/schema";
 import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
@@ -142,6 +143,21 @@ describe("the Live Activity tick", () => {
       b.startMinutes === null ? [] : [b.startMinutes + b.budgetMinutes]);
     await tickLiveActivities(berlin(Math.max(...ends) + 5));
 
+    expect(sent.at(-1)?.push.event).toBe("end");
+    expect(await db.select().from(tripLiveActivities)).toEqual([]);
+  });
+
+  it("ends the Activity once every spot of the day is done or skipped", async () => {
+    const { first } = await running();
+    await tickLiveActivities(berlin(first.startMinutes! + 1));
+    expect(sent.at(-1)?.push.event).toBe("update");
+
+    // Every stop of the trip is ticked off or skipped, today's among them.
+    await db.update(tripPlanStops).set({ status: "done", done_at: new Date().toISOString() });
+    const [one] = await db.select({ id: tripPlanStops.id }).from(tripPlanStops).limit(1);
+    await db.update(tripPlanStops).set({ status: "skipped", done_at: null }).where(eq(tripPlanStops.id, one.id));
+
+    await tickLiveActivities(berlin(first.startMinutes! + 2));
     expect(sent.at(-1)?.push.event).toBe("end");
     expect(await db.select().from(tripLiveActivities)).toEqual([]);
   });

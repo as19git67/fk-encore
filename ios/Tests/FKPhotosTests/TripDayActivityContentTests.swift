@@ -85,6 +85,44 @@ final class TripDayActivityContentTests: XCTestCase {
         XCTAssertEqual(content.overrunMinutes, 20)
     }
 
+    func testTheDayIsDoneOnceEverySpotIsDoneOrSkipped() {
+        var settled = sampleDay
+        XCTAssertFalse(TripDayActivityContent.isDayDone(settled))
+
+        let statuses = ["done", "skipped", "done"]
+        var index = 0
+        for b in settled.blocks.indices {
+            for s in settled.blocks[b].stops.indices {
+                settled.blocks[b].stops[s].status = statuses[index]
+                index += 1
+            }
+        }
+        XCTAssertTrue(TripDayActivityContent.isDayDone(settled))
+
+        settled.blocks[1].stops[0].status = "planned"
+        XCTAssertFalse(TripDayActivityContent.isDayDone(settled))
+    }
+
+    func testNeverPointsAtASpotAlreadyDone() throws {
+        // 09:30: the clock has them at the museum, the viewpoint is done.
+        var settled = sampleDay
+        settled.blocks[0].stops[1].status = "done"
+        let content = try XCTUnwrap(TripDayActivityContent.build(day: settled, at: 9 * 60 + 30))
+        XCTAssertEqual(content.currentStopName, "Museum")
+        XCTAssertNil(content.nextStopName)
+
+        // The museum done instead: not where they are, and the viewpoint is next.
+        var museumDone = sampleDay
+        museumDone.blocks[0].stops[0].status = "done"
+        let moved = try XCTUnwrap(TripDayActivityContent.build(day: museumDone, at: 9 * 60 + 30))
+        XCTAssertNil(moved.currentStopName)
+        XCTAssertEqual(moved.nextStopName, "Aussichtspunkt")
+    }
+
+    func testADayWithoutSpotsIsNeverDone() {
+        XCTAssertFalse(TripDayActivityContent.isDayDone(day([block("morning", start: 9 * 60, budget: 210)])))
+    }
+
     func testIsNilBeforeTheFirstBlockAndAfterTheLast() {
         XCTAssertNil(TripDayActivityContent.build(day: sampleDay, at: 6 * 60))
         XCTAssertNil(TripDayActivityContent.build(day: sampleDay, at: 22 * 60))

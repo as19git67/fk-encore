@@ -19,7 +19,12 @@ final class TripPlannerViewModel {
     /// Every change to a trip arrives here, so this is where the copy
     /// kept for the road learns about it (§3.9).
     private(set) var plan: TripPlan? {
-        didSet { scheduleBundleRefresh() }
+        didSet {
+            scheduleBundleRefresh()
+            // The Live Activity follows the change at once: a spot
+            // ticked off or taken off the day, the last one done.
+            if let plan { Task { await TripDayActivityManager.shared.refresh(from: plan) } }
+        }
     }
     private(set) var isLoading = false
     /// Set while a day is being detailed, so the button can say so.
